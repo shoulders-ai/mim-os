@@ -1,0 +1,153 @@
+# Headless CLI
+
+The `mim` CLI is the Tier 1 headless interface over the same main-process tool registry used by the app.
+
+It boots `src/main/headless.ts`, registers safe non-UI tools, opens a workspace, and runs generic `mim tool` calls as the `ai` actor through the headless permission gate. It does not start Electron, the package iframe server, PTY tabs, or renderer bridge tools.
+
+## Running
+
+Build first:
+
+```bash
+npm run build
+node bin/mim.mjs help
+```
+
+When installed through npm, the binary name is `mim`.
+
+## Workspace Resolution
+
+Commands resolve the workspace in this order:
+
+1. `--workspace path`
+2. nearest parent containing `mim.yaml`
+3. current working directory
+
+`mim init [path]` initializes the target path, creates the workspace contract, and uses `--name` when provided. `--workspace` must be followed by a path.
+
+## Commands
+
+```bash
+mim init [path] [--name name]
+mim status [--workspace path]
+mim orient [--workspace path] [--json]
+mim log <message> [--workspace path]
+mim log --read [--workspace path] [--json]
+mim list-tools [--json]
+mim tool <name> [json|--stdin] [--workspace path] [--json] [--yes]
+mim go [--workspace path] [-- command ...]
+mim mcp
+```
+
+`mim orient` regenerates `.mim/agent-context.md` and prints it by default.
+
+`mim log` appends or reads the human logbook at `.mim/log.md`.
+
+`mim tool` is the generic tool entrypoint. It accepts one JSON object argument or reads the object from standard input:
+
+```bash
+node bin/mim.mjs tool workspace.info '{}' --json
+printf '{}\n' | node bin/mim.mjs tool workspace.info --stdin --json
+```
+
+For secret-bearing calls, prefer `--stdin` from a trusted local shell so tokens do not need to be typed directly into the command line.
+
+Approval-required `mim tool` calls are denied by default in non-interactive mode. On an interactive TTY the CLI prompts on stderr. `--yes` is the explicit escape hatch for trusted local automation and auto-approves the headless gate.
+
+`mim go` refreshes agent context, then runs an external command in the workspace. With no command it runs `claude`.
+
+`mim mcp` starts the MCP stdio bridge to the running desktop app. It does not
+boot a headless workspace. It uses `MIM_PORT`/`MIM_TOKEN` when present, otherwise
+reads `~/.mim/server.json`. See [mcp.md](mcp.md).
+
+## Trace Tools
+
+The CLI can inspect the same local trace stream used by chat observability:
+
+```bash
+# Aggregate recent tool, model, gate, job, package, day, and outcome health
+node bin/mim.mjs tool trace.stats '{"days":7}' --json
+
+# Return capped redacted digest events; payload blobs stay referenced by pointer
+node bin/mim.mjs tool trace.query '{"days":1,"status":"error","limit":20}' --json
+
+# Regenerate .mim/agent-context.md, including Observability health when signals exist
+node bin/mim.mjs orient --json
+```
+
+## Registry, Install, and Enablement
+
+On workspace open, the headless kernel registers the same package loader,
+enablement store, app tools, registry tools, and install tools as the Electron
+app. All of these are available through `mim tool`:
+
+```bash
+# List all registry sources and their entries (returns { registries: [...], entries: [...] })
+mim tool registry.list '{}' --json
+
+# Acknowledge trust for a workspace-declared registry
+mim tool registry.trust '{"id":"acme"}' --yes
+
+# Install a package globally from the registry
+mim tool package.install '{"id":"github-monitor"}' --yes
+
+# Install a specific version
+mim tool package.install '{"id":"github-monitor","version":"1.2.0"}' --yes
+
+# Install from a direct repo URL (optional "path" selects a subdirectory in a multi-package repo)
+mim tool package.install '{"repo":"https://github.com/shoulders-ai/mim-apps","path":"packages/github-monitor","ref":"v1.2.0"}' --yes
+
+# Update to the latest registry version (repoints workspace pin if one exists)
+mim tool package.update '{"id":"github-monitor"}' --yes
+
+# Uninstall a version
+mim tool package.uninstall '{"id":"github-monitor","version":"1.0.0"}' --yes
+
+# View resolved enablement state for all packages
+mim tool app.status '{}' --json
+
+# Enable a package (workspace layer writes committed mim.yaml)
+mim tool app.enable '{"id":"github-monitor","layer":"workspace"}' --yes
+
+# Enable in local overlay only (gitignored enabled.json)
+mim tool app.enable '{"id":"some-addon","layer":"local"}' --yes
+
+# Disable
+mim tool app.disable '{"id":"some-addon"}' --yes
+```
+
+Registry and install tools (`registry.list`, `package.install`,
+`package.update`) are `network`-category (external effect), so they require
+`--yes` or TTY confirmation. `package.uninstall`, `app.enable`/`app.disable`
+are `settings`-category (mutate effect), same rule.
+
+`app.trust` and `registry.trust` are user-only and hard-denied to the `ai`
+actor. They are not available through `mim tool` (which runs as `ai`). Trust
+acknowledgement for vendored workspace packages and workspace-declared
+registries is an interactive-only action.
+
+### Enablement layers
+
+Enablement has two writable layers:
+
+- **workspace** — the committed `mim.yaml` `apps:` entry, keyed by package id.
+  Travels through git; every collaborator sees the same setting.
+- **local** — the gitignored `.mim/packages/enabled.json` overlay. Per-machine,
+  personal add-ons.
+
+The default layer for `app.enable`/`app.disable` is `workspace` when a
+committed entry already exists for the id, else `local`. Pass `layer`
+explicitly to override.
+
+Resolution order: committed entry (authoritative for workspace packages, subject
+to trust when needed, and provenance-verified global packages) > local
+enabled/disabled > disabled default. No package source is implicitly enabled.
+
+## Source
+
+- CLI entrypoint: `src/main/cli.ts`
+- Headless registry: `src/main/headless.ts`
+- MCP stdio bridge: `src/main/mcp/stdio.ts`
+- Binary wrapper: `bin/mim.mjs`
+- Build output: `out/main/cli.js`
+- Tests: `src/main/cli.test.ts`

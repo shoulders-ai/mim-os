@@ -1,0 +1,259 @@
+@import "tailwindcss";
+
+/* ── Fonts ─────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: 'Satoshi';
+  src: url('/fonts/Satoshi-Variable.ttf') format('truetype');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Satoshi';
+  src: url('/fonts/Satoshi-VariableItalic.ttf') format('truetype');
+  font-weight: 300 900;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-VariableFont_wght.ttf') format('truetype');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Lora';
+  src: url('/fonts/Lora-VariableFont_wght.ttf') format('truetype');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Zilla Slab';
+  src: url('/fonts/ZillaSlab-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Zilla Slab';
+  src: url('/fonts/ZillaSlab-SemiBold.ttf') format('truetype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── Design Tokens ─────────────────────────────────────────────────── */
+
+@theme {
+  --color-ink:         #1a1a18;
+  --color-ink-2:       #4a4a44;
+  --color-ink-3:       #8a8a80;
+  --color-ink-4:       #b0b0a6;
+  --color-chrome:      #ebe9e3;
+  --color-chrome-mid:  #f3f1ec;
+  --color-chrome-high: #f9f8f5;
+  --color-surface:     #ffffff;
+  --color-accent:      #c05d3c;
+  --color-accent-soft: rgba(192, 93, 60, 0.08);
+  --color-accent-ink:  #ffffff;
+  --color-rule:        #d8d7d2;
+  --color-rule-light:  #eae9e5;
+  --color-line-soft:   rgba(0, 0, 0, 0.04);
+  --color-line-hl:     rgba(192, 93, 60, 0.06);
+  --color-accent-2:    #a84830;
+  --color-accent-tint: rgba(192, 93, 60, 0.06);
+  --color-add:         #5e8b3e;
+  --color-rem:         #c05d3c;
+
+  --font-serif: 'Lora', 'Georgia', serif;
+  --font-sans:  'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono:  'JetBrains Mono', ui-monospace, monospace;
+  --font-slab:  'Zilla Slab', 'Georgia', serif;
+  --font-brand: 'Georgia', serif;
+
+  /* Stacking order for the ui/ primitives. Popover sits ABOVE modal on purpose:
+     a select or menu opened from inside a dialog must render over it. Consumed
+     via z-[var(--z-popover)] etc. Legacy components still using raw z-index
+     migrate onto these tiers in the menu phases; --z-critical is the top layer
+     for blocking permission gates. */
+  --z-modal:    100;
+  --z-popover:  200;
+  --z-toast:    300;
+  --z-critical: 400;
+}
+
+/* ── Themes ──────────────────────────────────────────────────────────
+   Each block overrides the design-system tokens (--color-*) plus the CM6
+   bridge variables: --syntax-keyword, --syntax-string, --syntax-number,
+   --syntax-type, --syntax-function, --syntax-property, --syntax-operator,
+   --syntax-meta, and --selection. Those are theme-tuned here, not hardcoded
+   in EditorPanel, so dark themes get correct code colors. */
+
+/* Parchment — warm papery light, terracotta accent. */
+:root[data-theme="parchment"] {
+  --color-ink: #1a1a18; --color-ink-2: #4a4a44; --color-ink-3: #8a8a80; --color-ink-4: #b0b0a6;
+  --color-chrome: #ebe9e3; --color-chrome-mid: #f3f1ec; --color-chrome-high: #f9f8f5; --color-surface: #ffffff;
+  --color-accent: #c05d3c; --color-accent-soft: rgba(192,93,60,0.12); --color-accent-ink: #ffffff;
+  --color-accent-2: #a84830; --color-accent-tint: rgba(192,93,60,0.10);
+  --color-add: #5e8b3e; --color-rem: #c05d3c;
+  --color-rule: #d8d7d2; --color-rule-light: #eae9e5;
+  --color-line-soft: rgba(0,0,0,0.04); --color-line-hl: rgba(192,93,60,0.06);
+  --syntax-keyword: #7c4dff; --syntax-string: #2e7d32; --syntax-number: #e65100;
+  --syntax-type: #0d7377; --syntax-function: #6f42c1; --syntax-property: #1a6b8a;
+  --syntax-operator: #a84830; --syntax-meta: #8a6d3b;
+  --selection: rgba(192,93,60,0.12);
+}
+/* North (glacier) — cool blue-gray light, steel-blue accent. */
+:root[data-theme="glacier"] {
+  --color-ink: #1c1f24; --color-ink-2: #44494f; --color-ink-3: #7d838a; --color-ink-4: #a5abb2;
+  --color-chrome: #e4e8ec; --color-chrome-mid: #edf0f4; --color-chrome-high: #f4f6f8; --color-surface: #ffffff;
+  --color-accent: #4a7c9b; --color-accent-soft: rgba(74,124,155,0.12); --color-accent-ink: #ffffff;
+  --color-accent-2: #3b6a86; --color-accent-tint: rgba(74,124,155,0.10);
+  --color-add: #3a8a4a; --color-rem: #c05050;
+  --color-rule: #d0d5db; --color-rule-light: #e2e6eb;
+  --color-line-soft: rgba(0,0,0,0.03); --color-line-hl: rgba(74,124,155,0.06);
+  --syntax-keyword: #6e56cf; --syntax-string: #297a3a; --syntax-number: #b35c00;
+  --syntax-type: #0b6e72; --syntax-function: #5746a5; --syntax-property: #1a6090;
+  --syntax-operator: #3b6a86; --syntax-meta: #6b7280;
+  --selection: rgba(74,124,155,0.14);
+}
+/* Slate — neutral dark, muted teal accent. */
+:root[data-theme="slate"] {
+  --color-ink: #e0e0dc; --color-ink-2: #b0b0aa; --color-ink-3: #8a8a84; --color-ink-4: #4a4a44;
+  --color-chrome: #1e1e1e; --color-chrome-mid: #252525; --color-chrome-high: #292929; --color-surface: #2c2c2c;
+  --color-accent: #5a9e8f; --color-accent-soft: rgba(90,158,143,0.08); --color-accent-ink: #ffffff;
+  --color-accent-2: #4a887a; --color-accent-tint: rgba(90,158,143,0.10);
+  --color-add: #7cc68a; --color-rem: #e07070;
+  --color-rule: #383838; --color-rule-light: #333333;
+  --color-line-soft: rgba(255,255,255,0.04); --color-line-hl: rgba(90,158,143,0.06);
+  --syntax-keyword: #b39dff; --syntax-string: #7cc68a; --syntax-number: #e8a36d;
+  --syntax-type: #66d9ef; --syntax-function: #dcc6e0; --syntax-property: #80cbc4;
+  --syntax-operator: #89ddff; --syntax-meta: #a0a0a0;
+  --selection: rgba(90,158,143,0.18);
+}
+/* Monokai — near-black surfaces, vibrant orange accent, saturated syntax. */
+:root[data-theme="monokai"] {
+  --color-ink: #f8f8f2; --color-ink-2: #d5d3cb; --color-ink-3: #928e7c; --color-ink-4: #555248;
+  --color-chrome: #1e1e1e; --color-chrome-mid: #252525; --color-chrome-high: #262624; --color-surface: #272822;
+  --color-accent: #f97316; --color-accent-soft: rgba(249,115,22,0.08); --color-accent-ink: #ffffff;
+  --color-accent-2: #e06510; --color-accent-tint: rgba(249,115,22,0.10);
+  --color-add: #a6e22e; --color-rem: #f92672;
+  --color-rule: #3e3d32; --color-rule-light: #353429;
+  --color-line-soft: rgba(255,255,255,0.04); --color-line-hl: rgba(249,115,22,0.06);
+  --syntax-keyword: #ae81ff; --syntax-string: #a6e22e; --syntax-number: #fd971f;
+  --syntax-type: #66d9ef; --syntax-function: #e6db74; --syntax-property: #a6e22e;
+  --syntax-operator: #f92672; --syntax-meta: #75715e;
+  --selection: rgba(249,115,22,0.16);
+}
+/* Nord — arctic cool-blue dark, frost-cyan accent. */
+:root[data-theme="nord"] {
+  --color-ink: #d8dee9; --color-ink-2: #a9b3c4; --color-ink-3: #6c7a92; --color-ink-4: #4c566a;
+  --color-chrome: #1e232c; --color-chrome-mid: #232936; --color-chrome-high: #29303d; --color-surface: #2e3440;
+  --color-accent: #88c0d0; --color-accent-soft: rgba(136,192,208,0.10); --color-accent-ink: #1e232c;
+  --color-accent-2: #81a1c1; --color-accent-tint: rgba(136,192,208,0.08);
+  --color-add: #a3be8c; --color-rem: #bf616a;
+  --color-rule: #434c5e; --color-rule-light: #3b4252;
+  --color-line-soft: rgba(255,255,255,0.04); --color-line-hl: rgba(136,192,208,0.06);
+  --syntax-keyword: #81a1c1; --syntax-string: #a3be8c; --syntax-number: #b48ead;
+  --syntax-type: #8fbcbb; --syntax-function: #88c0d0; --syntax-property: #d8dee9;
+  --syntax-operator: #81a1c1; --syntax-meta: #5e81ac;
+  --selection: rgba(136,192,208,0.20);
+}
+/* Dracula — deep slate dark, violet accent, pink/lime syntax. */
+:root[data-theme="dracula"] {
+  --color-ink: #f8f8f2; --color-ink-2: #bfc1cd; --color-ink-3: #6272a4; --color-ink-4: #44475a;
+  --color-chrome: #12131a; --color-chrome-mid: #1b1c25; --color-chrome-high: #21222c; --color-surface: #282a36;
+  --color-accent: #bd93f9; --color-accent-soft: rgba(189,147,249,0.10); --color-accent-ink: #282a36;
+  --color-accent-2: #ff79c6; --color-accent-tint: rgba(189,147,249,0.08);
+  --color-add: #50fa7b; --color-rem: #ff5555;
+  --color-rule: #44475a; --color-rule-light: #343746;
+  --color-line-soft: rgba(255,255,255,0.04); --color-line-hl: rgba(189,147,249,0.06);
+  --syntax-keyword: #ff79c6; --syntax-string: #f1fa8c; --syntax-number: #bd93f9;
+  --syntax-type: #8be9fd; --syntax-function: #50fa7b; --syntax-property: #66d9ef;
+  --syntax-operator: #ff79c6; --syntax-meta: #6272a4;
+  --selection: rgba(189,147,249,0.20);
+}
+/* White — ultra-clean neutral light, near-white chrome, near-black accent. */
+:root[data-theme="white"] {
+  --color-ink: #1d1d1f; --color-ink-2: #48484c; --color-ink-3: #86868b; --color-ink-4: #b4b4b9;
+  --color-chrome: #fafafa; --color-chrome-mid: #fcfcfd; --color-chrome-high: #fefefe; --color-surface: #ffffff;
+  --color-accent: #2d2d2d; --color-accent-soft: rgba(45,45,45,0.12); --color-accent-ink: #ffffff;
+  --color-accent-2: #1a1a1a; --color-accent-tint: rgba(45,45,45,0.10);
+  --color-add: #248a3d; --color-rem: #d70015;
+  --color-rule: #d8d8dd; --color-rule-light: #e8e8ec;
+  --color-line-soft: rgba(0,0,0,0.04); --color-line-hl: rgba(45,45,45,0.04);
+  --syntax-keyword: #9b2393; --syntax-string: #c41a16; --syntax-number: #1c00cf;
+  --syntax-type: #0b4f79; --syntax-function: #326d74; --syntax-property: #3e6e74;
+  --syntax-operator: #48484c; --syntax-meta: #86868b;
+  --selection: rgba(45,45,45,0.10);
+}
+/* Sage — warm botanical light, muted forest-green accent. */
+:root[data-theme="sage"] {
+  --color-ink: #1f231f; --color-ink-2: #474d46; --color-ink-3: #7e857c; --color-ink-4: #a9afa6;
+  --color-chrome: #e6e9e3; --color-chrome-mid: #eef0eb; --color-chrome-high: #f5f6f3; --color-surface: #fdfdfb;
+  --color-accent: #5a8266; --color-accent-soft: rgba(90,130,102,0.14); --color-accent-ink: #ffffff;
+  --color-accent-2: #466b51; --color-accent-tint: rgba(90,130,102,0.10);
+  --color-add: #5e8b3e; --color-rem: #c0563c;
+  --color-rule: #d3d8cf; --color-rule-light: #e3e7df;
+  --color-line-soft: rgba(0,0,0,0.04); --color-line-hl: rgba(90,130,102,0.06);
+  --syntax-keyword: #8a4f9e; --syntax-string: #3f7d4f; --syntax-number: #b5651d;
+  --syntax-type: #2e7d6f; --syntax-function: #6a5acd; --syntax-property: #4a7c5b;
+  --syntax-operator: #7e6148; --syntax-meta: #7e857c;
+  --selection: rgba(90,130,102,0.14);
+}
+
+/* ── Base Reset ────────────────────────────────────────────────────── */
+
+html {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+html, body {
+  height: 100%; width: 100%; margin: 0; padding: 0;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-ink);
+  background: var(--color-chrome);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'kern' 1, 'liga' 1, 'onum' 1;
+}
+#app {
+  height: 100%; width: 100%; margin: 0; padding: 0;
+  background: var(--color-chrome);
+}
+
+@layer base {
+  button { font-family: inherit; border: none; background: none; color: inherit; font-size: inherit; }
+  input { font-family: inherit; }
+}
+
+textarea, input, [contenteditable], pre, code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: var(--color-rule); border-radius: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.drag-region { -webkit-app-region: drag; }
+.no-drag { -webkit-app-region: no-drag; }
+
+/* Package image-icon (SVG/PNG) rendered inside a nav-token. The mask uses a
+   dynamic URL passed as the --icon-url custom property by the renderer; the
+   fill is currentColor so the mark inherits the token color and follows the
+   active grammar (ink-3 -> accent) like a text token. No v-html: package
+   content never enters the privileged DOM as HTML. */
+.package-icon-img {
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  -webkit-mask: var(--icon-url) center / contain no-repeat;
+  mask: var(--icon-url) center / contain no-repeat;
+}

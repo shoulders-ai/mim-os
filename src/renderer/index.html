@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="white">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- Defense in depth behind DOMPurify: if a sanitizer bypass ever lands
+       markup in the DOM, CSP blocks inline script execution and foreign
+       network destinations. connect/frame allow only the local kernel server
+       (dynamic port) and the dev server. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*; frame-src http://127.0.0.1:* http://localhost:*; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg">
+  <title>Mim</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

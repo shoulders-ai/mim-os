@@ -1,0 +1,92 @@
+:root {
+  --font-sans:  'Satoshi', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: 'Lora', 'Georgia', serif;
+  --font-mono:  'JetBrains Mono', ui-monospace, monospace;
+  --font-brand: 'Georgia', serif;
+
+  --color-ink:         #1a1a18;
+  --color-ink-2:       #4a4a44;
+  --color-ink-3:       #8a8a80;
+  --color-ink-4:       #b0b0a6;
+  --color-chrome:      #ebe9e3;
+  --color-chrome-mid:  #f3f1ec;
+  --color-chrome-high: #f9f8f5;
+  --color-surface:     #ffffff;
+  --color-accent:      #c05d3c;
+  --color-accent-soft: rgba(192, 93, 60, 0.08);
+  --color-accent-ink:  #ffffff;
+  --color-accent-tint: rgba(192, 93, 60, 0.06);
+  --color-rule:        #d8d7d2;
+  --color-rule-light:  #eae9e5;
+  --color-line-soft:   rgba(0, 0, 0, 0.04);
+  --color-add:         #5e8b3e;
+  --color-rem:         #c05d3c;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html {
+  cursor: default;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-ink);
+  background: var(--color-surface);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'kern' 1, 'liga' 1;
+}
+
+textarea, input, [contenteditable], pre, code {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button {
+  font: inherit;
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: default;
+}
+
+input, textarea {
+  font: inherit;
+  border: 1px solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--color-surface);
+  outline: none;
+}
+input:focus, textarea:focus {
+  border-color: var(--color-accent);
+}
+
+pre, code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: var(--color-rule); border-radius: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-rule-light);
+  border-radius: var(--radius-lg);
+  padding: var(--space-md);
+}

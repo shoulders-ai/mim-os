@@ -1,0 +1,319 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { createHeadlessKernel } from '@main/headless.js'
+import { PermissionDeniedError } from '@main/security/gate.js'
+import type { AppStatus } from '@main/tools/coreApps.js'
+
+describe('createHeadlessKernel', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mim-headless-'))
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('registers the expected tool surface', () => {
+    const kernel = createHeadlessKernel()
+    const names = new Set(kernel.tools.list().map(t => t.name))
+
+    for (const expected of [
+      'fs.read', 'fs.write', 'fs.list',
+      'workspace.open', 'workspace.info', 'workspace.init',
+	      'settings.get', 'settings.set',
+	      'session.create', 'session.list',
+	      'search', 'search.files', 'search.sessions',
+	      'trace.query', 'trace.stats',
+	      'telemetry.track', 'telemetry.status', 'telemetry.setEnabled',
+	      'skill.list',
+	      'log.append', 'log.read',
+	      'ai.registry',
+      'documents.docx.read',
+      'slack.status',
+      'google.status',
+      'app.status',
+    ]) {
+      expect(names.has(expected), `missing tool: ${expected}`).toBe(true)
+    }
+  })
+
+  it('openWorkspace opens a tmp dir and scaffolds .mim/workspace.json', async () => {
+    const kernel = createHeadlessKernel()
+    await kernel.openWorkspace(dir)
+
+    expect(kernel.tools.getWorkspacePath()).toBe(dir)
+    expect(existsSync(join(dir, '.mim', 'workspace.json'))).toBe(true)
+    const config = JSON.parse(readFileSync(join(dir, '.mim', 'workspace.json'), 'utf-8'))
+    expect(config.name).toBe(dir.split('/').pop())
+  })
+
+  it('does not create telemetry identity while disabled under tests', async () => {
+    const oldHome = process.env.HOME
+    process.env.HOME = dir
+    try {
+      const kernel = createHeadlessKernel()
+      expect(existsSync(join(dir, '.mim', 'telemetry.json'))).toBe(false)
+      await kernel.shutdown()
+    } finally {
+      process.env.HOME = oldHome
+    }
+  })
+
+  it('openWorkspace rejects a path that does not exist', async () => {
+    const kernel = createHeadlessKernel()
+    await expect(kernel.openWorkspace(join(dir, 'nope'))).rejects.toThrow('Path does not exist')
+  })
+
+  it('read-only AI calls work under the default deny policy', async () => {
+    const kernel = createHeadlessKernel() // approvals defaults to 'deny'
+    await kernel.openWorkspace(dir)
+    writeFileSync(join(dir, 'readme.md'), 'hello headless')
+
+    const result = await kernel.tools.call('fs.read', { path: 'readme.md' }, { actor: 'ai' }) as {
+      content: string
+    }
+    expect(result.content).toBe('hello headless')
+  })
+
+  it("approvals 'deny' blocks an approval-required mutating AI call", async () => {
+    const kernel = createHeadlessKernel({ approvals: 'deny' })
+    await kernel.openWorkspace(dir)
+
+    await expect(
+      kernel.tools.call('fs.write', { path: 'blocked.md', content: 'nope' }, { actor: 'ai' }),
+    ).rejects.toThrow(PermissionDeniedError)
+    expect(existsSync(join(dir, 'blocked.md'))).toBe(false)
+  })
+
+  it("approvals 'allow' permits the same mutating AI call", async () => {
+    const kernel = createHeadlessKernel({ approvals: 'allow' })
+    await kernel.openWorkspace(dir)
+
+    await kernel.tools.call('fs.write', { path: 'allowed.md', content: 'yes' }, { actor: 'ai' })
+    expect(readFileSync(join(dir, 'allowed.md'), 'utf-8')).toBe('yes')
+  })
+
+  it("approvals 'prompt' defers to confirmApproval", async () => {
+    const seen: string[] = []
+    const kernel = createHeadlessKernel({
+      approvals: 'prompt',
+      confirmApproval: async (request) => {
+        seen.push(request.toolName)
+        return request.params.path === 'ok.md'
+      },
+    })
+    await kernel.openWorkspace(dir)
+
+    await kernel.tools.call('fs.write', { path: 'ok.md', content: 'approved' }, { actor: 'ai' })
+    expect(readFileSync(join(dir, 'ok.md'), 'utf-8')).toBe('approved')
+
+    await expect(
+      kernel.tools.call('fs.write', { path: 'rejected.md', content: 'denied' }, { actor: 'ai' }),
+    ).rejects.toThrow('Permission denied: fs.write')
+    expect(existsSync(join(dir, 'rejected.md'))).toBe(false)
+
+    expect(seen).toEqual(['fs.write', 'fs.write'])
+  })
+
+  it('direct user mutations do not need approval even under deny', async () => {
+    const kernel = createHeadlessKernel({ approvals: 'deny' })
+    await kernel.openWorkspace(dir)
+
+    await kernel.tools.call('fs.write', { path: 'user.md', content: 'mine' }, { actor: 'user' })
+    expect(readFileSync(join(dir, 'user.md'), 'utf-8')).toBe('mine')
+  })
+})
+
+const ctx = { actor: 'user' as const }
+
+function writeWorkspacePackage(root: string, id: string): void {
+  const packageDir = join(root, 'packages', id)
+  mkdirSync(packageDir, { recursive: true })
+  writeFileSync(join(packageDir, 'package.json'), JSON.stringify({
+    name: `@mim/${id}`,
+    version: '0.1.0',
+    type: 'module',
+    mim: {
+      manifestVersion: 1,
+      id,
+      name: id,
+      permissions: {},
+    },
+  }))
+}
+
+describe('headless app.enable', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'mim-headless-'))
+    writeFileSync(join(root, 'mim.yaml'), 'name: headless-test\n')
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('enables a workspace package and persists the enablement via app.status', async () => {
+    writeWorkspacePackage(root, 'board')
+    const kernel = createHeadlessKernel()
+    await kernel.openWorkspace(root)
+
+    const before = await kernel.tools.call('app.status', {}, ctx) as { apps: AppStatus[] }
+    const boardBefore = before.apps.find(a => a.id === 'board')
+    if (boardBefore) {
+      expect(boardBefore.enabled).toBe(false)
+    }
+
+    const result = await kernel.tools.call('app.enable', { id: 'board', layer: 'workspace' }, ctx)
+    expect(result).toMatchObject({ ok: true, id: 'board', layer: 'workspace' })
+
+    const after = await kernel.tools.call('app.status', {}, ctx) as { apps: AppStatus[] }
+    const boardAfter = after.apps.find(a => a.id === 'board')
+    expect(boardAfter).toBeDefined()
+    expect(boardAfter!.enabled).toBe(true)
+    expect(boardAfter!.layer).toBe('workspace')
+  })
+
+  it('enables at the local layer and resolves through app.status', async () => {
+    writeWorkspacePackage(root, 'board')
+    const kernel = createHeadlessKernel()
+    await kernel.openWorkspace(root)
+
+    const result = await kernel.tools.call('app.enable', { id: 'board', layer: 'local' }, ctx)
+    expect(result).toMatchObject({ ok: true, id: 'board', layer: 'local' })
+
+    const after = await kernel.tools.call('app.status', {}, ctx) as { apps: AppStatus[] }
+    const boardAfter = after.apps.find(a => a.id === 'board')
+    expect(boardAfter).toBeDefined()
+    expect(boardAfter!.enabled).toBe(true)
+    expect(boardAfter!.layer).toBe('local')
+  })
+
+  it('emit is no-op in headless (does not throw)', async () => {
+    const kernel = createHeadlessKernel()
+    await kernel.openWorkspace(root)
+
+    await expect(
+      kernel.tools.call('app.enable', { id: 'board', layer: 'workspace' }, ctx),
+    ).resolves.toMatchObject({ ok: true })
+  })
+})
+
+describe('headless registry and install tool registration', () => {
+  let root: string
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'mim-headless-reg-'))
+    writeFileSync(join(root, 'mim.yaml'), 'name: headless-registry-test\n')
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('registers registry.list tool in headless kernel', async () => {
+    const kernel = createHeadlessKernel()
+    await kernel.openWorkspace(root)
+    const tool = kernel.tools.get('registry.list')
+    expect(tool).toBeDefined()
+    expect(tool!.name).toBe('registry.list')
+  })
+
+  it('registers package.install tool in headless kernel', async () => {
+    const kernel = createHeadlessKernel()
+    await kernel.openWorkspace(root)
+    const tool = kernel.tools.get('package.install')
+    expect(tool).toBeDefined()
+    expect(tool!.name).toBe('package.install')
+  })
+
+  it('registers package.update tool in headless kernel', async () => {
+    const kernel = createHeadlessKernel()
+    await kernel.openWorkspace(root)
+    const tool = kernel.tools.get('package.update')
+    expect(tool).toBeDefined()
+  })
+
+  it('registers package.uninstall tool in headless kernel', async () => {
+    const kernel = createHeadlessKernel()
+    await kernel.openWorkspace(root)
+    const tool = kernel.tools.get('package.uninstall')
+    expect(tool).toBeDefined()
+  })
+})
+
+describe('headless named package tools', () => {
+  let root: string
+
+  function writeFixturePackage(): void {
+    const pkgDir = join(root, 'packages', 'fixture')
+    mkdirSync(join(pkgDir, 'backend'), { recursive: true })
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({
+      name: 'fixture',
+      version: '0.1.0',
+      type: 'module',
+      mim: {
+        manifestVersion: 1,
+        id: 'fixture',
+        name: 'Fixture',
+        views: [],
+        backend: 'backend/index.js',
+        permissions: { workspace: { read: true } },
+        provides: { tools: [{ name: 'fixture.ping', category: 'read', risk: 'low' }] },
+      },
+    }, null, 2))
+    writeFileSync(join(pkgDir, 'backend', 'index.js'), [
+      'export const tools = {',
+      "  ping: { name: 'fixture.ping', description: 'Ping fixture', audience: ['chat'], execute: async () => ({ ok: true }) },",
+      '}',
+      "export const agentContext = async () => 'fixture section body'",
+      '',
+    ].join('\n'))
+  }
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'mim-headless-named-'))
+    writeFileSync(join(root, 'mim.yaml'), 'name: headless-named-test\n')
+    writeFixturePackage()
+  })
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  async function openTrustedFixture(): Promise<ReturnType<typeof createHeadlessKernel>> {
+    const kernel = createHeadlessKernel()
+    await kernel.openWorkspace(root)
+    await kernel.tools.call('app.trust', { id: 'fixture' }, ctx)
+    await kernel.tools.call('app.enable', { id: 'fixture', layer: 'local' }, ctx)
+    // enable triggers a fire-and-forget named-tool sync; wait for it to land
+    await vi.waitFor(() => expect(kernel.tools.get('fixture.ping')).toBeDefined(), { timeout: 3000 })
+    return kernel
+  }
+
+  it('a granted named tool is callable as a first-class tool', async () => {
+    const kernel = await openTrustedFixture()
+    const result = await kernel.tools.call('fixture.ping', {}, ctx)
+    expect(result).toEqual({ ok: true })
+  })
+
+  it('manifest-declared read/low policy lets AI call it without approval under deny mode', async () => {
+    const kernel = await openTrustedFixture()
+    // The unknown-tool fallback policy is general (mutate -> denied under 'deny'),
+    // so success here proves the dynamic per-tool policy was consulted.
+    const result = await kernel.tools.call('fixture.ping', {}, { actor: 'ai' })
+    expect(result).toEqual({ ok: true })
+  })
+
+  it('workspace.orient includes the app-contributed section', async () => {
+    const kernel = await openTrustedFixture()
+    const result = await kernel.tools.call('workspace.orient', {}, ctx) as { content: string }
+    expect(result.content).toContain('## Fixture')
+    expect(result.content).toContain('fixture section body')
+  })
+})

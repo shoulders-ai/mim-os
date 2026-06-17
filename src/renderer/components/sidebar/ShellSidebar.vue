@@ -1,0 +1,1086 @@
+<script setup lang="ts">
+import { ref, computed, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import {
+  IconActivity,
+  IconChevronDown,
+  IconChevronRight,
+  IconFolder,
+  IconHistory,
+  IconLayoutSidebarLeftCollapse,
+  IconMessage,
+  IconPlus,
+  IconSettings,
+  IconTerminal2,
+} from '@tabler/icons-vue'
+import { NAVIGATOR_SPINE_WIDTH } from '../../services/workbench/entries.js'
+import { shortcutLabel } from '../../services/shortcutLabels.js'
+import { useSessionStore, type Session, type SessionStatusKind } from '../../stores/sessions.js'
+import { useAgentsStore, type DetectedAgent } from '../../stores/agents.js'
+import { useAppsStore } from '../../stores/coreApps.js'
+import { useSettingsStore } from '../../stores/settings.js'
+import { useRunsStore, type NavigatorRun } from '../../stores/runs.js'
+import {
+  defaultWorkPackageView,
+  packageWorkEntryId,
+  type PackageViewDefinition,
+} from '../../services/workbench/packageViews.js'
+import { downloadSessionExport } from '../../services/sessionExport.js'
+import SessionRow from './SessionRow.vue'
+import SessionContextMenu from './SessionContextMenu.vue'
+import RunRow from './RunRow.vue'
+import RunContextMenu from './RunContextMenu.vue'
+import BatchContextMenu from './BatchContextMenu.vue'
+import WorkspaceSwitcher from './WorkspaceSwitcher.vue'
+import { applyManualOrder, sortWithManualOrder } from './sidebarOrdering.js'
+import { initialsFrom, runStatusDotClass, runStatusTag, sessionDotClass, sessionStatusTag } from './sidebarStatus.js'
+import { usePointerReorder } from './usePointerReorder.js'
+import { isImageIcon, packageIconUrl } from './packageIcon.js'
+import { agentIconUrl } from './agentIcon.js'
+import WorkingIcon from '../ui/WorkingIcon.vue'
+
+interface LoadedPackage {
+  manifest: { id: string; name: string; icon?: string; views?: PackageViewDefinition[] }
+  dir: string
+  source: string
+}
+
+// 'run' rows carry a NavigatorRun whose own kind ('package-job' or
+// 'agent-session') decides where clicks and commands route.
+type ActivityRow =
+  | { key: string; kind: 'chat'; session: Session; updatedAt?: string }
+  | { key: string; kind: 'run'; run: NavigatorRun; updatedAt?: string }
+
+// Core platform surfaces: a fixed cluster above the Apps section. Not
+// draggable, no section header — these are fixtures, not installed apps.
+interface SurfaceRow {
+  key: 'chat' | 'files' | 'trust' | 'terminal'
+  label: string
+  selectWorkId: string
+}
+
+// Package rows are destinations (their package view lights up as active);
+// agent rows are pure launchers — every click spawns a new session.
+type AppRow =
+  | { key: string; kind: 'package'; pkg: LoadedPackage }
+  | { key: string; kind: 'agent'; agent: DetectedAgent }
+
+const props = defineProps<{
+  width: number
+  collapsed?: boolean
+  packages: LoadedPackage[]
+  activeWorkId: string
+  workspaceName: string | null
+  recentWorkspaces: Array<{ path: string; name: string }>
+  port?: number
+}>()
+
+const emit = defineEmits<{
+  toggle: []
+  selectWork: [id: string]
+  selectSession: [id: string]
+  archiveSession: [id: string]
+  deleteSession: [id: string]
+  selectPackageRun: [packageId: string, runId: string]
+  archivePackageRun: [packageId: string, runId: string]
+  deletePackageRun: [packageId: string, runId: string]
+  launchAgent: [agentId: string]
+  selectAgentSession: [agentId: string, sessionId: string]
+  archiveAgentSession: [sessionId: string]
+  deleteAgentSession: [sessionId: string]
+  stopAgentSession: [sessionId: string]
+  openFolder: []
+  openRecentWorkspace: [path: string]
+  addProject: [mode: 'new' | 'clone']
+  manageApps: []
+  settings: [section?: 'apps']
+  resize: [e: PointerEvent]
+}>()
+
+// Collapsed = thin icon rail; expanded = label tray (stored width).
+const effectiveWidth = computed(() => (props.collapsed ? NAVIGATOR_SPINE_WIDTH : props.width))
+
+const sessionStore = useSessionStore()
+const agentsStore = useAgentsStore()
+const appsStore = useAppsStore()
+const settingsStore = useSettingsStore()
+const runsStore = useRunsStore()
+const HIDDEN_NAVIGATOR_PACKAGE_IDS = new Set(['hello', 'runtime-demo'])
+
+// A package is launchable iff it has a view AND the resolved state says it is
+// visible. Disabled packages are hidden from launchers (spec: one model).
+const launchablePackages = computed(() =>
+  props.packages.filter(pkg =>
+    !!defaultWorkPackageView(pkg) && appsStore.isPackageVisible(pkg.manifest.id),
+  ),
+)
+
+const SURFACE_ICONS: Record<SurfaceRow['key'], typeof IconMessage> = {
+  chat: IconMessage,
+  files: IconFolder,
+  trust: IconActivity,
+  terminal: IconTerminal2,
+}
+
+const SURFACE_ROWS: SurfaceRow[] = [
+  {
+    key: 'chat',
+    label: 'Chat',
+    selectWorkId: '__chat__',
+  },
+  {
+    key: 'files',
+    label: 'Files',
+    selectWorkId: '__files__',
+  },
+  {
+    key: 'terminal',
+    label: 'Terminal',
+    selectWorkId: '__terminal__',
+  },
+  {
+    key: 'trust',
+    label: 'Monitor',
+    selectWorkId: '__activity_trust__',
+  },
+]
+
+// Launchable packages keep loader order, detected CLI agents come last. Manual
+// order (plain package/agent ids — the catalogs cannot collide: agent ids are
+// fixed catalog ids) overrides the whole sequence.
+const appRows = computed<AppRow[]>(() => {
+  const visible = launchablePackages.value
+    .filter(pkg => !HIDDEN_NAVIGATOR_PACKAGE_IDS.has(pkg.manifest.id))
+  return applyManualOrder(
+    [
+      ...visible.map(pkg => ({ key: pkg.manifest.id, kind: 'package' as const, pkg })),
+      ...agentsStore.enabledAgents.map(agent => ({ key: agent.id, kind: 'agent' as const, agent })),
+    ],
+    settingsStore.navigatorAppOrder,
+  )
+})
+
+const activityRows = computed<ActivityRow[]>(() =>
+  sortWithManualOrder([
+    ...sessionStore.visibleSessions.map(session => ({
+      key: activityKeyForSession(session.id),
+      kind: 'chat' as const,
+      session,
+      updatedAt: session.updatedAt || session.createdAt,
+    })),
+    ...[...runsStore.packageJobRuns, ...runsStore.agentSessionRuns].map(run => ({
+      key: activityKeyForRun(run),
+      kind: 'run' as const,
+      run,
+      updatedAt: run.updatedAt,
+    })),
+  ], settingsStore.navigatorActivityOrder),
+)
+
+const appsCollapsed = ref(false)
+const activityCollapsed = ref(false)
+
+// The cluster rule is functional: it darkens only while list rows are
+// actually disappearing beneath it.
+const listScrolled = ref(false)
+function onListScroll(event: Event) {
+  listScrolled.value = (event.target as HTMLElement).scrollTop > 0
+}
+
+// ---- Row refs for context-menu rename ----
+const sessionRowRefs = ref<Record<string, InstanceType<typeof SessionRow>>>({})
+function setRowRef(id: string, el: any) {
+  if (el) sessionRowRefs.value[id] = el
+  else delete sessionRowRefs.value[id]
+}
+
+const runRowRefs = ref<Record<string, InstanceType<typeof RunRow>>>({})
+function setRunRowRef(id: string, el: any) {
+  if (el) runRowRefs.value[id] = el
+  else delete runRowRefs.value[id]
+}
+
+// ---- Status helpers (presentation mapping lives in sidebarStatus.ts) ----
+function statusKind(session: Session): SessionStatusKind {
+  return sessionStore.sessionStatusKind(session)
+}
+
+function statusTag(session: Session): string | null {
+  return sessionStatusTag(statusKind(session), sessionStore.isJustFinished(session.id))
+}
+
+function packageRunWorkId(run: NavigatorRun): string {
+  return `work:package-run:${run.packageId}:${run.sourceId}`
+}
+
+// Mirrors agentSessionWorkEntry() — identity is the session id alone.
+function agentSessionWorkId(run: NavigatorRun): string {
+  return `work:agent-session:${run.sourceId}`
+}
+
+// The NavigatorRun for an agent session does not carry the agent id; open
+// intents need it, so resolve it from the session record in the runs store.
+function agentIdForSession(sessionId: string): string {
+  return runsStore.agentSessions.find(item => item.sessionId === sessionId)?.agentId ?? ''
+}
+
+// Live pty states — the only states where Stop applies and Delete does not.
+// 'done' (RunStatus) is excluded because it's shared with record-level done
+// (process exited); the brief runtime-done window (< 5s) still shows Stop
+// in the AgentSessionView header.
+function agentRunIsLive(run: NavigatorRun): boolean {
+  return run.kind === 'agent-session' && (run.status === 'working' || run.status === 'needs-input' || run.status === 'idle')
+}
+
+// ---- Collapsed-rail monograms ----
+const workspaceMonogram = computed(() => initialsFrom(props.workspaceName ?? ''))
+
+function activityMonogram(row: ActivityRow): string {
+  return row.kind === 'chat' ? initialsFrom(row.session.label) : initialsFrom(row.run.title)
+}
+
+function activityRowTitle(row: ActivityRow): string {
+  if (row.kind === 'chat') {
+    const tag = statusTag(row.session)
+    return tag ? `${row.session.label} · ${tag}` : row.session.label
+  }
+  const tag = runStatusTag(row.run.status)
+  return tag ? `${row.run.title} · ${tag}` : row.run.title
+}
+
+function activityRowActive(row: ActivityRow): boolean {
+  if (row.kind === 'chat') return props.activeWorkId === `work:chat:${row.session.id}`
+  if (row.run.kind === 'agent-session') return props.activeWorkId === agentSessionWorkId(row.run)
+  return props.activeWorkId === packageRunWorkId(row.run)
+}
+
+// A small status dot overlays the monogram so running/needs-attention items
+// remain legible without their label. Empty string = no dot.
+function activityDotClass(row: ActivityRow): string {
+  if (row.kind === 'run') return runStatusDotClass(row.run.status)
+  return sessionDotClass(statusKind(row.session), sessionStore.isJustFinished(row.session.id))
+}
+
+function activityRowWorking(row: ActivityRow): boolean {
+  if (row.kind === 'run') return row.run.status === 'working'
+  return statusKind(row.session) === 'working'
+}
+
+function selectActivityRow(row: ActivityRow) {
+  if (row.kind === 'chat') selectSession(row.session.id)
+  else selectRun(row.run)
+}
+
+// ---- Multi-select (expanded tray only) ----
+// Cmd/Ctrl-click toggles, Shift-click selects a range from the anchor, plain
+// click clears and navigates. Selection marks rows for batch archive/delete
+// through the context menu; it never changes the active Work.
+const selectedActivityKeys = ref(new Set<string>())
+const selectionAnchorKey = ref<string | null>(null)
+
+function clearActivitySelection() {
+  selectedActivityKeys.value.clear()
+  selectionAnchorKey.value = null
+}
+
+function handleActivityRowClick(row: ActivityRow, event: MouseEvent) {
+  if (suppressActivityClick.value) return
+  if (event.metaKey || event.ctrlKey) {
+    if (selectedActivityKeys.value.has(row.key)) selectedActivityKeys.value.delete(row.key)
+    else selectedActivityKeys.value.add(row.key)
+    selectionAnchorKey.value = row.key
+    return
+  }
+  if (event.shiftKey && selectionAnchorKey.value) {
+    const keys = activityRows.value.map(r => r.key)
+    const from = keys.indexOf(selectionAnchorKey.value)
+    const to = keys.indexOf(row.key)
+    if (from >= 0 && to >= 0) {
+      selectedActivityKeys.value = new Set(keys.slice(Math.min(from, to), Math.max(from, to) + 1))
+      return
+    }
+  }
+  clearActivitySelection()
+  selectActivityRow(row)
+}
+
+const selectedActivityRows = computed(() =>
+  activityRows.value.filter(row => selectedActivityKeys.value.has(row.key)),
+)
+
+function onSelectionKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && selectedActivityKeys.value.size) clearActivitySelection()
+}
+
+function selectRun(run: NavigatorRun) {
+  if (suppressActivityClick.value) return
+  if (run.kind === 'package-job' && run.packageId) {
+    emit('selectPackageRun', run.packageId, run.sourceId)
+  } else if (run.kind === 'agent-session') {
+    emit('selectAgentSession', agentIdForSession(run.sourceId), run.sourceId)
+  }
+}
+
+function appRowActive(row: AppRow): boolean {
+  // Agent rows are launchers, not destinations — never active. The launched
+  // session's Activity row carries the active state instead.
+  if (row.kind === 'agent') return false
+  return props.activeWorkId === packageWorkEntryId(row.pkg)
+}
+
+// Core surfaces are launchers, but the live host should still read as "you are
+// here" — the one tray signal that confirms which surface is active. Chat
+// covers both the draft (`work:chat:new`) and any open session.
+function surfaceActive(row: SurfaceRow): boolean {
+  if (row.key === 'chat') return props.activeWorkId.startsWith('work:chat:')
+  if (row.key === 'files') return props.activeWorkId === 'work:files'
+  if (row.key === 'terminal') return props.activeWorkId === 'work:terminal'
+  return props.activeWorkId === 'work:activity-trust'
+}
+
+function appRowName(row: AppRow): string {
+  return row.kind === 'package' ? row.pkg.manifest.name : row.agent.name
+}
+
+function selectAppRow(row: AppRow) {
+  if (suppressAppClick.value) return
+  if (row.kind === 'agent') emit('launchAgent', row.agent.id)
+  else emit('selectWork', row.pkg.manifest.id)
+}
+
+function activityKeyForSession(sessionId: string): string {
+  return `chat:${sessionId}`
+}
+
+function activityKeyForRun(run: NavigatorRun): string {
+  return run.id
+}
+
+// ---- Select session ----
+function selectSession(id: string) {
+  if (suppressActivityClick.value) return
+  sessionStore.select(id)
+  emit('selectSession', id)
+}
+
+// ---- Context menus ----
+const ctxMenu = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  session: null as Session | null,
+})
+
+const runCtxMenu = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  run: null as NavigatorRun | null,
+})
+
+const batchCtxMenu = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+})
+
+// A right-click inside a multi-selection opens the batch menu; outside it
+// drops the selection and opens the normal single-row menu (Finder rule).
+function openBatchMenuFor(event: MouseEvent, key: string): boolean {
+  if (selectedActivityKeys.value.size > 1 && selectedActivityKeys.value.has(key)) {
+    batchCtxMenu.x = event.clientX
+    batchCtxMenu.y = event.clientY
+    batchCtxMenu.visible = true
+    return true
+  }
+  clearActivitySelection()
+  return false
+}
+
+function closeBatchMenu() {
+  batchCtxMenu.visible = false
+}
+
+function batchArchive() {
+  const rows = selectedActivityRows.value
+  closeBatchMenu()
+  clearActivitySelection()
+  for (const row of rows) {
+    if (row.kind === 'chat') emit('archiveSession', row.session.id)
+    else if (row.run.kind === 'agent-session') emit('archiveAgentSession', row.run.sourceId)
+    else if (row.run.packageId) emit('archivePackageRun', row.run.packageId, row.run.sourceId)
+  }
+}
+
+function batchDelete() {
+  const rows = selectedActivityRows.value
+  closeBatchMenu()
+  clearActivitySelection()
+  for (const row of rows) {
+    if (row.kind === 'chat') emit('deleteSession', row.session.id)
+    else if (row.run.kind === 'agent-session') {
+      // Running sessions cannot be deleted (stop first); skip them silently
+      // rather than surface a main-process error mid-batch.
+      if (!agentRunIsLive(row.run)) emit('deleteAgentSession', row.run.sourceId)
+    }
+    else if (row.run.packageId) emit('deletePackageRun', row.run.packageId, row.run.sourceId)
+  }
+}
+
+function openContextMenu(event: MouseEvent, session: Session) {
+  if (openBatchMenuFor(event, activityKeyForSession(session.id))) return
+  ctxMenu.x = event.clientX
+  ctxMenu.y = event.clientY
+  ctxMenu.session = session
+  ctxMenu.visible = true
+}
+
+function closeContextMenu() {
+  ctxMenu.visible = false
+  ctxMenu.session = null
+}
+
+function openRunContextMenu(event: MouseEvent, run: NavigatorRun) {
+  if (openBatchMenuFor(event, activityKeyForRun(run))) return
+  runCtxMenu.x = event.clientX
+  runCtxMenu.y = event.clientY
+  runCtxMenu.run = run
+  runCtxMenu.visible = true
+}
+
+function closeRunContextMenu() {
+  runCtxMenu.visible = false
+  runCtxMenu.run = null
+}
+
+// Stop applies only to live agent sessions; Delete is withheld from them
+// until the pty has ended (stop first, then delete).
+const runCtxIsLiveAgent = computed(() => !!runCtxMenu.run && agentRunIsLive(runCtxMenu.run))
+
+function onRunCtxRename() {
+  const run = runCtxMenu.run
+  closeRunContextMenu()
+  if (run?.kind === 'package-job' || run?.kind === 'agent-session') {
+    nextTick(() => runRowRefs.value[run.sourceId]?.startRename())
+  }
+}
+
+function onRunCtxArchive() {
+  const run = runCtxMenu.run
+  closeRunContextMenu()
+  if (run?.kind === 'agent-session') {
+    emit('archiveAgentSession', run.sourceId)
+  } else if (run?.kind === 'package-job' && run.packageId) {
+    emit('archivePackageRun', run.packageId, run.sourceId)
+  }
+}
+
+function onRunCtxDelete() {
+  const run = runCtxMenu.run
+  closeRunContextMenu()
+  if (run?.kind === 'agent-session') {
+    emit('deleteAgentSession', run.sourceId)
+  } else if (run?.kind === 'package-job' && run.packageId) {
+    emit('deletePackageRun', run.packageId, run.sourceId)
+  }
+}
+
+function onRunCtxStop() {
+  const run = runCtxMenu.run
+  closeRunContextMenu()
+  if (run?.kind === 'agent-session') {
+    emit('stopAgentSession', run.sourceId)
+  }
+}
+
+function onCtxRename() {
+  if (!ctxMenu.session) return
+  const session = ctxMenu.session
+  closeContextMenu()
+  nextTick(() => {
+    const rowComp = sessionRowRefs.value[session.id]
+    rowComp?.startRename()
+  })
+}
+
+function onCtxExport() {
+  if (!ctxMenu.session) return
+  const session = ctxMenu.session
+  closeContextMenu()
+  downloadSessionExport(session)
+}
+
+function onCtxArchive() {
+  if (!ctxMenu.session) return
+  const sessionId = ctxMenu.session.id
+  closeContextMenu()
+  emit('archiveSession', sessionId)
+}
+
+function onCtxDelete() {
+  if (!ctxMenu.session) return
+  const sessionId = ctxMenu.session.id
+  closeContextMenu()
+  emit('deleteSession', sessionId)
+}
+
+// ---- Rename handler (from SessionRow emit) ----
+function handleRenameCommit(patchedSession: Session) {
+  sessionStore.rename(patchedSession.id, patchedSession.label)
+}
+
+// ---- Undo ----
+function onUndo() {
+  sessionStore.undoLast()
+}
+
+// ---- Pointer-based drag and drop ----
+const {
+  drag: appDrag,
+  dropIndicator: appDropIndicator,
+  dragging: appDragging,
+  suppressClick: suppressAppClick,
+  onPointerDown: onAppPointerDown,
+} = usePointerReorder({
+  rowSelector: '.sb .app-list [data-app-key]',
+  keyAttr: 'appKey',
+  keys: () => appRows.value.map(row => row.key),
+  onReorder: reordered => settingsStore.set('navigatorAppOrder', reordered),
+})
+
+const {
+  drag: activityDrag,
+  dropIndicator: activityDropIndicator,
+  dragging: activityDragging,
+  suppressClick: suppressActivityClick,
+  onPointerDown: onActivityPointerDown,
+} = usePointerReorder({
+  rowSelector: '.sb .activity-list [data-activity-key]',
+  keyAttr: 'activityKey',
+  keys: () => activityRows.value.map(row => row.key),
+  onReorder: (reordered) => {
+    settingsStore.set('navigatorActivityOrder', reordered)
+    const chatOrder = reordered
+      .filter(key => key.startsWith('chat:'))
+      .map(key => key.slice('chat:'.length))
+    sessionStore.reorder(chatOrder)
+  },
+})
+
+const draggingActive = computed(() => appDragging.value || activityDragging.value)
+
+function onSessionRowPointerDown(event: PointerEvent, session: Session) {
+  onActivityPointerDown(event, activityKeyForSession(session.id))
+}
+
+// ---- Workspace change → reload sessions ----
+watch(() => props.workspaceName, () => {
+  clearActivitySelection()
+  sessionStore.load()
+})
+
+// ---- Lifecycle ----
+onMounted(() => {
+  sessionStore.load()
+  window.addEventListener('keydown', onSelectionKeydown)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onSelectionKeydown)
+})
+</script>
+
+<template>
+  <aside
+    class="sb relative flex h-full flex-shrink-0 flex-col overflow-hidden bg-chrome-high"
+    :class="[draggingActive && 'select-none', collapsed ? 'border-r-0' : 'border-r border-rule-light']"
+    :style="{ width: effectiveWidth + 'px' }"
+    :data-collapsed="collapsed ? 'true' : 'false'"
+    aria-label="Sidebar"
+  >
+    <!-- The Navigator is one chrome-high column in both states — the same
+         tone as the pane headers it bridges to, so the collapsed rail + first
+         pane header read as one continuous chrome surface (the melt) and the
+         expanded tray sits in the same chrome region as the Work/Artifact
+         headers. Depth against surface content comes from the border-r
+         hairline + the chrome-high → surface step. No separate rail slab. -->
+    <!-- Top chrome: expanded owns collapse; collapsed is bridged by the first pane header. -->
+    <div
+      class="sb-drag-handle shrink-0"
+      :class="collapsed ? 'relative h-12' : 'flex h-10 items-center justify-end px-2'"
+      :data-testid="collapsed ? 'navigator-bridge-cap' : 'navigator-top-chrome'"
+    >
+      <button
+        v-if="!collapsed"
+        type="button"
+        class="no-drag flex h-6 w-6 items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
+        :title="`Collapse sidebar (${shortcutLabel(['Mod', 'B'])})`"
+        aria-label="Collapse sidebar"
+        data-testid="navigator-collapse"
+        @click.stop="emit('toggle')"
+      >
+        <IconLayoutSidebarLeftCollapse :size="14" :stroke="1.9" />
+      </button>
+    </div>
+
+    <!-- Header cluster: the workspace switcher and the core surfaces sit
+         flat on the chrome like every other row — grouped by proximity and
+         the single full-bleed rule below, which is where scrolling begins.
+         Pinned above the scroll list so core surfaces never scroll away.
+         Rem-true mirror against the rail (root font is 14px, so pixel
+         literals drift — every equation below must keep holding):
+         · chip y: chrome 2.5rem + ws pt-2 + the h-9 row's 0.25rem chip
+           centering equals the rail's cap 3rem + mark pt-1.
+         · first core token: chrome 2.5rem + ws row (pt-2 + h-9 = 2.75rem)
+           + core pt-5 equals the rail's cap 3rem + mark h-11 + list pt-3.
+         · Apps marker: core pb-2 + 1px rule + Apps mt (0.75rem − 1px)
+           equals the rail's mt-5. -->
+    <div v-if="!collapsed" class="shrink-0 px-3 pt-2" data-testid="workspace-row">
+      <WorkspaceSwitcher
+        :workspace-name="workspaceName"
+        :recent-workspaces="recentWorkspaces"
+        :monogram="workspaceMonogram"
+        @open-folder="emit('openFolder')"
+        @open-recent-workspace="path => emit('openRecentWorkspace', path)"
+        @add-project="mode => emit('addProject', mode)"
+      />
+    </div>
+    <div
+      v-if="!collapsed"
+      class="core-surface-list flex shrink-0 flex-col gap-px pr-3 pl-2 pt-5 pb-2"
+      data-testid="core-surfaces"
+    >
+      <button
+        v-for="row in SURFACE_ROWS"
+        :key="row.key"
+        class="group/navrow flex w-full items-center overflow-hidden rounded-[7px] py-px pl-1 text-left text-[12.5px] hover:bg-chrome-mid"
+        :class="surfaceActive(row) ? 'bg-accent-tint' : ''"
+        :data-work-key="row.key"
+        :data-active="surfaceActive(row) ? 'true' : undefined"
+        :title="row.label"
+        :aria-label="row.label"
+        @click="emit('selectWork', row.selectWorkId)"
+      >
+        <span class="nav-token text-[13px]" :class="surfaceActive(row) ? 'text-accent' : 'text-ink-3'">
+          <component :is="SURFACE_ICONS[row.key]" :size="16" :stroke="1.8" />
+        </span>
+        <span
+          class="ml-1 min-w-0 flex-1 truncate pr-2 text-left"
+          :class="surfaceActive(row) ? 'text-ink font-medium' : 'text-ink-2'"
+        >{{ row.label }}</span>
+      </button>
+    </div>
+    <!-- The one drawn line in the tray: marks where the pinned cluster ends
+         and the scroll region begins; sharpens while rows pass beneath it. -->
+    <div
+      v-if="!collapsed"
+      class="shrink-0 border-t"
+      :class="listScrolled ? 'border-rule' : 'border-rule-light'"
+      data-testid="core-rule"
+      aria-hidden="true"
+    />
+    <!-- Cap (3rem) + mark (h-11) mirrors the expanded top chrome (2.5rem) +
+         workspace row (pt-2 + h-9), keeping the monogram and every row below
+         at identical y — see the header-cluster equations above. Rem-true on
+         purpose: the root font size is 14px, so a pixel-literal height here
+         breaks the mirror and jiggles every icon below it on toggle. -->
+    <div
+      v-if="collapsed"
+      class="relative h-11 shrink-0 px-3 pt-1"
+      data-testid="workspace-mark"
+      :title="workspaceName ?? undefined"
+    >
+      <span class="grid h-7 w-7 place-items-center rounded-[7px] border border-rule-light bg-chrome-mid font-sans text-[11px] font-semibold leading-none tracking-tight text-ink-2">{{ workspaceMonogram }}</span>
+    </div>
+
+    <!-- Navigator list -->
+    <div
+      class="relative flex flex-1 flex-col overflow-y-auto overflow-x-hidden overscroll-contain px-3 pb-2"
+      :class="collapsed ? '' : 'min-h-[80px]'"
+      data-testid="navigator-list"
+      @scroll.passive="onListScroll"
+    >
+
+      <!-- Core surfaces, rail face: token-only rows in the shared list lane.
+           The tray renders these in the pinned header cluster instead. -->
+      <div v-if="collapsed" class="core-surface-list flex flex-col items-start gap-px pt-3" data-testid="core-surfaces">
+        <button
+          v-for="row in SURFACE_ROWS"
+          :key="row.key"
+          class="group/navrow flex h-8 items-center overflow-hidden rounded-[7px] text-left text-[12.5px]"
+          :data-work-key="row.key"
+          :data-active="surfaceActive(row) ? 'true' : undefined"
+          :title="row.label"
+          :aria-label="row.label"
+          @click="emit('selectWork', row.selectWorkId)"
+        >
+          <span
+            class="nav-token text-[13px]"
+            :class="surfaceActive(row)
+              ? 'bg-accent-tint text-accent'
+              : 'text-ink-3 group-hover/navrow:bg-chrome-mid group-hover/navrow:text-ink'"
+          >
+            <component :is="SURFACE_ICONS[row.key]" :size="16" :stroke="1.8" />
+          </span>
+        </button>
+      </div>
+
+      <!-- Apps: installed package launchers. Expanded margin compensates the
+           header cluster's pb-2 + 1px rule so the Apps marker holds y on
+           toggle (rail keeps mt-5 above its divider). -->
+      <section :class="collapsed ? 'mt-5' : 'mt-[calc(0.75rem-1px)]'">
+        <!-- Section marker keeps row positions stable in both states. -->
+        <div class="nav-section-marker" data-testid="section-marker-apps">
+          <template v-if="collapsed">
+            <div class="nav-section-divider" data-testid="section-divider-apps" aria-hidden="true" />
+          </template>
+          <template v-else>
+            <button
+              class="flex h-[24px] flex-1 items-center gap-1 rounded-[5px] px-1 text-left text-[10px] font-semibold uppercase tracking-[0.04em] text-ink-3 hover:bg-chrome-mid hover:text-ink-2"
+              :aria-expanded="!appsCollapsed"
+              data-testid="section-toggle-apps"
+              title="Toggle Apps"
+              @click="appsCollapsed = !appsCollapsed"
+            >
+              <IconChevronRight v-if="appsCollapsed" :size="12" :stroke="2" class="shrink-0 text-ink-4" />
+              <IconChevronDown v-else :size="12" :stroke="2" class="shrink-0 text-ink-4" />
+              <span>Apps</span>
+            </button>
+            <button
+              class="relative flex h-[22px] w-[22px] items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
+              title="Manage apps"
+              data-testid="manage-apps"
+              @click="$emit('manageApps')"
+            >
+              <IconSettings :size="13" :stroke="1.8" />
+              <span
+                v-if="appsStore.updateCount > 0"
+                data-testid="manage-apps-badge"
+                class="absolute -right-px -top-px h-[7px] w-[7px] rounded-full bg-accent ring-2 ring-chrome"
+              />
+            </button>
+          </template>
+        </div>
+
+        <div
+          v-if="collapsed || !appsCollapsed"
+          class="app-list mt-1 flex flex-col items-start gap-px"
+          :class="collapsed ? '' : '-ml-1'"
+        >
+          <template v-for="row in appRows" :key="row.key">
+            <div v-if="!collapsed && appDropIndicator?.beforeKey === row.key" class="h-[2px] mx-[6px] bg-accent rounded-[1px] shrink-0" />
+            <button
+              class="group/navrow flex items-center overflow-hidden rounded-[7px] py-px text-left text-[12.5px]"
+              :class="[
+                collapsed ? '' : 'w-full pl-1 text-ink-2 hover:bg-chrome-mid',
+                !collapsed && appRowActive(row) ? 'bg-accent-tint text-ink font-medium' : '',
+                appDrag?.key === row.key && appDrag?.active ? 'opacity-35' : '',
+              ]"
+              :data-app-key="row.key"
+              :data-package-id="row.kind === 'package' ? row.pkg.manifest.id : undefined"
+              :data-agent-id="row.kind === 'agent' ? row.agent.id : undefined"
+              :title="appRowName(row)"
+              :aria-label="appRowName(row)"
+              @pointerdown="collapsed ? undefined : onAppPointerDown($event, row.key)"
+              @click="selectAppRow(row)"
+            >
+              <span
+                class="nav-token text-[13px]"
+                :class="collapsed
+                  ? (appRowActive(row) ? 'bg-accent-tint text-accent' : 'text-ink-3 group-hover/navrow:bg-chrome-mid group-hover/navrow:text-ink')
+                  : (appRowActive(row) ? 'text-accent' : 'text-ink-3')"
+              >
+                <span
+                  v-if="row.kind === 'agent' && agentIconUrl(row.agent.id)"
+                  class="package-icon-img"
+                  :style="{ '--icon-url': `url('${agentIconUrl(row.agent.id)}')` }"
+                  :aria-hidden="true"
+                />
+                <span
+                  v-else-if="row.kind === 'package' && isImageIcon(row.pkg.manifest.icon) && port"
+                  class="package-icon-img"
+                  :style="{ '--icon-url': `url('${packageIconUrl(row.pkg.manifest.icon!, row.pkg.manifest.id, port)}')` }"
+                  :aria-hidden="true"
+                />
+                <template v-else>{{ row.pkg.manifest.icon ?? '◻' }}</template>
+              </span>
+              <span v-if="!collapsed" class="ml-1 min-w-0 flex-1 truncate pr-2 text-left">{{ appRowName(row) }}</span>
+            </button>
+            <div v-if="!collapsed && appDropIndicator?.afterKey === row.key" class="h-[2px] mx-[6px] bg-accent rounded-[1px] shrink-0" />
+          </template>
+          <div v-if="!collapsed && !appRows.length" class="px-[6px] py-1 text-[11px] text-ink-4">
+            No apps
+          </div>
+        </div>
+      </section>
+
+      <!-- Activity -->
+      <section class="mt-5">
+        <!-- Section marker keeps row positions stable in both states. The
+             marker carries the new-chat affordance in both: header icon when
+             expanded, the rail's + token when collapsed (the rail has no room
+             for a History token; History stays on the expanded tray). -->
+        <div class="nav-section-marker" data-testid="section-marker-activity">
+          <template v-if="collapsed">
+            <button
+              class="ml-[3px] grid h-[22px] w-[22px] place-items-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
+              title="New chat"
+              aria-label="New chat"
+              data-testid="activity-new-chat"
+              @click="emit('selectWork', '__chat__')"
+            >
+              <IconPlus :size="13" :stroke="1.8" />
+            </button>
+          </template>
+          <template v-else>
+            <button
+              class="flex h-[24px] flex-1 items-center gap-1 rounded-[5px] px-1 text-left text-[10px] font-semibold uppercase tracking-[0.04em] text-ink-3 hover:bg-chrome-mid hover:text-ink-2"
+              :aria-expanded="!activityCollapsed"
+              data-testid="section-toggle-activity"
+              title="Toggle Activity"
+              @click="activityCollapsed = !activityCollapsed"
+            >
+              <IconChevronRight v-if="activityCollapsed" :size="12" :stroke="2" class="shrink-0 text-ink-4" />
+              <IconChevronDown v-else :size="12" :stroke="2" class="shrink-0 text-ink-4" />
+              <span>Activity</span>
+            </button>
+            <button
+              class="flex h-[22px] w-[22px] items-center justify-center rounded-[5px]"
+              :class="activeWorkId === 'work:archive' ? 'bg-accent-tint text-accent' : 'text-ink-3 hover:bg-chrome-mid hover:text-ink'"
+              title="History"
+              aria-label="History"
+              data-testid="activity-history"
+              @click="emit('selectWork', '__archive__')"
+            >
+              <IconHistory :size="13" :stroke="1.8" />
+            </button>
+            <button
+              class="flex h-[22px] w-[22px] items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
+              title="New chat"
+              aria-label="New chat"
+              data-testid="activity-new-chat"
+              @click="emit('selectWork', '__chat__')"
+            >
+              <IconPlus :size="13" :stroke="1.8" />
+            </button>
+          </template>
+        </div>
+
+        <!-- Collapsed rail: monogram tokens (instances have no icon) -->
+        <div v-if="collapsed && activityRows.length" class="activity-rail mt-1 flex flex-col items-start gap-px">
+          <button
+            v-for="row in activityRows"
+            :key="row.key"
+            class="group/navrow flex h-8 items-center"
+            :data-activity-key="row.key"
+            :data-run-id="row.kind === 'run' ? row.run.id : undefined"
+            :title="activityRowTitle(row)"
+            :aria-label="activityRowTitle(row)"
+            @click="selectActivityRow(row)"
+            @contextmenu.prevent="row.kind === 'chat' ? openContextMenu($event, row.session) : openRunContextMenu($event, row.run)"
+          >
+            <!-- The monogram chip is h-7 (1.75rem) — the same box as the
+                 nav-token — so chips and icon tokens share one height down the
+                 rail. Left-aligned to the px-3 lane so it sits flush under the
+                 tokens; matches the SessionRow/RunRow chip and the workspace
+                 mark so nothing resizes on toggle. -->
+            <span
+              class="relative grid h-7 w-7 place-items-center rounded-[7px] border font-sans text-[11px] font-semibold leading-none tracking-tight"
+              :class="activityRowActive(row) ? 'border-accent/40 bg-accent-tint text-accent' : 'border-rule-light bg-chrome-mid text-ink-2 group-hover/navrow:bg-chrome-high group-hover/navrow:text-ink'"
+            >
+              {{ activityMonogram(row) }}
+              <WorkingIcon v-if="activityRowWorking(row)" />
+              <span
+                v-else-if="activityDotClass(row)"
+                class="absolute -right-px -top-px h-[7px] w-[7px] rounded-full ring-2 ring-chrome"
+                :class="activityDotClass(row)"
+              />
+            </span>
+          </button>
+        </div>
+
+        <!-- Expanded list -->
+        <div v-if="!collapsed && !activityCollapsed" class="mt-1">
+          <div v-if="activityRows.length" class="activity-list -ml-1 flex flex-col gap-px">
+            <template v-for="row in activityRows" :key="row.key">
+              <div v-if="activityDropIndicator?.beforeKey === row.key" class="h-[2px] mx-[6px] bg-accent rounded-[1px] shrink-0" />
+              <SessionRow
+                v-if="row.kind === 'chat'"
+                :ref="(el: any) => setRowRef(row.session.id, el)"
+                :data-activity-key="row.key"
+                :session="row.session"
+                :monogram="activityMonogram(row)"
+                :active="activeWorkId === `work:chat:${row.session.id}`"
+                :selected="selectedActivityKeys.has(row.key)"
+                :status-kind="statusKind(row.session)"
+                :status-tag="statusTag(row.session)"
+                :just-finished="sessionStore.isJustFinished(row.session.id)"
+                :dragging="activityDrag?.key === row.key && activityDrag?.active"
+                @select="(_id: string, ev: MouseEvent) => handleActivityRowClick(row, ev)"
+                @contextmenu="openContextMenu"
+                @rename-commit="handleRenameCommit"
+                @pointerdown="onSessionRowPointerDown"
+              />
+              <RunRow
+                v-else
+                :ref="(el: any) => setRunRowRef(row.run.sourceId, el)"
+                :data-activity-key="row.key"
+                :run="row.run"
+                :active="activeWorkId === packageRunWorkId(row.run)"
+                :selected="selectedActivityKeys.has(row.key)"
+                :dragging="activityDrag?.key === row.key && activityDrag?.active"
+                @select="(_run: NavigatorRun, ev: MouseEvent) => handleActivityRowClick(row, ev)"
+                @contextmenu="openRunContextMenu"
+                @pointerdown="onActivityPointerDown($event, row.key)"
+              />
+              <div v-if="activityDropIndicator?.afterKey === row.key" class="h-[2px] mx-[6px] bg-accent rounded-[1px] shrink-0" />
+            </template>
+          </div>
+          <div v-else class="text-[11px] text-ink-4 px-[6px] py-1">
+            No activity
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Footer: Settings only. Collapse lives in the expanded top chrome;
+         expand lives in the bridged pane header next to the traffic lights.
+         pb-4 keeps the Settings token clear of the flush bottom edge; shared classes keep both states in lockstep. -->
+    <footer
+      class="relative shrink-0 border-t border-rule-light px-3 pb-3 pt-1.5"
+      data-testid="sidebar-footer"
+    >
+      <button
+        class="group/navrow flex h-8 items-center rounded-[7px] text-left font-sans text-[12.5px] text-ink-2"
+        :class="collapsed ? '' : 'w-full hover:bg-chrome-mid hover:text-ink'"
+        aria-label="Settings"
+        title="Settings"
+        @click="$emit('settings')"
+      >
+        <span
+          class="nav-token text-ink-3"
+          :class="collapsed ? 'group-hover/navrow:bg-chrome-mid group-hover/navrow:text-ink' : ''"
+        >
+          <IconSettings :size="16" :stroke="1.8" />
+        </span>
+        <span v-if="!collapsed" class="ml-1 min-w-0 flex-1 truncate pr-2 text-left">Settings</span>
+      </button>
+    </footer>
+
+    <!-- Session context menu -->
+    <SessionContextMenu
+      v-if="ctxMenu.visible"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      @close="closeContextMenu"
+      @rename="onCtxRename"
+      @export="onCtxExport"
+      @archive="onCtxArchive"
+      @delete="onCtxDelete"
+    />
+
+    <!-- Run context menu (package runs and agent sessions) -->
+    <RunContextMenu
+      v-if="runCtxMenu.visible"
+      :x="runCtxMenu.x"
+      :y="runCtxMenu.y"
+      :can-stop="runCtxIsLiveAgent"
+      :can-delete="!runCtxIsLiveAgent"
+      @close="closeRunContextMenu"
+      @rename="onRunCtxRename"
+      @stop="onRunCtxStop"
+      @archive="onRunCtxArchive"
+      @delete="onRunCtxDelete"
+    />
+
+    <!-- Batch context menu (multi-selected Activity rows) -->
+    <BatchContextMenu
+      v-if="batchCtxMenu.visible"
+      :x="batchCtxMenu.x"
+      :y="batchCtxMenu.y"
+      :count="selectedActivityRows.length"
+      @close="closeBatchMenu"
+      @archive="batchArchive"
+      @delete="batchDelete"
+    />
+
+    <!-- Undo toast -->
+    <Transition name="toast-fade">
+      <div v-if="sessionStore.undoToast" class="absolute bottom-12 left-2 right-2 flex items-center justify-between px-3 py-2 bg-ink text-surface rounded-[6px] font-sans text-[12px] z-50 shadow-lg">
+        <span>{{ sessionStore.undoToast.message }}</span>
+        <button v-if="sessionStore.undoToast.snapshot" class="text-accent font-medium text-[12px] hover:opacity-80" @click="onUndo">Undo</button>
+      </div>
+    </Transition>
+
+    <!-- Resize handle (expanded tray only; the rail is fixed width) -->
+    <div
+      v-if="!collapsed"
+      class="sb-resize absolute top-0 -right-1 w-2 h-full z-10 cursor-col-resize"
+      :class="draggingActive && 'sb-resize-dragging'"
+      @pointerdown="$emit('resize', $event)"
+    />
+  </aside>
+</template>
+
+<style scoped>
+/* Drag region — vendor-prefixed, cannot be expressed in Tailwind */
+.sb-drag-handle {
+  -webkit-app-region: drag;
+}
+
+.nav-token {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 7px;
+  line-height: 1;
+}
+
+.nav-token :deep(svg) {
+  display: block;
+}
+
+.nav-section-marker {
+  display: flex;
+  height: 24px;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.nav-section-divider {
+  width: 1.75rem;
+  height: 1px;
+  border-radius: 999px;
+  background: var(--color-rule-light);
+}
+
+/* Resize handle accent line — uses ::after pseudo-element */
+.sb-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 3px;
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+  background: transparent;
+  transition: background 150ms;
+}
+.sb-resize:hover::after,
+.sb-resize-dragging::after {
+  background: var(--color-accent);
+}
+
+/* Toast transition */
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
+}
+</style>

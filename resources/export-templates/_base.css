@@ -1,0 +1,183 @@
+/* Document export stylesheet — the single source of visual styling for the PDF
+ * path. CSS variables (--doc-font, --doc-mono, --doc-size) and body classes
+ * (doc--numbered, doc--title-h1, doc--justify, doc--two-col) are injected by
+ * the HTML composer from the DocumentStyle.
+ * Page size and margins are applied by printToPDF, not here. */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  font-family: var(--doc-font);
+  font-size: var(--doc-size);
+  line-height: 1.6;
+  color: #1c1c1a;
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── Headings ─────────────────────────────────────────────────────── */
+
+h1, h2, h3, h4, h5, h6 {
+  line-height: 1.25;
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+h1 { font-size: 1.9em; font-weight: 700; letter-spacing: -0.012em; margin: 1.5em 0 0.6em; }
+h2 { font-size: 1.4em;  font-weight: 650; letter-spacing: -0.008em; margin: 1.35em 0 0.5em; }
+h3 { font-size: 1.15em; font-weight: 650; margin: 1.2em 0 0.4em; }
+h4 { font-size: 1em;    font-weight: 700; margin: 1.1em 0 0.35em; }
+h5 { font-size: 0.92em; font-weight: 700; margin: 1em 0 0.3em; }
+h6 { font-size: 0.85em; font-weight: 700; color: #555550; margin: 1em 0 0.3em; }
+
+.doc-body > h1:first-child,
+.doc-body > h2:first-child,
+.doc-body > h3:first-child { margin-top: 0; }
+
+/* Numbered headings (doc--numbered) via CSS counters. */
+.doc--numbered .doc-body { counter-reset: sec subsec subsubsec; }
+.doc--numbered .doc-body h1 { counter-increment: sec; counter-reset: subsec subsubsec; }
+.doc--numbered .doc-body h1::before { content: counter(sec) "\2002"; }
+.doc--numbered .doc-body h2 { counter-increment: subsec; counter-reset: subsubsec; }
+.doc--numbered .doc-body h2::before { content: counter(sec) "." counter(subsec) "\2002"; }
+.doc--numbered .doc-body h3 { counter-increment: subsubsec; }
+.doc--numbered .doc-body h3::before { content: counter(sec) "." counter(subsec) "." counter(subsubsec) "\2002"; }
+
+/* A document-leading H1 is the title (doc--title-h1): centered, unnumbered. */
+.doc--title-h1 .doc-body > h1:first-child {
+  counter-increment: none;
+  text-align: center;
+  font-size: 1.75em;
+  margin-bottom: 1.4em;
+}
+.doc--title-h1 .doc-body > h1:first-child::before { content: none; }
+
+/* ── Body copy ────────────────────────────────────────────────────── */
+
+p { margin: 0 0 0.65em; orphans: 3; widows: 3; }
+
+.doc--justify .doc-body p {
+  text-align: justify;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+ul, ol { margin: 0.25em 0 0.75em; padding-left: 1.7em; }
+li { margin-bottom: 0.25em; }
+li > ul, li > ol { margin: 0.25em 0 0.25em; }
+li input[type="checkbox"] { margin-right: 0.45em; transform: translateY(0.08em); }
+
+blockquote {
+  border-left: 2pt solid #c9c9c2;
+  padding: 0.1em 0 0.1em 1.1em;
+  margin: 0.9em 0;
+  color: #4a4a45;
+  font-style: italic;
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+hr { border: none; border-top: 0.6pt solid #b5b5ae; margin: 1.8em auto; width: 100%; }
+
+a { color: #0b57a4; text-decoration: none; }
+
+strong { font-weight: 700; }
+
+img {
+  max-width: 100%;
+  height: auto;
+  break-inside: avoid;
+  page-break-inside: avoid;
+  margin: 0.4em 0;
+}
+
+/* ── Code ─────────────────────────────────────────────────────────── */
+
+code {
+  font-family: var(--doc-mono);
+  font-size: 0.85em;
+  background: #f4f4f0;
+  border-radius: 2pt;
+  padding: 0.08em 0.32em;
+}
+
+pre {
+  background: #f7f7f4;
+  border: 0.5pt solid #e2e2db;
+  border-radius: 3pt;
+  padding: 0.8em 1em;
+  margin: 0.9em 0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+pre code { background: none; padding: 0; border-radius: 0; font-size: 0.82em; display: block; }
+
+/* Print-safe highlight.js palette (subdued, dark-on-light). */
+.hljs-comment, .hljs-quote { color: #6a6a63; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-meta { color: #16518a; font-weight: 600; }
+.hljs-string, .hljs-regexp, .hljs-addition { color: #2a6f3a; }
+.hljs-number, .hljs-literal, .hljs-symbol { color: #8a4a16; }
+.hljs-title, .hljs-name, .hljs-section { color: #5c3d99; }
+.hljs-built_in, .hljs-type, .hljs-class { color: #0e6673; }
+.hljs-attr, .hljs-attribute, .hljs-variable { color: #74531f; }
+.hljs-deletion { color: #9d2a2a; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
+
+/* ── Tables ───────────────────────────────────────────────────────── */
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.9em 0 1.1em;
+  font-size: 0.9em;
+  line-height: 1.45;
+}
+thead { display: table-header-group; }
+tr { break-inside: avoid; page-break-inside: avoid; }
+th {
+  font-weight: 650;
+  text-align: left;
+  padding: 0.45em 0.7em;
+  border-bottom: 1.2pt solid #2a2a26;
+}
+td {
+  padding: 0.4em 0.7em;
+  border-bottom: 0.5pt solid #d4d4cd;
+  vertical-align: top;
+}
+
+/* ── Two-column layout (doc--two-col) ─────────────────────────────── */
+
+.doc--two-col .doc-body {
+  columns: 2;
+  column-gap: 7mm;
+  column-fill: auto;
+}
+.doc--two-col .doc-body h1 { column-span: all; }
+.doc--two-col .doc-body pre,
+.doc--two-col .doc-body table,
+.doc--two-col .doc-body img { break-inside: avoid-column; }
+
+/* ── Bibliography ─────────────────────────────────────────────────── */
+
+.doc-references { margin-top: 2.2em; }
+.doc--two-col .doc-references { column-span: all; }
+.doc-references-title { font-size: 1.4em; font-weight: 650; margin-bottom: 0.6em; }
+.doc-ref {
+  font-size: 0.92em;
+  margin-bottom: 0.45em;
+  padding-left: 1.8em;
+  text-indent: -1.8em;
+  text-align: left;
+  line-height: 1.5;
+}
+.doc-ref-label { font-variant-numeric: tabular-nums; }

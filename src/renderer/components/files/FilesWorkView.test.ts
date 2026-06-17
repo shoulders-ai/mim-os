@@ -1,0 +1,782 @@
+// @vitest-environment happy-dom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createApp, h, nextTick, ref } from 'vue'
+import FilesWorkView from './FilesWorkView.vue'
+
+const indexFiles = ref<Array<{
+  path: string
+  name: string
+  dir: string
+  size?: number
+  modifiedAt?: string
+  createdAt?: string
+  lastChangedBy?: string
+}>>([])
+const indexTruncated = ref(false)
+const loadSpy = vi.fn()
+const refreshSpy = vi.fn()
+
+vi.mock('../../services/workspaceFileIndex.js', () => ({
+  useWorkspaceFileIndex: () => ({
+    files: indexFiles,
+    truncated: indexTruncated,
+    loaded: ref(true),
+    load: loadSpy,
+    refresh: refreshSpy,
+  }),
+}))
+
+async function flushUi() {
+  await Promise.resolve()
+  await nextTick()
+  await Promise.resolve()
+  await nextTick()
+}
+
+async function waitForContentSearch() {
+  await vi.advanceTimersByTimeAsync(220)
+  await flushUi()
+}
+
+function mountFiles(props = {}, handlers: Record<string, unknown> = {}) {
+  const appRoot = document.createElement('div')
+  document.body.appendChild(appRoot)
+  const app = createApp(FilesWorkView, {
+    active: true,
+    recentFiles: [],
+    ...props,
+    ...handlers,
+  })
+  app.mount(appRoot)
+  return { app, root: appRoot }
+}
+
+function mountReactiveFiles(
+  props: {
+    active?: ReturnType<typeof ref<boolean>>
+    refreshKey?: ReturnType<typeof ref<number>>
+  },
+  handlers: Record<string, unknown> = {},
+) {
+  const appRoot = document.createElement('div')
+  document.body.appendChild(appRoot)
+  const app = createApp({
+    setup() {
+      return () => h(FilesWorkView, {
+        active: props.active?.value ?? true,
+        refreshKey: props.refreshKey?.value,
+        recentFiles: [],
+        ...handlers,
+      })
+    },
+  })
+  app.mount(appRoot)
+  return { app, root: appRoot }
+}
+
+function rowButtons(root: HTMLElement) {
+  return Array.from(root.querySelectorAll<HTMLButtonElement>('[data-testid="files-row"]'))
+}
+
+function modeButton(root: HTMLElement, label: string) {
+  const button = Array.from(root.querySelectorAll<HTMLButtonElement>('button'))
+    .find(item =>
+      item.textContent?.trim() === label
+      || item.title === label
+      || item.getAttribute('aria-label') === label
+    )
+  if (!button) throw new Error(`Missing button ${label}`)
+  return button
+}
+
+function input(root: HTMLElement) {
+  return root.querySelector<HTMLInputElement>('input[placeholder="Search files"]')!
+}
+
+async function type(root: HTMLElement, value: string) {
+  const el = input(root)
+  el.value = value
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+  await flushUi()
+}
+
+describe('FilesWorkView', () => {
+  let mounted: ReturnType<typeof mountFiles> | null = null
+  let call: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    indexFiles.value = [
+      {
+        path: 'docs/design-system.md',
+        name: 'design-system.md',
+        dir: 'docs',
+        size: 1200,
+        modifiedAt: '2026-06-01T09:30:00.000Z',
+        createdAt: '2026-01-18T10:00:00.000Z',
+        lastChangedBy: 'Ada',
+      },
+      {
+        path: 'docs/proposal.docx',
+        name: 'proposal.docx',
+        dir: 'docs',
+        size: 48000,
+        modifiedAt: '2026-05-31T15:00:00.000Z',
+        createdAt: '2026-05-20T08:00:00.000Z',
+        lastChangedBy: 'Ben',
+      },
+      {
+        path: 'src/renderer/App.vue',
+        name: 'App.vue',
+        dir: 'src/renderer',
+        size: 7200,
+        modifiedAt: '2026-05-30T10:00:00.000Z',
+        createdAt: '2026-03-01T08:00:00.000Z',
+        lastChangedBy: 'Clara',
+      },
+    ]
+    indexTruncated.value = false
+    loadSpy.mockClear()
+    refreshSpy.mockClear()
+    call = vi.fn(async (tool: string, params?: Record<string, unknown>) => {
+      if (tool === 'fs.list' && params?.path === '.') {
+        return {
+          entries: [
+            {
+              path: 'docs',
+              name: 'docs',
+              type: 'directory',
+              modifiedAt: '2026-06-01T08:00:00.000Z',
+              createdAt: '2026-01-18T09:00:00.000Z',
+              lastChangedBy: 'Ada',
+            },
+            {
+              path: 'README.md',
+              name: 'README.md',
+              type: 'file',
+              size: 9000,
+              modifiedAt: '2026-06-01T07:30:00.000Z',
+              createdAt: '2026-01-18T09:00:00.000Z',
+              lastChangedBy: 'Ada',
+            },
+          ],
+          truncated: false,
+        }
+      }
+      if (tool === 'fs.list' && params?.path === 'docs') {
+        return {
+          entries: [
+            {
+              path: 'docs/proposal.docx',
+              name: 'proposal.docx',
+              type: 'file',
+              size: 48000,
+              modifiedAt: '2026-05-31T15:00:00.000Z',
+              createdAt: '2026-05-20T08:00:00.000Z',
+              lastChangedBy: 'Ben',
+            },
+            {
+              path: 'docs/design-system.md',
+              name: 'design-system.md',
+              type: 'file',
+              size: 1200,
+              modifiedAt: '2026-06-01T09:30:00.000Z',
+              createdAt: '2026-01-18T10:00:00.000Z',
+              lastChangedBy: 'Ada',
+            },
+          ],
+          truncated: false,
+        }
+      }
+      if (tool === 'search.files' && params?.query === 'command palette') {
+        return {
+          results: [
+            {
+              path: 'src/renderer/App.vue',
+              line: 42,
+              snippet: 'Open the command palette from the application shell.',
+            },
+          ],
+        }
+      }
+      if (tool === 'search.files') return { results: [] }
+      return { entries: [] }
+    })
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: {
+        call,
+        revealInFinder: vi.fn(),
+        getPathForFile: vi.fn((file: File) => `/Users/test/incoming/${file.name}`),
+      },
+    })
+    mounted = null
+  })
+
+  afterEach(() => {
+    mounted?.app.unmount()
+    mounted?.root.remove()
+    mounted = null
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('renders a breadcrumb-backed file table with modified and created columns', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    expect(mounted.root.querySelector('[data-testid="files-browser-bar"]')).not.toBeNull()
+    expect(loadSpy).toHaveBeenCalled()
+    expect(call).toHaveBeenCalledWith('fs.list', { path: '.', max_entries: 500, include_last_changed_by: true })
+    expect(mounted.root.textContent).toContain('Modified')
+    expect(mounted.root.textContent).toContain('Created')
+    expect(mounted.root.textContent).toContain('Size')
+    expect(mounted.root.textContent).toContain('README.md')
+    expect(mounted.root.textContent).toContain('docs')
+    expect(mounted.root.textContent).toContain('9 KB')
+    expect(mounted.root.textContent).not.toContain('By')
+    expect(mounted.root.querySelector('footer')).toBeNull()
+    expect(mounted.root.querySelector('.tabler-icon-dots-vertical')).toBeNull()
+  })
+
+  it('refreshes the current directory and workspace index when it becomes active again', async () => {
+    const active = ref(false)
+    mounted = mountReactiveFiles({ active })
+    await flushUi()
+    call.mockClear()
+
+    active.value = true
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('fs.list', { path: '.', max_entries: 500, include_last_changed_by: true })
+    expect(refreshSpy).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes when the active Files row is selected again', async () => {
+    const refreshKey = ref(0)
+    mounted = mountReactiveFiles({ refreshKey })
+    await flushUi()
+    call.mockClear()
+
+    refreshKey.value += 1
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('fs.list', { path: '.', max_entries: 500, include_last_changed_by: true })
+    expect(refreshSpy).toHaveBeenCalledOnce()
+  })
+
+  it('expands folders on one click and navigates into them on double click', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const docsRow = rowButtons(mounted.root).find(row => row.textContent?.includes('docs'))!
+    docsRow.click()
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('fs.list', { path: 'docs', max_entries: 500, include_last_changed_by: true })
+    expect(mounted.root.textContent).toContain('proposal.docx')
+    expect(mounted.root.textContent).toContain('design-system.md')
+
+    docsRow.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    await flushUi()
+
+    expect(mounted.root.textContent).toContain('proposal.docx')
+    expect(mounted.root.textContent).toContain('workspace')
+  })
+
+  it('opens every file on one click and routes native formats to the OS app on double click', async () => {
+    const onOpenFile = vi.fn()
+    const onOpenFileNative = vi.fn()
+    mounted = mountFiles({}, { onOpenFile, onOpenFileNative })
+    await flushUi()
+    await type(mounted.root, 'design')
+
+    rowButtons(mounted.root)[0].click()
+    await flushUi()
+    expect(onOpenFile).toHaveBeenCalledWith('docs/design-system.md')
+
+    onOpenFile.mockClear()
+    await type(mounted.root, 'proposal')
+
+    // Native formats still open something on single click (the file card in
+    // Artifact via openFile); the OS app stays a deliberate double-click.
+    const row = rowButtons(mounted.root)[0]
+    expect(row.textContent).toContain('proposal.docx')
+    row.click()
+    await flushUi()
+    expect(onOpenFile).toHaveBeenCalledWith('docs/proposal.docx')
+    expect(onOpenFileNative).not.toHaveBeenCalled()
+
+    row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await flushUi()
+    expect(document.body.textContent).toContain('Open in Microsoft Word')
+
+    row.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    await flushUi()
+    expect(onOpenFileNative).toHaveBeenCalledWith('docs/proposal.docx')
+  })
+
+  it('sorts columns when headers are clicked', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const nameHeader = Array.from(mounted.root.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.includes('Name'))!
+    nameHeader.click()
+    await flushUi()
+
+    const names = rowButtons(mounted.root).map(row => row.textContent ?? '')
+    expect(names[0]).toContain('docs')
+    expect(names[1]).toContain('README.md')
+  })
+
+  it('keeps folders first when sorting browse rows by kind', async () => {
+    call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
+      if (tool === 'fs.list' && params?.path === '.') {
+        return {
+          entries: [
+            {
+              path: 'archive.zip',
+              name: 'archive.zip',
+              type: 'file',
+              size: 12000,
+              modifiedAt: '2026-06-01T09:00:00.000Z',
+              createdAt: '2026-06-01T09:00:00.000Z',
+            },
+            {
+              path: 'docs',
+              name: 'docs',
+              type: 'directory',
+              modifiedAt: '2026-06-01T08:00:00.000Z',
+              createdAt: '2026-06-01T08:00:00.000Z',
+            },
+            {
+              path: 'notes.md',
+              name: 'notes.md',
+              type: 'file',
+              size: 2000,
+              modifiedAt: '2026-06-01T07:00:00.000Z',
+              createdAt: '2026-06-01T07:00:00.000Z',
+            },
+          ],
+          truncated: false,
+        }
+      }
+      if (tool === 'search.files') return { results: [] }
+      return { entries: [] }
+    })
+
+    mounted = mountFiles()
+    await flushUi()
+
+    const kindHeader = Array.from(mounted.root.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.includes('Kind'))!
+    kindHeader.click()
+    await flushUi()
+
+    let names = rowButtons(mounted.root).map(row => row.textContent ?? '')
+    expect(names[0]).toContain('docs')
+    expect(names[1]).toContain('archive.zip')
+
+    kindHeader.click()
+    await flushUi()
+
+    names = rowButtons(mounted.root).map(row => row.textContent ?? '')
+    expect(names[0]).toContain('docs')
+    expect(names[1]).toContain('notes.md')
+  })
+
+  it('adds debounced file-content matches to search results', async () => {
+    vi.useFakeTimers()
+    mounted = mountFiles()
+    await flushUi()
+    await type(mounted.root, 'command palette')
+    await waitForContentSearch()
+
+    expect(call).toHaveBeenCalledWith('search.files', { query: 'command palette', max_results: 40 })
+    expect(rowButtons(mounted.root)[0].textContent).toContain('App.vue')
+    expect(mounted.root.textContent).toContain('src/renderer:42')
+    expect(mounted.root.textContent).toContain('command palette')
+  })
+
+  it('ignores stale content-search responses after the query changes', async () => {
+    vi.useFakeTimers()
+    let resolveStale!: (value: { results: Array<{ path: string; line: number; snippet: string }> }) => void
+    const staleResult = new Promise<{ results: Array<{ path: string; line: number; snippet: string }> }>((resolve) => {
+      resolveStale = resolve
+    })
+    call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
+      if (tool === 'fs.list') return { entries: [], truncated: false }
+      if (tool === 'search.files' && params?.query === 'stale query') return staleResult
+      if (tool === 'search.files' && params?.query === 'live query') {
+        return {
+          results: [{
+            path: 'docs/design-system.md',
+            line: 12,
+            snippet: 'The live query result should remain visible.',
+          }],
+        }
+      }
+      return { results: [] }
+    })
+
+    mounted = mountFiles()
+    await flushUi()
+    await type(mounted.root, 'stale query')
+    await vi.advanceTimersByTimeAsync(220)
+    await flushUi()
+
+    await type(mounted.root, 'live query')
+    await vi.advanceTimersByTimeAsync(220)
+    await flushUi()
+
+    expect(mounted.root.textContent).toContain('design-system.md')
+    expect(mounted.root.textContent).toContain('docs:12')
+
+    resolveStale({
+      results: [{
+        path: 'src/renderer/App.vue',
+        line: 99,
+        snippet: 'A stale query result arrived late.',
+      }],
+    })
+    await flushUi()
+
+    expect(mounted.root.textContent).toContain('design-system.md')
+    expect(mounted.root.textContent).not.toContain('App.vue')
+    expect(mounted.root.textContent).not.toContain('stale query result')
+  })
+
+  it('opens a custom context menu with file actions', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const readmeRow = rowButtons(mounted.root).find(row => row.textContent?.includes('README.md'))!
+    readmeRow.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 12,
+      clientY: 24,
+    }))
+    await flushUi()
+
+    expect(document.body.textContent).toContain('Open in Editor')
+    expect(document.body.textContent).toContain('Reveal in Finder')
+    expect(document.body.textContent).toContain('Copy path')
+  })
+
+  it('duplicates and trashes rows from the context menu', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const readmeRow = rowButtons(mounted.root).find(row => row.textContent?.includes('README.md'))!
+    readmeRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 24 }))
+    await flushUi()
+    modeButton(document.body, 'Duplicate').click()
+    await flushUi()
+    expect(call).toHaveBeenCalledWith('fs.copy', { path: 'README.md' })
+
+    readmeRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 24 }))
+    await flushUi()
+    modeButton(document.body, 'Delete').click()
+    await flushUi()
+
+    // Nothing moves before the confirmation dialog is answered.
+    expect(call).not.toHaveBeenCalledWith('fs.trash', expect.anything())
+    expect(document.body.textContent).toContain('Trash')
+    modeButton(document.body, 'Delete file').click()
+    await flushUi()
+    expect(call).toHaveBeenCalledWith('fs.trash', { path: 'README.md' })
+  })
+
+  it('cancels delete from the confirmation dialog without touching the file', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const readmeRow = rowButtons(mounted.root).find(row => row.textContent?.includes('README.md'))!
+    readmeRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 24 }))
+    await flushUi()
+    modeButton(document.body, 'Delete').click()
+    await flushUi()
+    modeButton(document.body, 'Cancel').click()
+    await flushUi()
+
+    expect(call).not.toHaveBeenCalledWith('fs.trash', expect.anything())
+    expect(document.body.textContent).not.toContain('moves to the Trash')
+  })
+
+  it('renames a row through the name dialog', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const readmeRow = rowButtons(mounted.root).find(row => row.textContent?.includes('README.md'))!
+    readmeRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 24 }))
+    await flushUi()
+    modeButton(document.body, 'Rename').click()
+    await flushUi()
+
+    const dialogInput = document.body.querySelector<HTMLInputElement>('input[placeholder="file-name.md"]')!
+    expect(dialogInput.value).toBe('README.md')
+    dialogInput.value = 'INTRO.md'
+    dialogInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    dialogInput.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('fs.rename', { old_path: 'README.md', new_path: 'INTRO.md' })
+  })
+
+  it('creates folders from the empty-area context menu', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const container = mounted.root.querySelector<HTMLElement>('.overflow-y-auto')!
+    container.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }))
+    await flushUi()
+    expect(document.body.textContent).toContain('New file')
+    modeButton(document.body, 'New folder').click()
+    await flushUi()
+
+    const dialogInput = document.body.querySelector<HTMLInputElement>('input[placeholder="folder-name"]')!
+    dialogInput.value = 'assets'
+    dialogInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    dialogInput.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('fs.mkdir', { path: 'assets' })
+  })
+
+  it('creates and opens a new file from the context menu of a folder', async () => {
+    const onOpenFile = vi.fn()
+    mounted = mountFiles({}, { onOpenFile })
+    await flushUi()
+
+    const docsRow = rowButtons(mounted.root).find(row => row.textContent?.includes('docs'))!
+    docsRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 24 }))
+    await flushUi()
+    modeButton(document.body, 'New file inside').click()
+    await flushUi()
+
+    const dialogInput = document.body.querySelector<HTMLInputElement>('input[placeholder="file-name.md"]')!
+    dialogInput.value = 'notes.md'
+    dialogInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    dialogInput.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('fs.create', { path: 'docs/notes.md' })
+    expect(onOpenFile).toHaveBeenCalledWith('docs/notes.md')
+  })
+
+  it('imports OS-dragged files into the current folder with a drop overlay', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const container = mounted.root.querySelector<HTMLElement>('[data-testid="files-drop-zone"]')!
+    const file = new File(['x'], 'photo.png')
+    const dataTransfer = { files: [file], types: ['Files'] }
+
+    const enter = new Event('dragenter', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(enter, 'dataTransfer', { value: dataTransfer })
+    container.dispatchEvent(enter)
+    await flushUi()
+    expect(mounted.root.textContent).toContain('Drop to import')
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    container.dispatchEvent(drop)
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('fs.import', {
+      source_path: '/Users/test/incoming/photo.png',
+      dest_dir: '.',
+    })
+    expect(mounted.root.textContent).not.toContain('Drop to import')
+  })
+
+  it('imports OS-dragged files into the hovered folder row', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const docsRow = rowButtons(mounted.root).find(row => row.textContent?.includes('docs'))!
+    const file = new File(['x'], 'report.docx')
+    const dataTransfer = { files: [file], types: ['Files'] }
+
+    const over = new Event('dragover', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(over, 'dataTransfer', { value: dataTransfer })
+    docsRow.dispatchEvent(over)
+    await flushUi()
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    docsRow.dispatchEvent(drop)
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('fs.import', {
+      source_path: '/Users/test/incoming/report.docx',
+      dest_dir: 'docs',
+    })
+  })
+
+  it('ignores drags that carry no OS files', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const container = mounted.root.querySelector<HTMLElement>('[data-testid="files-drop-zone"]')!
+    const dataTransfer = { files: [], types: ['text/plain'] }
+
+    const enter = new Event('dragenter', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(enter, 'dataTransfer', { value: dataTransfer })
+    container.dispatchEvent(enter)
+    await flushUi()
+    expect(mounted.root.textContent).not.toContain('Drop to import')
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(drop, 'dataTransfer', { value: dataTransfer })
+    container.dispatchEvent(drop)
+    await flushUi()
+    expect(call).not.toHaveBeenCalledWith('fs.import', expect.anything())
+  })
+
+  it('hides the drop overlay when the drag leaves without dropping', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const container = mounted.root.querySelector<HTMLElement>('[data-testid="files-drop-zone"]')!
+    const dataTransfer = { files: [new File(['x'], 'photo.png')], types: ['Files'] }
+
+    const enter = new Event('dragenter', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(enter, 'dataTransfer', { value: dataTransfer })
+    container.dispatchEvent(enter)
+    await flushUi()
+    expect(mounted.root.textContent).toContain('Drop to import')
+
+    const leave = new Event('dragleave', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(leave, 'dataTransfer', { value: dataTransfer })
+    container.dispatchEvent(leave)
+    await flushUi()
+
+    expect(mounted.root.textContent).not.toContain('Drop to import')
+    expect(call).not.toHaveBeenCalledWith('fs.import', expect.anything())
+  })
+
+  it('shows Changed as a workspace-wide modified-time table', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    modeButton(mounted.root, 'Changed').click()
+    await flushUi()
+
+    const names = rowButtons(mounted.root).map(row => row.textContent ?? '')
+    expect(names[0]).toContain('design-system.md')
+    expect(names[1]).toContain('proposal.docx')
+    expect(mounted.root.textContent).toContain('Location')
+  })
+
+  it('shows recent files with metadata from the workspace index', async () => {
+    mounted = mountFiles({
+      recentFiles: [{ path: 'docs/proposal.docx', name: 'proposal.docx' }],
+    })
+    await flushUi()
+
+    modeButton(mounted.root, 'Recent').click()
+    await flushUi()
+
+    expect(rowButtons(mounted.root)).toHaveLength(1)
+    expect(mounted.root.textContent).toContain('proposal.docx')
+    expect(mounted.root.textContent).toContain('docs')
+    expect(mounted.root.textContent).toContain('47 KB')
+  })
+
+  it('groups resource mounts under a labeled section, disabling unavailable ones', async () => {
+    call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
+      if (tool === 'fs.list' && params?.path === '.') {
+        return { entries: [{ path: 'README.md', name: 'README.md', type: 'file' }], truncated: false }
+      }
+      if (tool === 'fs.list' && params?.path === '.mim/resources/designs') {
+        return {
+          entries: [{ path: '.mim/resources/designs/logo.svg', name: 'logo.svg', type: 'file', size: 800 }],
+          truncated: false,
+        }
+      }
+      if (tool === 'fs.list') return { entries: [], truncated: false }
+      if (tool === 'resources.collections') {
+        return { collections: [
+          { id: 'designs', name: 'Designs', mountPath: '.mim/resources/designs', write: 'readonly', status: 'ok' },
+          { id: 'brand', name: 'Brand', mountPath: '.mim/resources/brand', write: 'direct', status: 'not-synced' },
+        ] }
+      }
+      if (tool === 'search.files') return { results: [] }
+      return { entries: [] }
+    })
+
+    mounted = mountFiles()
+    await flushUi()
+
+    // Labeled section header, so collections read as a distinct group.
+    const header = mounted.root.querySelector<HTMLElement>('[data-testid="files-resources-header"]')
+    expect(header?.textContent).toContain('Shared resources')
+    expect(header?.textContent).toContain('2')
+
+    // The header pins to the bottom of the scroll pane so the section stays
+    // discoverable under a long workspace listing; clicking it scrolls there.
+    expect(header?.className).toContain('sticky')
+    const scrollSpy = vi.fn()
+    header!.scrollIntoView = scrollSpy
+    header!.click()
+    await flushUi()
+    expect(scrollSpy).toHaveBeenCalled()
+
+    const rows = rowButtons(mounted.root)
+    const designs = rows.find(row => row.textContent?.includes('Designs'))!
+    const brand = rows.find(row => row.textContent?.includes('Brand'))!
+    expect(designs).toBeDefined()
+    // readonly roots carry a lock affordance
+    expect(mounted.root.querySelector('.tabler-icon-lock')).not.toBeNull()
+
+    // Unavailable collections stay visible (discoverability) but inert,
+    // labeled with their status.
+    expect(brand).toBeDefined()
+    expect(brand.disabled).toBe(true)
+    expect(brand.textContent).toContain('not-synced')
+    brand.click()
+    await flushUi()
+    expect(call).not.toHaveBeenCalledWith('fs.list', expect.objectContaining({ path: '.mim/resources/brand' }))
+
+    // Available collections expand like normal folders — and their children
+    // actually render inline.
+    designs.click()
+    await flushUi()
+    expect(call).toHaveBeenCalledWith('fs.list', expect.objectContaining({ path: '.mim/resources/designs' }))
+    expect(mounted.root.textContent).toContain('logo.svg')
+
+    // Second click collapses again.
+    designs.click()
+    await flushUi()
+    expect(mounted.root.textContent).not.toContain('logo.svg')
+  })
+
+  it('keeps secondary file commands in the More menu', async () => {
+    const onNewFile = vi.fn()
+    const onOpenFileDialog = vi.fn()
+    mounted = mountFiles({}, { onNewFile, onOpenFileDialog })
+    await flushUi()
+
+    modeButton(mounted.root, 'More file actions').click()
+    await flushUi()
+
+    expect(document.body.textContent).toContain('New draft')
+    expect(document.body.textContent).toContain('Open file...')
+
+    modeButton(document.body, 'New draft').click()
+    await flushUi()
+    expect(onNewFile).toHaveBeenCalledOnce()
+
+    modeButton(mounted.root, 'More file actions').click()
+    await flushUi()
+    modeButton(document.body, 'Open file...').click()
+    await flushUi()
+    expect(onOpenFileDialog).toHaveBeenCalledOnce()
+  })
+})

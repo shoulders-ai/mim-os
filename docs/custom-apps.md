@@ -1,0 +1,132 @@
+# Custom Apps
+
+Custom apps are how a workspace teaches Mim a durable capability. The user goal
+is not "install a package"; it is "Mim should know how to do this recurring
+task from now on." Skills and packages are the implementation choices.
+
+Use this guide when deciding what to build, explaining the workflow to a user,
+or debugging why a custom capability is not visible in chat.
+
+## The User Path
+
+A user should be able to describe the capability in plain language:
+
+```text
+I want Mim to monitor my GitHub PRs and tell me what needs review.
+```
+
+The agent should translate that into the smallest durable abstraction:
+
+| Need | Build |
+|---|---|
+| Persistent instructions for chat | Workspace skill in `skills/<name>/SKILL.md` |
+| Custom logic, data, HTTP, secrets, jobs, or UI | Package in `packages/<id>/` |
+| Instructions plus executable behavior | Package with bundled skill |
+
+Keep package vocabulary out of the main conversation unless the user is asking
+about implementation details. Report the result as a capability: "You can now
+ask Mim `what PRs need review?`"
+
+## Self-Building With Mim
+
+When a user wants to build their own app, point them to Chat first:
+
+1. Describe the recurring task and the desired prompt.
+2. Say whether it needs external services, secrets, local files, long-running
+   work, or a visual surface.
+3. Let the `build-app` skill choose skill-only, headless package, UI package,
+   or package plus bundled skill.
+4. Review any trust or secret setup in Settings > Apps.
+5. Test the final user prompt in chat.
+
+Good self-build prompts:
+
+```text
+Teach Mim how to check my team's PRs and summarize blockers every morning.
+```
+
+```text
+Create a custom app that reads CSV exports from reports/ and flags anomalies.
+```
+
+```text
+Make a persistent workspace skill for how we triage customer escalations.
+```
+
+## What A Complete Package Includes
+
+A chat-native package should normally include four things:
+
+- Named tools in `mim.provides.tools`, so chat can call the package.
+- Backend `tools` or `jobs`, so the capability has executable behavior.
+- A package skill in `skills/<name>/SKILL.md`, so chat knows when to use it.
+- `agentContext` when the package has current state worth carrying into future
+  sessions.
+- A root `README.md`, so humans can inspect setup and usage.
+
+Headless packages are preferred when chat tools or jobs are enough. Add UI only
+when the user needs a visual control surface, review surface, or persistent app
+surface.
+
+## Authoring Loop
+
+The agent-facing loop is:
+
+```text
+package_create
+package_validate
+package_reload
+app_status
+app_enable
+package_capabilities_list
+package_tools_execute or package_jobs_start
+```
+
+`package_validate` closes the "did it load?" gap before reload. It checks the
+manifest, referenced files, backend importability, package skills, named-tool
+grants, and permission hints.
+
+`package_reload` closes the "I edited the backend but nothing changed" gap. It
+rescans packages, invalidates backend import caches, and syncs named tools.
+
+Do not call the work done until the package is enabled, the expected tools or
+jobs appear in capabilities, and a representative tool or job has been tested.
+
+## Trust, Secrets, And Permissions
+
+Workspace packages with backend code or sensitive permissions require user trust
+before they can run. The agent cannot grant trust for the user. If `app_status`
+or `app_enable` reports that trust is needed, ask the user to review and trust
+the package in Settings > Apps.
+
+Declare only the permissions the package uses:
+
+- `workspace.read` for reading workspace files.
+- `workspace.write` for writing workspace files.
+- `http` for exact HTTPS hosts used through `ctx.http`.
+- `secrets` for keychain secret names used through `ctx.secrets`.
+- `ai` for backend AI helper usage.
+
+Secrets live in the OS keychain. A package UI can set, delete, and check secret
+status, but cannot read secret values.
+
+## Debugging Checklist
+
+If chat does not know about the new capability:
+
+- Confirm the relevant skill is visible with `skill.list`.
+- Confirm the package is enabled with `app_status`.
+- Run `package_validate` and fix every error.
+- Run `package_reload` after backend or manifest edits.
+- Confirm named tools appear in `package_capabilities_list`.
+- Test a tool with `package_tools_execute`.
+- Check whether Settings > Apps requires user trust or secret setup.
+
+If the package validates but tools do not appear, compare `mim.provides.tools`
+names with backend `tool.name` fields. They must match the grant.
+
+## Implementation References
+
+- Package contract and SDK details: [package-system-api.md](package-system-api.md)
+- Skills format and activation: [skills.md](skills.md)
+- AI tool gating and wrappers: [ai-tools.md](ai-tools.md)
