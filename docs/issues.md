@@ -12,3 +12,6 @@ Logged items that require a separate effort. Fix small things inline; log larger
 - **Hung job blocks its non-parallel slot until restart.** A package job that never resolves holds the concurrency slot forever. No timeout or watchdog mechanism exists.
 - **Linux: keytar throws when no OS keyring is running.** On minimal WMs or headless Linux without GNOME Keyring/KWallet, secret-backed integrations fail loudly; needs an encrypted local fallback.
 - **Platform shell hardcodes slides-specific result fields.** `PackageRunView` and related components contain slides-specific assumptions that should be generic package capabilities.
+- **`web.read`: Readability crash fallback has no test.** The try/catch around Readability.parse() (added after `shoulde.rs` crashed it) has no test exercising the catch path.
+- **`src/main/tools/web.ts` has no co-located test.** Convention says `foo.ts` gets `foo.test.ts`. The kernel tool registration is thin wiring but should have a smoke test.
+- **Packages can call `web.read`/`web.search` without declaring permissions.** The `packagePermissionViolation` function has no explicit check for `web.*` tools. They fall through as allowed. Decide if packages should need to declare `web` or `network` permission.

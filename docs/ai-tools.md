@@ -54,6 +54,15 @@ Slack send is a kernel/CLI tool only, not a chat tool. Google outbound chat tool
 
 Integration secrets stay in the OS keychain via `src/main/integrations/secrets.ts`. Packages cannot call personal Slack or Google tools in runtime v1.
 
+## Web Tools
+
+Chat exposes a URL reader for fetching and extracting web content:
+
+- `web_search` calls `web.search` and returns search results via the Exa API. Returns `query` and `results[]` with `title`, `url`, `snippet`. Requires `EXA_API_KEY` in env or `~/.mim/keys.env` (set via Settings → Models → Integrations). Category `network`, risk `medium`.
+- `web_read` calls `web.read` and returns cleaned markdown content extracted via Mozilla Readability + Turndown. Returns `title`, `content`, `excerpt`, `byline`, `siteName`, `truncated`, and `length`. Only http/https URLs are allowed; private/loopback addresses are blocked. Category `network`, risk `medium`.
+
+Implementation: `src/main/web/webSearch.ts`, `src/main/web/readUrl.ts`. Tests: `src/main/web/webSearch.test.ts`, `src/main/web/readUrl.test.ts`.
+
 ## Trace Tools
 
 Chat exposes trace analysis tools over the local audit stream:

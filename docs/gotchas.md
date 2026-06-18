@@ -204,6 +204,10 @@ not a signal, and parser state carries across pty chunk boundaries so a
 sequence split mid-chunk still parses. Keep any new output-signal logic
 inside that state machine, not as a substring scan.
 
+## Nested dialogs must use :open, not v-if
+
+Headless UI v1's Dialog stack counter does not properly decrement when a nested Dialog is unmounted via `v-if`. After the child unmounts, the parent dialog's Escape and click-outside-to-close permanently break. Always keep nested MimDialog/PermissionConfirmDialog instances mounted and control visibility via the `:open` prop. Guard prop accesses with optional chaining when the backing data is null.
+
 ## Nothing synchronous on main that scales with workspace or history size
 
 Never add synchronous I/O to the main process that grows with the number of workspace files, sessions, or history entries. Use `fs/promises` or `child_process` async variants for anything that walks directories or reads multiple files. Synchronous reads that block the event loop freeze the entire app — streaming, IPC, window rendering, everything. The FTS reindex, file content search, and git-log author lookup were all converted from sync to async for this reason. New features that touch workspace-sized data must be async from the start.

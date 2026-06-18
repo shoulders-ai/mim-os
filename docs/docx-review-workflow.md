@@ -47,7 +47,7 @@ The model selector is a real list populated from `ai.registry` and
 `modelId` against the same registry and rejects unknown or non-tool-capable
 models before review calls.
 `reviewNotes` is optional free text. When provided, it is prepended to the
-technical, editorial, reference, and report-writing agent prompts.
+technical, editorial, reference, reconciler, and summary prompts.
 There is no free-text model-id field, author field, max-comments field,
 gatekeeper toggle, or workspace scan button. Those are implementation defaults,
 not user choices in this workflow.
@@ -71,7 +71,8 @@ Package UI or chat package tool
      -> ctx.documents.docx.extract(path)
      -> ctx.ai.callModel(selected review model) gatekeeper
      -> ctx.ai.callModel(selected review model) tool-loop reviewers
-     -> ctx.ai.callModel(selected review model) reconciler
+     -> ctx.ai.callModel(selected review model) batched reconciler
+     -> ctx.ai.callModel(selected review model) compact summary writer
      -> ctx.tools.call(fs.write) markdown report
      -> ctx.documents.docx.annotate(...) reviewed DOCX copy
 ```
@@ -126,10 +127,14 @@ the final Word-writing stage.
 6. Reconciler
    - The selected review model accounts for every raw reviewer comment exactly
      once, merging, keeping, or explicitly dropping it with a reason.
-   - Each successful reconcile decision emits determinate progress from 72% to
-     88%, so long reconciliation runs remain visibly alive.
-   - The reconciler writes the short peer-review summary; the markdown report is
-     written next to the source file.
+   - The model can only submit reconciliation decisions through the batched
+     `decide_comments` tool. It receives the full raw-comment array, but submits
+     an array of decisions in each tool call instead of one call per comment.
+     Failed items are returned with reasons so the model repairs only the
+     remaining ids.
+   - Successful batches emit determinate progress from 72% to 88%. The summary
+     is generated in a separate compact one-shot call from the reconciled
+     comment list, then the markdown report is written next to the source file.
 
 7. HTML anchoring
    - `anchorCommentsInHtml` deterministically maps accepted `text_snippet`
@@ -160,6 +165,8 @@ reviewDocx package job
       search_references(Crossref/OpenAlex)
       submit_citation_report
   Reconciler
+    decide_comments
+  Summary Writer
   DOCX Anchor Repairer
     submit_docx_anchor_repairs
 ```

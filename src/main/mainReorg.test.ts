@@ -45,6 +45,7 @@ const expectedRootFiles = new Set([
   'cli.ts',
   'closeGuard.test.ts',
   'closeGuard.ts',
+  'ext-resource-loading.test.ts',
   'git.test.ts',
   'git.ts',
   'headless.test.ts',
