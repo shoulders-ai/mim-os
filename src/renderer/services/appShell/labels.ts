@@ -59,7 +59,7 @@ export function workRailMeta(work: WorkEntry | null): string {
 }
 
 export function artifactTitle(artifact: ArtifactEntry | null): string {
-  return artifact?.title ?? 'Artifact'
+  return artifact?.title ?? 'Editor'
 }
 
 export function artifactSubtitle(artifact: ArtifactEntry | null): string {

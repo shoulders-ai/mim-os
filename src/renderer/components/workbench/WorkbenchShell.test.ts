@@ -212,8 +212,8 @@ describe('WorkbenchShell panes', () => {
     const pane = root.querySelector('[data-pane="artifact"]') as HTMLElement
     expect(root.querySelector('#dirty-editor')).toBeTruthy()
     expect(root.querySelector('[data-testid="artifact-resize-handle"]')).toBeNull()
-    expect(pane.querySelector('button[title="Show Artifact: README.md"]')).toBeTruthy()
-    expect(root.querySelector('button[title="Show Artifact: README.md"]')).toBeTruthy()
+    expect(pane.querySelector('button[title="Show Editor: README.md"]')).toBeTruthy()
+    expect(root.querySelector('button[title="Show Editor: README.md"]')).toBeTruthy()
 
     state.value = 'expanded'
     expanded.value = false

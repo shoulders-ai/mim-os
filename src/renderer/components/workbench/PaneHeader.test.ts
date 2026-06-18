@@ -71,8 +71,8 @@ describe('PaneHeader', () => {
     app.mount(root)
     await flushUi()
 
-    button('Expand Artifact').click()
-    button('Collapse Artifact').click()
+    button('Expand Editor').click()
+    button('Collapse Editor').click()
 
     expect(onExpand).toHaveBeenCalledOnce()
     expect(onCollapse).toHaveBeenCalledOnce()

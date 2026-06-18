@@ -149,7 +149,7 @@ const iconButtonClass = 'no-drag flex h-6 w-6 items-center justify-center rounde
         v-if="canExpand"
         type="button"
         :class="[iconButtonClass, expanded ? 'bg-chrome-mid text-ink' : '']"
-        :title="expanded ? 'Restore split' : `Expand ${pane === 'work' ? 'Work' : 'Artifact'}`"
+        :title="expanded ? 'Restore split' : `Expand ${pane === 'work' ? 'Work' : 'Editor'}`"
         @click="$emit('expand')"
       >
         <IconArrowsMaximize v-if="!expanded" :size="13" :stroke-width="1.9" />
@@ -160,7 +160,7 @@ const iconButtonClass = 'no-drag flex h-6 w-6 items-center justify-center rounde
         v-if="canCollapse"
         type="button"
         :class="iconButtonClass"
-        :title="`Collapse ${pane === 'work' ? 'Work' : 'Artifact'}`"
+        :title="`Collapse ${pane === 'work' ? 'Work' : 'Editor'}`"
         @click="$emit('collapse')"
       >
         <IconArrowBarToLeft v-if="pane === 'work'" :size="13" :stroke-width="1.9" />

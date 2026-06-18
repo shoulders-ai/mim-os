@@ -12,7 +12,7 @@ withDefaults(defineProps<{
   state: 'expanded',
   expanded: false,
   subtitle: '',
-  meta: 'Obj',
+  meta: 'Editor',
 })
 
 defineEmits<{
@@ -29,7 +29,7 @@ defineEmits<{
       state === 'expanded' && expanded ? 'flex-1' : '',
     ]"
     data-pane="artifact"
-    aria-label="Artifact"
+    aria-label="Editor"
   >
     <!-- Edge-to-edge: the resize handle is always a persistent 1px hairline
          that spans the pane's full height (chrome-high header band above,

@@ -97,7 +97,7 @@ describe('app shell labels', () => {
     expect(artifactTitle(fileArtifact)).toBe('a.md')
     expect(artifactSubtitle(fileArtifact)).toBe('docs/a.md')
     expect(artifactRailMeta(fileArtifact)).toBe('File')
-    expect(artifactTitle(null)).toBe('Artifact')
+    expect(artifactTitle(null)).toBe('Editor')
     expect(artifactSubtitle(null)).toBe('Empty')
     expect(artifactRailMeta(null)).toBe('Empty')
   })

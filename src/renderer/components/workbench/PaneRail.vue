@@ -27,7 +27,7 @@ defineEmits<{
 const railButtonClass = 'group flex h-full w-11 flex-col items-center overflow-hidden border-rule-light bg-chrome-high text-ink-3 hover:bg-chrome-mid hover:text-ink'
 
 function railTitle(): string {
-  const label = props.pane === 'work' ? 'Work' : 'Artifact'
+  const label = props.pane === 'work' ? 'Work' : 'Editor'
   return `Show ${label}: ${props.title}`
 }
 </script>
@@ -64,7 +64,7 @@ function railTitle(): string {
 
     <span class="flex h-10 w-full shrink-0 items-center justify-center border-t border-rule-light">
       <span class="max-w-8 truncate font-mono text-[9px] font-[650] uppercase tracking-normal text-ink-4">
-        {{ meta || (pane === 'work' ? 'Work' : 'Obj') }}
+        {{ meta || (pane === 'work' ? 'Work' : 'Editor') }}
       </span>
     </span>
   </button>
