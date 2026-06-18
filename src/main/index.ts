@@ -56,6 +56,7 @@ import { createAgentContextContributionsProvider, createLocalPackageStatusProvid
 import { registerCoreAppTools } from '@main/tools/coreApps.js'
 import { checkForUpdates } from '@main/packages/updateCheck.js'
 import { registerLogbookTools } from '@main/tools/logbook.js'
+import { registerWebTools } from '@main/tools/web.js'
 import { registerSlackTools } from '@main/tools/slack.js'
 import { registerGoogleTools } from '@main/tools/google.js'
 import { registerTelemetryTools } from '@main/tools/telemetry.js'
@@ -370,6 +371,7 @@ async function boot(): Promise<void> {
     },
   })
   registerLogbookTools(tools)
+  registerWebTools(tools)
   registerSlackTools(tools)
   registerGoogleTools(tools)
   registerTelemetryTools(tools, telemetry)

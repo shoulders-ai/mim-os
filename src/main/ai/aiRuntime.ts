@@ -306,6 +306,25 @@ export function createAiSdkTools({
       }),
       execute: async (params) => call('sheets.read', params),
     }),
+
+    web_read: tool({
+      description: 'Fetch a URL and return cleaned, readable markdown content. Uses Mozilla Readability to extract the article and strip navigation, ads, and boilerplate. Returns title, markdown content, excerpt, byline, and siteName.',
+      inputSchema: z.object({
+        url: z.string().url(),
+        max_chars: z.number().int().positive().optional().describe('Maximum characters to return (default 80000)'),
+        timeout_ms: z.number().int().positive().optional().describe('Fetch timeout in milliseconds (default 15000)'),
+      }),
+      execute: async (params) => call('web.read', params),
+    }),
+
+    web_search: tool({
+      description: 'Search the web via Exa and return results with title, URL, and snippet. Requires an Exa API key (Settings → Models → Integrations). Use web_read to fetch full content of interesting results.',
+      inputSchema: z.object({
+        query: z.string().min(1),
+        max_results: z.number().int().positive().max(20).optional().describe('Maximum results (default 10)'),
+      }),
+      execute: async (params) => call('web.search', params),
+    }),
   }
 
   if (profile === 'inline') {

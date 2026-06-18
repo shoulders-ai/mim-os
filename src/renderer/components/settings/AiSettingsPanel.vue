@@ -25,11 +25,17 @@ const saved = ref<string | null>(null)
 // configured providers until Replace is clicked.
 const editing = ref<Set<string>>(new Set())
 
-const providers = [
+const aiProviders = [
   { id: 'anthropic', label: 'Anthropic', placeholder: 'sk-ant-...', envVar: 'ANTHROPIC_API_KEY' },
   { id: 'openai',    label: 'OpenAI',    placeholder: 'sk-...',     envVar: 'OPENAI_API_KEY' },
   { id: 'google',    label: 'Google',    placeholder: 'AIza...',    envVar: 'GOOGLE_API_KEY' },
 ]
+
+const integrationProviders = [
+  { id: 'exa', label: 'Exa Search', placeholder: 'exa-...', envVar: 'EXA_API_KEY', hint: 'Free key at dashboard.exa.ai' },
+]
+
+const providers = [...aiProviders, ...integrationProviders]
 
 function keyStatusFor(provider: string) {
   return settings.keyStatuses.find(s => s.provider === provider)
@@ -226,7 +232,7 @@ onMounted(async () => {
     <SettingsGroup title="Keys">
       <div class="overflow-hidden rounded-[8px] border border-rule-light bg-surface">
         <div
-          v-for="prov in providers"
+          v-for="prov in aiProviders"
           :key="prov.id"
           class="border-b border-rule-light px-3 py-2.5 last:border-b-0"
         >
@@ -287,6 +293,71 @@ onMounted(async () => {
         </div>
       </div>
       <p class="m-0 pt-2 text-center text-[10px] text-ink-3">Keys are stored in ~/.mim/keys.env</p>
+    </SettingsGroup>
+
+    <!-- Integration keys -->
+    <SettingsGroup title="Integrations">
+      <div class="overflow-hidden rounded-[8px] border border-rule-light bg-surface">
+        <div
+          v-for="prov in integrationProviders"
+          :key="prov.id"
+          class="border-b border-rule-light px-3 py-2.5 last:border-b-0"
+        >
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex min-w-0 items-center gap-2">
+              <span
+                class="h-[7px] w-[7px] shrink-0 rounded-full"
+                :class="keyStatusFor(prov.id)?.configured ? 'bg-add' : 'bg-ink-4'"
+              />
+              <span class="text-[12px] font-medium text-ink">{{ prov.label }}</span>
+              <code class="rounded-[3px] bg-chrome-mid px-1.5 py-px font-mono text-[9px] text-ink-3">{{ prov.envVar }}</code>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <span v-if="saved === prov.id" class="text-[10px] text-add">Key saved</span>
+              <template v-if="keyStatusFor(prov.id)?.configured">
+                <span
+                  v-if="keyStatusFor(prov.id)?.source === 'env'"
+                  class="text-[10px] text-ink-3"
+                  :title="`Set by ${prov.envVar} in your environment — change or remove it there`"
+                >From environment</span>
+                <template v-else>
+                  <button
+                    v-if="!editing.has(prov.id)"
+                    type="button"
+                    class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
+                    :disabled="saving === prov.id"
+                    @click="startReplace(prov.id)"
+                  >Replace</button>
+                  <button
+                    type="button"
+                    class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:border-rem/40 hover:bg-rem/10 hover:text-rem disabled:opacity-40"
+                    :disabled="saving === prov.id"
+                    @click="clearKey(prov.id)"
+                  >Remove</button>
+                </template>
+              </template>
+              <span v-else class="text-[10px] italic text-ink-3">{{ prov.hint ?? 'Not configured' }}</span>
+            </div>
+          </div>
+          <div v-if="keyInputVisible(prov.id)" class="mt-2 flex items-center gap-2">
+            <input
+              v-model="inputs[prov.id]"
+              type="password"
+              class="h-7 min-w-0 flex-1 rounded-[5px] border border-rule-light bg-chrome-high px-2.5 font-mono text-[11px] text-ink-2 outline-none transition-colors duration-100 focus:border-accent"
+              :placeholder="prov.placeholder"
+              :aria-label="`${prov.label} API key`"
+              @keydown.enter="saveKey(prov.id)"
+            />
+            <button
+              type="button"
+              class="h-7 shrink-0 rounded-[5px] bg-accent px-3 text-[11px] font-medium text-accent-ink hover:opacity-85 disabled:opacity-40"
+              :disabled="!inputs[prov.id]?.trim() || saving === prov.id"
+              @click="saveKey(prov.id)"
+            >{{ saving === prov.id ? '…' : 'Save' }}</button>
+          </div>
+        </div>
+      </div>
+      <p class="m-0 pt-2 text-center text-[10px] text-ink-3">Enables web_search for the AI agent</p>
     </SettingsGroup>
 
     <!-- Model defaults -->

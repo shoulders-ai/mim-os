@@ -86,6 +86,10 @@ Advanced git:
 - git_status(), git_diff(path?, staged?), git_log(limit?) — read repository state when the user asks for git-level detail
 - git_commit(message), git_pull(), git_push() — mutate the real repository through the permission gate. Do not use these for ordinary recovery; prefer local history.
 
+Web:
+- web_search(query, max_results?) — search the web via Exa and return results with title, URL, and snippet. Requires an Exa API key in Settings → Models → Integrations. Use web_read to fetch full content of interesting results.
+- web_read(url, max_chars?, timeout_ms?) — fetch a URL and return cleaned, readable markdown content. Extracts the article via Mozilla Readability and strips navigation, ads, and boilerplate. Returns title, content, excerpt, byline, siteName. Only http/https URLs.
+
 Package management:
 - package_create(id, name, description, html, js?) — create a new package
 - package_edit(id, file, content) — edit a package file

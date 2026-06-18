@@ -12,6 +12,10 @@
     "google": {
       "url": "https://generativelanguage.googleapis.com/v1beta/models",
       "apiKeyEnv": "GOOGLE_API_KEY"
+    },
+    "exa": {
+      "url": "https://api.exa.ai/search",
+      "apiKeyEnv": "EXA_API_KEY"
     }
   },
   "defaults": {
