@@ -302,9 +302,12 @@ export function registerInstallTools(
       const workspacePath = tools.getWorkspacePath()
       if (!workspacePath) throw new Error('No workspace open')
 
-      // Install only when this exact version is not already present.
+      // Install when this exact version is not present, or when the
+      // installed copy's provenance source doesn't match the registry
+      // (e.g. after a repo rename).
       const installDir = join(deps.globalDir, id, entry.version)
-      if (!existsSync(join(installDir, 'package.json'))) {
+      if (!existsSync(join(installDir, 'package.json'))
+        || (entry.repo && provenanceSourceChanged(installDir, entry.repo))) {
         await tools.call('package.install', { id, version: entry.version }, { actor: 'system' })
       }
 
@@ -461,6 +464,17 @@ function deepEqual(a: unknown, b: unknown): boolean {
   const bKeys = Object.keys(bObj).sort()
   if (aKeys.length !== bKeys.length) return false
   return aKeys.every((k, i) => k === bKeys[i] && deepEqual(aObj[k], bObj[k]))
+}
+
+function provenanceSourceChanged(installDir: string, expectedSource: string): boolean {
+  const path = join(installDir, '.mim-install.json')
+  if (!existsSync(path)) return false
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>
+    return typeof raw.source === 'string' && raw.source !== expectedSource
+  } catch {
+    return false
+  }
 }
 
 /**

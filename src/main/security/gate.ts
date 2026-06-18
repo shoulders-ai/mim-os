@@ -267,6 +267,8 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'skill.inspectImport': { category: 'read', risk: 'medium', targetParam: 'folder' },
   'skill.import': { category: 'write', risk: 'medium', targetParam: 'folder' },
   'skill.delete': { category: 'write', risk: 'medium', targetParam: 'name' },
+  'web.read': { category: 'network', risk: 'medium', targetParam: 'url' },
+  'web.search': { category: 'network', risk: 'medium', targetParam: 'query' },
   'skillSource.list': { category: 'read', risk: 'low' },
   'skillSource.inspect': { category: 'network', risk: 'medium' },
   'skillSource.add': { category: 'settings', risk: 'medium', targetParam: 'id' },
@@ -290,6 +292,9 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'app.updates': { category: 'read', risk: 'low' },
   'registry.list': { category: 'network', risk: 'medium' },
   'registry.trust': { category: 'settings', risk: 'high', targetParam: 'id' },
+  'registry.inspectSource': { category: 'read', risk: 'low', targetParam: 'path' },
+  'registry.addSource': { category: 'settings', risk: 'medium', targetParam: 'id' },
+  'registry.removeSource': { category: 'settings', risk: 'medium', targetParam: 'id' },
   'package.install': { category: 'network', risk: 'medium', targetParam: 'id' },
   'package.update': { category: 'network', risk: 'medium', targetParam: 'id' },
   'package.uninstall': { category: 'settings', risk: 'medium', targetParam: 'id' },
@@ -701,7 +706,7 @@ function packagePermissionViolation(
     return `Package ${ctx.package_id} cannot manage package installation or enablement`
   }
 
-  if (toolName === 'registry.list' || toolName === 'registry.trust' || toolName === 'app.updates') {
+  if (toolName === 'registry.list' || toolName === 'registry.trust' || toolName === 'registry.inspectSource' || toolName === 'registry.addSource' || toolName === 'registry.removeSource' || toolName === 'app.updates') {
     return `Package ${ctx.package_id} cannot access the package registry`
   }
   if (toolName === 'package.install' || toolName === 'package.update' || toolName === 'package.uninstall' || toolName === 'app.add') {

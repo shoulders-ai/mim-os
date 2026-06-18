@@ -8,7 +8,7 @@ import type { ResolvedApp } from '../../stores/coreApps.js'
 
 export interface RegistryInfo {
   id: string
-  kind: 'git' | 'local'
+  kind: 'git' | 'local' | 'url'
   location: string
   name?: string
   origin: 'default' | 'user' | 'workspace' | 'machine'

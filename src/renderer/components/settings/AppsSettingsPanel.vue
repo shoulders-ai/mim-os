@@ -19,6 +19,7 @@ import {
 import type { RegistryEntry, RegistryInfo } from '../apps/appsSurfaceLogic.js'
 import { permissionLines } from '../packages/permissionSummary.js'
 import PermissionConfirmDialog from '../apps/PermissionConfirmDialog.vue'
+import MimDialog from '../ui/MimDialog.vue'
 import MimToggle from '../ui/MimToggle.vue'
 
 const emit = defineEmits<{
@@ -52,10 +53,16 @@ const registryBusy = ref<string | null>(null)
 const registryError = ref<string | null>(null)
 const confirmAddId = ref<string | null>(null)
 
-// ---- Browse advanced state ----
-const advancedOpen = ref(false)
-const installSourceUrl = ref('')
-const installSourcePath = ref('')
+
+// ---- Add source dialog state ----
+const sourceDialogOpen = ref(false)
+const sourceFolder = ref('')
+const sourceId = ref('')
+const sourceName = ref('')
+const sourceDialogError = ref<string | null>(null)
+const sourceBusy = ref<string | null>(null)
+const sourceReview = ref<{ id: string; name?: string; location: string; appCount: number; apps: Array<{ id: string; name: string; description?: string; version: string }>; diagnostics: string[]; status: string } | null>(null)
+const confirmingSourceRemove = ref<string | null>(null)
 
 // ---- Permission confirmation state ----
 const pendingEnableRow = ref<WorkspaceRow | null>(null)
@@ -135,6 +142,7 @@ const availableRegistryEntries = computed(() =>
 
 const multipleRegistries = computed(() => registries.value.length > 1)
 const nonOkRegistries = computed(() => getNonOkRegistries(registries.value))
+const machineSources = computed(() => registries.value.filter(r => r.origin === 'machine'))
 const confirmingAddEntry = computed(() =>
   availableRegistryEntries.value.find(entry => entry.id === confirmAddId.value) ?? null,
 )
@@ -299,6 +307,86 @@ async function installFromSource(id: string, source: string, path?: string) {
   }
 }
 
+// ---- Source dialog actions ----
+
+function clearSourceDialog() {
+  sourceDialogOpen.value = false
+  sourceFolder.value = ''
+  sourceId.value = ''
+  sourceName.value = ''
+  sourceReview.value = null
+  sourceDialogError.value = null
+}
+
+async function pickSourceFolder() {
+  const selected = await window.kernel.openFolderDialog()
+  if (selected) {
+    sourceFolder.value = selected
+    await inspectAppSource()
+  }
+}
+
+async function inspectAppSource() {
+  const path = sourceFolder.value.trim()
+  if (!path) return
+  sourceBusy.value = 'inspect'
+  sourceDialogError.value = null
+  sourceReview.value = null
+  try {
+    sourceReview.value = await window.kernel.call('registry.inspectSource', {
+      path,
+      ...(sourceId.value.trim() ? { id: sourceId.value.trim() } : {}),
+      ...(sourceName.value.trim() ? { name: sourceName.value.trim() } : {}),
+    }) as typeof sourceReview.value
+    if (sourceReview.value) {
+      sourceId.value = sourceReview.value.id
+      if (sourceReview.value.name) sourceName.value = sourceReview.value.name
+    }
+  } catch (err) {
+    sourceDialogError.value = (err as Error).message
+  } finally {
+    sourceBusy.value = null
+  }
+}
+
+async function confirmAddSource() {
+  if (!sourceReview.value) return
+  sourceBusy.value = 'add'
+  sourceDialogError.value = null
+  try {
+    await window.kernel.call('registry.addSource', {
+      id: sourceId.value.trim(),
+      path: sourceFolder.value.trim(),
+      ...(sourceName.value.trim() ? { name: sourceName.value.trim() } : {}),
+      confirmed: true,
+    })
+    clearSourceDialog()
+    await refreshAll()
+  } catch (err) {
+    sourceDialogError.value = (err as Error).message
+  } finally {
+    sourceBusy.value = null
+  }
+}
+
+async function removeAppSource(id: string) {
+  if (confirmingSourceRemove.value !== id) {
+    confirmingSourceRemove.value = id
+    return
+  }
+  sourceBusy.value = `remove:${id}`
+  registryError.value = null
+  try {
+    await window.kernel.call('registry.removeSource', { id })
+    confirmingSourceRemove.value = null
+    await refreshAll()
+  } catch (err) {
+    registryError.value = (err as Error).message
+  } finally {
+    sourceBusy.value = null
+  }
+}
+
 // ---- Registry actions ----
 
 async function refreshRegistry() {
@@ -360,14 +448,6 @@ async function registryUpdate(entry: RegistryEntry) {
   } finally {
     registryBusy.value = null
   }
-}
-
-async function installFromSourceAdvanced() {
-  const url = installSourceUrl.value.trim()
-  if (!url) return
-  await installFromSource('unknown', url, installSourcePath.value.trim() || undefined)
-  installSourceUrl.value = ''
-  installSourcePath.value = ''
 }
 
 // ---- Refresh all ----
@@ -667,7 +747,42 @@ watch(inWorkspaceRows, (rows) => {
       </section>
 
       <section class="mb-4">
-        <h2 :class="sectionTitleClass">Browse</h2>
+        <div class="flex items-center justify-between">
+          <h2 :class="sectionTitleClass">Browse</h2>
+          <button
+            type="button"
+            data-testid="app-add-source"
+            class="mb-1.5 flex h-[22px] items-center gap-1 rounded-[5px] border border-rule bg-chrome-high px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink"
+            @click="sourceDialogOpen = true"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14" /><path d="M5 12h14" /></svg>
+            <span>Add source</span>
+          </button>
+        </div>
+
+        <div
+          v-for="src in machineSources"
+          :key="`machine-${src.id}`"
+          :data-testid="`app-source-${src.id}`"
+          class="mb-1.5 flex min-h-8 items-center justify-between gap-2 rounded-[6px] bg-chrome-high px-2.5 py-1.5"
+        >
+          <span class="min-w-0">
+            <span class="block truncate text-[11.5px] font-medium text-ink-2">{{ src.name || src.id }}</span>
+            <span class="block truncate text-[10px] text-ink-3">{{ src.location }}</span>
+          </span>
+          <div class="flex shrink-0 items-center gap-1">
+            <span v-if="src.status === 'error'" class="text-[10px] text-rem">error</span>
+            <button
+              type="button"
+              :data-testid="`app-source-remove-${src.id}`"
+              class="inline-flex h-[22px] items-center gap-1 rounded-[5px] px-1.5 text-[10.5px] font-medium text-rem hover:bg-rem/5"
+              :disabled="sourceBusy === `remove:${src.id}`"
+              @click="removeAppSource(src.id)"
+            >
+              {{ confirmingSourceRemove === src.id ? 'Confirm' : 'Remove' }}
+            </button>
+          </div>
+        </div>
 
         <template v-for="reg in nonOkRegistries" :key="`reg-${reg.id}`">
           <div
@@ -749,32 +864,6 @@ watch(inWorkspaceRows, (rows) => {
           </div>
         </div>
 
-        <div class="mt-3">
-          <button
-            type="button"
-            class="flex items-center gap-1.5 rounded-[5px] py-1 pr-2 text-[10.5px] font-semibold text-ink-3 hover:bg-chrome-mid hover:text-ink-2"
-            @click="advancedOpen = !advancedOpen"
-          >
-            <svg class="shrink-0 text-ink-4 transition-transform duration-150 motion-reduce:transition-none" :class="advancedOpen ? 'rotate-90' : ''" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6" /></svg>
-            Advanced
-          </button>
-          <div v-if="advancedOpen" class="mt-2 rounded-[8px] border border-rule-light bg-chrome-high p-2.5">
-            <div :class="sectionTitleClass">Install from source</div>
-            <div class="mt-1.5 flex flex-wrap gap-1.5" data-testid="install-from-source-form">
-              <input v-model="installSourceUrl" placeholder="Git repo URL" class="h-[26px] min-w-[140px] flex-1 rounded-[5px] border border-rule-light bg-surface px-2 text-[11px] text-ink outline-none placeholder:text-ink-4 focus:border-accent" />
-              <input v-model="installSourcePath" placeholder="Path (optional)" class="h-[26px] min-w-[140px] flex-1 rounded-[5px] border border-rule-light bg-surface px-2 text-[11px] text-ink outline-none placeholder:text-ink-4 focus:border-accent" />
-              <button
-                type="button"
-                :class="primaryButtonClass"
-                data-testid="install-from-source-btn"
-                :disabled="!installSourceUrl.trim() || actionBusy?.startsWith('install-source:')"
-                @click="installFromSourceAdvanced"
-              >
-                Install
-              </button>
-            </div>
-          </div>
-        </div>
       </section>
     </div>
 
@@ -791,16 +880,107 @@ watch(inWorkspaceRows, (rows) => {
     />
 
     <PermissionConfirmDialog
-      v-if="confirmingAddEntry"
-      :open="true"
-      :app-name="confirmingAddEntry.name"
-      :permissions="confirmingAddEntry.permissions"
+      :open="confirmingAddEntry !== null"
+      :app-name="confirmingAddEntry?.name ?? ''"
+      :permissions="confirmingAddEntry?.permissions ?? {}"
       confirm-label="Add"
-      :test-id="`registry-add-card-${confirmingAddEntry.id}`"
-      :confirm-test-id="`registry-add-confirm-${confirmingAddEntry.id}`"
-      @confirm="addToWorkspace(confirmingAddEntry)"
+      :test-id="confirmingAddEntry ? `registry-add-card-${confirmingAddEntry.id}` : undefined"
+      :confirm-test-id="confirmingAddEntry ? `registry-add-confirm-${confirmingAddEntry.id}` : undefined"
+      @confirm="confirmingAddEntry && addToWorkspace(confirmingAddEntry)"
       @cancel="confirmAddId = null"
       @update:open="onAddDialogOpenChange"
     />
+
+    <MimDialog :open="sourceDialogOpen" title="Add app source" size="md" @close="clearSourceDialog">
+      <div class="flex flex-col gap-3 p-4">
+        <label class="flex flex-col gap-1">
+          <span class="font-sans text-[11px] font-semibold text-ink-2">Local folder</span>
+          <div class="flex gap-2">
+            <input
+              v-model="sourceFolder"
+              data-testid="app-source-folder"
+              class="h-8 min-w-0 flex-1 rounded-[6px] border border-rule-light bg-chrome-mid px-2 font-mono text-[11px] text-ink outline-none focus:border-accent"
+              placeholder="/path/to/app-source"
+            />
+            <button type="button" class="h-8 rounded-[6px] border border-rule-light px-2 font-sans text-[11px] text-ink-2 hover:bg-chrome-mid" @click="pickSourceFolder">
+              Browse
+            </button>
+          </div>
+        </label>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="flex flex-col gap-1">
+            <span class="font-sans text-[11px] font-semibold text-ink-2">ID</span>
+            <input
+              v-model="sourceId"
+              data-testid="app-source-id"
+              class="h-8 rounded-[6px] border border-rule-light bg-chrome-mid px-2 font-mono text-[11px] text-ink outline-none focus:border-accent"
+              placeholder="team"
+            />
+          </label>
+          <label class="flex flex-col gap-1">
+            <span class="font-sans text-[11px] font-semibold text-ink-2">Label</span>
+            <input
+              v-model="sourceName"
+              data-testid="app-source-name"
+              class="h-8 rounded-[6px] border border-rule-light bg-chrome-mid px-2 font-sans text-[12px] text-ink outline-none focus:border-accent"
+              placeholder="Team apps"
+            />
+          </label>
+        </div>
+        <button
+          type="button"
+          data-testid="app-source-inspect"
+          class="flex h-8 w-fit items-center gap-1.5 rounded-[6px] border border-rule bg-surface px-3 font-sans text-[12px] font-semibold text-ink hover:bg-chrome-high disabled:opacity-50"
+          :disabled="!sourceFolder.trim() || sourceBusy === 'inspect'"
+          @click="inspectAppSource"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+          <span>Review</span>
+        </button>
+        <div v-if="sourceDialogError" data-testid="app-source-error" class="rounded-[6px] border border-rem/30 px-3 py-2 font-sans text-[12px] text-rem">
+          {{ sourceDialogError }}
+        </div>
+        <div v-if="sourceReview" data-testid="app-source-review" class="rounded-[8px] border border-rule-light bg-chrome-mid p-3">
+          <div class="flex items-center justify-between gap-2">
+            <div>
+              <div class="font-sans text-[12px] font-semibold text-ink">{{ sourceReview.name || sourceReview.id }}</div>
+              <p class="font-sans text-[11px] text-ink-3">{{ sourceReview.appCount }} {{ sourceReview.appCount === 1 ? 'app' : 'apps' }} found</p>
+            </div>
+          </div>
+          <div v-if="sourceReview.apps.length" class="mt-2 flex flex-col gap-1">
+            <div
+              v-for="app in sourceReview.apps"
+              :key="app.id"
+              class="flex items-center justify-between gap-2 text-[11px]"
+            >
+              <span class="truncate font-medium text-ink">{{ app.name }}</span>
+              <span class="shrink-0 font-mono text-[10px] text-ink-4">{{ app.version }}</span>
+            </div>
+          </div>
+          <p v-if="!sourceReview.apps.length && sourceReview.status === 'missing'" class="mt-2 font-sans text-[11px] text-ink-3">
+            No index.json found in this folder. The folder needs an index.json with a packages array.
+          </p>
+          <div v-if="sourceReview.diagnostics.length" class="mt-2 flex flex-col gap-1">
+            <p v-for="message in sourceReview.diagnostics" :key="message" class="font-sans text-[11px] text-rem">
+              {{ message }}
+            </p>
+          </div>
+          <div class="mt-3 flex justify-end gap-2">
+            <button type="button" class="h-8 rounded-[6px] px-3 font-sans text-[12px] text-ink-2 hover:bg-chrome-mid" @click="clearSourceDialog">
+              Cancel
+            </button>
+            <button
+              type="button"
+              data-testid="app-source-confirm"
+              class="h-8 rounded-[6px] bg-accent px-3 font-sans text-[12px] font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
+              :disabled="sourceBusy === 'add' || !sourceReview?.apps.length"
+              @click="confirmAddSource"
+            >
+              Add source
+            </button>
+          </div>
+        </div>
+      </div>
+    </MimDialog>
   </div>
 </template>

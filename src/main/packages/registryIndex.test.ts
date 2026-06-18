@@ -255,6 +255,13 @@ describe('local dir entries', () => {
     }
   })
 
+  it('accepts dir: "." for a package at the source root', () => {
+    const result = parseRegistryIndex(dirIndex([validDirEntry({ dir: '.' })]), { allowLocalDirs: true })
+    expect(result.entries).toHaveLength(1)
+    expect(result.entries[0].dir).toBe('.')
+    expect(result.diagnostics).toHaveLength(0)
+  })
+
   it('drops a dir entry missing version', () => {
     const entry = validDirEntry()
     delete entry.version

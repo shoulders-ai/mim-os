@@ -567,15 +567,16 @@ describe('app.add', () => {
     })
   })
 
-  it('skips the download when the version is already installed', async () => {
+  it('skips the download when the version is already installed with matching provenance', async () => {
     const entry = validRegistryEntry()
     const deps = await makeAddDeps(entry)
 
-    // Pre-install the exact version.
+    // Pre-install the exact version with matching provenance.
     const installDir = join(globalDir, 'github-monitor', '1.2.0')
     mkdirSync(join(installDir, 'ui'), { recursive: true })
     writeFileSync(join(installDir, 'package.json'), JSON.stringify(validPackageJson()))
     writeFileSync(join(installDir, 'ui', 'index.html'), '<h1>GM</h1>')
+    writeFileSync(join(installDir, '.mim-install.json'), JSON.stringify({ source: entry.repo }))
 
     registerInstallTools(tools, deps)
     const result = (await tools.call('app.add', { id: 'github-monitor' }, { actor: 'user' })) as Record<string, unknown>
@@ -588,6 +589,58 @@ describe('app.add', () => {
     const config = parseMimYaml(readFileSync(join(dir, 'mim.yaml'), 'utf-8'))
     const pinned = config.apps?.['github-monitor']
     expect(typeof pinned === 'object' && (pinned as Record<string, unknown>).version).toBe('1.2.0')
+  })
+
+  it('reinstalls when provenance source does not match registry repo', async () => {
+    const entry = validRegistryEntry({ repo: 'https://github.com/shoulders-ai/mim-apps', path: 'packages/github-monitor' })
+    const deps = await makeAddDeps(entry)
+
+    // Pre-install with OLD provenance source (repo was renamed).
+    const installDir = join(globalDir, 'github-monitor', '1.2.0')
+    mkdirSync(join(installDir, 'ui'), { recursive: true })
+    writeFileSync(join(installDir, 'package.json'), JSON.stringify(validPackageJson()))
+    writeFileSync(join(installDir, 'ui', 'index.html'), '<h1>GM</h1>')
+    writeFileSync(join(installDir, '.mim-install.json'), JSON.stringify({
+      source: 'https://github.com/shoulders-ai/mim-packages',
+    }))
+
+    vi.mocked(cloneRepo).mockImplementation(async (_url, target) => {
+      const pkgRoot = join(target, 'packages', 'github-monitor')
+      mkdirSync(join(pkgRoot, 'ui'), { recursive: true })
+      writeFileSync(join(target, 'package.json'), JSON.stringify({ name: 'mim-apps', private: true }))
+      writeFileSync(join(pkgRoot, 'package.json'), JSON.stringify(validPackageJson()))
+      writeFileSync(join(pkgRoot, 'ui', 'index.html'), '<h1>GM</h1>')
+      return { cloned: target }
+    })
+    vi.mocked(checkoutRef).mockResolvedValue(undefined)
+    vi.mocked(resolveHead).mockResolvedValue(COMMIT_SHA)
+
+    registerInstallTools(tools, deps)
+    const result = (await tools.call('app.add', { id: 'github-monitor' }, { actor: 'user' })) as Record<string, unknown>
+
+    expect(result.added).toBe('github-monitor')
+    expect(vi.mocked(cloneRepo)).toHaveBeenCalled()
+
+    // Provenance must now point to the new source.
+    const provenance = JSON.parse(readFileSync(join(installDir, '.mim-install.json'), 'utf-8'))
+    expect(provenance.source).toBe('https://github.com/shoulders-ai/mim-apps')
+  })
+
+  it('skips reinstall when provenance file is missing from existing install', async () => {
+    const entry = validRegistryEntry()
+    const deps = await makeAddDeps(entry)
+
+    // Pre-install the exact version with NO provenance file.
+    const installDir = join(globalDir, 'github-monitor', '1.2.0')
+    mkdirSync(join(installDir, 'ui'), { recursive: true })
+    writeFileSync(join(installDir, 'package.json'), JSON.stringify(validPackageJson()))
+    writeFileSync(join(installDir, 'ui', 'index.html'), '<h1>GM</h1>')
+
+    registerInstallTools(tools, deps)
+    const result = (await tools.call('app.add', { id: 'github-monitor' }, { actor: 'user' })) as Record<string, unknown>
+
+    expect(result.added).toBe('github-monitor')
+    expect(vi.mocked(cloneRepo)).not.toHaveBeenCalled()
   })
 
   it('fails when the app is not in the registry', async () => {

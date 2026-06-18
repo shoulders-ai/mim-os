@@ -92,7 +92,7 @@ export function parseRegistryIndex(raw: unknown, options?: ParseRegistryIndexOpt
         entryDiags.push(`Registry entry "${id ?? `[${i}]`}": local dir entries are not allowed in this registry`)
       } else {
         const dir = e.dir as string
-        if (!isValidPackagePath(dir)) {
+        if (dir !== '.' && !isValidPackagePath(dir)) {
           entryDiags.push(`Registry entry "${id ?? `[${i}]`}": invalid dir "${dir}" — must be a relative path with no "." or ".." segments`)
         }
       }

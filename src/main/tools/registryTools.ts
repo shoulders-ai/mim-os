@@ -2,11 +2,12 @@
 // enriches entries with install state and shadowing, and handles trust gating.
 // registry.trust acks workspace registry trust via the enablement store.
 
-import { existsSync, readdirSync } from 'fs'
-import { join } from 'path'
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, statSync } from 'fs'
+import { dirname, isAbsolute, join } from 'path'
 import { pullRepo } from '@main/git.js'
 import { registryMirrorDir } from '@main/packages/cacheLayout.js'
 import type { RegistryEntry } from '@main/packages/registryIndex.js'
+import { parsePackageManifest } from '@main/packages/packageManifest.js'
 import { isValidSemver } from '@main/packages/semver.js'
 import {
   registrySources,
@@ -25,6 +26,9 @@ export interface RegistryToolDeps {
   globalDir: string
   getWorkspacePath: () => string | null
 }
+
+const SOURCE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,59}$/
+const RESERVED_SOURCE_IDS = new Set(['default', 'user'])
 
 export function registerRegistryTools(
   tools: ToolRegistry,
@@ -187,6 +191,155 @@ export function registerRegistryTools(
       })
     },
   })
+
+  // ---------------------------------------------------------------------------
+  // Machine-local registry source management
+  // ---------------------------------------------------------------------------
+
+  tools.register({
+    name: 'registry.inspectSource',
+    description: 'Inspect a local folder before adding it as a machine-local registry source. Validates the path, reads index.json or auto-discovers packages.',
+    execute: async (params) => {
+      const path = typeof params.path === 'string' ? params.path : ''
+      if (!path) throw new Error('registry.inspectSource requires a path parameter')
+      if (!isAbsolute(path)) throw new Error(`Path must be absolute, got: ${path}`)
+      if (!existsSync(path)) throw new Error(`Path does not exist: ${path}`)
+
+      let stat
+      try { stat = statSync(path) } catch { throw new Error(`Cannot stat path: ${path}`) }
+      if (!stat.isDirectory()) throw new Error(`Path is not a directory: ${path}`)
+
+      let id = typeof params.id === 'string' ? params.id : ''
+      if (!id) {
+        const lastSegment = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? ''
+        id = lastSegment.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/^-+/, '').replace(/-+$/, '')
+      }
+      if (!SOURCE_ID_RE.test(id)) throw new Error(`Invalid source id "${id}" — must match ${SOURCE_ID_RE}`)
+
+      const name = typeof params.name === 'string' ? params.name : undefined
+
+      const source: RegistrySource = { id, kind: 'local', location: path, name, origin: 'machine' }
+      const result = await readSourceIndex(source, { cacheRoot: deps.cacheRoot })
+
+      // If index.json exists and parsed (even with errors), use it.
+      if (result.status === 'ok' || result.status === 'error') {
+        return {
+          id, name, kind: 'local' as const, location: path,
+          appCount: result.entries.length,
+          apps: result.entries.map(e => ({ id: e.id, name: e.name, description: e.description, version: e.version })),
+          diagnostics: result.diagnostics, status: result.status,
+        }
+      }
+
+      // No index.json — auto-discover packages from the folder.
+      const discovered = discoverPackagesInFolder(path)
+      return {
+        id, name, kind: 'local' as const, location: path,
+        appCount: discovered.apps.length,
+        apps: discovered.apps,
+        diagnostics: discovered.diagnostics,
+        status: discovered.apps.length > 0 ? 'ok' : 'missing',
+        generated: true,
+      }
+    },
+  })
+
+  tools.register({
+    name: 'registry.addSource',
+    description: 'Write a local folder as a machine-local registry source to .mim/registries.json. Auto-generates index.json if missing.',
+    execute: async (params) => {
+      if (params.confirmed !== true) {
+        throw new Error('registry.addSource requires confirmed: true — inspect the source first')
+      }
+
+      const id = typeof params.id === 'string' ? params.id : ''
+      if (!id) throw new Error('registry.addSource requires an id parameter')
+      if (!SOURCE_ID_RE.test(id)) throw new Error(`Invalid source id "${id}" — must match ${SOURCE_ID_RE}`)
+      if (RESERVED_SOURCE_IDS.has(id)) throw new Error(`Cannot use reserved id "${id}"`)
+
+      const path = typeof params.path === 'string' ? params.path : ''
+      if (!path) throw new Error('registry.addSource requires a path parameter')
+      if (!isAbsolute(path)) throw new Error(`Path must be absolute, got: ${path}`)
+      if (!existsSync(path)) throw new Error(`Path does not exist: ${path}`)
+
+      const workspacePath = deps.getWorkspacePath()
+      if (!workspacePath) throw new Error('No workspace is open')
+
+      // Auto-generate index.json if missing so the registry system can read it.
+      const indexPath = join(path, 'index.json')
+      if (!existsSync(indexPath)) {
+        const discovered = discoverPackagesInFolder(path)
+        if (discovered.apps.length > 0) {
+          const index = {
+            manifestVersion: 1,
+            packages: discovered.apps.map(app => ({
+              id: app.id, name: app.name, description: app.description,
+              dir: app.dir, version: app.version, permissions: app.permissions ?? {},
+            })),
+          }
+          writeFileSync(indexPath, JSON.stringify(index, null, 2) + '\n')
+        }
+      }
+
+      const name = typeof params.name === 'string' ? params.name : undefined
+
+      const registriesPath = join(workspacePath, '.mim', 'registries.json')
+      let data: Record<string, unknown> = {}
+      if (existsSync(registriesPath)) {
+        try {
+          data = JSON.parse(readFileSync(registriesPath, 'utf-8')) as Record<string, unknown>
+        } catch {
+          data = {}
+        }
+      }
+      if (!data.registries || typeof data.registries !== 'object' || Array.isArray(data.registries)) {
+        data.registries = {}
+      }
+      const registries = data.registries as Record<string, unknown>
+      registries[id] = { ...(name ? { name } : {}), path }
+
+      mkdirSync(dirname(registriesPath), { recursive: true })
+      writeFileSync(registriesPath, JSON.stringify(data, null, 2) + '\n')
+
+      return { added: id, path }
+    },
+  })
+
+  tools.register({
+    name: 'registry.removeSource',
+    description: 'Remove a machine-local registry source from .mim/registries.json.',
+    execute: async (params) => {
+      const id = typeof params.id === 'string' ? params.id : ''
+      if (!id) throw new Error('registry.removeSource requires an id parameter')
+      if (RESERVED_SOURCE_IDS.has(id)) throw new Error(`Cannot remove reserved id "${id}"`)
+
+      const workspacePath = deps.getWorkspacePath()
+      if (!workspacePath) throw new Error('No workspace is open')
+
+      const registriesPath = join(workspacePath, '.mim', 'registries.json')
+      if (!existsSync(registriesPath)) {
+        return { removed: id }
+      }
+
+      let data: Record<string, unknown>
+      try {
+        data = JSON.parse(readFileSync(registriesPath, 'utf-8')) as Record<string, unknown>
+      } catch {
+        return { removed: id }
+      }
+
+      if (!data.registries || typeof data.registries !== 'object' || Array.isArray(data.registries)) {
+        return { removed: id }
+      }
+
+      const registries = data.registries as Record<string, unknown>
+      delete registries[id]
+
+      writeFileSync(registriesPath, JSON.stringify(data, null, 2) + '\n')
+
+      return { removed: id }
+    },
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +420,78 @@ export function listInstalledVersions(id: string, globalDir: string): string[] {
   } catch {
     return []
   }
+}
+
+// ---------------------------------------------------------------------------
+// Auto-discover packages from a folder (no index.json required)
+// ---------------------------------------------------------------------------
+
+interface DiscoveredApp {
+  id: string
+  name: string
+  description?: string
+  dir: string
+  version: string
+  permissions: Record<string, unknown>
+}
+
+function discoverPackagesInFolder(root: string): { apps: DiscoveredApp[]; diagnostics: string[] } {
+  const apps: DiscoveredApp[] = []
+  const diagnostics: string[] = []
+
+  // Scan for package.json files: check root, then immediate children, then packages/<dir>/
+  const candidates: Array<{ dir: string; relDir: string }> = []
+
+  // 1. Root itself might be a single package
+  if (existsSync(join(root, 'package.json'))) {
+    candidates.push({ dir: root, relDir: '.' })
+  }
+
+  // 2. Immediate child directories
+  try {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name === 'node_modules') continue
+      const childDir = join(root, entry.name)
+      if (existsSync(join(childDir, 'package.json'))) {
+        candidates.push({ dir: childDir, relDir: entry.name })
+      }
+      // 3. Two-level: packages/<id>/ or <folder>/<id>/
+      try {
+        for (const sub of readdirSync(childDir, { withFileTypes: true })) {
+          if (!sub.isDirectory() || sub.name.startsWith('.') || sub.name === 'node_modules') continue
+          const subDir = join(childDir, sub.name)
+          if (existsSync(join(subDir, 'package.json'))) {
+            candidates.push({ dir: subDir, relDir: `${entry.name}/${sub.name}` })
+          }
+        }
+      } catch { /* unreadable child dir */ }
+    }
+  } catch (err) {
+    diagnostics.push(`Could not scan folder: ${(err as Error).message}`)
+    return { apps, diagnostics }
+  }
+
+  for (const { dir, relDir } of candidates) {
+    try {
+      const raw = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf-8')) as Record<string, unknown>
+      const { manifest } = parsePackageManifest(raw, dir)
+      if (!manifest) continue
+      apps.push({
+        id: manifest.id,
+        name: manifest.name,
+        description: manifest.description,
+        dir: relDir === '.' ? '.' : relDir,
+        version: manifest.version,
+        permissions: manifest.permissions as unknown as Record<string, unknown>,
+      })
+    } catch { /* not a valid mim package */ }
+  }
+
+  if (!apps.length) {
+    diagnostics.push('No packages with a valid mim manifest found in this folder')
+  }
+
+  return { apps, diagnostics }
 }
 
 // Minimal deep-equal for permission objects (plain JSON values).
