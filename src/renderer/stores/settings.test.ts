@@ -343,6 +343,17 @@ describe('renderer settings store', () => {
     expect(globalThis.localStorage?.getItem('mim:recentWorkspaces')).toBe('[]')
   })
 
+  it('removeRecentWorkspace() removes a single app-level recent path', () => {
+    const store = useSettingsStore()
+    store.addRecentWorkspace('/Users/test/a')
+    store.addRecentWorkspace('/Users/test/b')
+
+    store.removeRecentWorkspace('/Users/test/a')
+
+    expect(store.recentWorkspaces).toEqual(['/Users/test/b'])
+    expect(JSON.parse(globalThis.localStorage?.getItem('mim:recentWorkspaces') ?? '[]')).toEqual(['/Users/test/b'])
+  })
+
   it('load() populates config refs from config.get independently of settings.get', async () => {
     const call = vi.fn(async (tool: string) => {
       if (tool === 'settings.get') {

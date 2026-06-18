@@ -28,6 +28,7 @@ import { useSettingsStore } from './stores/settings.js'
 import { useAppsStore } from './stores/coreApps.js'
 import { useApprovalsStore, type ApprovalRequest } from './stores/approvals.js'
 import { useDiffStore } from './stores/diff.js'
+import { useToastStore } from './stores/toasts.js'
 import { buildApprovalDiff } from './services/approvalDiff.js'
 import {
   useWorkbenchStore,
@@ -109,6 +110,7 @@ const agentsStore = useAgentsStore()
 const appsStore = useAppsStore()
 const approvalsStore = useApprovalsStore()
 const diffStore = useDiffStore()
+const toastStore = useToastStore()
 const workHostRef = ref<{
   sendExternalMessage?: (message: string) => Promise<void> | void
   prepareChatDraft?: (payload: { text?: string; attachments?: unknown[]; contextChips?: unknown[] }) => Promise<void> | void
@@ -252,6 +254,8 @@ const workspaceActions = createWorkspaceActions({
   openWorkspaceDialog: () => window.kernel.openWorkspace(),
   openWorkspacePathInKernel: path => window.kernel.openWorkspacePath(path),
   addRecentWorkspace: path => { settingsStore.addRecentWorkspace(path) },
+  removeRecentWorkspace: path => { settingsStore.removeRecentWorkspace(path) },
+  pushToast: toast => { toastStore.push(toast) },
 })
 const refreshWorkspaceStatus = workspaceActions.refreshWorkspaceStatus
 const initializeWorkspace = workspaceActions.initializeWorkspace
@@ -839,6 +843,9 @@ function onPackageJobEvent(payload: unknown) {
   if (payload.ephemeral === true) return
   runsStore.applyPackageJobEvent(payload)
   schedulePackageRunsRefresh()
+  if (payload.type === 'job.started') {
+    void openPackageRunWork(payload.packageId, payload.runId)
+  }
 }
 
 async function refreshAgentSessions() {

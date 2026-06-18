@@ -266,6 +266,13 @@ export const useSettingsStore = defineStore('settings', () => {
     writeRecentWorkspaces(next)
   }
 
+  function removeRecentWorkspace(path: string) {
+    if (typeof path !== 'string' || path.length === 0) return
+    const next = recentWorkspaces.value.filter(p => p !== path)
+    recentWorkspaces.value = next
+    writeRecentWorkspaces(next)
+  }
+
   function clearRecentWorkspaces() {
     recentWorkspaces.value = []
     writeRecentWorkspaces([])
@@ -314,6 +321,7 @@ export const useSettingsStore = defineStore('settings', () => {
     addRecentFile,
     clearRecentFiles,
     addRecentWorkspace,
+    removeRecentWorkspace,
     clearRecentWorkspaces,
   }
 })

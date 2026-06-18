@@ -57,7 +57,7 @@ export interface ArtifactNavigationSnapshot {
 const DEFAULT_LAYOUT: PaneLayout = {
   navigator: { state: 'expanded', width: 240 },
   work: { state: 'expanded', width: 640 },
-  artifact: { state: 'expanded', width: 520 },
+  artifact: { state: 'rail', width: 520 },
 }
 
 const PANE_WIDTH_RANGES: Record<PaneId, { min: number; max?: number }> = {

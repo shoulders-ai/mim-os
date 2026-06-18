@@ -21,6 +21,8 @@ function makeDeps(overrides: Partial<WorkspaceActionsDeps> = {}) {
     openWorkspaceDialog: vi.fn(async () => '/work/Beta'),
     openWorkspacePathInKernel: vi.fn(async path => path),
     addRecentWorkspace: vi.fn(),
+    removeRecentWorkspace: vi.fn(),
+    pushToast: vi.fn(),
     ...overrides,
   }
   return {
@@ -115,5 +117,48 @@ describe('app shell workspace actions', () => {
     expect(deps.addRecentWorkspace).toHaveBeenNthCalledWith(1, '/work/Beta')
     expect(deps.addRecentWorkspace).toHaveBeenNthCalledWith(2, '/work/Gamma')
     expect(deps.openWorkspacePathInKernel).toHaveBeenCalledTimes(2)
+  })
+
+  it('removes a missing recent workspace and surfaces feedback', async () => {
+    const deps = makeDeps({
+      openWorkspacePathInKernel: vi.fn(async () => {
+        throw new Error('Path does not exist: /work/Missing')
+      }),
+      removeRecentWorkspace: vi.fn(),
+      pushToast: vi.fn(),
+    }).deps
+    const actions = createWorkspaceActions(deps)
+
+    await actions.openWorkspacePath('/work/Missing')
+
+    expect(deps.removeRecentWorkspace).toHaveBeenCalledWith('/work/Missing')
+    expect(deps.pushToast).toHaveBeenCalledWith({
+      kind: 'error',
+      message: 'Folder not found',
+      detail: 'Removed from recent workspaces.',
+    })
+    expect(deps.addRecentWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('keeps a recent workspace and surfaces feedback when opening fails for another reason', async () => {
+    const error = new Error('Permission denied')
+    const deps = makeDeps({
+      openWorkspacePathInKernel: vi.fn(async () => {
+        throw error
+      }),
+      removeRecentWorkspace: vi.fn(),
+      pushToast: vi.fn(),
+    }).deps
+    const actions = createWorkspaceActions(deps)
+
+    await actions.openWorkspacePath('/work/Private')
+
+    expect(deps.removeRecentWorkspace).not.toHaveBeenCalled()
+    expect(deps.pushToast).toHaveBeenCalledWith({
+      kind: 'error',
+      message: 'Workspace open failed',
+      detail: 'Permission denied',
+    })
+    expect(deps.addRecentWorkspace).not.toHaveBeenCalled()
   })
 })

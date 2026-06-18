@@ -3,6 +3,12 @@ export interface WorkspaceStatus {
   missing: string[]
 }
 
+export interface WorkspaceToast {
+  kind: 'error' | 'info'
+  message: string
+  detail?: string
+}
+
 export interface WorkspaceActionsDeps {
   workspacePath(): string | null
   setWorkspaceStatus(status: WorkspaceStatus | null): void
@@ -11,6 +17,8 @@ export interface WorkspaceActionsDeps {
   openWorkspaceDialog(): Promise<string | null | undefined>
   openWorkspacePathInKernel(path: string): Promise<string | null | undefined>
   addRecentWorkspace(path: string): void
+  removeRecentWorkspace(path: string): void
+  pushToast(toast: WorkspaceToast): void
 }
 
 export function workspaceDisplayName(input: {
@@ -18,6 +26,14 @@ export function workspaceDisplayName(input: {
   path: string | null
 }): string | null {
   return input.authoritativeName ?? input.path?.split('/').pop() ?? null
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function isMissingWorkspacePathError(error: unknown): boolean {
+  return errorMessage(error).includes('Path does not exist:')
 }
 
 export function createWorkspaceActions(deps: WorkspaceActionsDeps) {
@@ -56,8 +72,25 @@ export function createWorkspaceActions(deps: WorkspaceActionsDeps) {
 
   async function openWorkspacePath(path: string) {
     if (!path) return
-    const opened = await deps.openWorkspacePathInKernel(path)
-    if (opened) deps.addRecentWorkspace(opened)
+    try {
+      const opened = await deps.openWorkspacePathInKernel(path)
+      if (opened) deps.addRecentWorkspace(opened)
+    } catch (error) {
+      if (isMissingWorkspacePathError(error)) {
+        deps.removeRecentWorkspace(path)
+        deps.pushToast({
+          kind: 'error',
+          message: 'Folder not found',
+          detail: 'Removed from recent workspaces.',
+        })
+        return
+      }
+      deps.pushToast({
+        kind: 'error',
+        message: 'Workspace open failed',
+        detail: errorMessage(error),
+      })
+    }
   }
 
   return {
