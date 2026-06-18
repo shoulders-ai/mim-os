@@ -2,6 +2,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import {
   IconActivity,
+  IconArchive,
   IconChevronDown,
   IconChevronRight,
   IconFolder,
@@ -36,6 +37,7 @@ import { initialsFrom, runStatusDotClass, runStatusTag, sessionDotClass, session
 import { usePointerReorder } from './usePointerReorder.js'
 import { isImageIcon, packageIconUrl } from './packageIcon.js'
 import { agentIconUrl } from './agentIcon.js'
+import MimDialog from '../ui/MimDialog.vue'
 import WorkingIcon from '../ui/WorkingIcon.vue'
 
 interface LoadedPackage {
@@ -47,8 +49,8 @@ interface LoadedPackage {
 // 'run' rows carry a NavigatorRun whose own kind ('package-job' or
 // 'agent-session') decides where clicks and commands route.
 type ActivityRow =
-  | { key: string; kind: 'chat'; session: Session; updatedAt?: string }
-  | { key: string; kind: 'run'; run: NavigatorRun; updatedAt?: string }
+  | { key: string; kind: 'chat'; session: Session }
+  | { key: string; kind: 'run'; run: NavigatorRun }
 
 // Core platform surfaces: a fixed cluster above the Apps section. Not
 // draggable, no section header — these are fixtures, not installed apps.
@@ -165,13 +167,11 @@ const activityRows = computed<ActivityRow[]>(() =>
       key: activityKeyForSession(session.id),
       kind: 'chat' as const,
       session,
-      updatedAt: session.updatedAt || session.createdAt,
     })),
     ...[...runsStore.packageJobRuns, ...runsStore.agentSessionRuns].map(run => ({
       key: activityKeyForRun(run),
       kind: 'run' as const,
       run,
-      updatedAt: run.updatedAt,
     })),
   ], settingsStore.navigatorActivityOrder),
 )
@@ -300,6 +300,7 @@ function handleActivityRowClick(row: ActivityRow, event: MouseEvent) {
     }
   }
   clearActivitySelection()
+  selectionAnchorKey.value = row.key
   selectActivityRow(row)
 }
 
@@ -531,6 +532,32 @@ function handleRenameCommit(patchedSession: Session) {
 // ---- Undo ----
 function onUndo() {
   sessionStore.undoLast()
+}
+
+// ---- Archive all ----
+const archiveAllDialogOpen = ref(false)
+
+function activityRowIsLive(row: ActivityRow): boolean {
+  if (activityRowActive(row)) return true
+  if (row.kind === 'chat') {
+    const kind = statusKind(row.session)
+    return kind === 'working' || kind === 'error' || kind === 'needs-approval' || kind === 'unread'
+  }
+  const s = row.run.status
+  return s === 'working' || s === 'needs-input' || s === 'idle' || s === 'needs-approval' || s === 'error' || s === 'paused'
+}
+
+const archivableRows = computed(() =>
+  activityRows.value.filter(row => !activityRowIsLive(row)),
+)
+
+function confirmArchiveAll() {
+  archiveAllDialogOpen.value = false
+  for (const row of archivableRows.value) {
+    if (row.kind === 'chat') emit('archiveSession', row.session.id)
+    else if (row.run.kind === 'agent-session') emit('archiveAgentSession', row.run.sourceId)
+    else if (row.run.packageId) emit('archivePackageRun', row.run.packageId, row.run.sourceId)
+  }
 }
 
 // ---- Pointer-based drag and drop ----
@@ -804,6 +831,12 @@ onUnmounted(() => {
                 <template v-else>{{ row.pkg.manifest.icon ?? '◻' }}</template>
               </span>
               <span v-if="!collapsed" class="ml-1 min-w-0 flex-1 truncate pr-2 text-left">{{ appRowName(row) }}</span>
+              <IconPlus
+                v-if="!collapsed && row.kind === 'agent'"
+                :size="11"
+                :stroke-width="2"
+                class="shrink-0 mr-1.5 text-ink-4"
+              />
             </button>
             <div v-if="!collapsed && appDropIndicator?.afterKey === row.key" class="h-[2px] mx-[6px] bg-accent rounded-[1px] shrink-0" />
           </template>
@@ -842,6 +875,16 @@ onUnmounted(() => {
               <IconChevronRight v-if="activityCollapsed" :size="12" :stroke="2" class="shrink-0 text-ink-4" />
               <IconChevronDown v-else :size="12" :stroke="2" class="shrink-0 text-ink-4" />
               <span>Activity</span>
+            </button>
+            <button
+              v-if="archivableRows.length"
+              class="flex h-[22px] w-[22px] items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
+              title="Archive all"
+              aria-label="Archive all"
+              data-testid="activity-archive-all"
+              @click="archiveAllDialogOpen = true"
+            >
+              <IconArchive :size="13" :stroke="1.8" />
             </button>
             <button
               class="flex h-[22px] w-[22px] items-center justify-center rounded-[5px]"
@@ -925,7 +968,7 @@ onUnmounted(() => {
                 :ref="(el: any) => setRunRowRef(row.run.sourceId, el)"
                 :data-activity-key="row.key"
                 :run="row.run"
-                :active="activeWorkId === packageRunWorkId(row.run)"
+                :active="activityRowActive(row)"
                 :selected="selectedActivityKeys.has(row.key)"
                 :dragging="activityDrag?.key === row.key && activityDrag?.active"
                 @select="(_run: NavigatorRun, ev: MouseEvent) => handleActivityRowClick(row, ev)"
@@ -1010,6 +1053,42 @@ onUnmounted(() => {
         <button v-if="sessionStore.undoToast.snapshot" class="text-accent font-medium text-[12px] hover:opacity-80" @click="onUndo">Undo</button>
       </div>
     </Transition>
+
+    <!-- Archive all confirm -->
+    <MimDialog
+      v-if="archiveAllDialogOpen"
+      :open="true"
+      size="sm"
+      role="alertdialog"
+      title="Archive all activity"
+      @close="archiveAllDialogOpen = false"
+    >
+      <div class="flex flex-col gap-3 px-5 pb-5 font-sans">
+        <p class="m-0 text-[13px] text-ink">
+          Archive {{ archivableRows.length }} {{ archivableRows.length === 1 ? 'item' : 'items' }}?
+        </p>
+        <p v-if="activityRows.length !== archivableRows.length" class="m-0 text-[12px] text-ink-3">
+          {{ activityRows.length - archivableRows.length }} running {{ activityRows.length - archivableRows.length === 1 ? 'item' : 'items' }} will be skipped.
+        </p>
+        <div class="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            class="h-7 rounded-[5px] border border-rule-light px-3 text-[12px] text-ink-2 hover:bg-chrome-mid"
+            @click="archiveAllDialogOpen = false"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            class="h-7 rounded-[5px] bg-accent px-3 text-[12px] font-medium text-accent-ink hover:opacity-90"
+            data-testid="archive-all-confirm"
+            @click="confirmArchiveAll"
+          >
+            Archive all
+          </button>
+        </div>
+      </div>
+    </MimDialog>
 
     <!-- Resize handle (expanded tray only; the rail is fixed width) -->
     <div

@@ -800,6 +800,72 @@ describe('ShellSidebar smoke', () => {
     expect(onSelectAgentSession).toHaveBeenCalledWith('claude-code', 'sess-1')
   })
 
+  it('highlights the agent session Activity row when its Work entry is active', async () => {
+    useRunsStore().setAgentSessions([makeAgentSession()])
+    app = createApp(ShellSidebar, {
+      width: 220,
+      packages: [],
+      activeWorkId: 'work:agent-session:sess-1',
+      workspaceName: 'Workspace',
+      recentWorkspaces: [],
+    })
+    app.use(pinia)
+    app.mount(root)
+    await flushUi()
+
+    const row = root.querySelector('[data-run-id="agent:sess-1"]') as HTMLElement | null
+    expect(row?.className).toContain('bg-accent-tint')
+  })
+
+  it('highlights the package run Activity row when its Work entry is active', async () => {
+    useRunsStore().setPackageRuns([{
+      runId: 'run-1',
+      packageId: 'doc-review',
+      jobId: 'review',
+      status: 'running',
+      inputs: {},
+      startedAt: '2026-01-01T00:10:00.000Z',
+      events: [],
+    }])
+    app = createApp(ShellSidebar, {
+      width: 220,
+      packages: [],
+      activeWorkId: 'work:package-run:doc-review:run-1',
+      workspaceName: 'Workspace',
+      recentWorkspaces: [],
+    })
+    app.use(pinia)
+    app.mount(root)
+    await flushUi()
+
+    const row = root.querySelector('[data-run-id="package:run-1"]') as HTMLElement | null
+    expect(row?.className).toContain('bg-accent-tint')
+  })
+
+  it('shows a plus icon on agent launcher rows but not package launcher rows', async () => {
+    useAgentsStore().agents = [makeAgent()]
+    useSettingsStore().enabledAgents = ['claude-code']
+    app = createApp(ShellSidebar, {
+      width: 220,
+      packages: [{
+        manifest: { id: 'docx-review', name: 'DOCX Review', icon: 'D', views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }] },
+        dir: '/packages/docx-review',
+        source: 'global',
+      }],
+      activeWorkId: '',
+      workspaceName: 'Workspace',
+      recentWorkspaces: [],
+    })
+    app.use(pinia)
+    app.mount(root)
+    await flushUi()
+
+    const agentRow = root.querySelector('[data-agent-id="claude-code"]')
+    const packageRow = root.querySelector('[data-package-id="docx-review"]')
+    expect(agentRow?.querySelector('svg')).not.toBeNull()
+    expect(packageRow?.querySelector('svg')).toBeNull()
+  })
+
   it('offers stop while an agent session runs and archive/delete once it ended', async () => {
     const onStopAgentSession = vi.fn()
     const onArchiveAgentSession = vi.fn()

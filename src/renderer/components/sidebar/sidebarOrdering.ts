@@ -1,6 +1,5 @@
 export interface OrderedNavigatorItem {
   key: string
-  updatedAt?: string
 }
 
 export function sortWithManualOrder<T extends OrderedNavigatorItem>(
@@ -17,8 +16,6 @@ export function sortWithManualOrder<T extends OrderedNavigatorItem>(
     const bOrdered = bOrder !== undefined
 
     if (!aOrdered && !bOrdered) {
-      const timeDiff = timestamp(b.item.updatedAt) - timestamp(a.item.updatedAt)
-      if (timeDiff !== 0) return timeDiff
       return a.index - b.index
     }
     if (!aOrdered) return -1
@@ -31,8 +28,6 @@ export function sortWithManualOrder<T extends OrderedNavigatorItem>(
 
 // Destinations policy: manually ordered rows first (in saved order), rows not
 // yet in the saved order keep their canonical declaration order after them.
-// Contrast with sortWithManualOrder, where unordered rows float to the top by
-// recency — destinations are stable, instances are live.
 export function applyManualOrder<T extends { key: string }>(
   rows: T[],
   manualOrder: string[],
@@ -64,8 +59,3 @@ export function reorderKeys(
   return reordered
 }
 
-function timestamp(value?: string): number {
-  if (!value) return 0
-  const time = new Date(value).getTime()
-  return Number.isFinite(time) ? time : 0
-}

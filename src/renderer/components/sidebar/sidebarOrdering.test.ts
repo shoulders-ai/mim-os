@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { applyManualOrder, reorderKeys, sortWithManualOrder } from './sidebarOrdering.js'
 
 describe('sidebar ordering', () => {
-  it('puts new unordered activity above manually ordered rows', () => {
+  it('keeps unordered activity rows in stable input order (no recency jump)', () => {
     const rows = [
-      { key: 'chat:old', updatedAt: '2026-01-01T00:00:00.000Z' },
-      { key: 'chat:new', updatedAt: '2026-01-03T00:00:00.000Z' },
-      { key: 'package:run', updatedAt: '2026-01-02T00:00:00.000Z' },
+      { key: 'chat:old' },
+      { key: 'chat:new' },
+      { key: 'package:run' },
     ]
 
     expect(sortWithManualOrder(rows, ['chat:old']).map(row => row.key)).toEqual([
@@ -16,11 +16,25 @@ describe('sidebar ordering', () => {
     ])
   })
 
+  it('does not reorder unordered rows when timestamps differ', () => {
+    const rows = [
+      { key: 'chat:a' },
+      { key: 'chat:b' },
+      { key: 'chat:c' },
+    ]
+
+    expect(sortWithManualOrder(rows, []).map(row => row.key)).toEqual([
+      'chat:a',
+      'chat:b',
+      'chat:c',
+    ])
+  })
+
   it('respects manual order for rows already in the saved order', () => {
     const rows = [
-      { key: 'chat:first', updatedAt: '2026-01-03T00:00:00.000Z' },
-      { key: 'chat:second', updatedAt: '2026-01-02T00:00:00.000Z' },
-      { key: 'package:run', updatedAt: '2026-01-01T00:00:00.000Z' },
+      { key: 'chat:first' },
+      { key: 'chat:second' },
+      { key: 'package:run' },
     ]
 
     expect(sortWithManualOrder(rows, ['package:run', 'chat:second', 'chat:first']).map(row => row.key)).toEqual([
