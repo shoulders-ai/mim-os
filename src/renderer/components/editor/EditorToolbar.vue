@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { IconFileExport, IconMessageCirclePlus } from '@tabler/icons-vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { IconFileExport, IconMessageCirclePlus, IconQuote } from '@tabler/icons-vue'
 import { shortcutLabel } from '../../services/shortcutLabels.js'
 
 const props = defineProps<{
@@ -21,11 +22,44 @@ const TB_ACTIVE = 'rounded-[3px] bg-accent-soft font-semibold text-accent'
 function tb(action: string): string[] {
   return [TB_BASE, props.activeFormats.includes(action) ? TB_ACTIVE : '']
 }
+
+const toolbarRef = ref<HTMLElement>()
+const compact = ref(false)
+let fullContentWidth = 0
+
+function checkOverflow() {
+  const el = toolbarRef.value
+  if (!el) return
+  if (!compact.value) {
+    if (el.scrollWidth > el.clientWidth) {
+      fullContentWidth = el.scrollWidth
+      compact.value = true
+    }
+  } else if (el.clientWidth >= fullContentWidth) {
+    compact.value = false
+    requestAnimationFrame(() => {
+      const e = toolbarRef.value
+      if (e && e.scrollWidth > e.clientWidth) {
+        fullContentWidth = e.scrollWidth
+        compact.value = true
+      }
+    })
+  }
+}
+
+let observer: ResizeObserver | undefined
+onMounted(() => {
+  observer = new ResizeObserver(checkOverflow)
+  if (toolbarRef.value) observer.observe(toolbarRef.value)
+})
+onUnmounted(() => observer?.disconnect())
+
+watch(() => props.commentCount, () => nextTick(checkOverflow))
 </script>
 
 <template>
-  <div class="flex h-[30px] shrink-0 items-center gap-[1.5px] overflow-x-auto overflow-y-hidden border-b border-rule-light bg-chrome-mid px-3.5 whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-    <div class="flex items-center gap-0.5">
+  <div ref="toolbarRef" class="flex h-[30px] shrink-0 items-center gap-[1.5px] overflow-x-auto overflow-y-hidden border-b border-rule-light bg-chrome-mid px-3.5 whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div class="flex shrink-0 items-center gap-0.5">
       <button :class="tb('heading-1')" title="Heading 1" @mousedown.prevent @click="emit('format', 'heading-1')">H1</button>
       <button :class="tb('heading-2')" title="Heading 2" @mousedown.prevent @click="emit('format', 'heading-2')">H2</button>
       <button :class="tb('heading-3')" title="Heading 3" @mousedown.prevent @click="emit('format', 'heading-3')">H3</button>
@@ -33,8 +67,8 @@ function tb(action: string): string[] {
       <button :class="[tb('italic'), 'italic']" title="Italic" @mousedown.prevent @click="emit('format', 'italic')">I</button>
       <button :class="[tb('strikethrough'), 'line-through']" title="Strikethrough" @mousedown.prevent @click="emit('format', 'strikethrough')">S</button>
     </div>
-    <span class="mx-0 my-1.5 w-px self-stretch bg-rule"></span>
-    <div class="flex items-center gap-0.5">
+    <span class="mx-0 my-1.5 w-px shrink-0 self-stretch bg-rule"></span>
+    <div class="flex shrink-0 items-center gap-0.5">
       <button :class="tb('bullet-list')" title="Bullet List" @mousedown.prevent @click="emit('format', 'bullet-list')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="4" cy="6" r="1" fill="currentColor"/><circle cx="4" cy="12" r="1" fill="currentColor"/><circle cx="4" cy="18" r="1" fill="currentColor"/></svg>
       </button>
@@ -59,34 +93,37 @@ function tb(action: string): string[] {
       <button :class="tb('code')" title="Inline Code" @mousedown.prevent @click="emit('format', 'code')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
       </button>
-      <button :class="tb('cite')" title="Citation" @mousedown.prevent @click="emit('format', 'cite')">Cite</button>
+      <button :class="tb('cite')" class="gap-1" title="Citation" @mousedown.prevent @click="emit('format', 'cite')">
+        <IconQuote :size="13" stroke-width="2" />
+        <span v-show="!compact" class="text-[11px]">Cite</span>
+      </button>
     </div>
-    <span class="mx-0 my-1.5 w-px self-stretch bg-rule"></span>
+    <span class="mx-0 my-1.5 w-px shrink-0 self-stretch bg-rule"></span>
     <button
       :class="TB_BASE"
-      class="gap-1 px-2 text-[11px] disabled:opacity-35"
+      class="shrink-0 gap-1 px-2 text-[11px] disabled:opacity-35"
       :title="canComment ? `Add comment (${shortcutLabel(['Shift', 'Mod', 'M'])})` : commentCount ? `${commentCount} comments (${shortcutLabel(['Shift', 'Mod', 'M'])})` : `Select text to comment (${shortcutLabel(['Shift', 'Mod', 'M'])})`"
       :disabled="!canComment && !commentCount"
       @mousedown.prevent
       @click="emit('comment')"
     >
       <IconMessageCirclePlus :size="13" stroke-width="2" :class="commentCount && !commentRailOpen ? 'text-accent' : ''" />
-      Comment
+      <span v-show="!compact">Comment</span>
       <span
         v-if="commentCount && !commentRailOpen"
         class="font-mono text-[10px] text-accent"
       >{{ commentCount }}</span>
     </button>
-    <div class="flex-1"></div>
+    <div class="min-w-2 flex-1"></div>
     <button
       :class="TB_BASE"
-      class="gap-1 px-2 text-[11px]"
+      class="shrink-0 gap-1 px-2 text-[11px]"
       :title="`Export to PDF or Word (${shortcutLabel(['Shift', 'Mod', 'E'])})`"
       @mousedown.prevent
       @click="emit('export')"
     >
       <IconFileExport :size="13" stroke-width="2" />
-      Export
+      <span v-show="!compact">Export</span>
     </button>
   </div>
 </template>

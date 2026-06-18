@@ -73,6 +73,38 @@ describe('MimDialog', () => {
     mounted.app.unmount()
   })
 
+  it('emits close when clicking the backdrop', async () => {
+    const mounted = mountDialog()
+    await flushUi()
+
+    const backdrop = document.body.querySelector('.mim-dialog-backdrop')
+    expect(backdrop).not.toBeNull()
+
+    backdrop!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))
+    backdrop!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    backdrop!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await flushUi()
+
+    expect(mounted.close).toHaveBeenCalled()
+    mounted.app.unmount()
+  })
+
+  it('emits close when clicking the viewport outside the panel', async () => {
+    const mounted = mountDialog()
+    await flushUi()
+
+    const viewport = document.body.querySelector('.mim-dialog-viewport')
+    expect(viewport).not.toBeNull()
+
+    viewport!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true }))
+    viewport!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    viewport!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await flushUi()
+
+    expect(mounted.close).toHaveBeenCalled()
+    mounted.app.unmount()
+  })
+
   it('accepts an initial focus ref', async () => {
     const target = ref<HTMLButtonElement | null>(null)
     const app = createApp({

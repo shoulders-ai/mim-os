@@ -91,7 +91,7 @@ function requestClose() {
     <Dialog
       v-bind="$attrs"
       as="div"
-      class="mim-dialog fixed inset-0"
+      class="no-drag mim-dialog fixed inset-0"
       :class="zClass"
       :initial-focus="initialFocus"
       :role="role"

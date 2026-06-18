@@ -281,12 +281,33 @@ async function loadResourceRoots() {
   }
 }
 
+async function refreshExpandedChildren() {
+  const paths = [...expandedPaths.value]
+  if (!paths.length) return
+  const next: Record<string, FsEntry[]> = {}
+  await Promise.all(paths.map(async (path) => {
+    try {
+      const result = await window.kernel.call('fs.list', {
+        path,
+        max_entries: DIRECTORY_LIMIT,
+        include_last_changed_by: true,
+      }) as { entries?: FsEntry[] }
+      next[path] = (result.entries ?? []).filter(isFsEntry)
+    } catch {
+      const updated = new Set(expandedPaths.value)
+      updated.delete(path)
+      expandedPaths.value = updated
+    }
+  }))
+  expandedChildren.value = next
+}
+
 async function refresh() {
-  expandedChildren.value = {}
   await Promise.all([
     loadDirectory(currentDir.value),
     loadResourceRoots(),
     index.refresh(),
+    refreshExpandedChildren(),
   ])
 }
 

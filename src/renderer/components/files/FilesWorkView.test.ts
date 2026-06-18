@@ -757,6 +757,77 @@ describe('FilesWorkView', () => {
     expect(mounted.root.textContent).not.toContain('logo.svg')
   })
 
+  it('preserves expanded folders after deleting a child item', async () => {
+    call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
+      if (tool === 'fs.list' && params?.path === '.') {
+        return {
+          entries: [
+            { path: 'docs', name: 'docs', type: 'directory', modifiedAt: '2026-06-01T08:00:00.000Z', createdAt: '2026-01-18T09:00:00.000Z' },
+          ],
+          truncated: false,
+        }
+      }
+      if (tool === 'fs.list' && params?.path === 'docs') {
+        return {
+          entries: [
+            { path: 'docs/alpha.md', name: 'alpha.md', type: 'file', size: 100, modifiedAt: '2026-06-01T09:00:00.000Z', createdAt: '2026-06-01T09:00:00.000Z' },
+            { path: 'docs/beta.md', name: 'beta.md', type: 'file', size: 200, modifiedAt: '2026-06-01T09:00:00.000Z', createdAt: '2026-06-01T09:00:00.000Z' },
+          ],
+          truncated: false,
+        }
+      }
+      if (tool === 'fs.trash') return {}
+      if (tool === 'search.files') return { results: [] }
+      return { entries: [] }
+    })
+
+    mounted = mountFiles()
+    await flushUi()
+
+    // Expand docs folder
+    const docsRow = rowButtons(mounted.root).find(row => row.textContent?.includes('docs'))!
+    docsRow.click()
+    await flushUi()
+    expect(mounted.root.textContent).toContain('alpha.md')
+    expect(mounted.root.textContent).toContain('beta.md')
+
+    // Delete alpha.md via context menu
+    const alphaRow = rowButtons(mounted.root).find(row => row.textContent?.includes('alpha.md'))!
+    alphaRow.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 24 }))
+    await flushUi()
+    modeButton(document.body, 'Delete').click()
+    await flushUi()
+
+    // After delete, update mock to no longer return alpha.md
+    call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
+      if (tool === 'fs.list' && params?.path === '.') {
+        return {
+          entries: [
+            { path: 'docs', name: 'docs', type: 'directory', modifiedAt: '2026-06-01T08:00:00.000Z', createdAt: '2026-01-18T09:00:00.000Z' },
+          ],
+          truncated: false,
+        }
+      }
+      if (tool === 'fs.list' && params?.path === 'docs') {
+        return {
+          entries: [
+            { path: 'docs/beta.md', name: 'beta.md', type: 'file', size: 200, modifiedAt: '2026-06-01T09:00:00.000Z', createdAt: '2026-06-01T09:00:00.000Z' },
+          ],
+          truncated: false,
+        }
+      }
+      if (tool === 'search.files') return { results: [] }
+      return { entries: [] }
+    })
+
+    modeButton(document.body, 'Delete file').click()
+    await flushUi()
+
+    // The docs folder should still be expanded with beta.md visible
+    expect(mounted.root.textContent).toContain('beta.md')
+    expect(mounted.root.textContent).not.toContain('alpha.md')
+  })
+
   it('keeps secondary file commands in the More menu', async () => {
     const onNewFile = vi.fn()
     const onOpenFileDialog = vi.fn()

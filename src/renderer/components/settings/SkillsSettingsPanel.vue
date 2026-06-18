@@ -2,11 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   IconChevronDown,
-  IconDownload,
   IconFolder,
   IconPencil,
   IconPlus,
   IconRefresh,
+  IconSearch,
   IconTrash,
 } from '@tabler/icons-vue'
 import MimDialog from '../ui/MimDialog.vue'
@@ -93,6 +93,7 @@ const skills = ref<SkillMetadata[]>([])
 const diagnostics = ref<SkillDiagnostic[]>([])
 const sources = ref<SkillSourceItem[]>([])
 const activeDialog = ref<null | 'new' | 'import' | 'source'>(null)
+const dialogError = ref<string | null>(null)
 const confirmingDelete = ref<string | null>(null)
 const confirmingSourceRemove = ref<string | null>(null)
 
@@ -226,6 +227,7 @@ function sourceUnlocks(source: SkillSourceItem): string[] {
 
 function clearDialogState() {
   activeDialog.value = null
+  dialogError.value = null
   importFolder.value = ''
   importReview.value = null
   sourceLocation.value = ''
@@ -234,7 +236,6 @@ function clearDialogState() {
   sourceReview.value = null
   newSkillName.value = ''
   newSkillDescription.value = ''
-  error.value = null
 }
 
 async function toggleSkill(skill: SkillMetadata, enabled: boolean) {
@@ -301,18 +302,21 @@ async function createSkill() {
 
 async function pickImportFolder() {
   const selected = await window.kernel.openFolderDialog()
-  if (selected) importFolder.value = selected
+  if (selected) {
+    importFolder.value = selected
+    await inspectImport()
+  }
 }
 
 async function inspectImport() {
   if (!canInspectImport.value) return
   actionBusy.value = 'inspect-import'
-  error.value = null
+  dialogError.value = null
   importReview.value = null
   try {
     importReview.value = await window.kernel.call('skill.inspectImport', { folder: importFolder.value.trim() }) as SkillReview
   } catch (err) {
-    error.value = (err as Error).message
+    dialogError.value = (err as Error).message
   } finally {
     actionBusy.value = null
   }
@@ -321,7 +325,7 @@ async function inspectImport() {
 async function confirmImport() {
   if (!importReview.value) return
   actionBusy.value = 'import'
-  error.value = null
+  dialogError.value = null
   try {
     const result = await window.kernel.call('skill.import', {
       folder: importFolder.value.trim(),
@@ -332,7 +336,7 @@ async function confirmImport() {
     await refresh()
     if (dir) await window.kernel.revealInFinder(dir)
   } catch (err) {
-    error.value = (err as Error).message
+    dialogError.value = (err as Error).message
   } finally {
     actionBusy.value = null
   }
@@ -340,7 +344,10 @@ async function confirmImport() {
 
 async function pickSourceFolder() {
   const selected = await window.kernel.openFolderDialog()
-  if (selected) sourceLocation.value = selected
+  if (selected) {
+    sourceLocation.value = selected
+    await inspectSource()
+  }
 }
 
 function sourceParams(confirmed = false) {
@@ -357,14 +364,14 @@ function sourceParams(confirmed = false) {
 async function inspectSource() {
   if (!canInspectSource.value) return
   actionBusy.value = 'inspect-source'
-  error.value = null
+  dialogError.value = null
   sourceReview.value = null
   try {
     sourceReview.value = await window.kernel.call('skillSource.inspect', sourceParams()) as SourceReview
     sourceId.value = sourceReview.value.id
     sourceName.value = sourceReview.value.name ?? sourceName.value
   } catch (err) {
-    error.value = (err as Error).message
+    dialogError.value = (err as Error).message
   } finally {
     actionBusy.value = null
   }
@@ -373,13 +380,13 @@ async function inspectSource() {
 async function confirmSource() {
   if (!sourceReview.value) return
   actionBusy.value = 'add-source'
-  error.value = null
+  dialogError.value = null
   try {
     await window.kernel.call('skillSource.add', sourceParams(true))
     clearDialogState()
     await refresh()
   } catch (err) {
-    error.value = (err as Error).message
+    dialogError.value = (err as Error).message
   } finally {
     actionBusy.value = null
   }
@@ -664,9 +671,12 @@ onBeforeUnmount(() => {
           :disabled="!canInspectImport || actionBusy === 'inspect-import'"
           @click="inspectImport"
         >
-          <IconDownload :size="14" :stroke-width="2" />
-          <span>Inspect</span>
+          <IconSearch :size="14" :stroke-width="2" />
+          <span>Review</span>
         </button>
+        <div v-if="dialogError && activeDialog === 'import'" data-testid="skill-import-error" class="rounded-[6px] border border-rem/30 px-3 py-2 font-sans text-[12px] text-rem">
+          {{ dialogError }}
+        </div>
         <div v-if="importReview" class="rounded-[8px] border border-rule-light bg-chrome-mid p-3">
           <div class="font-mono text-[12px] font-semibold text-ink">{{ importReview.skill.name }}</div>
           <p class="mt-1 font-sans text-[12px] leading-5 text-ink-2">{{ importReview.skill.description }}</p>
@@ -737,9 +747,12 @@ onBeforeUnmount(() => {
           :disabled="!canInspectSource || actionBusy === 'inspect-source'"
           @click="inspectSource"
         >
-          <IconDownload :size="14" :stroke-width="2" />
-          <span>Inspect</span>
+          <IconSearch :size="14" :stroke-width="2" />
+          <span>Review</span>
         </button>
+        <div v-if="dialogError && activeDialog === 'source'" data-testid="skill-source-error" class="rounded-[6px] border border-rem/30 px-3 py-2 font-sans text-[12px] text-rem">
+          {{ dialogError }}
+        </div>
         <div v-if="sourceReview" class="rounded-[8px] border border-rule-light bg-chrome-mid p-3">
           <div class="flex items-center justify-between gap-2">
             <div>
