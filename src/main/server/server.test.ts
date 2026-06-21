@@ -7,7 +7,7 @@ import { createServer, MCP_TOOL_SPECS, resolvePackageUiPath } from '@main/server
 import type { LoadedPackage, PackageLoader } from '@main/packages/packages.js'
 import type { ToolContext, ToolDef, ToolRegistry } from '@main/tools/registry.js'
 
-describe('package server', () => {
+describe('app server', () => {
   let dir: string
   let server: Awaited<ReturnType<typeof createServer>> | null
   let sockets: WebSocket[]
@@ -107,7 +107,7 @@ describe('package server', () => {
     throw new Error('Timed out waiting for condition')
   }
 
-  it('serves package UI files from the package ui directory', async () => {
+  it('serves app UI files from the app ui directory', async () => {
     const pkg = addPackage()
     server = await createServer(makeTools(), makePackages([pkg]))
 
@@ -116,8 +116,8 @@ describe('package server', () => {
     expect(await response.text()).toContain('Package UI')
   })
 
-  it('serves package UI even when the install path contains a dot-directory', async () => {
-    // Packages install under ~/.mim/packages/<id>/<version>/; the `.mim`
+  it('serves app UI even when the install path contains a dot-directory', async () => {
+    // Apps install under ~/.mim/packages/<id>/<version>/; the `.mim`
     // dot-segment makes sendFile's default dotfiles:'ignore' policy 404 the
     // whole path unless we serve relative to the ui/ root.
     const pkgDir = join(dir, '.mim', 'packages', 'dotpkg', '0.1.0')
@@ -171,7 +171,7 @@ describe('package server', () => {
     expect(response.status).toBe(404)
   })
 
-  it('resolves package UI paths without allowing sibling-prefix traversal', () => {
+  it('resolves app UI paths without allowing sibling-prefix traversal', () => {
     const pkg = addPackage()
     mkdirSync(join(pkg.dir, 'ui-evil'), { recursive: true })
     writeFileSync(join(pkg.dir, 'ui-evil', 'secret.txt'), 'do not serve')
@@ -474,7 +474,7 @@ describe('package server', () => {
       method: 'identify',
       params: { launch: 'bad-token' },
     })
-    expect(identify).toEqual({ id: 'identify-1', error: 'Invalid package launch token' })
+    expect(identify).toEqual({ id: 'identify-1', error: 'Invalid app launch token' })
 
     const result = await sendJson(socket, {
       id: 'read-1',
@@ -550,7 +550,7 @@ describe('package server', () => {
         id: 'identify-1',
         method: 'identify',
         params: { launch },
-      })).resolves.toEqual({ id: 'identify-1', error: 'Invalid package launch token' })
+      })).resolves.toEqual({ id: 'identify-1', error: 'Invalid app launch token' })
     } finally {
       nowSpy.mockRestore()
     }
@@ -612,7 +612,7 @@ describe('package server', () => {
     const second = await openSocket(server.port)
     second.send(JSON.stringify({ id: 'ping', method: 'identify', params: { launch: 'bad' } }))
     const reply = await nextMessage(second)
-    expect(reply.error).toBe('Invalid package launch token')
+    expect(reply.error).toBe('Invalid app launch token')
   })
 
   it('replays buffered events on reconnect when the client sends lastSeq', async () => {

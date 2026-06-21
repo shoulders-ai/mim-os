@@ -90,9 +90,9 @@ export interface PermissionGateOptions {
   // Effective write policy for a mounted resource collection. Absent resolver
   // or unknown id means readonly — deny is the safe default for shared assets.
   getResourceWritePolicy?: (collectionId: string) => CollectionWritePolicy | null | undefined
-  // Package-provided tools register per-tool policies at runtime. Consulted
+  // App-provided tools register per-tool policies at runtime. Consulted
   // after the static TOOL_POLICIES map: core tool policies cannot be overridden
-  // by a package (security property).
+  // by an app (security property).
   getDynamicToolPolicy?: (toolName: string) => ToolPolicy | undefined
   sendApprovalRequest: (request: PermissionApprovalRequest) => boolean
   recordDecision?: (event: PermissionDecisionEvent) => void
@@ -189,7 +189,7 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'workspace.open': { category: 'system', risk: 'medium', pathParam: 'path' },
   'workspace.info': { category: 'read', risk: 'low' },
   // Regenerates the gitignored .mim/agent-context.md from existing workspace
-  // state. Benign, low-risk; no approval prompt for user/AI/package.
+  // state. Benign, low-risk; no approval prompt for user/AI/app.
   'workspace.orient': { category: 'general', risk: 'low' },
   'log.append': { category: 'write', risk: 'low', targetParam: 'message' },
   'log.read': { category: 'read', risk: 'low' },
@@ -308,8 +308,8 @@ export function getToolPolicy(name: string): ToolPolicy {
   }
 }
 
-// Static TOOL_POLICIES always wins — core tools cannot be re-policied by a
-// package. Then dynamic (package-registered), then the general/low default.
+// Static TOOL_POLICIES always wins — core tools cannot be re-policied by an
+// app. Then dynamic (app-registered), then the general/low default.
 function resolveToolPolicy(
   name: string,
   getDynamic?: (toolName: string) => ToolPolicy | undefined,
@@ -393,11 +393,11 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
         throw new PermissionDeniedError(`Permission denied: ${packageReason}`)
       }
       if (policy.category === 'write' && pathInfo?.kind === 'sensitive') {
-        const reason = `Package ${ctx.package_id} cannot write to sensitive path`
+        const reason = `App ${ctx.package_id} cannot write to sensitive path`
         record({ ...baseEvent, decision: 'denied', reason })
         throw new PermissionDeniedError(`Permission denied: ${reason}`)
       }
-      record({ ...baseEvent, decision: 'allowed', reason: 'package permission granted' })
+      record({ ...baseEvent, decision: 'allowed', reason: 'app permission granted' })
       return
     }
 
@@ -687,14 +687,14 @@ function packagePermissionViolation(
   getPackagePermissions?: (packageId: string) => PackagePermissions | undefined,
 ): string | null {
   if (ctx.actor !== 'package') return null
-  if (!ctx.package_id) return 'Package tool call is missing package identity'
+  if (!ctx.package_id) return 'App tool call is missing app identity'
   if (!getPackagePermissions) return null
 
   const permissions = getPackagePermissions(ctx.package_id)
-  if (!permissions) return `Package ${ctx.package_id} is not installed or enabled`
+  if (!permissions) return `App ${ctx.package_id} is not installed or enabled`
 
   if (policy.ownerPackageId && policy.ownerPackageId !== ctx.package_id) {
-    return `Package ${ctx.package_id} cannot call tools owned by package ${policy.ownerPackageId}`
+    return `App ${ctx.package_id} cannot call tools owned by app ${policy.ownerPackageId}`
   }
 
   if (
@@ -703,128 +703,128 @@ function packagePermissionViolation(
     toolName === 'package.delete' ||
     toolName === 'package.reload'
   ) {
-    return `Package ${ctx.package_id} cannot manage package installation or enablement`
+    return `App ${ctx.package_id} cannot manage app installation or enablement`
   }
 
   if (toolName === 'registry.list' || toolName === 'registry.trust' || toolName === 'registry.inspectSource' || toolName === 'registry.addSource' || toolName === 'registry.removeSource' || toolName === 'app.updates') {
-    return `Package ${ctx.package_id} cannot access the package registry`
+    return `App ${ctx.package_id} cannot access the app registry`
   }
   if (toolName === 'package.install' || toolName === 'package.update' || toolName === 'package.uninstall' || toolName === 'app.add') {
-    return `Package ${ctx.package_id} cannot manage package installation`
+    return `App ${ctx.package_id} cannot manage app installation`
   }
 
   if (toolName === 'app.enable' || toolName === 'app.disable') {
     if (params.id === ctx.package_id) return null
-    return `Package ${ctx.package_id} cannot manage enablement of other packages`
+    return `App ${ctx.package_id} cannot manage enablement of other apps`
   }
   if (toolName === 'app.remove') {
-    return `Package ${ctx.package_id} cannot remove packages from the workspace`
+    return `App ${ctx.package_id} cannot remove apps from the workspace`
   }
   if (toolName === 'app.trust') {
-    return `Package ${ctx.package_id} cannot acknowledge package trust`
+    return `App ${ctx.package_id} cannot acknowledge app trust`
   }
 
   // The whole agent.* surface (catalog, launch/kill, session records and
-  // scrollback) is off-limits to packages — agent sessions run with the
+  // scrollback) is off-limits to apps — agent sessions run with the
   // user's full shell authority.
   if (toolName.startsWith('agent.')) {
-    return `Package ${ctx.package_id} cannot access agent sessions`
+    return `App ${ctx.package_id} cannot access agent sessions`
   }
 
   if (toolName.startsWith('git.') || toolName.startsWith('sync.')) {
-    return `Package ${ctx.package_id} cannot access workspace git or sync tools`
+    return `App ${ctx.package_id} cannot access workspace git or sync tools`
   }
 
-  // Packages may discover and read collections (via fs.* under the mount
+  // Apps may discover and read collections (via fs.* under the mount
   // paths) but never manage them: registration changes mim.yaml / bindings.
   if (toolName === 'resources.add' || toolName === 'resources.remove' || toolName === 'resources.sync' || toolName === 'resources.setPolicy') {
-    return `Package ${ctx.package_id} cannot manage resource collections`
+    return `App ${ctx.package_id} cannot manage resource collections`
   }
   if ((toolName === 'resources.collections' || toolName === 'resources.resolvePath') && permissions.workspace?.read !== true) {
-    return `Package ${ctx.package_id} did not declare workspace read permission`
+    return `App ${ctx.package_id} did not declare workspace read permission`
   }
 
   if (policy.category === 'system') {
-    return `Package ${ctx.package_id} cannot use system tools in runtime v1`
+    return `App ${ctx.package_id} cannot use system tools in runtime v1`
   }
 
   if (toolName.startsWith('settings.')) {
-    return `Package ${ctx.package_id} cannot access workspace settings`
+    return `App ${ctx.package_id} cannot access workspace settings`
   }
 
   if (toolName.startsWith('session.')) {
-    return `Package ${ctx.package_id} cannot access chat session storage`
+    return `App ${ctx.package_id} cannot access chat session storage`
   }
 
-  // Package secret tools are scoped to the manifest's declared secret names,
-  // mirroring how ctx.secrets is scoped in the package runtime.
+  // App secret tools are scoped to the manifest's declared secret names,
+  // mirroring how ctx.secrets is scoped in the app runtime.
   if (toolName.startsWith('package.secrets.')) {
     const declared = permissions.secrets ?? []
-    if (declared.length === 0) return `Package ${ctx.package_id} did not declare any secrets`
+    if (declared.length === 0) return `App ${ctx.package_id} did not declare any secrets`
     // Only `status` is name-less; set/delete must name a declared secret here,
     // so the gate never records 'allowed' for a call it did not validate.
     if (toolName !== 'package.secrets.status') {
       const name = typeof params.name === 'string' ? params.name : ''
-      if (name.length === 0) return `Package secret tools require a declared secret name`
-      if (!declared.includes(name)) return `Package ${ctx.package_id} did not declare secret: ${name}`
+      if (name.length === 0) return `App secret tools require a declared secret name`
+      if (!declared.includes(name)) return `App ${ctx.package_id} did not declare secret: ${name}`
     }
     return null
   }
 
   if (toolName.startsWith('skill.') || toolName.startsWith('skillSource.')) {
-    return `Package ${ctx.package_id} cannot access AI skill activation state`
+    return `App ${ctx.package_id} cannot access AI skill activation state`
   }
 
   if (toolName === 'ai.setKey') {
-    return `Package ${ctx.package_id} cannot access provider keys directly`
+    return `App ${ctx.package_id} cannot access provider keys directly`
   }
 
   if (toolName.startsWith('slack.')) {
-    return `Package ${ctx.package_id} cannot access personal Slack integrations in runtime v1`
+    return `App ${ctx.package_id} cannot access personal Slack integrations in runtime v1`
   }
 
   if (toolName.startsWith('google.') || toolName.startsWith('gmail.') || toolName.startsWith('calendar.') || toolName.startsWith('drive.') || toolName.startsWith('docs.') || toolName.startsWith('sheets.')) {
-    return `Package ${ctx.package_id} cannot access personal Google integrations in runtime v1`
+    return `App ${ctx.package_id} cannot access personal Google integrations in runtime v1`
   }
 
   if (toolName === 'documents.pickReviewFile' && permissions.workspace?.write !== true) {
-    return `Package ${ctx.package_id} did not declare workspace write permission`
+    return `App ${ctx.package_id} did not declare workspace write permission`
   }
 
   if (toolName === 'documents.pickImportFile' && permissions.workspace?.write !== true) {
-    return `Package ${ctx.package_id} did not declare workspace write permission`
+    return `App ${ctx.package_id} did not declare workspace write permission`
   }
 
   if (toolName === 'documents.importMarkdown' && (permissions.workspace?.read !== true || permissions.workspace?.write !== true)) {
-    return `Package ${ctx.package_id} must declare workspace read and write permission`
+    return `App ${ctx.package_id} must declare workspace read and write permission`
   }
 
   if (toolName === 'references.setBibliographyPath' && permissions.workspace?.read !== true) {
-    return `Package ${ctx.package_id} did not declare workspace read permission`
+    return `App ${ctx.package_id} did not declare workspace read permission`
   }
 
   if (toolName.startsWith('terminal.')) {
-    return `Package ${ctx.package_id} cannot run terminal commands in runtime v1`
+    return `App ${ctx.package_id} cannot run terminal commands in runtime v1`
   }
 
   if (policy.pathParam && policy.category === 'read' && permissions.workspace?.read !== true) {
-    return `Package ${ctx.package_id} did not declare workspace read permission`
+    return `App ${ctx.package_id} did not declare workspace read permission`
   }
 
   if (policy.pathParam && policy.category === 'write' && permissions.workspace?.write !== true) {
-    return `Package ${ctx.package_id} did not declare workspace write permission`
+    return `App ${ctx.package_id} did not declare workspace write permission`
   }
 
   if (toolName === 'search.sessions' || (toolName === 'search' && params.scope !== 'files')) {
-    return `Package ${ctx.package_id} cannot access chat session search`
+    return `App ${ctx.package_id} cannot access chat session search`
   }
 
   if ((toolName === 'search.files' || toolName === 'search') && permissions.workspace?.read !== true) {
-    return `Package ${ctx.package_id} did not declare workspace read permission`
+    return `App ${ctx.package_id} did not declare workspace read permission`
   }
 
   if (policy.category === 'ai' && permissions.ai !== true) {
-    return `Package ${ctx.package_id} did not declare AI permission`
+    return `App ${ctx.package_id} did not declare AI permission`
   }
 
   return null

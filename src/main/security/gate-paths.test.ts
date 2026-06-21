@@ -107,10 +107,10 @@ describe('permission path classification — resource mounts', () => {
     expect(classifyPermissionPath('.mim/resources.json', workspacePath)).toMatchObject({ kind: 'workspace' })
   })
 
-  it('classifies the package enablement/trust ledger as sensitive', () => {
+  it('classifies the app enablement/trust ledger as sensitive', () => {
     expect(classifyPermissionPath('.mim/packages/enabled.json', workspacePath)).toMatchObject({
       kind: 'sensitive',
-      reason: 'Package enablement ledger',
+      reason: 'App enablement ledger',
     })
     expect(classifyPermissionPath('/Users/test/workspace/.mim/packages/enabled.json', workspacePath)).toMatchObject({
       kind: 'sensitive',

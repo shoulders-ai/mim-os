@@ -91,7 +91,7 @@ describe('tool policy metadata', () => {
     expect(getToolPolicy('telemetry.setEnabled')).toMatchObject({ category: 'settings', risk: 'medium' })
   })
 
-  it('classifies package secret tools as secrets-category mutations', () => {
+  it('classifies app secret tools as secrets-category mutations', () => {
     expect(getToolPolicy('package.secrets.set')).toMatchObject({ category: 'secrets', risk: 'high', targetParam: 'name' })
     expect(getToolPolicy('package.secrets.delete')).toMatchObject({ category: 'secrets', risk: 'high', targetParam: 'name' })
     expect(getToolPolicy('package.secrets.status')).toMatchObject({ category: 'read', risk: 'low' })
@@ -350,7 +350,7 @@ describe('permission gate decisions', () => {
     })
   })
 
-  it('enforces declared workspace permissions for package file reads', async () => {
+  it('enforces declared workspace permissions for app file reads', async () => {
     const { gate, requests, decisions } = makeGate({ packagePermissions: { workspace: { read: true } } })
 
     await gate.check(tool('fs.read'), { path: 'docs/notes.md' }, { actor: 'package', package_id: 'stats-checker' })
@@ -364,7 +364,7 @@ describe('permission gate decisions', () => {
     })
   })
 
-  it('denies package workspace reads that were not declared', async () => {
+  it('denies app workspace reads that were not declared', async () => {
     const { gate, requests, decisions } = makeGate({ packagePermissions: {} })
 
     await expect(
@@ -376,11 +376,11 @@ describe('permission gate decisions', () => {
       decision: 'denied',
       actor: 'package',
       tool: 'fs.read',
-      reason: 'Package stats-checker did not declare workspace read permission',
+      reason: 'App stats-checker did not declare workspace read permission',
     })
   })
 
-  it('denies package writes unless workspace write permission is declared', async () => {
+  it('denies app writes unless workspace write permission is declared', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true } } })
 
     await expect(
@@ -391,7 +391,7 @@ describe('permission gate decisions', () => {
     ).rejects.toThrow('did not declare workspace write permission')
   })
 
-  it('denies package PDF extraction and bibliography setting unless workspace read permission is declared', async () => {
+  it('denies app PDF extraction and bibliography setting unless workspace read permission is declared', async () => {
     const { gate } = makeGate({ packagePermissions: {} })
 
     await expect(
@@ -402,7 +402,7 @@ describe('permission gate decisions', () => {
     ).rejects.toThrow('did not declare workspace read permission')
   })
 
-  it('allows package PDF extraction and bibliography setting with workspace read permission', async () => {
+  it('allows app PDF extraction and bibliography setting with workspace read permission', async () => {
     const { gate, requests } = makeGate({ packagePermissions: { workspace: { read: true } } })
 
     await gate.check(tool('documents.pdf.extract'), { path: 'docs/source.pdf' }, { actor: 'package', package_id: 'references' })
@@ -411,7 +411,7 @@ describe('permission gate decisions', () => {
     expect(requests).toHaveLength(0)
   })
 
-  it('denies package review-file picking unless workspace write permission is declared', async () => {
+  it('denies app review-file picking unless workspace write permission is declared', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true } } })
 
     await expect(
@@ -419,7 +419,7 @@ describe('permission gate decisions', () => {
     ).rejects.toThrow('did not declare workspace write permission')
   })
 
-  it('denies package import picking and markdown import unless workspace permissions are declared', async () => {
+  it('denies app import picking and markdown import unless workspace permissions are declared', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true } } })
 
     await expect(
@@ -431,7 +431,7 @@ describe('permission gate decisions', () => {
     ).rejects.toThrow('must declare workspace read and write permission')
   })
 
-  it('blocks direct package access to provider keys and package management', async () => {
+  it('blocks direct app access to provider keys and app management', async () => {
     const { gate } = makeGate({ packagePermissions: { ai: true, workspace: { read: true, write: true } } })
 
     await expect(
@@ -439,10 +439,10 @@ describe('permission gate decisions', () => {
     ).rejects.toThrow('cannot access provider keys directly')
     await expect(
       gate.check(tool('package.create'), { id: 'other-package' }, { actor: 'package', package_id: 'stats-checker' }),
-    ).rejects.toThrow('cannot manage package installation or enablement')
+    ).rejects.toThrow('cannot manage app installation or enablement')
   })
 
-  it('blocks package access to personal Slack integrations', async () => {
+  it('blocks app access to personal Slack integrations', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true } } })
 
     await expect(
@@ -450,7 +450,7 @@ describe('permission gate decisions', () => {
     ).rejects.toThrow('personal Slack')
   })
 
-  it('blocks package access to personal Google integrations', async () => {
+  it('blocks app access to personal Google integrations', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true } } })
 
     await expect(
@@ -458,7 +458,7 @@ describe('permission gate decisions', () => {
     ).rejects.toThrow('personal Google')
   })
 
-  it('allows package secret tools only for declared secret names', async () => {
+  it('allows app secret tools only for declared secret names', async () => {
     const { gate, requests, decisions } = makeGate({ packagePermissions: { secrets: ['github_token'] } })
 
     await gate.check(tool('package.secrets.set'), { name: 'github_token', secret: 'ghp_abc' }, { actor: 'package', package_id: 'github-monitor' })
@@ -468,13 +468,13 @@ describe('permission gate decisions', () => {
 
     await expect(
       gate.check(tool('package.secrets.set'), { name: 'other', secret: 'x' }, { actor: 'package', package_id: 'github-monitor' }),
-    ).rejects.toThrow('Package github-monitor did not declare secret: other')
+    ).rejects.toThrow('App github-monitor did not declare secret: other')
     await expect(
       gate.check(tool('package.secrets.delete'), { name: 'other' }, { actor: 'package', package_id: 'github-monitor' }),
     ).rejects.toThrow('did not declare secret')
   })
 
-  it('denies package secret set/delete when the name is missing, empty, or not a string', async () => {
+  it('denies app secret set/delete when the name is missing, empty, or not a string', async () => {
     const { gate } = makeGate({ packagePermissions: { secrets: ['github_token'] } })
 
     await expect(
@@ -486,11 +486,11 @@ describe('permission gate decisions', () => {
     await expect(
       gate.check(tool('package.secrets.delete'), { name: 123 }, { actor: 'package', package_id: 'github-monitor' }),
     ).rejects.toThrow('require a declared secret name')
-    // status takes no name and stays allowed for declaring packages.
+    // status takes no name and stays allowed for declaring apps.
     await gate.check(tool('package.secrets.status'), {}, { actor: 'package', package_id: 'github-monitor' })
   })
 
-  it('denies package secret tools entirely when the manifest declares no secrets', async () => {
+  it('denies app secret tools entirely when the manifest declares no secrets', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true } } })
 
     await expect(
@@ -498,7 +498,7 @@ describe('permission gate decisions', () => {
     ).rejects.toThrow('did not declare any secrets')
   })
 
-  it('redacts the secret value in package.secrets.set audit params', async () => {
+  it('redacts the secret value in app secrets.set audit params', async () => {
     const { gate, decisions } = makeGate({ packagePermissions: { secrets: ['github_token'] } })
 
     await gate.check(tool('package.secrets.set'), { name: 'github_token', secret: 'ghp_abc' }, { actor: 'package', package_id: 'github-monitor' })
@@ -506,7 +506,7 @@ describe('permission gate decisions', () => {
     expect(decisions.at(-1)?.params).toMatchObject({ secret: '[redacted]' })
   })
 
-  it('blocks package access to system tools and chat session storage', async () => {
+  it('blocks app access to system tools and chat session storage', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true } } })
 
     await expect(
@@ -523,7 +523,7 @@ describe('permission gate decisions', () => {
     ).rejects.toThrow('cannot access chat session search')
   })
 
-  it('allows package file search only when workspace read permission is declared', async () => {
+  it('allows app file search only when workspace read permission is declared', async () => {
     const allowed = makeGate({ packagePermissions: { workspace: { read: true } } })
     await allowed.gate.check(tool('search'), { query: 'TODO', scope: 'files' }, { actor: 'package', package_id: 'stats-checker' })
 
@@ -619,7 +619,7 @@ describe('approval preview', () => {
   })
 })
 
-describe('app, skill, and package-owned named tool policies', () => {
+describe('app, skill, and app-owned named tool policies', () => {
   it('keeps app-specific names out of the static core policy map', () => {
     expect(getToolPolicy('issues.list')).toEqual({ category: 'general', risk: 'low', label: 'issues.list' })
     expect(getToolPolicy('knowledge.list')).toEqual({ category: 'general', risk: 'low', label: 'knowledge.list' })
@@ -647,10 +647,10 @@ describe('app, skill, and package-owned named tool policies', () => {
   })
 })
 
-describe('package-owned named tool permission enforcement', () => {
+describe('app-owned named tool permission enforcement', () => {
   const pkg = { actor: 'package' as const, package_id: 'board' }
 
-  it('allows a package to call its own named tools without approval', async () => {
+  it('allows an app to call its own named tools without approval', async () => {
     const { gate, requests } = makeGate({
       packagePermissions: { workspace: { read: true, write: true } },
       getDynamicToolPolicy: name => name === 'issues.delete'
@@ -663,7 +663,7 @@ describe('package-owned named tool permission enforcement', () => {
     expect(requests).toHaveLength(0)
   })
 
-  it('denies packages calling named tools owned by another package', async () => {
+  it('denies apps calling named tools owned by another app', async () => {
     const { gate } = makeGate({
       packagePermissions: { workspace: { read: true, write: true } },
       getDynamicToolPolicy: name => name === 'issues.delete'
@@ -673,7 +673,7 @@ describe('package-owned named tool permission enforcement', () => {
 
     await expect(
       gate.check(tool('issues.delete'), { id: 'issue-1' }, { actor: 'package', package_id: 'knowledge' }),
-    ).rejects.toThrow('cannot call tools owned by package board')
+    ).rejects.toThrow('cannot call tools owned by app board')
   })
 
   it('uses dynamic named-tool policy for AI approval requests', async () => {
@@ -697,27 +697,27 @@ describe('package-owned named tool permission enforcement', () => {
     await pending
   })
 
-  it('denies skill catalog tools to packages', async () => {
+  it('denies skill catalog tools to apps', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     for (const name of ['skill.list', 'skill.get', 'skill.setDisabled', 'skill.create']) {
       await expect(gate.check(tool(name), {}, pkg)).rejects.toThrow('cannot access AI skill activation state')
     }
   })
 
-  it('lets the board package toggle its own enablement (id = board)', async () => {
+  it('lets the board app toggle its own enablement (id = board)', async () => {
     const { gate, requests } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     await gate.check(tool('app.enable'), { id: 'board' }, { actor: 'package', package_id: 'board' })
     await gate.check(tool('app.disable'), { id: 'board' }, { actor: 'package', package_id: 'board' })
     expect(requests).toHaveLength(0)
   })
 
-  it('lets the knowledge package toggle its own enablement (id = knowledge)', async () => {
+  it('lets the knowledge app toggle its own enablement (id = knowledge)', async () => {
     const { gate, requests } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     await gate.check(tool('app.enable'), { id: 'knowledge' }, { actor: 'package', package_id: 'knowledge' })
     expect(requests).toHaveLength(0)
   })
 
-  it('denies a package toggling any id that is not its own', async () => {
+  it('denies an app toggling any id that is not its own', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     await expect(
       gate.check(tool('app.enable'), { id: 'knowledge' }, { actor: 'package', package_id: 'board' }),
@@ -730,39 +730,39 @@ describe('package-owned named tool permission enforcement', () => {
     ).rejects.toThrow(PermissionDeniedError)
   })
 
-  it('denies app.trust to package actors entirely, even for their own id', async () => {
+  it('denies app.trust to app actors entirely, even for their own id', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     await expect(
       gate.check(tool('app.trust'), { id: 'board' }, { actor: 'package', package_id: 'board' }),
-    ).rejects.toThrow('cannot acknowledge package trust')
+    ).rejects.toThrow('cannot acknowledge app trust')
   })
 
-  it('denies registry.trust to package actors', async () => {
+  it('denies registry.trust to app actors', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     await expect(
       gate.check(tool('registry.trust'), { id: 'acme' }, { actor: 'package', package_id: 'board' }),
-    ).rejects.toThrow('cannot access the package registry')
+    ).rejects.toThrow('cannot access the app registry')
   })
 
-  it('denies registry.list to package actors', async () => {
+  it('denies registry.list to app actors', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     await expect(
       gate.check(tool('registry.list'), {}, { actor: 'package', package_id: 'board' }),
-    ).rejects.toThrow('cannot access the package registry')
+    ).rejects.toThrow('cannot access the app registry')
   })
 
-  it('denies app.remove to package actors', async () => {
+  it('denies app.remove to app actors', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     await expect(
       gate.check(tool('app.remove'), { id: 'board' }, { actor: 'package', package_id: 'board' }),
-    ).rejects.toThrow('cannot remove packages')
+    ).rejects.toThrow('cannot remove apps')
   })
 
-  it('denies app.updates to package actors (same class as registry.list)', async () => {
+  it('denies app.updates to app actors (same class as registry.list)', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     await expect(
       gate.check(tool('app.updates'), {}, { actor: 'package', package_id: 'board' }),
-    ).rejects.toThrow('cannot access the package registry')
+    ).rejects.toThrow('cannot access the app registry')
   })
 
   it('allows the user actor everything', async () => {
@@ -797,14 +797,14 @@ describe('enablement ledger is protected from direct fs.write (Decision 12)', ()
     expect(requests[0]).toMatchObject({
       toolName: 'fs.write',
       pathKind: 'sensitive',
-      reason: 'Package enablement ledger',
+      reason: 'App enablement ledger',
     })
 
     gate.respond(requests[0].requestId, { approved: false })
     await expect(pending).rejects.toThrow('Permission denied')
   })
 
-  it('denies package actors from writing to the enablement ledger even with workspace.write', async () => {
+  it('denies app actors from writing to the enablement ledger even with workspace.write', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
 
     await expect(
@@ -991,7 +991,7 @@ describe('resource collection write policy', () => {
     expect(decisions.at(-1)).toMatchObject({ decision: 'allowed', pathKind: 'resource' })
   })
 
-  it('denies package writes to readonly collections but allows direct with workspace.write', async () => {
+  it('denies app writes to readonly collections but allows direct with workspace.write', async () => {
     const permissions: PackagePermissions = { workspace: { read: true, write: true } }
     const { gate } = makeGate({ packagePermissions: permissions, resourcePolicies: { templates: 'readonly', snippets: 'direct' } })
     await expect(
@@ -1039,7 +1039,7 @@ describe('resources tool policies', () => {
     ).resolves.toBeUndefined()
   })
 
-  it('denies package resource reads without workspace.read', async () => {
+  it('denies app resource reads without workspace.read', async () => {
     const permissions: PackagePermissions = {}
     const { gate } = makeGate({ packagePermissions: permissions })
     await expect(
@@ -1289,7 +1289,7 @@ describe('agent.launch / agent.stop are user-only (agent-sessions decision 4)', 
   })
 })
 
-describe('agent tools are denied to package actors', () => {
+describe('agent tools are denied to app actors', () => {
   it('denies every agent.* tool even with full workspace permissions', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     for (const name of [
@@ -1398,7 +1398,7 @@ describe('dynamic tool policy provider', () => {
   })
 })
 
-describe('package-actor sanity for dynamic-policy tools', () => {
+describe('app-actor sanity for dynamic-policy tools', () => {
   const getDynamic = (name: string): ToolPolicy | undefined => {
     const policies: Record<string, ToolPolicy> = {
       'metrics.query': { category: 'general', risk: 'low', label: 'Metrics: Query' },
@@ -1407,7 +1407,7 @@ describe('package-actor sanity for dynamic-policy tools', () => {
     return policies[name]
   }
 
-  it('allows a package calling a dynamic general/low tool (cross-package is intentional)', async () => {
+  it('allows an app calling a dynamic general/low tool (cross-app is intentional)', async () => {
     const { gate, requests } = makeGate({
       packagePermissions: { workspace: { read: true } },
       getDynamicToolPolicy: getDynamic,
@@ -1416,7 +1416,7 @@ describe('package-actor sanity for dynamic-policy tools', () => {
     expect(requests).toHaveLength(0)
   })
 
-  it('allows a package calling a dynamic write tool without pathParam (no workspace-write check)', async () => {
+  it('allows an app calling a dynamic write tool without pathParam (no workspace-write check)', async () => {
     const { gate, requests } = makeGate({
       packagePermissions: { workspace: { read: true } },
       getDynamicToolPolicy: getDynamic,
@@ -1427,7 +1427,7 @@ describe('package-actor sanity for dynamic-policy tools', () => {
     expect(requests).toHaveLength(0)
   })
 
-  it('hard-deny lists still apply to package actors regardless of dynamic policy', async () => {
+  it('hard-deny lists still apply to app actors regardless of dynamic policy', async () => {
     const evilDynamic = (name: string): ToolPolicy | undefined => {
       if (name === 'terminal.run') return { category: 'general', risk: 'low' }
       return undefined

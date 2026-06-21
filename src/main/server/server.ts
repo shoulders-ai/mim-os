@@ -86,7 +86,7 @@ export async function createServer(
   // Populated after port assignment; checked at request time.
   const allowedOrigins = new Set<string>()
 
-  // Event replay buffer: stores the last N job events per package so
+  // Event replay buffer: stores the last N job events per app so
   // reconnecting clients can catch up on missed events.
   const EVENT_BUFFER_MAX = 500
   const eventBuffer = new Map<string, Array<Record<string, unknown>>>()
@@ -209,10 +209,10 @@ export async function createServer(
     res.sendFile(relative(root, fullPath), { root })
   })
 
-  // Serve package UI files
+  // Serve app UI files
   app.use('/packages/:id', (req, res, next) => {
     const pkg = packages.get(req.params.id)
-    if (!pkg) return res.status(404).send('Package not found')
+    if (!pkg) return res.status(404).send('App not found')
 
     const fullPath = resolvePackageUiPath(pkg.dir, req.path)
 
@@ -220,7 +220,7 @@ export async function createServer(
       return res.status(404).send('File not found')
     }
 
-    // Serve relative to the package's ui/ root. Packages install under
+    // Serve relative to the app's ui/ root. Apps install under
     // ~/.mim/packages/<id>/<version>/, and that `.mim` segment is a dotfile;
     // sendFile with an absolute path applies send's default dotfiles:'ignore'
     // to the WHOLE path and 404s on the prefix. The `root` option scopes the
@@ -289,7 +289,7 @@ export async function createServer(
           const launch = typeof params.launch === 'string' ? params.launch : ''
           const identified = resolveLaunchToken(launchTokens, launch)
           if (!identified) {
-            sendWs(ws, { id, error: 'Invalid package launch token' })
+            sendWs(ws, { id, error: 'Invalid app launch token' })
             return
           }
           // Establish the token: from now on the same launch URL re-identifies
@@ -413,11 +413,11 @@ export async function createServer(
     createPackageLaunchUrl: (packageId: string, viewId?: string) => {
       pruneExpiredLaunchTokens(launchTokens)
       const pkg = packages.get(packageId)
-      if (!pkg) throw new Error(`Package not found: ${packageId}`)
+      if (!pkg) throw new Error(`App not found: ${packageId}`)
       const view = viewId
         ? pkg.manifest.views.find(candidate => candidate.id === viewId)
         : pkg.manifest.views[0]
-      if (!view) throw new Error(`Package has no view: ${packageId}`)
+      if (!view) throw new Error(`App has no view: ${packageId}`)
       const token = randomUUID()
       launchTokens.set(token, {
         packageId,
@@ -560,9 +560,9 @@ function pruneExpiredLaunchTokens(tokens: Map<string, LaunchToken>): void {
 
 function viewSrcToUiRequestPath(packageDir: string, src: string): string {
   const resolved = resolveInsidePackage(packageDir, src)
-  if (!resolved) throw new Error(`Invalid package view src: ${src}`)
+  if (!resolved) throw new Error(`Invalid app view src: ${src}`)
   const uiRoot = resolve(packageDir, 'ui')
   const rel = relative(uiRoot, resolved)
-  if (rel.startsWith('..') || isAbsolute(rel)) throw new Error(`Package view must be inside ui/: ${src}`)
+  if (rel.startsWith('..') || isAbsolute(rel)) throw new Error(`App view must be inside ui/: ${src}`)
   return rel.replace(/\\/g, '/')
 }

@@ -94,7 +94,7 @@ export function classifyPermissionPath(
     if (isEnablementLedger(absolutePath, base)) {
       return {
         kind: 'sensitive',
-        reason: 'Package enablement ledger',
+        reason: 'App enablement ledger',
         absolutePath,
       }
     }
