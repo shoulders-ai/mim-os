@@ -50,7 +50,7 @@ describe('external resource loading', () => {
       expect(existsSync(join(EXT_ROOT, 'index.json'))).toBe(false)
     })
 
-    it('parses the package manifest from the external package dir', () => {
+    it('parses the app manifest from the external app dir', () => {
       const packageDir = join(EXT_ROOT, 'packages', 'ext-demo')
       const raw = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf-8'))
       const { manifest, diagnostics } = parsePackageManifest(raw, packageDir)

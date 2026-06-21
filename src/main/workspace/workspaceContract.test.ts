@@ -30,7 +30,7 @@ describe('workspaceContract — mim.yaml parse/serialize', () => {
     expect(parseMimYaml(text)).toEqual(config)
   })
 
-  it('round-trips a boolean apps map keyed by package id', () => {
+  it('round-trips a boolean apps map keyed by app id', () => {
     const config = { name: 'my-project', apps: { board: true, knowledge: false } }
     const text = serializeMimYaml(config)
     expect(parseMimYaml(text)).toEqual(config)
@@ -80,7 +80,7 @@ describe('workspaceContract — mim.yaml parse/serialize', () => {
     expect(config.apps).toEqual({ hello: true })
   })
 
-  it('drops app keys that are not valid package ids', () => {
+  it('drops app keys that are not valid app ids', () => {
     const config = parseMimYaml('name: solo\napps:\n  "Bad Name!": true\n  UPPER: true\n  "-leading": true\n  board: true\n')
     expect(config.apps).toEqual({ board: true })
   })
@@ -373,7 +373,7 @@ describe('workspaceContract — committed app enablement (readAppEnabled / readC
     expect(readAppEnabled(dir, 'board')).toBe(false)
   })
 
-  it('readAppEnabled reads boolean entries by package id', () => {
+  it('readAppEnabled reads boolean entries by app id', () => {
     write('name: x\napps:\n  board: true\n  knowledge: false\n')
     expect(readAppEnabled(dir, 'board')).toBe(true)
     expect(readAppEnabled(dir, 'knowledge')).toBe(false)
@@ -396,7 +396,7 @@ describe('workspaceContract — committed app enablement (readAppEnabled / readC
     })
   })
 
-  it('setAppEnabled writes a boolean entry for a new package id', () => {
+  it('setAppEnabled writes a boolean entry for a new app id', () => {
     write('name: x\n')
     setAppEnabled(dir, 'board', true)
     expect(parseMimYaml(readFileSync(join(dir, 'mim.yaml'), 'utf-8')).apps).toEqual({ board: true })
@@ -425,8 +425,8 @@ describe('workspaceContract — committed app enablement (readAppEnabled / readC
     expect(config.apps).toEqual({ board: false, knowledge: true })
   })
 
-  it('setAppEnabled rejects invalid package ids', () => {
-    expect(() => setAppEnabled(dir, 'Bad Id', true)).toThrow('Invalid package id')
+  it('setAppEnabled rejects invalid app ids', () => {
+    expect(() => setAppEnabled(dir, 'Bad Id', true)).toThrow('Invalid app id')
   })
 })
 

@@ -158,7 +158,7 @@ describe('headless app.enable', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('enables a workspace package and persists the enablement via app.status', async () => {
+  it('enables a workspace app and persists the enablement via app.status', async () => {
     writeWorkspacePackage(root, 'board')
     const kernel = createHeadlessKernel()
     await kernel.openWorkspace(root)
@@ -224,7 +224,7 @@ describe('headless registry and install tool registration', () => {
     expect(tool!.name).toBe('registry.list')
   })
 
-  it('registers package.install tool in headless kernel', async () => {
+  it('registers the package.install tool in headless kernel', async () => {
     const kernel = createHeadlessKernel()
     await kernel.openWorkspace(root)
     const tool = kernel.tools.get('package.install')
@@ -232,14 +232,14 @@ describe('headless registry and install tool registration', () => {
     expect(tool!.name).toBe('package.install')
   })
 
-  it('registers package.update tool in headless kernel', async () => {
+  it('registers the package.update tool in headless kernel', async () => {
     const kernel = createHeadlessKernel()
     await kernel.openWorkspace(root)
     const tool = kernel.tools.get('package.update')
     expect(tool).toBeDefined()
   })
 
-  it('registers package.uninstall tool in headless kernel', async () => {
+  it('registers the package.uninstall tool in headless kernel', async () => {
     const kernel = createHeadlessKernel()
     await kernel.openWorkspace(root)
     const tool = kernel.tools.get('package.uninstall')
@@ -247,7 +247,7 @@ describe('headless registry and install tool registration', () => {
   })
 })
 
-describe('headless named package tools', () => {
+describe('headless named app tools', () => {
   let root: string
 
   function writeFixturePackage(): void {

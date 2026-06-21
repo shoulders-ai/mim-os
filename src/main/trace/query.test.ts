@@ -192,7 +192,7 @@ describe('trace query', () => {
     expect(result.events.map(e => e.traceId)).toEqual(['tool-fail', 'job-fail'])
   })
 
-  it('aggregates tool, model, gate, job, package, day, and outcome stats', async () => {
+  it('aggregates tool, model, gate, job, app, day, and outcome stats', async () => {
     writeTraceFile(dir, '2026-06-12', [
       event({ kind: 'tool.result', tool: 'fs.write', status: 'ok', durationMs: 20 }),
       event({ kind: 'tool.error', traceId: 't2', spanId: 's2', tool: 'fs.read', status: 'error', durationMs: 10 }),

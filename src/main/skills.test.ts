@@ -101,9 +101,9 @@ describe('filesystem skill loader', () => {
     ])
   })
 
-  it('scans package skill roots with source package', () => {
+  it('scans app skill roots with app source', () => {
     const pkgDir = join(root, 'pkg-skills')
-    writeSkill(pkgDir, 'my-skill', 'name: my-skill\ndescription: From package')
+    writeSkill(pkgDir, 'my-skill', 'name: my-skill\ndescription: From app')
 
     const loader = createSkillLoader({
       builtinDir,
@@ -115,15 +115,15 @@ describe('filesystem skill loader', () => {
     expect(loader.get('package:review-app/my-skill')).toMatchObject({
       id: 'package:review-app/my-skill',
       name: 'my-skill',
-      description: 'From package',
+      description: 'From app',
       source: 'package',
       packageId: 'review-app',
     })
   })
 
-  it('keeps package skills in a separate namespace from authored skills', () => {
+  it('keeps app skills in a separate namespace from authored skills', () => {
     const pkgDir = join(root, 'pkg-skills')
-    writeSkill(pkgDir, 'shared', 'name: shared\ndescription: Package version')
+    writeSkill(pkgDir, 'shared', 'name: shared\ndescription: App version')
     writeSkill(personalDir, 'shared', 'name: shared\ndescription: Personal version')
 
     const loader = createSkillLoader({
@@ -141,12 +141,12 @@ describe('filesystem skill loader', () => {
     expect(loader.get('package:writer/shared')).toMatchObject({
       id: 'package:writer/shared',
       source: 'package',
-      description: 'Package version',
+      description: 'App version',
     })
     expect(loader.listDetailed().map(skill => skill.id)).toEqual(['shared'])
   })
 
-  it('tolerates a package root that does not exist', () => {
+  it('tolerates an app root that does not exist', () => {
     const loader = createSkillLoader({
       builtinDir,
       personalDir,
@@ -191,7 +191,7 @@ describe('filesystem skill loader', () => {
     expect(loader.get('no-unlocks')?.unlocks).toEqual([])
   })
 
-  it('loads the bundled build-app skill with package authoring unlocks', () => {
+  it('loads the bundled build-app skill with app authoring unlocks', () => {
     const builtinSkillsDir = resolveBuiltinSkillsDir()
     expect(existsSync(join(builtinSkillsDir, 'build-app', 'SKILL.md'))).toBe(true)
 
@@ -242,7 +242,7 @@ describe('filesystem skill loader', () => {
     writeSkill(join(workspaceDir, 'skills'), 'issue-work', 'name: issue-work\ndescription: Workspace')
     writeSkill(builtinDir, 'other-work', 'name: other-work\ndescription: Other')
     const pkgDir = join(root, 'pkg-skills')
-    writeSkill(pkgDir, 'issue-work', 'name: issue-work\ndescription: Package')
+    writeSkill(pkgDir, 'issue-work', 'name: issue-work\ndescription: App')
 
     const loader = createSkillLoader({
       builtinDir,

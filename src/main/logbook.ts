@@ -90,7 +90,7 @@ function formatLogEntry(entry: LogbookEntry): string {
 }
 
 function sourceLabel(entry: LogbookEntry): string {
-  if (entry.actor === 'package' && entry.package_id) return `package ${entry.package_id}`
+  if (entry.actor === 'package' && entry.package_id) return `app ${entry.package_id}`
   return entry.actor
 }
 

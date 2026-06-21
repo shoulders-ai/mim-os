@@ -39,7 +39,7 @@ describe('logbook', () => {
     expect(content).toContain('- 2026-06-01T12:34:56.000Z [ai] Line one Line two with space')
   })
 
-  it('includes package identity when the actor is a package', () => {
+  it('includes app identity when the actor is an app', () => {
     appendLogEntry(
       dir,
       { actor: 'package', package_id: 'docx-review', message: 'Generated report' },
@@ -47,7 +47,7 @@ describe('logbook', () => {
     )
 
     const content = readFileSync(join(dir, '.mim', 'log.md'), 'utf-8')
-    expect(content).toContain('[package docx-review] Generated report')
+    expect(content).toContain('[app docx-review] Generated report')
   })
 
   it('rejects empty messages', () => {

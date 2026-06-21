@@ -106,7 +106,7 @@ The workspace is a directory on the user's machine. Committed layout:
 - CLAUDE.md — contract pointer (usually references AGENTS.md)
 - issues/ — issue records, one markdown file each (present when the issues app is enabled)
 - knowledge/ — knowledge records, one markdown file each (present when the knowledge app is enabled)
-- packages/ — installed packages (UI extensions)
+- packages/ — installed apps (UI extensions)
 
 Runtime (gitignored, not committed):
 - .mim/ — runtime config, event log, chat sessions, and agent-context.md (the volatile current-state digest)
@@ -117,13 +117,13 @@ You can read, write, and manage files within the workspace. File mutation tools 
 
 {{TOOL_SET}}
 
-## Packages
+## Apps
 
-Packages are UI extensions that run in sandboxed iframes. Each package lives in packages/{id}/ and contains:
+Apps are UI extensions that run in sandboxed iframes. Each app lives in packages/{id}/ and contains:
 - package.json — manifest with id, name, description, icon, ui path
 - ui/index.html — the UI entry point
 
-Packages use the SDK at /sdk/mim.js to interact with the kernel:
+Apps use the SDK at /sdk/mim.js to interact with the kernel:
 
 \`\`\`html
 <!DOCTYPE html>
@@ -145,7 +145,7 @@ Packages use the SDK at /sdk/mim.js to interact with the kernel:
 </html>
 \`\`\`
 
-When the user asks you to build a UI, create a package. Use plain HTML + JS with the SDK. The tokens.css file provides design tokens (--color-ink, --color-accent, --font-sans, etc.) so packages match the Mim aesthetic.
+When the user asks you to build a UI, create an app. Use plain HTML + JS with the SDK. The tokens.css file provides design tokens (--color-ink, --color-accent, --font-sans, etc.) so apps match the Mim aesthetic.
 
 ## Skills
 
@@ -431,7 +431,7 @@ export function readAppEnabled(dir: string, id: string): boolean {
 }
 
 export function setAppEnabled(dir: string, id: string, enabled: boolean): void {
-  if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid package id: ${id}`)
+  if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid app id: ${id}`)
   const path = join(dir, 'mim.yaml')
   let config: MimConfig
   if (existsSync(path)) {
@@ -451,7 +451,7 @@ export function setAppEnabled(dir: string, id: string, enabled: boolean): void {
 }
 
 /**
- * Write (or update) the committed source pin for a package in mim.yaml.
+ * Write (or update) the committed source pin for an app in mim.yaml.
  * Preserves an existing entry's enabled flag; enablement itself goes through
  * setAppEnabled so the add flow stays on the standard path.
  */
@@ -460,7 +460,7 @@ export function writeAppPin(
   id: string,
   pin: { source: string; path?: string; version: string },
 ): void {
-  if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid package id: ${id}`)
+  if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid app id: ${id}`)
   const filePath = join(dir, 'mim.yaml')
   const config: MimConfig = existsSync(filePath)
     ? parseMimYaml(readFileSync(filePath, 'utf-8'))
@@ -479,12 +479,12 @@ export function writeAppPin(
 }
 
 /**
- * Remove the committed app pin for a package from mim.yaml.
+ * Remove the committed app pin from mim.yaml.
  * Handles both boolean-form (`board: true`) and object-form entries.
  * No-op when the id is absent from the apps map.
  */
 export function removeApp(dir: string, id: string): void {
-  if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid package id: ${id}`)
+  if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid app id: ${id}`)
   const path = join(dir, 'mim.yaml')
   if (!existsSync(path)) return
   const config = parseMimYaml(readFileSync(path, 'utf-8'))
