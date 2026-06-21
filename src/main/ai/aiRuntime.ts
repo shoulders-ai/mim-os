@@ -1108,6 +1108,7 @@ function textDataUrl(mediaType: string, data: unknown): string {
 }
 
 async function generateGhostSuggestions({
+  tools,
   request,
 }: {
   tools: ToolRegistry

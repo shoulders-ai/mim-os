@@ -58,26 +58,26 @@ Web:
 - web_search(query, max_results?) — search the web via Exa and return results with title, URL, and snippet. Requires an Exa API key in Settings → Models → Integrations. Use web_read to fetch full content of interesting results.
 - web_read(url, max_chars?, timeout_ms?) — fetch a URL and return cleaned, readable markdown content. Extracts the article via Mozilla Readability and strips navigation, ads, and boilerplate. Returns title, content, excerpt, byline, siteName. Only http/https URLs.
 
-Package management:
-- package_create(id, name, description, html, js?) — create a new package
-- package_edit(id, file, content) — edit a package file
-- package_delete(id) — remove a package
-- package_list() — list installed packages
+App management:
+- package_create(id, name, description, html, js?) — create a new app
+- package_edit(id, file, content) — edit an app file
+- package_delete(id) — remove an app
+- package_list() — list installed apps
 
 Registry and install:
-- registry_list() — list packages available in the registry, with install state. Always shows the effective registry URL.
+- registry_list() — list apps available in the registry, with install state. Always shows the effective registry URL.
 - package_install(id?, version?, repo?, ref?) — install globally to ~/.mim/packages/<id>/<version>/, by registry id or direct repo URL. Verifies the pinned commit, manifest id, engines, and permissions against the registry entry before copying.
 - package_update(id) — install the latest registry version side-by-side and repoint the workspace pin if one exists.
 - package_uninstall(id, version) — remove an installed version from the global dir.
 
 Enablement:
-- Packages are enabled per workspace via the committed mim.yaml apps map (keyed by package id) or the local .mim/packages/enabled.json layer. Global (registry-installed) packages in ~/.mim/packages/ are shared across workspaces; enablement is per workspace.`
+- Apps are enabled per workspace via the committed mim.yaml apps map (keyed by package id) or the local .mim/packages/enabled.json layer. Global (registry-installed) packages in ~/.mim/packages/ are shared across workspaces; enablement is per workspace.`
 
-export const PACKAGES_SECTION = `Packages are UI extensions that run in sandboxed iframes. Each package lives in packages/{id}/ and contains:
+export const PACKAGES_SECTION = `Apps are UI extensions that run in sandboxed iframes. Each app lives in packages/{id}/ and contains:
 - package.json — manifest with id, name, description, icon, ui path
 - ui/index.html — the UI entry point
 
-Packages use the SDK at /sdk/mim.js to interact with the kernel:
+Apps use the SDK at /sdk/mim.js to interact with the kernel:
 
 \`\`\`html
 <!DOCTYPE html>
@@ -99,7 +99,7 @@ Packages use the SDK at /sdk/mim.js to interact with the kernel:
 </html>
 \`\`\`
 
-When the user asks you to build a UI, create a package. Use plain HTML + JS with the SDK. The tokens.css file provides design tokens (--color-ink, --color-accent, --font-sans, etc.) so packages match the Mim aesthetic.`
+When the user asks you to build a UI, create an app. Use plain HTML + JS with the SDK. The tokens.css file provides design tokens (--color-ink, --color-accent, --font-sans, etc.) so apps match the Mim aesthetic.`
 
 export function resolveTemplateVars(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (match, key) => key in vars ? vars[key] : match)
@@ -125,7 +125,7 @@ The workspace is a directory on the user's machine. Committed layout:
 - CLAUDE.md — contract pointer (usually references AGENTS.md)
 - issues/ — issue records, one markdown file each (present when the issues app is enabled)
 - knowledge/ — knowledge records, one markdown file each (present when the knowledge app is enabled)
-- packages/ — installed packages (UI extensions)
+- packages/ — installed apps (UI extensions)
 
 Runtime (gitignored, not committed):
 - .mim/ — runtime config, event log, chat sessions, and agent-context.md (the volatile current-state digest)
@@ -138,7 +138,7 @@ You can read, write, and manage files within the workspace. File mutation tools 
 ${TOOL_CATALOG}
 
 
-# PACKAGES
+# APPS
 
 ${PACKAGES_SECTION}`
 }

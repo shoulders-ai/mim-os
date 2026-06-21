@@ -20,7 +20,7 @@ export function closeGuardDecision(dirtyTabCount: number, activeRunCount = 0, ac
     parts.push(`${dirtyTabCount} unsaved ${noun}`)
   }
   if (activeRunCount > 0) {
-    const noun = activeRunCount === 1 ? 'package run' : 'package runs'
+    const noun = activeRunCount === 1 ? 'app run' : 'app runs'
     parts.push(`${activeRunCount} active ${noun}`)
   }
   if (activeAgentCount > 0) {

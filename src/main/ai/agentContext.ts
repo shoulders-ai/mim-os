@@ -126,7 +126,7 @@ export function renderAgentContext(data: AgentContextData): string {
 
   if (data.localPackages && data.localPackages.length > 0) {
     lines.push('')
-    lines.push('## Local packages (development)')
+    lines.push('## Local apps (development)')
     const sorted = [...data.localPackages].sort((a, b) => a.id.localeCompare(b.id))
     for (const pkg of sorted) {
       if (pkg.diagnostics.length > 0) {
@@ -328,7 +328,7 @@ export async function writeAgentContext(
         data.localPackages = localPackages
       }
     } catch {
-      // best-effort: proceed without development package status
+      // best-effort: proceed without development app status
     } finally {
       clearTimeout(timer)
     }

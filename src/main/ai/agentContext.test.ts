@@ -73,7 +73,7 @@ describe('renderAgentContext', () => {
     expect(out).not.toContain('## Knowledge')
   })
 
-  it('renders package-owned board context through app sections', () => {
+  it('renders app-owned board context through app sections', () => {
     const out = renderAgentContext(
       baseData({
         apps: [{ id: 'board', enabled: true }],
@@ -85,7 +85,7 @@ describe('renderAgentContext', () => {
     expect(out).toContain('Waiting on Bob')
   })
 
-  it('renders package-owned knowledge context through app sections', () => {
+  it('renders app-owned knowledge context through app sections', () => {
     const out = renderAgentContext(
       baseData({
         apps: [{ id: 'knowledge', enabled: true }],
@@ -97,7 +97,7 @@ describe('renderAgentContext', () => {
     expect(out).toContain('5')
   })
 
-  it('renders local package development health', () => {
+  it('renders local app development health', () => {
     const out = renderAgentContext(
       baseData({
         localPackages: [
@@ -124,14 +124,14 @@ describe('renderAgentContext', () => {
       }),
     )
 
-    expect(out).toContain('## Local packages (development)')
+    expect(out).toContain('## Local apps (development)')
     expect(out).toContain('- my-pr-monitor: 2 tools, 1 job, 1 skill - enabled, loaded')
     expect(out).toContain('- my-reader: manifest error: Backend file does not exist')
   })
 
-  it('omits local package development health when there are no workspace packages', () => {
+  it('omits local app development health when there are no workspace apps', () => {
     const out = renderAgentContext(baseData({ localPackages: [] }))
-    expect(out).not.toContain('## Local packages')
+    expect(out).not.toContain('## Local apps')
   })
 
   it('renders recent changes when populated', () => {
@@ -376,7 +376,7 @@ describe('gatherAgentContext', () => {
   })
 })
 
-describe('writeAgentContext local package provider', () => {
+describe('writeAgentContext local app provider', () => {
   let dir: string
 
   beforeEach(() => {
@@ -388,7 +388,7 @@ describe('writeAgentContext local package provider', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('includes local package status from the async provider', async () => {
+  it('includes local app status from the async provider', async () => {
     setAgentContextLocalPackagesProvider(async () => [
       {
         id: 'dev-app',
@@ -408,13 +408,13 @@ describe('writeAgentContext local package provider', () => {
       readTraceHealth: () => [],
     })
 
-    expect(result.content).toContain('## Local packages (development)')
+    expect(result.content).toContain('## Local apps (development)')
     expect(result.content).toContain('dev-app: 1 tool')
   })
 })
 
 describe('renderAgentContext — generalized apps digest', () => {
-  it('lists enabled package ids in the Apps enabled line', () => {
+  it('lists enabled app ids in the Apps enabled line', () => {
     const data = baseData({
       apps: [
         { id: 'board', enabled: true },

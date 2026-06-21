@@ -93,7 +93,7 @@ describe('callModelToolLoop', () => {
   })
 
   // --- tool adaptation ---
-  it('A8/A9 adapts package tools and sanitizes the name as the key', async () => {
+  it('A8/A9 adapts app tools and sanitizes the name as the key', async () => {
     await callModelToolLoop({
       modelId: 'claude-sonnet-4-6',
       messages: [{ role: 'user', content: 'hi' }],
@@ -104,7 +104,7 @@ describe('callModelToolLoop', () => {
     expect(passed.submit_review.__tool.inputSchema).toEqual({ __jsonSchema: { type: 'object' } })
   })
 
-  it('A10 the adapted execute forwards input and returns the package value', async () => {
+  it('A10 the adapted execute forwards input and returns the app value', async () => {
     const execute = vi.fn(async (input: Record<string, unknown>) => ({ echoed: input.x }))
     await callModelToolLoop({
       modelId: 'claude-sonnet-4-6',
