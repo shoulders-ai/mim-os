@@ -40,7 +40,7 @@ export interface InstallToolDeps {
   globalDir: string
   /** Injectable clock for testability; production default is Date.now. */
   clock: () => number
-  /** Resolve a registry entry for a package id (and optional version). */
+  /** Resolve a registry entry for an app id (and optional version). */
   lookupRegistryEntry: (id: string, version?: string) => Promise<LookupResult | undefined>
 }
 
@@ -53,7 +53,7 @@ export function registerInstallTools(
 
   tools.register({
     name: 'package.install',
-    description: 'Install a package from the registry or a direct repo URL.',
+    description: 'Install an app from the registry or a direct repo URL.',
     execute: async (params) => {
       const id = typeof params.id === 'string' ? params.id : undefined
       const repo = typeof params.repo === 'string' ? params.repo : undefined
@@ -74,12 +74,12 @@ export function registerInstallTools(
 
       if (id) {
         lookupResult = await deps.lookupRegistryEntry(id, version)
-        if (!lookupResult) throw new Error(`Package "${id}" not found in registry`)
+        if (!lookupResult) throw new Error(`App "${id}" not found in registry`)
         registryEntry = lookupResult
         isLocal = lookupResult.registryKind === 'local' && !!lookupResult.localPackageDir
         if (!isLocal) {
           // Git entries must have repo/ref/commit.
-          if (!lookupResult.repo) throw new Error(`Git registry entry for "${id}" is missing repo`)
+          if (!lookupResult.repo) throw new Error(`Git registry entry for app "${id}" is missing repo`)
           sourceUrl = lookupResult.repo
           targetRef = lookupResult.ref
           expectedCommit = lookupResult.commit
@@ -112,7 +112,7 @@ export function registerInstallTools(
         // ".." segments, so it can never resolve outside the mirror checkout.
         if (packagePath !== undefined && !isValidPackagePath(packagePath)) {
           throw new Error(
-            `Invalid package path "${packagePath}" — must be a repo-relative path ` +
+            `Invalid app path "${packagePath}" — must be a repo-relative path ` +
             `with no "." or ".." segments`,
           )
         }
@@ -120,7 +120,7 @@ export function registerInstallTools(
         // SECURITY: reject source URLs carrying credentials.
         rejectCredentialUrl(sourceUrl!)
 
-        // Clone or refresh the package mirror. Mirrors end up on detached
+        // Clone or refresh the app mirror. Mirrors end up on detached
         // HEADs (tag checkouts), so refresh is fetch + explicit checkout —
         // never pull.
         const mirrorDir = packageMirrorDir(sourceUrl!, deps.cacheRoot)
@@ -157,15 +157,15 @@ export function registerInstallTools(
           )
         }
 
-        // Resolve the package root (repo root, or a subdirectory for monorepos).
+        // Resolve the app root (repo root, or a subdirectory for monorepos).
         packageRoot = packagePath ? join(mirrorDir, packagePath) : mirrorDir
         // Defense in depth: even with the segment validation above, the
         // resolved root must stay inside the mirror checkout.
         if (!(resolve(packageRoot) + sep).startsWith(resolve(mirrorDir) + sep)) {
-          throw new Error(`Package path "${packagePath}" escapes the checkout`)
+          throw new Error(`App path "${packagePath}" escapes the checkout`)
         }
         if (packagePath && !existsSync(packageRoot)) {
-          throw new Error(`Checkout does not contain the package path "${packagePath}"`)
+          throw new Error(`Checkout does not contain the app path "${packagePath}"`)
         }
 
         provenanceSource = sourceUrl!
@@ -184,9 +184,9 @@ export function registerInstallTools(
       if (!existsSync(manifestPath)) {
         throw new Error(
           packagePath
-            ? `Package path "${packagePath}" does not contain a package.json`
+            ? `App path "${packagePath}" does not contain a package.json`
             : isLocal
-              ? `Local package dir does not contain a package.json`
+              ? `Local app dir does not contain a package.json`
               : 'Checkout does not contain a package.json',
         )
       }
@@ -194,7 +194,7 @@ export function registerInstallTools(
       const parsed = parsePackageManifest(packageJson, packageRoot)
       if (!parsed.manifest) {
         throw new Error(
-          `Invalid package manifest: ${parsed.diagnostics.map(d => d.message).join('; ')}`,
+          `Invalid app manifest: ${parsed.diagnostics.map(d => d.message).join('; ')}`,
         )
       }
 
@@ -205,7 +205,7 @@ export function registerInstallTools(
       if (id && manifestId !== id) {
         throw new Error(
           `Manifest id mismatch: expected "${id}", got "${manifestId}". ` +
-          `The manifest id must equal the requested package id.`,
+          `The manifest id must equal the requested app id.`,
         )
       }
 
@@ -229,7 +229,7 @@ export function registerInstallTools(
       // Enforce engines.mim against the runtime version.
       if (manifest.engines?.mim && manifest.engines.mim !== MIM_RUNTIME_VERSION) {
         throw new Error(
-          `Engine incompatible: package requires "${manifest.engines.mim}" ` +
+          `Engine incompatible: app requires "${manifest.engines.mim}" ` +
           `but this runtime is "${MIM_RUNTIME_VERSION}"`,
         )
       }
@@ -246,7 +246,7 @@ export function registerInstallTools(
       }
 
       // Copy the worktree to <globalDir>/<id>/<version>/, excluding .git and
-      // any .mim-install.json inside the package.
+      // any .mim-install.json inside the app.
       const installDir = join(deps.globalDir, manifestId, installVersion)
       if (existsSync(installDir)) {
         rmSync(installDir, { recursive: true, force: true })
@@ -256,7 +256,7 @@ export function registerInstallTools(
       // The copy+provenance block is atomic: if anything throws mid-copy
       // (disk full, permission error) or during provenance write, clean up
       // the partial install directory so the loader never sees a broken
-      // package with no provenance.
+      // app with no provenance.
       try {
         copyTree(packageRoot, installDir)
 
@@ -275,7 +275,7 @@ export function registerInstallTools(
         throw err
       }
 
-      // Rescan so the loader picks up the new package.
+      // Rescan so the loader picks up the new app.
       await deps.packages.rescan()
 
       return { installed: manifestId, version: installVersion, dir: installDir }
@@ -294,10 +294,10 @@ export function registerInstallTools(
       const id = typeof params.id === 'string' ? params.id : undefined
       const version = typeof params.version === 'string' ? params.version : undefined
       if (!id) throw new Error('Missing required parameter: id')
-      if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid package id: ${id}`)
+      if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid app id: ${id}`)
 
       const entry = await deps.lookupRegistryEntry(id, version)
-      if (!entry) throw new Error(`Package "${id}" not found in registry`)
+      if (!entry) throw new Error(`App "${id}" not found in registry`)
 
       const workspacePath = tools.getWorkspacePath()
       if (!workspacePath) throw new Error('No workspace open')
@@ -319,7 +319,7 @@ export function registerInstallTools(
         return { added: id, version: entry.version, local: true }
       }
 
-      if (!entry.repo) throw new Error(`Git registry entry for "${id}" is missing repo`)
+      if (!entry.repo) throw new Error(`Git registry entry for app "${id}" is missing repo`)
       writeAppPin(workspacePath, id, {
         source: entry.repo,
         path: entry.path,
@@ -335,15 +335,15 @@ export function registerInstallTools(
 
   tools.register({
     name: 'package.update',
-    description: 'Update an installed package to a newer registry version.',
+    description: 'Update an installed app to a newer registry version.',
     execute: async (params) => {
       const id = typeof params.id === 'string' ? params.id : undefined
       if (!id) throw new Error('Missing required parameter: id')
-      if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid package id: ${id}`)
+      if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid app id: ${id}`)
 
       // Re-resolve from registry (gets the latest entry).
       const registryEntry = await deps.lookupRegistryEntry(id)
-      if (!registryEntry) throw new Error(`Package "${id}" not found in registry`)
+      if (!registryEntry) throw new Error(`App "${id}" not found in registry`)
 
       // Install the new version (side-by-side).
       const installResult = (await tools.call(
@@ -369,18 +369,18 @@ export function registerInstallTools(
 
   tools.register({
     name: 'package.uninstall',
-    description: 'Remove an installed package version from the global packages directory.',
+    description: 'Remove an installed app version from the global apps directory.',
     execute: async (params) => {
       const id = typeof params.id === 'string' ? params.id : undefined
       const version = typeof params.version === 'string' ? params.version : undefined
       if (!id) throw new Error('Missing required parameter: id')
       if (!version) throw new Error('Missing required parameter: version')
-      if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid package id: ${id}`)
+      if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid app id: ${id}`)
       if (!isValidSemver(version)) throw new Error(`Invalid version: ${version}`)
 
       const installDir = join(deps.globalDir, id, version)
       if (!existsSync(installDir)) {
-        throw new Error(`Package "${id}@${version}" is not installed`)
+        throw new Error(`App "${id}@${version}" is not installed`)
       }
 
       // No refusal when enabled somewhere — fix-forward. Enabled-but-missing
@@ -420,7 +420,7 @@ function assertNoSymlinks(dir: string, prefix = ''): void {
     const rel = prefix ? `${prefix}/${entry.name}` : entry.name
     if (entry.isSymbolicLink()) {
       throw new Error(
-        `Symlink found in checkout: ${rel} — packages must not contain symlinks`,
+        `Symlink found in checkout: ${rel} — apps must not contain symlinks`,
       )
     }
     if (entry.isDirectory()) {
@@ -478,7 +478,7 @@ function provenanceSourceChanged(installDir: string, expectedSource: string): bo
 }
 
 /**
- * Repoint the version pin for a package in the workspace's mim.yaml.
+ * Repoint the version pin for an app in the workspace's mim.yaml.
  * Only acts when a committed entry already exists; does not create a new one.
  */
 function repointVersionPin(workspacePath: string, id: string, newVersion: string): void {

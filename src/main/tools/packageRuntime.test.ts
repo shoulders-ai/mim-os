@@ -7,7 +7,7 @@ import { createMemorySecretStore } from '@main/integrations/secrets.js'
 import { createToolRegistry } from '@main/tools/registry.js'
 import { registerPackageRuntimeTools } from '@main/tools/packageRuntime.js'
 
-describe('package runtime tools', () => {
+describe('app runtime tools', () => {
   function makeTools(packageDir = '/tmp/self') {
     const tools = createToolRegistry(createTraceLog())
     const runtime = {
@@ -46,7 +46,7 @@ describe('package runtime tools', () => {
     return { tools, jobs, packages, runtime, secretStore }
   }
 
-  it('lists filesystem package skills in package capabilities', async () => {
+  it('lists filesystem app skills in app capabilities', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mim-package-skill-tool-'))
     try {
       const skillDir = join(dir, 'skills', 'review-work')
@@ -75,7 +75,7 @@ describe('package runtime tools', () => {
     }
   })
 
-  it('starts package jobs with the authenticated package identity', async () => {
+  it('starts app jobs with the authenticated app identity', async () => {
     const { tools, jobs } = makeTools()
 
     await tools.call('package.jobs.start', { jobId: 'inspect', inputs: { x: 1 } }, {
@@ -86,7 +86,7 @@ describe('package runtime tools', () => {
     expect(jobs.start).toHaveBeenCalledWith('self', 'inspect', { x: 1 })
   })
 
-  it('rejects cross-package job starts from package UI', async () => {
+  it('rejects cross-app job starts from app UI', async () => {
     const { tools, jobs } = makeTools()
 
     await expect(
@@ -94,12 +94,12 @@ describe('package runtime tools', () => {
         actor: 'package',
         package_id: 'self',
       }),
-    ).rejects.toThrow('authenticated package identity')
+    ).rejects.toThrow('authenticated app identity')
 
     expect(jobs.start).not.toHaveBeenCalled()
   })
 
-  it('passes package job archive and delete lifecycle calls to the runner', async () => {
+  it('passes app job archive and delete lifecycle calls to the runner', async () => {
     const { tools, jobs } = makeTools()
 
     await expect(tools.call('package.jobs.archive', { runId: 'run-1' }, { actor: 'user' }))
@@ -114,7 +114,7 @@ describe('package runtime tools', () => {
     expect(jobs.delete).toHaveBeenCalledWith('run-1')
   })
 
-  it('passes package job rename calls to the runner', async () => {
+  it('passes app job rename calls to the runner', async () => {
     const { tools, jobs } = makeTools()
 
     await expect(tools.call('package.jobs.rename', { runId: 'run-1', label: 'Renamed run' }, { actor: 'user' }))
@@ -123,7 +123,7 @@ describe('package runtime tools', () => {
     expect(jobs.rename).toHaveBeenCalledWith('run-1', 'Renamed run')
   })
 
-  it('stores, reports, and deletes declared package secrets without ever returning values', async () => {
+  it('stores, reports, and deletes declared app secrets without ever returning values', async () => {
     const { tools, secretStore } = makeTools()
     const ctx = { actor: 'package' as const, package_id: 'self' }
 
@@ -141,18 +141,18 @@ describe('package runtime tools', () => {
       .resolves.toEqual({ secrets: [{ name: 'api_token', exists: false }] })
   })
 
-  it('rejects undeclared secret names from package secret tools', async () => {
+  it('rejects undeclared secret names from app secret tools', async () => {
     const { tools } = makeTools()
 
     await expect(tools.call('package.secrets.set', { name: 'other', secret: 'x' }, { actor: 'package', package_id: 'self' }))
       .rejects.toThrow('did not declare secret')
   })
 
-  it('requires package identity for package secret tools', async () => {
+  it('requires app identity for app secret tools', async () => {
     const { tools } = makeTools()
 
     await expect(tools.call('package.secrets.set', { name: 'api_token', secret: 'x' }, { actor: 'user' }))
-      .rejects.toThrow('Package secret tools require package identity')
+      .rejects.toThrow('App secret tools require app identity')
   })
 
   it('exposes no secret-value read tool', async () => {

@@ -69,7 +69,7 @@ describe('telemetry tools', () => {
     expect(result).toEqual({ enabled: false, locked: false })
   })
 
-  it('denies package and AI actors for tracking and settings changes', async () => {
+  it('denies app and AI actors for tracking and settings changes', async () => {
     await expect(
       tools.call('telemetry.track', { event: 'workspace_open' }, { actor: 'ai' }),
     ).rejects.toThrow(/user-only/)

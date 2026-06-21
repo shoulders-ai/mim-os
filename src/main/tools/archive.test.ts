@@ -184,7 +184,7 @@ describe('archive.list tool', () => {
     })
   })
 
-  it('includes archived package runs when a package job runner is registered', async () => {
+  it('includes archived app runs when an app job runner is registered', async () => {
     const jobs = {
       list: () => [{
         runId: 'run-1',

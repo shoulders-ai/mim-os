@@ -98,7 +98,7 @@ describe('registry.inspectSource', () => {
     })
   })
 
-  it('auto-discovers packages when no index.json exists', async () => {
+  it('auto-discovers apps when no index.json exists', async () => {
     const sourceDir = join(dir, 'dev-folder')
     const pkgDir = join(sourceDir, 'packages', 'my-app')
     mkdirSync(pkgDir, { recursive: true })
@@ -122,7 +122,7 @@ describe('registry.inspectSource', () => {
     expect(apps[0]).toMatchObject({ id: 'my-app', name: 'My App', version: '0.2.0' })
   })
 
-  it('returns diagnostics for empty folder with no packages', async () => {
+  it('returns diagnostics for empty folder with no apps', async () => {
     const sourceDir = join(dir, 'empty-registry')
     mkdirSync(sourceDir, { recursive: true })
 
@@ -308,7 +308,7 @@ describe('registry.addSource', () => {
     expect(data.registries['new-one']).toMatchObject({ path: sourceDir })
   })
 
-  it('auto-generates index.json when adding a folder with packages but no index', async () => {
+  it('auto-generates index.json when adding a folder with apps but no index', async () => {
     const sourceDir = join(dir, 'dev-apps')
     const pkgDir = join(sourceDir, 'packages', 'cool-app')
     mkdirSync(pkgDir, { recursive: true })

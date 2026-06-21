@@ -63,7 +63,7 @@ function asLocalLookup(entry: RegistryEntry, registryLocation: string, localPack
   }
 }
 
-// Minimal valid package.json for the checkout.
+// Minimal valid package.json for the checkout (app manifest).
 function validPackageJson(overrides?: Record<string, unknown>): Record<string, unknown> {
   return {
     name: '@mim/github-monitor',
@@ -80,7 +80,7 @@ function validPackageJson(overrides?: Record<string, unknown>): Record<string, u
   }
 }
 
-// Seed a fake checkout in the package mirror dir with a valid package structure.
+// Seed a fake checkout in the app mirror dir with a valid app structure.
 function seedPackageMirror(
   mirrorDir: string,
   packageJson?: Record<string, unknown>,
@@ -167,7 +167,7 @@ describe('package.install', () => {
 
   // ---- Happy path ----
 
-  it('installs a package from the registry by id', async () => {
+  it('installs an app from the registry by id', async () => {
     const deps = await makeDeps()
     const mirrorDir = packageMirrorDir('https://github.com/shoulders-ai/mim-github-monitor', cacheRoot)
     setupGitMocks(mirrorDir)
@@ -206,7 +206,7 @@ describe('package.install', () => {
     expect(raw).not.toContain('secret')
   })
 
-  it('excludes .mim-install.json from the package checkout during copy', async () => {
+  it('excludes .mim-install.json from the app checkout during copy', async () => {
     const deps = await makeDeps()
     const mirrorDir = packageMirrorDir('https://github.com/shoulders-ai/mim-github-monitor', cacheRoot)
     setupGitMocks(mirrorDir, validPackageJson(), { existingProvenance: true })
@@ -220,7 +220,7 @@ describe('package.install', () => {
     expect(provenance.old).toBeUndefined()
   })
 
-  it('installs a direct repo package (no registry entry)', async () => {
+  it('installs a direct repo app (no registry entry)', async () => {
     const deps = await makeDeps({
       lookupRegistryEntry: async () => undefined,
     })
@@ -262,7 +262,7 @@ describe('package.install', () => {
     }
   }
 
-  it('installs a package from a registry entry with a monorepo path', async () => {
+  it('installs an app from a registry entry with a monorepo path', async () => {
     const deps = await makeDeps({
       lookupRegistryEntry: async (id) => id === 'github-monitor'
         ? asGitLookup(validRegistryEntry({ repo: 'https://github.com/shoulders-ai/mim-apps', path: 'packages/github-monitor' }))
@@ -289,7 +289,7 @@ describe('package.install', () => {
     expect(provenance.path).toBe('packages/github-monitor')
   })
 
-  it('installs a direct repo package with a path parameter', async () => {
+  it('installs a direct repo app with a path parameter', async () => {
     const deps = await makeDeps({ lookupRegistryEntry: () => undefined })
     vi.mocked(cloneRepo).mockImplementation(async (_url, target) => {
       seedMonorepoMirror(target)
@@ -313,11 +313,11 @@ describe('package.install', () => {
     for (const path of ['../escape', 'packages/../../escape', '/abs/path', 'a\\b', '.hidden/pkg']) {
       await expect(
         tools.call('package.install', { repo: 'https://github.com/shoulders-ai/mim-apps', path }, { actor: 'user' }),
-      ).rejects.toThrow(/invalid package path/i)
+      ).rejects.toThrow(/invalid app path/i)
     }
   })
 
-  it('refuses when the checkout does not contain the package path', async () => {
+  it('refuses when the checkout does not contain the app path', async () => {
     const deps = await makeDeps({ lookupRegistryEntry: () => undefined })
     vi.mocked(cloneRepo).mockImplementation(async (_url, target) => {
       seedMonorepoMirror(target)
@@ -329,10 +329,10 @@ describe('package.install', () => {
 
     await expect(
       callInstall(deps, { repo: 'https://github.com/shoulders-ai/mim-apps', path: 'packages/nope' }),
-    ).rejects.toThrow(/does not contain the package path/i)
+    ).rejects.toThrow(/does not contain the app path/i)
   })
 
-  it('refuses a symlink inside the package path but tolerates one elsewhere in the monorepo', async () => {
+  it('refuses a symlink inside the app path but tolerates one elsewhere in the monorepo', async () => {
     const deps = await makeDeps({ lookupRegistryEntry: () => undefined })
     vi.mocked(cloneRepo).mockImplementation(async (_url, target) => {
       seedMonorepoMirror(target, { symlinkOutside: true })
@@ -652,7 +652,7 @@ describe('app.add', () => {
     ).rejects.toThrow(/not found in registry/)
   })
 
-  it('is denied to package actors', async () => {
+  it('is denied to app actors', async () => {
     const { createPermissionGate, PermissionDeniedError } = await import('@main/security/gate.js')
     const gate = createPermissionGate({
       getApprovalMode: () => 'normal',
@@ -809,7 +809,7 @@ describe('package.uninstall', () => {
     expect(existsSync(pkgDir)).toBe(false)
   })
 
-  it('does not refuse when the package is enabled (fix-forward)', async () => {
+  it('does not refuse when the app is enabled (fix-forward)', async () => {
     // Enable the package, then uninstall — no error, surfaces in UI later.
     const pkgDir = join(globalDir, 'github-monitor', '1.2.0')
     mkdirSync(join(pkgDir, 'ui'), { recursive: true })
@@ -858,7 +858,7 @@ describe('install tools gate policies', () => {
   })
 })
 
-describe('install tools package-actor denials', () => {
+describe('install tools app-actor denials', () => {
   let dir: string
 
   beforeEach(() => {
@@ -885,15 +885,15 @@ describe('install tools package-actor denials', () => {
     ).rejects.toThrow(PermissionDeniedError)
   }
 
-  it('denies package.install to package actors', async () => {
+  it('denies package.install to app actors', async () => {
     await expectDenied('package.install')
   })
 
-  it('denies package.update to package actors', async () => {
+  it('denies package.update to app actors', async () => {
     await expectDenied('package.update')
   })
 
-  it('denies package.uninstall to package actors', async () => {
+  it('denies package.uninstall to app actors', async () => {
     await expectDenied('package.uninstall')
   })
 })
@@ -1005,7 +1005,7 @@ describe('local-dir installs', () => {
     await expect(callInstall(deps, { id: 'github-monitor' })).rejects.toThrow(/permission.*mismatch/i)
   })
 
-  it('refuses when a symlink is found in the local package tree', async () => {
+  it('refuses when a symlink is found in the local app tree', async () => {
     const pkgDir = join(localRegistryDir, 'packages', 'github-monitor')
     seedLocalPackage(pkgDir, validPackageJson(), { symlink: true })
 

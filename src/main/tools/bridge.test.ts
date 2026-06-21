@@ -73,7 +73,7 @@ describe('Bridge tools', () => {
     ).rejects.toThrow('Missing required parameter: command')
   })
 
-  it('workbench.openWork opens the calling package Work view', async () => {
+  it('workbench.openWork opens the calling app Work view', async () => {
     const result = await tools.call(
       'workbench.openWork',
       { viewId: 'launch' },
@@ -94,7 +94,7 @@ describe('Bridge tools', () => {
     })
   })
 
-  it('workbench.openWork opens a concrete package run for the calling package', async () => {
+  it('workbench.openWork opens a concrete app run for the calling app', async () => {
     const result = await tools.call(
       'workbench.openWork',
       { kind: 'package-run', runId: 'run-1' },
@@ -115,7 +115,7 @@ describe('Bridge tools', () => {
     })
   })
 
-  it('workbench.openArtifact opens the calling package Artifact view', async () => {
+  it('workbench.openArtifact opens the calling app Artifact view', async () => {
     const result = await tools.call(
       'workbench.openArtifact',
       { viewId: 'report' },
@@ -135,23 +135,23 @@ describe('Bridge tools', () => {
     })
   })
 
-  it('workbench tools prevent packages from targeting other packages', async () => {
+  it('workbench tools prevent apps from targeting other apps', async () => {
     await expect(
       tools.call(
         'workbench.openArtifact',
         { packageId: 'other', viewId: 'report' },
         { actor: 'package', package_id: 'reviewer' }
       )
-    ).rejects.toThrow('Package cannot open another package view')
+    ).rejects.toThrow('App cannot open another app view')
   })
 
-  it('workbench tools require packageId for non-package callers', async () => {
+  it('workbench tools require packageId for non-app callers', async () => {
     await expect(
       tools.call('workbench.openWork', { viewId: 'launch' }, ctx)
     ).rejects.toThrow('Missing required parameter: packageId')
   })
 
-  it('workbench.openWork requires a runId for package-run targets', async () => {
+  it('workbench.openWork requires a runId for app-run targets', async () => {
     await expect(
       tools.call(
         'workbench.openWork',

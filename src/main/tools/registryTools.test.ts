@@ -514,7 +514,7 @@ describe('registry.trust gate', () => {
   })
 })
 
-describe('registry.list package-actor denial', () => {
+describe('registry.list app-actor denial', () => {
   let dir: string
 
   beforeEach(() => {
@@ -525,7 +525,7 @@ describe('registry.list package-actor denial', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('denies registry.list to package actors', async () => {
+  it('denies registry.list to app actors', async () => {
     const { createPermissionGate, PermissionDeniedError } = await import('@main/security/gate.js')
     const decisions: unknown[] = []
     const gate = createPermissionGate({
@@ -542,7 +542,7 @@ describe('registry.list package-actor denial', () => {
     ).rejects.toThrow(PermissionDeniedError)
   })
 
-  it('denies registry.trust to package actors', async () => {
+  it('denies registry.trust to app actors', async () => {
     const { createPermissionGate, PermissionDeniedError } = await import('@main/security/gate.js')
     const gate = createPermissionGate({
       getApprovalMode: () => 'normal',

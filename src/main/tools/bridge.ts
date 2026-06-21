@@ -68,7 +68,7 @@ export function registerBridgeTools(tools: ToolRegistry): void {
 
   tools.register({
     name: 'workbench.openWork',
-    description: 'Open a package view or run in the Work pane',
+    description: 'Open an app view or run in the Work pane',
     execute: async (params, ctx) => {
       const packageId = resolvePackageId(params, ctx)
       const kind = optionalString(params.kind) ?? 'package-view'
@@ -97,7 +97,7 @@ export function registerBridgeTools(tools: ToolRegistry): void {
 
   tools.register({
     name: 'workbench.openArtifact',
-    description: 'Open a package view in the Artifact pane',
+    description: 'Open an app view in the Artifact pane',
     execute: async (params, ctx) => {
       const packageId = resolvePackageId(params, ctx)
       const viewId = optionalString(params.viewId)
@@ -114,9 +114,9 @@ export function registerBridgeTools(tools: ToolRegistry): void {
 function resolvePackageId(params: Record<string, unknown>, ctx: Parameters<ToolRegistry['call']>[2]): string {
   const requested = optionalString(params.packageId)
   if (ctx.actor === 'package') {
-    if (!ctx.package_id) throw new Error('Package identity required')
+    if (!ctx.package_id) throw new Error('App identity required')
     if (requested && requested !== ctx.package_id) {
-      throw new Error('Package cannot open another package view')
+      throw new Error('App cannot open another app view')
     }
     return ctx.package_id
   }

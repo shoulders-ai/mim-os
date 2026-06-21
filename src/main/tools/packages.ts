@@ -29,7 +29,7 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.create',
-    description: 'Create a new package in the workspace',
+    description: 'Create a new app in the workspace',
     inputSchema: objectSchema({
       id: { type: 'string' },
       name: { type: 'string' },
@@ -70,7 +70,7 @@ export function registerPackageTools(
         const existing = packages.get(id)
         if (existing && existing.source === 'global') {
           throw new Error(
-            `Package "${id}" already exists as a ${existing.source} package. ` +
+            `App "${id}" already exists as a ${existing.source} app. ` +
             `Pass override: true to create a workspace override.`,
           )
         }
@@ -78,7 +78,7 @@ export function registerPackageTools(
 
       const pkgDir = join(workspace, 'packages', id)
       if (existsSync(pkgDir)) {
-        throw new Error(`Package already exists: ${id}`)
+        throw new Error(`App already exists: ${id}`)
       }
 
       mkdirSync(pkgDir, { recursive: true })
@@ -143,7 +143,7 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.edit',
-    description: 'Edit a file within an existing package',
+    description: 'Edit a file within an existing app',
     execute: async (params) => {
       const workspace = requireWorkspace(tools)
       const id = requireString(params, 'id')
@@ -153,13 +153,13 @@ export function registerPackageTools(
       validatePackageId(id)
       const pkgDir = join(workspace, 'packages', id)
       if (!existsSync(pkgDir)) {
-        throw new Error(`Package not found: ${id}`)
+        throw new Error(`App not found: ${id}`)
       }
 
-      // Resolve and validate path stays within the package directory
+      // Resolve and validate path stays within the app directory
       const target = resolve(pkgDir, normalize(file))
       if (!target.startsWith(pkgDir + '/') && target !== pkgDir) {
-        throw new Error('Path traversal outside package directory is not allowed')
+        throw new Error('Path traversal outside app directory is not allowed')
       }
 
       // Ensure parent dir exists
@@ -173,7 +173,7 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.delete',
-    description: 'Delete a package from the workspace',
+    description: 'Delete an app from the workspace',
     execute: async (params) => {
       const workspace = requireWorkspace(tools)
       const id = requireString(params, 'id')
@@ -181,7 +181,7 @@ export function registerPackageTools(
       validatePackageId(id)
       const pkgDir = join(workspace, 'packages', id)
       if (!existsSync(pkgDir)) {
-        throw new Error(`Package not found: ${id}`)
+        throw new Error(`App not found: ${id}`)
       }
 
       rmSync(pkgDir, { recursive: true, force: true })
@@ -191,25 +191,25 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.readme',
-    description: 'Read the package-root README.md for an installed package',
+    description: 'Read the app-root README.md for an installed app',
     inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
     execute: async (params) => {
       const id = requireString(params, 'id')
       validatePackageId(id)
       const pkg = packages.get(id)
-      if (!pkg) throw new Error(`Package not found: ${id}`)
+      if (!pkg) throw new Error(`App not found: ${id}`)
 
       const readmePath = resolveInsidePackage(pkg.dir, 'README.md')
-      if (!readmePath) throw new Error(`Package README not found: ${id}`)
+      if (!readmePath) throw new Error(`App README not found: ${id}`)
 
       let stat
       try {
         stat = await fs.lstat(readmePath)
       } catch {
-        throw new Error(`Package README not found: ${id}`)
+        throw new Error(`App README not found: ${id}`)
       }
       if (!stat.isFile()) {
-        throw new Error(`Package README is not a regular file: ${id}`)
+        throw new Error(`App README is not a regular file: ${id}`)
       }
 
       const content = await fs.readFile(readmePath, 'utf-8')
@@ -219,7 +219,7 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.validate',
-    description: 'Validate a workspace package before or after reload',
+    description: 'Validate a workspace app before or after reload',
     inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
     execute: async (params) => {
       const workspace = requireWorkspace(tools)
@@ -231,7 +231,7 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.reload',
-    description: 'Rescan packages, invalidate package runtime caches, and re-register named package tools',
+    description: 'Rescan apps, invalidate app runtime caches, and re-register named app tools',
     inputSchema: objectSchema({ id: { type: 'string' } }),
     execute: async (params) => {
       requireWorkspace(tools)
@@ -254,7 +254,7 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.list',
-    description: 'List all installed packages',
+    description: 'List all installed apps',
     execute: async () => {
       return {
         packages: packageListPayload(packages, enablement),
@@ -404,7 +404,7 @@ async function validateWorkspacePackage(workspace: string, id: string): Promise<
   const addWarning = (path: string, message: string) => warnings.push({ path, message })
 
   if (!existsSync(pkgDir)) {
-    addError(pkgDir, `Package directory not found: ${id}`)
+    addError(pkgDir, `App directory not found: ${id}`)
     return { id, path: pkgDir, valid: false, errors, warnings, summary }
   }
 
@@ -430,7 +430,7 @@ async function validateWorkspacePackage(workspace: string, id: string): Promise<
   }
 
   if (manifest.id !== id) {
-    addError(manifestPath, `mim.id "${manifest.id}" must match package folder "${id}"`)
+    addError(manifestPath, `mim.id "${manifest.id}" must match app folder "${id}"`)
   }
 
   summary.skills = validatePackageSkills(pkgDir, errors, warnings)
@@ -438,7 +438,7 @@ async function validateWorkspacePackage(workspace: string, id: string): Promise<
   if (manifest.backend) {
     const backendPath = resolveInsidePackage(pkgDir, manifest.backend)
     if (!backendPath) {
-      addError(manifestPath, 'Backend path escapes package directory')
+      addError(manifestPath, 'Backend path escapes app directory')
     } else {
       try {
         const mod = await import(`${pathToFileURL(backendPath).href}?mimValidate=${Date.now()}`) as Record<string, unknown>
@@ -653,10 +653,10 @@ function validatePackageSkills(
 
 function validatePackageId(id: string): void {
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(id)) {
-    throw new Error('Invalid package id: must be lowercase alphanumeric, hyphens, underscores')
+    throw new Error('Invalid app id: must be lowercase alphanumeric, hyphens, underscores')
   }
   if (id.includes('..') || id.includes('/')) {
-    throw new Error('Invalid package id')
+    throw new Error('Invalid app id')
   }
 }
 

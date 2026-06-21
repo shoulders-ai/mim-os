@@ -185,7 +185,7 @@ describe('skill tools', () => {
     await expect(tools.call('skill.inspectImport', { folder: sourceDir }, ctx)).rejects.toThrow('Symlink')
   })
 
-  it('excludes package skills from detailed settings listing but allows qualified activation', async () => {
+  it('excludes app skills from detailed settings listing but allows qualified activation', async () => {
     const pkgDir = join(root, 'package-skills')
     mkdirSync(join(pkgDir, 'review-work'), { recursive: true })
     writeFileSync(join(pkgDir, 'review-work', 'SKILL.md'), [

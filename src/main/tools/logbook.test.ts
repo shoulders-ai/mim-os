@@ -51,14 +51,14 @@ describe('logbook tools', () => {
     expect(readFileSync(join(dir, '.mim', 'log.md'), 'utf-8')).toContain('[user] Finished pass')
   })
 
-  it('log.append preserves package actor identity', async () => {
+  it('log.append preserves app actor identity', async () => {
     await tools.call(
       'log.append',
       { message: 'Package note' },
       { actor: 'package', package_id: 'board' },
     )
 
-    expect(readFileSync(join(dir, '.mim', 'log.md'), 'utf-8')).toContain('[package board] Package note')
+    expect(readFileSync(join(dir, '.mim', 'log.md'), 'utf-8')).toContain('[app board] Package note')
   })
 
   it('log.read reports an absent log without creating it', async () => {

@@ -23,7 +23,7 @@ export function registerPackageRuntimeTools(
 ): void {
   tools.register({
     name: 'package.capabilities.list',
-    description: 'List enabled package jobs and tools',
+    description: 'List enabled app jobs and tools',
     inputSchema: objectSchema({}),
     execute: async () => {
       const capabilities = await runtime.listCapabilities()
@@ -46,7 +46,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.tools.list',
-    description: 'List enabled package tools available to chat',
+    description: 'List enabled app tools available to chat',
     inputSchema: objectSchema({}),
     execute: async () => {
       const packageTools = await runtime.listChatTools()
@@ -56,7 +56,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.tools.execute',
-    description: 'Execute an enabled package-owned AI tool',
+    description: 'Execute an enabled app-owned AI tool',
     inputSchema: objectSchema({
       name: { type: 'string' },
       input: { type: 'object' },
@@ -72,7 +72,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.jobs.start',
-    description: 'Start a package backend job',
+    description: 'Start an app backend job',
     inputSchema: objectSchema({
       packageId: { type: 'string' },
       jobId: { type: 'string' },
@@ -86,25 +86,25 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.jobs.cancel',
-    description: 'Cancel a package backend job run',
+    description: 'Cancel an app backend job run',
     inputSchema: objectSchema({ runId: { type: 'string' } }, ['runId']),
     execute: async (params) => jobs.cancel(requireString(params, 'runId')),
   })
 
   tools.register({
     name: 'package.jobs.get',
-    description: 'Get a package backend job run',
+    description: 'Get an app backend job run',
     inputSchema: objectSchema({ runId: { type: 'string' } }, ['runId']),
     execute: async (params) => {
       const run = jobs.get(requireString(params, 'runId'))
-      if (!run) throw new Error(`Package run not found: ${params.runId}`)
+      if (!run) throw new Error(`App run not found: ${params.runId}`)
       return { run }
     },
   })
 
   tools.register({
     name: 'package.jobs.list',
-    description: 'List package backend job runs',
+    description: 'List app backend job runs',
     inputSchema: objectSchema({
       packageId: { type: 'string' },
       includeArchived: { type: 'boolean' },
@@ -113,7 +113,7 @@ export function registerPackageRuntimeTools(
     execute: async (params, ctx) => {
       const requestedPackageId = typeof params.packageId === 'string' ? params.packageId : undefined
       if (ctx.actor === 'package' && requestedPackageId && requestedPackageId !== ctx.package_id) {
-        throw new Error('Package jobs must use the authenticated package identity')
+        throw new Error('App jobs must use the authenticated app identity')
       }
       const packageId = ctx.actor === 'package' ? ctx.package_id : requestedPackageId
       return {
@@ -127,7 +127,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.jobs.rename',
-    description: 'Rename a package backend job run',
+    description: 'Rename an app backend job run',
     inputSchema: objectSchema({
       runId: { type: 'string' },
       label: { type: 'string' },
@@ -139,7 +139,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.jobs.archive',
-    description: 'Archive or restore a package backend job run',
+    description: 'Archive or restore an app backend job run',
     inputSchema: objectSchema({ runId: { type: 'string' }, archived: { type: 'boolean' } }, ['runId']),
     execute: async (params) => ({
       run: jobs.archive(requireString(params, 'runId'), params.archived !== false),
@@ -148,7 +148,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.jobs.restore',
-    description: 'Restore an archived package backend job run',
+    description: 'Restore an archived app backend job run',
     inputSchema: objectSchema({ runId: { type: 'string' } }, ['runId']),
     execute: async (params) => ({
       run: jobs.archive(requireString(params, 'runId'), false),
@@ -157,7 +157,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.jobs.delete',
-    description: 'Delete a package backend job run',
+    description: 'Delete an app backend job run',
     inputSchema: objectSchema({ runId: { type: 'string' } }, ['runId']),
     execute: async (params) => {
       const runId = requireString(params, 'runId')
@@ -169,14 +169,14 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.data.kv.get',
-    description: 'Read package-scoped key-value data',
+    description: 'Read app-scoped key-value data',
     inputSchema: objectSchema({ key: { type: 'string' } }, ['key']),
     execute: async (params, ctx) => packageData(tools, ctx).kv.get(requireString(params, 'key')),
   })
 
   tools.register({
     name: 'package.data.kv.set',
-    description: 'Write package-scoped key-value data',
+    description: 'Write app-scoped key-value data',
     inputSchema: objectSchema({ key: { type: 'string' }, value: {} }, ['key']),
     execute: async (params, ctx) => {
       packageData(tools, ctx).kv.set(requireString(params, 'key'), params.value)
@@ -186,7 +186,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.data.kv.delete',
-    description: 'Delete package-scoped key-value data',
+    description: 'Delete app-scoped key-value data',
     inputSchema: objectSchema({ key: { type: 'string' } }, ['key']),
     execute: async (params, ctx) => {
       packageData(tools, ctx).kv.delete(requireString(params, 'key'))
@@ -196,14 +196,14 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.data.kv.keys',
-    description: 'List package-scoped key-value keys',
+    description: 'List app-scoped key-value keys',
     inputSchema: objectSchema({}),
     execute: async (_params, ctx) => ({ keys: packageData(tools, ctx).kv.keys() }),
   })
 
   tools.register({
     name: 'package.data.collection.list',
-    description: 'List package-scoped collection records',
+    description: 'List app-scoped collection records',
     inputSchema: objectSchema({ collection: { type: 'string' } }, ['collection']),
     execute: async (params, ctx) => ({
       records: packageData(tools, ctx).collection(requireString(params, 'collection')).list(),
@@ -212,7 +212,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.data.collection.get',
-    description: 'Read a package-scoped collection record',
+    description: 'Read an app-scoped collection record',
     inputSchema: objectSchema({ collection: { type: 'string' }, id: { type: 'string' } }, ['collection', 'id']),
     execute: async (params, ctx) =>
       packageData(tools, ctx).collection(requireString(params, 'collection')).get(requireString(params, 'id')),
@@ -220,7 +220,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.data.collection.put',
-    description: 'Write a package-scoped collection record',
+    description: 'Write an app-scoped collection record',
     inputSchema: objectSchema({ collection: { type: 'string' }, id: { type: 'string' }, value: {} }, ['collection', 'id']),
     execute: async (params, ctx) => {
       packageData(tools, ctx).collection(requireString(params, 'collection')).put(requireString(params, 'id'), params.value)
@@ -230,7 +230,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.data.collection.delete',
-    description: 'Delete a package-scoped collection record',
+    description: 'Delete an app-scoped collection record',
     inputSchema: objectSchema({ collection: { type: 'string' }, id: { type: 'string' } }, ['collection', 'id']),
     execute: async (params, ctx) => {
       packageData(tools, ctx).collection(requireString(params, 'collection')).delete(requireString(params, 'id'))
@@ -238,13 +238,13 @@ export function registerPackageRuntimeTools(
     },
   })
 
-  // Package secret tools store and report manifest-declared secrets in the OS
+  // App secret tools store and report manifest-declared secrets in the OS
   // keychain. There is deliberately no value-returning read at the tool layer:
-  // package UI iframes can set, delete, and check existence, but secret values
+  // app UI iframes can set, delete, and check existence, but secret values
   // are only readable from backend code through ctx.secrets in the main process.
   tools.register({
     name: 'package.secrets.set',
-    description: 'Store a manifest-declared package secret in the OS keychain',
+    description: 'Store a manifest-declared app secret in the OS keychain',
     inputSchema: objectSchema({ name: { type: 'string' }, secret: { type: 'string' } }, ['name', 'secret']),
     execute: async (params, ctx) => {
       await packageSecrets(packages, ctx, options.secretStore).api
@@ -255,7 +255,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.secrets.delete',
-    description: 'Delete a manifest-declared package secret from the OS keychain',
+    description: 'Delete a manifest-declared app secret from the OS keychain',
     inputSchema: objectSchema({ name: { type: 'string' } }, ['name']),
     execute: async (params, ctx) => {
       await packageSecrets(packages, ctx, options.secretStore).api.delete(requireString(params, 'name'))
@@ -265,7 +265,7 @@ export function registerPackageRuntimeTools(
 
   tools.register({
     name: 'package.secrets.status',
-    description: 'Report which manifest-declared package secrets exist in the keychain',
+    description: 'Report which manifest-declared app secrets exist in the keychain',
     inputSchema: objectSchema({}),
     execute: async (_params, ctx) => {
       const { api, declared } = packageSecrets(packages, ctx, options.secretStore)
@@ -280,9 +280,9 @@ function packageJobParams(params: Record<string, unknown>, ctx: ToolContext) {
   const packageId = ctx.actor === 'package'
     ? ctx.package_id
     : requestedPackageId
-  if (!packageId) throw new Error('Missing package id')
+  if (!packageId) throw new Error('Missing app id')
   if (ctx.actor === 'package' && requestedPackageId && requestedPackageId !== packageId) {
-    throw new Error('Package jobs must use the authenticated package identity')
+    throw new Error('App jobs must use the authenticated app identity')
   }
   const jobId = requireString(params, 'jobId')
   const inputs = typeof params.inputs === 'object' && params.inputs != null && !Array.isArray(params.inputs)
@@ -292,17 +292,17 @@ function packageJobParams(params: Record<string, unknown>, ctx: ToolContext) {
 }
 
 function packageData(tools: ToolRegistry, ctx: ToolContext) {
-  if (!ctx.package_id) throw new Error('Package data tools require package identity')
+  if (!ctx.package_id) throw new Error('App data tools require app identity')
   const workspace = tools.getWorkspacePath()
   if (!workspace) throw new Error('No workspace open')
   return createPackageDataApi(workspace, ctx.package_id)
 }
 
 function packageSecrets(packages: PackageLoader, ctx: ToolContext, store: SecretStore | undefined): { api: PackageSecretsApi; declared: string[] } {
-  if (!ctx.package_id) throw new Error('Package secret tools require package identity')
+  if (!ctx.package_id) throw new Error('App secret tools require app identity')
   if (!store) throw new Error('Secret store is not available in this runtime')
   const pkg = packages.get(ctx.package_id)
-  if (!pkg) throw new Error(`Package not found: ${ctx.package_id}`)
+  if (!pkg) throw new Error(`App not found: ${ctx.package_id}`)
   const declared = pkg.manifest.permissions.secrets ?? []
   return { api: createPackageSecretsApi({ packageId: ctx.package_id, declared, store }), declared }
 }

@@ -100,7 +100,7 @@ describe('app tools (status / enable / disable / trust)', () => {
   })
 
   describe('app.status', () => {
-    it('returns one resolved row per loaded package, sorted by id', async () => {
+    it('returns one resolved row per loaded app, sorted by id', async () => {
       register([
         makePackage('hello', 'global'),
         makePackage('board', 'global'),
@@ -141,7 +141,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(await statusOf('hello')).toMatchObject({ enabled: true, layer: 'local' })
     })
 
-    it('committed entry beats a local override for workspace packages', async () => {
+    it('committed entry beats a local override for workspace apps', async () => {
       writeMimYaml('name: test-ws\napps:\n  board: true\n')
       register([makePackage('board', 'workspace')])
       enablement.setEnabled('board', false)
@@ -155,7 +155,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect((await statusOf('board')).folderPresent).toBe(true)
     })
 
-    it('surfaces a committed-but-not-loaded package as a needsInstall row', async () => {
+    it('surfaces a committed-but-not-loaded app as a needsInstall row', async () => {
       writeMimYaml([
         'name: test-ws',
         'apps:',
@@ -178,7 +178,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       })
     })
 
-    it('flags an untrusted vendored package even without a committed entry', async () => {
+    it('flags an untrusted vendored app even without a committed entry', async () => {
       const dir = join(root, 'packages', 'vendored')
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, 'index.mjs'), 'export const tools = {}')
@@ -187,7 +187,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(await statusOf('vendored')).toMatchObject({ enabled: false, needsTrust: true })
     })
 
-    it('flags an untrusted vendored package and ignores its committed flag', async () => {
+    it('flags an untrusted vendored app and ignores its committed flag', async () => {
       const dir = join(root, 'packages', 'vendored')
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, 'index.mjs'), 'export const tools = {}')
@@ -256,7 +256,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(readFileSync(join(root, 'knowledge', 'note.md'), 'utf-8')).toBe('# keep me\n')
     })
 
-    it('app.enable creates no folder for packages without a dataFolder', async () => {
+    it('app.enable creates no folder for apps without a dataFolder', async () => {
       register([makePackage('docx-review', 'global')])
       await tools.call('app.enable', { id: 'docx-review' }, ctx)
       expect(existsSync(join(root, 'docx-review'))).toBe(false)
@@ -276,7 +276,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(readFileSync(join(root, 'knowledge', 'kept.md'), 'utf-8')).toBe('# do not delete\n')
     })
 
-    it('toggles a committed-but-not-installed package without refusing', async () => {
+    it('toggles a committed-but-not-installed app without refusing', async () => {
       writeMimYaml('name: test-ws\napps:\n  github-monitor: true\n')
       register([])
       await tools.call('app.disable', { id: 'github-monitor' }, ctx)
@@ -284,7 +284,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(config.apps?.['github-monitor']).toBe(false)
     })
 
-    it('app.enable refuses an untrusted vendored package with a clear error and writes nothing', async () => {
+    it('app.enable refuses an untrusted vendored app with a clear error and writes nothing', async () => {
       const dir = join(root, 'packages', 'vendored')
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, 'index.mjs'), 'export const tools = {}')
@@ -297,7 +297,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(parseMimYaml(readFileSync(join(root, 'mim.yaml'), 'utf-8')).apps).toBeUndefined()
     })
 
-    it('app.enable succeeds for a vendored package once trust is acked', async () => {
+    it('app.enable succeeds for a vendored app once trust is acked', async () => {
       const dir = join(root, 'packages', 'vendored')
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, 'index.mjs'), 'export const tools = {}')
@@ -320,7 +320,7 @@ describe('app tools (status / enable / disable / trust)', () => {
         .rejects.toThrow(/did not take effect/)
     })
 
-    it('invalidates the package runtime and emits apps:changed on every write', async () => {
+    it('invalidates the app runtime and emits apps:changed on every write', async () => {
       register([makePackage('board', 'global')])
 
       await tools.call('app.enable', { id: 'board' }, ctx)
@@ -359,9 +359,9 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(enablement.isTrusted(pkg)).toBe(true)
     })
 
-    it('refuses unknown package ids', async () => {
+    it('refuses unknown app ids', async () => {
       register([])
-      await expect(tools.call('app.trust', { id: 'ghost' }, ctx)).rejects.toThrow('Package not found: ghost')
+      await expect(tools.call('app.trust', { id: 'ghost' }, ctx)).rejects.toThrow('App not found: ghost')
     })
   })
 
@@ -407,7 +407,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(existsSync(join(root, 'issues', 'issue-1.md'))).toBe(true)
     })
 
-    it('removes a loaded global package, clearing its local override', async () => {
+    it('removes a loaded global app, clearing its local override', async () => {
       register([makePackage('board', 'global')])
       enablement.setEnabled('board', false)
 
@@ -423,7 +423,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       register([])
 
       await expect(tools.call('app.remove', { id: 'ghost' }, ctx))
-        .rejects.toThrow('Unknown package: ghost')
+        .rejects.toThrow('Unknown app: ghost')
     })
 
     it('emits apps:changed and invalidates the runtime', async () => {
@@ -436,7 +436,7 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(emit).toHaveBeenCalledWith('apps:changed')
     })
 
-    it('works for committed-but-not-loaded packages', async () => {
+    it('works for committed-but-not-loaded apps', async () => {
       writeMimYaml('name: test-ws\napps:\n  github-monitor:\n    source: https://x.example/r.git\n    version: 1.2.0\n')
       register([])
 

@@ -108,13 +108,13 @@ function missingStatus(ws: string, id: string, deps: CoreAppToolsDeps): AppStatu
 
 export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDeps): void {
   function requireDeps(): CoreAppToolsDeps {
-    if (!deps) throw new Error('App tools are not wired to a package loader in this runtime')
+    if (!deps) throw new Error('App tools are not wired to an app loader in this runtime')
     return deps
   }
 
   tools.register({
     name: 'app.status',
-    description: 'Resolved enablement state for every known package: enabled, deciding layer (workspace/local/default), install and trust state, and folderPresent for apps with a data folder.',
+    description: 'Resolved enablement state for every known app: enabled, deciding layer (workspace/local/default), install and trust state, and folderPresent for apps with a data folder.',
     inputSchema: objectSchema({}),
     execute: async () => {
       const d = requireDeps()
@@ -134,7 +134,7 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
 
   tools.register({
     name: 'app.enable',
-    description: 'Enable a package by id. layer "workspace" writes the committed mim.yaml entry, "local" the personal overlay; defaults to workspace when a committed entry exists, else local. Creates the app data folder if one is registered.',
+    description: 'Enable an app by id. layer "workspace" writes the committed mim.yaml entry, "local" the personal overlay; defaults to workspace when a committed entry exists, else local. Creates the app data folder if one is registered.',
     inputSchema: objectSchema({
       id: { type: 'string' },
       layer: { type: 'string', enum: ['workspace', 'local'] },
@@ -166,7 +166,7 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
 
   tools.register({
     name: 'app.disable',
-    description: 'Disable a package by id (same layer semantics as app.enable). Never touches data folders or files.',
+    description: 'Disable an app by id (same layer semantics as app.enable). Never touches data folders or files.',
     inputSchema: objectSchema({
       id: { type: 'string' },
       layer: { type: 'string', enum: ['workspace', 'local'] },
@@ -190,7 +190,7 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
 
   tools.register({
     name: 'app.trust',
-    description: 'Acknowledge trust for a vendored workspace package on this machine. User-only.',
+    description: 'Acknowledge trust for a vendored workspace app on this machine. User-only.',
     inputSchema: objectSchema({
       id: { type: 'string' },
     }, ['id']),
@@ -199,7 +199,7 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
       workspace(tools)
       const id = requireId(params)
       const pkg = packages.get(id)
-      if (!pkg) throw new Error(`Package not found: ${id}`)
+      if (!pkg) throw new Error(`App not found: ${id}`)
       enablement.ackTrust(pkg)
       invalidate?.(id)
       emit?.('apps:changed')
@@ -209,7 +209,7 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
 
   tools.register({
     name: 'app.remove',
-    description: 'Remove a package from this workspace: deletes the mim.yaml pin and clears any local enable/disable override so the app drops out of the Installed set (back to default/available). Never touches install dirs or data folders (issues/, knowledge/) — those survive removal.',
+    description: 'Remove an app from this workspace: deletes the mim.yaml pin and clears any local enable/disable override so the app drops out of the Installed set (back to default/available). Never touches install dirs or data folders (issues/, knowledge/) — those survive removal.',
     inputSchema: objectSchema({
       id: { type: 'string' },
     }, ['id']),
@@ -220,9 +220,9 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
 
       const pkg = packages.get(id)
 
-      // If there is no committed entry and no loaded package, nothing to remove.
+      // If there is no committed entry and no loaded app, nothing to remove.
       if (!readCommittedApp(ws, id) && !pkg) {
-        throw new Error(`Unknown package: ${id}`)
+        throw new Error(`Unknown app: ${id}`)
       }
 
       // 1. Delete the mim.yaml apps entry (no-op if absent).

@@ -38,7 +38,7 @@ function stubPackageLoader() {
   return loader
 }
 
-describe('Package tools', () => {
+describe('App tools', () => {
   let dir: string
   let tools: ReturnType<typeof createToolRegistry>
   let loader: ReturnType<typeof stubPackageLoader>
@@ -57,7 +57,7 @@ describe('Package tools', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('package.create creates manifest and html', async () => {
+  it('package.create creates app manifest and html', async () => {
     const result = await tools.call('package.create', {
       id: 'test-pkg',
       name: 'Test Package',
@@ -86,7 +86,7 @@ describe('Package tools', () => {
     expect(readFileSync(join(dir, 'packages/with-js/ui/app.js'), 'utf-8')).toBe('console.log("hello")')
   })
 
-  it('package.create can scaffold a complete headless package', async () => {
+  it('package.create can scaffold a complete headless app', async () => {
     await tools.call('package.create', {
       id: 'pr-monitor',
       name: 'PR Monitor',
@@ -143,7 +143,7 @@ describe('Package tools', () => {
     expect(readFileSync(join(pkgDir, 'README.md'), 'utf-8')).toContain('pull requests')
   })
 
-  it('package.validate reports a complete package as valid', async () => {
+  it('package.validate reports a complete app as valid', async () => {
     await tools.call('package.create', {
       id: 'valid-tools',
       name: 'Valid Tools',
@@ -182,7 +182,7 @@ describe('Package tools', () => {
     expect(result.summary).toEqual({ tools: 1, jobs: 0, skills: 1, namedTools: 1 })
   })
 
-  it('package.validate catches backend and skill diagnostics without requiring the loader', async () => {
+  it('package.validate catches backend and skill diagnostics without requiring the app loader', async () => {
     const pkgDir = join(dir, 'packages/broken')
     mkdirSync(join(pkgDir, 'backend'), { recursive: true })
     mkdirSync(join(pkgDir, 'skills/bad-skill'), { recursive: true })
@@ -230,7 +230,7 @@ describe('Package tools', () => {
     expect(result.warnings.some(w => w.message.includes('broken.missing'))).toBe(true)
   })
 
-  it('package.reload rescans, invalidates runtime state, syncs named tools, and emits changes', async () => {
+  it('package.reload rescans, invalidates runtime state, syncs named tools, and emits app changes', async () => {
     const invalidate = vi.fn()
     const syncNamedTools = vi.fn(async () => {})
     const emit = vi.fn()
@@ -261,14 +261,14 @@ describe('Package tools', () => {
   it('package.create rejects invalid id', async () => {
     await expect(
       tools.call('package.create', { id: '../escape', name: 'Bad', html: '<p></p>' }, ctx)
-    ).rejects.toThrow('Invalid package id')
+    ).rejects.toThrow('Invalid app id')
 
     await expect(
       tools.call('package.create', { id: 'UPPER', name: 'Bad', html: '<p></p>' }, ctx)
-    ).rejects.toThrow('Invalid package id')
+    ).rejects.toThrow('Invalid app id')
   })
 
-  it('package.edit writes file within package', async () => {
+  it('package.edit writes file within app', async () => {
     // Set up a package directory
     const pkgDir = join(dir, 'packages', 'editable')
     mkdirSync(join(pkgDir, 'ui'), { recursive: true })
@@ -299,7 +299,7 @@ describe('Package tools', () => {
     ).rejects.toThrow('traversal')
   })
 
-  it('package.delete removes the package directory', async () => {
+  it('package.delete removes the app directory', async () => {
     const pkgDir = join(dir, 'packages', 'to-delete')
     mkdirSync(join(pkgDir, 'ui'), { recursive: true })
     writeFileSync(join(pkgDir, 'package.json'), '{"id":"to-delete","name":"Delete Me"}')
@@ -309,13 +309,13 @@ describe('Package tools', () => {
     expect(existsSync(pkgDir)).toBe(false)
   })
 
-  it('package.delete throws for nonexistent package', async () => {
+  it('package.delete throws for nonexistent app', async () => {
     await expect(
       tools.call('package.delete', { id: 'ghost' }, ctx)
     ).rejects.toThrow('not found')
   })
 
-  it('package.list returns loaded packages', async () => {
+  it('package.list returns loaded apps', async () => {
     const aDir = join(dir, 'packages', 'a')
     mkdirSync(aDir, { recursive: true })
     writeFileSync(join(aDir, 'README.md'), '# A')
@@ -335,7 +335,7 @@ describe('Package tools', () => {
     expect(result.packages[1].hasReadme).toBe(false)
   })
 
-  it('package.readme returns README.md content for a loaded package', async () => {
+  it('package.readme returns README.md content for a loaded app', async () => {
     const pkgDir = join(dir, 'packages', 'docs-app')
     mkdirSync(pkgDir, { recursive: true })
     writeFileSync(join(pkgDir, 'README.md'), '# Docs App\n\nUse it well.')
@@ -354,17 +354,17 @@ describe('Package tools', () => {
     })
   })
 
-  it('package.readme throws for a package without README.md', async () => {
+  it('package.readme throws for an app without README.md', async () => {
     const pkgDir = join(dir, 'packages', 'no-docs')
     mkdirSync(pkgDir, { recursive: true })
     loader._add({ id: 'no-docs', name: 'No Docs' }, pkgDir)
 
     await expect(
       tools.call('package.readme', { id: 'no-docs' }, ctx)
-    ).rejects.toThrow('Package README not found: no-docs')
+    ).rejects.toThrow('App README not found: no-docs')
   })
 
-  it('package.readme rejects a symlink README.md', async () => {
+  it('package.readme rejects a symlink README.md for an app', async () => {
     const pkgDir = join(dir, 'packages', 'linked-docs')
     mkdirSync(pkgDir, { recursive: true })
     writeFileSync(join(dir, 'external-readme.md'), '# Outside')
@@ -373,7 +373,7 @@ describe('Package tools', () => {
 
     await expect(
       tools.call('package.readme', { id: 'linked-docs' }, ctx)
-    ).rejects.toThrow('Package README is not a regular file: linked-docs')
+    ).rejects.toThrow('App README is not a regular file: linked-docs')
   })
 
   it('throws when no workspace is open', async () => {
@@ -384,7 +384,7 @@ describe('Package tools', () => {
     ).rejects.toThrow('No workspace')
   })
 
-  it('package.create refuses when id resolves to a global package', async () => {
+  it('package.create refuses when id resolves to a global app', async () => {
     loader._addWithSource({ id: 'github-monitor', name: 'GitHub Monitor' }, '/fake/github-monitor', 'global')
     await expect(
       tools.call('package.create', { id: 'github-monitor', name: 'GM Local', html: '<p></p>' }, ctx)
