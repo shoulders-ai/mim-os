@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { createMemorySecretStore } from '@main/integrations/secrets.js'
 import { createPackageSecretsApi, packageSecretAccount } from '@main/packages/packageSecrets.js'
 
-describe('package secrets', () => {
-  it('namespaces keychain accounts by package id and secret name', () => {
+describe('app secrets', () => {
+  it('namespaces keychain accounts by app id and secret name', () => {
     expect(packageSecretAccount('github-monitor', 'github_token')).toBe('package:github-monitor:github_token')
   })
 

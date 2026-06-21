@@ -6,7 +6,7 @@ import { createPackageEnablementStore } from '@main/packages/packageEnablement.j
 import type { PackagePermissions } from '@main/packages/packageManifest.js'
 import type { LoadedPackage } from '@main/packages/packages.js'
 
-describe('package enablement', () => {
+describe('app enablement', () => {
   let workspace: string
   let pkgRoot: string
 
@@ -59,7 +59,7 @@ describe('package enablement', () => {
   }
 
   describe('defaults (no committed entry, no local entry)', () => {
-    it('does not implicitly enable any package source', () => {
+    it('does not implicitly enable any app source', () => {
       const store = makeStore()
       expect(store.isEnabled(pkg('global-pkg', 'global'))).toBe(false)
       expect(store.isEnabled(pkg('vendored', 'workspace'))).toBe(false)
@@ -67,7 +67,7 @@ describe('package enablement', () => {
   })
 
   describe('local layer (enabled.json)', () => {
-    it('local enable/disable controls otherwise disabled packages', () => {
+    it('local enable/disable controls otherwise disabled apps', () => {
       const store = makeStore()
       store.setEnabled('vendored', true)
       store.setEnabled('global-pkg', false)
@@ -85,9 +85,9 @@ describe('package enablement', () => {
       expect(raw.disabled).toEqual(['mid'])
     })
 
-    it('rejects invalid package ids', () => {
+    it('rejects invalid app ids', () => {
       const store = makeStore()
-      expect(() => store.setEnabled('Not Valid!', true)).toThrow(/Invalid package id/)
+      expect(() => store.setEnabled('Not Valid!', true)).toThrow(/Invalid app id/)
     })
 
     it('reports a diagnostic for a corrupt enablement file', () => {
@@ -95,26 +95,26 @@ describe('package enablement', () => {
       writeFileSync(join(workspace, '.mim', 'packages', 'enabled.json'), '{nope')
       const store = makeStore()
       expect(store.isEnabled(pkg('hello', 'global'))).toBe(false)
-      expect(store.diagnostics().some(d => d.includes('Could not read package enablement file'))).toBe(true)
+      expect(store.diagnostics().some(d => d.includes('Could not read app enablement file'))).toBe(true)
     })
   })
 
   describe('committed layer (mim.yaml)', () => {
-    it('a committed entry is authoritative for benign workspace packages — false beats local enabled', () => {
+    it('a committed entry is authoritative for benign workspace apps — false beats local enabled', () => {
       const store = makeStore()
       store.setEnabled('hello', true)
       writeMimYaml({ hello: false })
       expect(store.isEnabled(pkg('hello', 'workspace'))).toBe(false)
     })
 
-    it('a committed entry is authoritative for benign workspace packages — true beats local disabled', () => {
+    it('a committed entry is authoritative for benign workspace apps — true beats local disabled', () => {
       const store = makeStore()
       store.setEnabled('board', false)
       writeMimYaml({ board: true })
       expect(store.isEnabled(pkg('board', 'workspace'))).toBe(true)
     })
 
-    it('a committed entry is authoritative for provenance-verified global packages', () => {
+    it('a committed entry is authoritative for provenance-verified global apps', () => {
       const dir = join(pkgRoot, 'global-pkg')
       mkdirSync(dir, { recursive: true })
       writeFileSync(join(dir, '.mim-install.json'), JSON.stringify({
@@ -142,14 +142,14 @@ describe('package enablement', () => {
       expect(store.isEnabled(hello)).toBe(true)
     })
 
-    it('committed entries activate workspace packages with no backend and no permissions', () => {
+    it('committed entries activate workspace apps with no backend and no permissions', () => {
       const store = makeStore()
       writeMimYaml({ vendored: true })
       expect(store.isEnabled(pkg('vendored', 'workspace'))).toBe(true)
     })
   })
 
-  describe('trust boundary (vendored workspace packages with backend/permissions)', () => {
+  describe('trust boundary (vendored workspace apps with backend/permissions)', () => {
     it('a committed flag alone never activates an untrusted vendored backend', () => {
       const dir = scaffoldPackageDir('vendored')
       const store = makeStore()
@@ -210,7 +210,7 @@ describe('package enablement', () => {
       expect(store.isEnabled(p)).toBe(true)
     })
 
-    it('an ack survives package tree changes', () => {
+    it('an ack survives app tree changes', () => {
       const dir = scaffoldPackageDir('vendored')
       const store = makeStore()
       writeMimYaml({ vendored: true })
@@ -226,10 +226,10 @@ describe('package enablement', () => {
       expect(raw.trusted).toEqual(['vendored@*'])
     })
 
-    it('needsTrust is true for an untrusted vendored package even without a committed entry', () => {
+    it('needsTrust is true for an untrusted vendored app even without a committed entry', () => {
       // The trust prompt must surface for any workspace copy that the trust
       // gate would block — committed or not — or the enable toggle dead-ends
-      // with no visible way to trust the package.
+      // with no visible way to trust the app.
       const dir = scaffoldPackageDir('vendored')
       const store = makeStore()
       const p = pkg('vendored', 'workspace', { backend: './backend/index.mjs', dir })
@@ -239,7 +239,7 @@ describe('package enablement', () => {
       expect(store.needsTrust(p)).toBe(false)
     })
 
-    it('needsTrust is false for non-workspace sources and for benign packages', () => {
+    it('needsTrust is false for non-workspace sources and for benign apps', () => {
       const dir = scaffoldPackageDir('vendored')
       const store = makeStore()
       writeMimYaml({ vendored: true })
@@ -306,9 +306,9 @@ describe('package enablement', () => {
       expect(store.localOverride('absent')).toBeNull()
     })
 
-    it('rejects an invalid package id', () => {
+    it('rejects an invalid app id', () => {
       const store = makeStore()
-      expect(() => store.clearOverride('Not Valid!')).toThrow(/Invalid package id/)
+      expect(() => store.clearOverride('Not Valid!')).toThrow(/Invalid app id/)
     })
   })
 

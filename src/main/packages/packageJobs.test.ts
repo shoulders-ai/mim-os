@@ -11,7 +11,7 @@ import { createPackageLoader } from '@main/packages/packages.js'
 import { createToolRegistry } from '@main/tools/registry.js'
 import { atomicWriteJson } from '@main/atomicJson.js'
 
-describe('package job runner', () => {
+describe('app job runner', () => {
   let dir: string
 
   beforeEach(() => {
@@ -189,7 +189,7 @@ describe('package job runner', () => {
     delete (globalThis as Record<string, unknown>).__mim_release_slow_job__
   })
 
-  it('archives, restores, and deletes persisted package runs', async () => {
+  it('archives, restores, and deletes persisted app runs', async () => {
     writePackage(`
       export const jobs = {
         count: {

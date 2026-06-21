@@ -255,7 +255,7 @@ describe('local dir entries', () => {
     }
   })
 
-  it('accepts dir: "." for a package at the source root', () => {
+  it('accepts dir: "." for an app at the source root', () => {
     const result = parseRegistryIndex(dirIndex([validDirEntry({ dir: '.' })]), { allowLocalDirs: true })
     expect(result.entries).toHaveLength(1)
     expect(result.entries[0].dir).toBe('.')

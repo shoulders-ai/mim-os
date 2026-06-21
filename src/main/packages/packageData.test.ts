@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { createPackageDataApi } from '@main/packages/packageData.js'
 
-describe('package data', () => {
+describe('app data', () => {
   let dir: string
 
   beforeEach(() => {
@@ -15,7 +15,7 @@ describe('package data', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('round-trips package-scoped kv values', () => {
+  it('round-trips app-scoped kv values', () => {
     const data = createPackageDataApi(dir, 'stats-checker')
 
     data.kv.set('settings', { enabled: true })
@@ -26,7 +26,7 @@ describe('package data', () => {
     expect(data.kv.get('settings')).toBeNull()
   })
 
-  it('round-trips package-scoped collection records in stable order', () => {
+  it('round-trips app-scoped collection records in stable order', () => {
     const data = createPackageDataApi(dir, 'stats-checker')
     const reports = data.collection('reports')
 
@@ -42,6 +42,6 @@ describe('package data', () => {
 
   it('does not let callers escape data paths through keys', () => {
     const data = createPackageDataApi(dir, 'stats-checker')
-    expect(() => data.kv.set('../other', true)).toThrow('Invalid package data key')
+    expect(() => data.kv.set('../other', true)).toThrow('Invalid app data key')
   })
 })

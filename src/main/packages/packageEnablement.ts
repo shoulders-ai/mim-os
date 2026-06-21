@@ -71,7 +71,7 @@ export function createPackageEnablementStore(options: PackageEnablementOptions):
         registries: Array.isArray(raw.registries) ? raw.registries.filter(isRegistryTrustEntryLike) : [],
       }
     } catch (err) {
-      cachedDiagnostics = [`Could not read package enablement file: ${(err as Error).message}`]
+      cachedDiagnostics = [`Could not read app enablement file: ${(err as Error).message}`]
       cachedState = { enabled: [], disabled: [], trusted: [], registries: [] }
     }
     return cachedState
@@ -128,7 +128,7 @@ export function createPackageEnablementStore(options: PackageEnablementOptions):
     },
 
     setEnabled(packageId, enabled) {
-      if (!isPackageIdLike(packageId)) throw new Error(`Invalid package id: ${packageId}`)
+      if (!isPackageIdLike(packageId)) throw new Error(`Invalid app id: ${packageId}`)
       const state = load()
       const next = {
         enabled: state.enabled.filter(id => id !== packageId),
@@ -142,7 +142,7 @@ export function createPackageEnablementStore(options: PackageEnablementOptions):
     },
 
     clearOverride(packageId) {
-      if (!isPackageIdLike(packageId)) throw new Error(`Invalid package id: ${packageId}`)
+      if (!isPackageIdLike(packageId)) throw new Error(`Invalid app id: ${packageId}`)
       const state = load()
       const inEnabled = state.enabled.includes(packageId)
       const inDisabled = state.disabled.includes(packageId)

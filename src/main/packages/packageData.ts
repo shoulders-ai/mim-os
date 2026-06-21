@@ -73,7 +73,7 @@ function jsonPath(dir: string, key: string): string {
 
 function assertSafeName(value: string, label: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value)) {
-    throw new Error(`Invalid package data ${label}: ${value}`)
+    throw new Error(`Invalid app data ${label}: ${value}`)
   }
 }
 

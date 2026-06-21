@@ -11,7 +11,7 @@ import { createPackageLoader } from '@main/packages/packages.js'
 import { createToolRegistry } from '@main/tools/registry.js'
 import { registerFileTools } from '@main/tools/fs.js'
 
-describe('package runtime capabilities', () => {
+describe('app runtime capabilities', () => {
   let dir: string
 
   beforeEach(() => {
@@ -61,7 +61,7 @@ describe('package runtime capabilities', () => {
     expect(packages.get('explosive')).toBeDefined()
   })
 
-  it('loads jobs and tools from an enabled headless package and ignores legacy skills exports', async () => {
+  it('loads jobs and tools from an enabled headless app and ignores legacy skills exports', async () => {
     writePackage('stats-checker', `
       export const jobs = {
         checkCsv: { label: 'Check CSV', async run() { return { ok: true } } }
@@ -96,7 +96,7 @@ describe('package runtime capabilities', () => {
     expect('skills' in capabilities).toBe(false)
   })
 
-  it('omits disabled package capabilities', async () => {
+  it('omits disabled app capabilities', async () => {
     writePackage('stats-checker', `
       export const tools = {
         checkDataset: { description: 'Check', async execute() { return true } }
@@ -108,7 +108,7 @@ describe('package runtime capabilities', () => {
     expect(tools.some(tool => tool.packageId === 'stats-checker')).toBe(false)
   })
 
-  it('executes package tools through a package runtime context', async () => {
+  it('executes app tools through an app runtime context', async () => {
     writeFileSync(join(dir, 'data.csv'), 'x,y\n1,2\n')
     writePackage('stats-checker', `
       export const tools = {
@@ -140,7 +140,7 @@ describe('package runtime capabilities', () => {
     })
   })
 
-  it('builds runtime contexts with frozen inputs and package-scoped tool calls', async () => {
+  it('builds runtime contexts with frozen inputs and app-scoped tool calls', async () => {
     writePackage('stats-checker', 'export const jobs = {}')
     const { enablement, runtime, packages, tools } = await makeRuntime()
     enablement.setEnabled('stats-checker', true)
@@ -167,7 +167,7 @@ describe('package runtime capabilities', () => {
     })
   })
 
-  it('routes ctx.documents.pdf.extract through the package-scoped tool registry', async () => {
+  it('routes ctx.documents.pdf.extract through the app-scoped tool registry', async () => {
     writePackage('references', 'export const jobs = {}', { workspace: { read: true } })
     const { enablement, runtime, packages, tools } = await makeRuntime()
     enablement.setEnabled('references', true)
@@ -279,7 +279,7 @@ describe('package runtime capabilities', () => {
     expect(caps.diagnostics).toEqual([])
   })
 
-  it('denies package actors executing named tools owned by another package', async () => {
+  it('denies app actors executing named tools owned by another app', async () => {
     const pkgDir = join(dir, 'packages', 'board')
     mkdirSync(join(pkgDir, 'backend'), { recursive: true })
     mkdirSync(join(pkgDir, 'ui'), { recursive: true })
