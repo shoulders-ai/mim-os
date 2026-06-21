@@ -42,7 +42,7 @@ node bin/mim.mjs status --workspace .
 
 ## Release Builds
 
-Release packaging is driven by `.github/workflows/release.yml` on `v*` tags or manual workflow dispatch. The matrix builds macOS arm64/x64, Windows x64, and Linux x64. Linux publishes AppImage, deb, and tar.gz artifacts; the tar.gz is the fuse-free portable option when AppImage support is missing.
+Release packaging is driven by `.github/workflows/release.yml` on `v*` tags or manual workflow dispatch. The matrix builds macOS arm64/x64, Windows x64, and Linux x64. macOS, Windows, and Linux AppImage builds support app auto-update through GitHub Releases metadata generated during packaging. Linux deb and tar.gz artifacts remain manual download formats; the tar.gz is the fuse-free portable option when AppImage support is missing.
 
 ## AI Key Setup
 

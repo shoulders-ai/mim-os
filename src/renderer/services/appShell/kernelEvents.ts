@@ -12,6 +12,15 @@ export interface AppUpdate {
   registryId: string
 }
 
+export interface AppShellToast {
+  kind: 'error' | 'info'
+  message: string
+  detail?: string
+  actionLabel?: string
+  action?: () => void | Promise<void>
+  durationMs?: number | null
+}
+
 export interface AppKernelEventDeps {
   setPackages(packages: LoadedPackage[]): void
   refreshApps(): Promise<unknown> | unknown
@@ -35,6 +44,9 @@ export interface AppKernelEventDeps {
   dispatchTerminalRun(command: string): Promise<unknown> | unknown
   onPackageJobEvent(payload: unknown): void
   onAgentSessionEvent(payload: unknown): void
+  pushToast(toast: AppShellToast): void
+  downloadUpdate(): Promise<unknown> | unknown
+  quitAndInstall(): Promise<unknown> | unknown
 }
 
 export function registerAppKernelEvents(
@@ -93,6 +105,55 @@ export function registerAppKernelEvents(
     }],
     ['package:job:event', deps.onPackageJobEvent],
     ['agent:session-event', deps.onAgentSessionEvent],
+    ['app:update-available', (payload: unknown) => {
+      const version = updateVersion(payload)
+      deps.pushToast({
+        kind: 'info',
+        message: `Mim ${version} is available`,
+        detail: updateReleaseNotes(payload),
+        actionLabel: 'Download',
+        durationMs: null,
+        action: async () => {
+          try {
+            await deps.downloadUpdate()
+          } catch (error) {
+            deps.pushToast({
+              kind: 'error',
+              message: 'Update download failed',
+              detail: errorMessage(error),
+            })
+          }
+        },
+      })
+    }],
+    ['app:update-progress', () => {
+      // Reserved for a future progress UI. The first updater flow keeps the
+      // visible toast surface quiet until the update is downloaded.
+    }],
+    ['app:update-downloaded', (payload: unknown) => {
+      const version = updateVersion(payload)
+      deps.pushToast({
+        kind: 'info',
+        message: `Mim ${version} is ready to install`,
+        actionLabel: 'Restart',
+        durationMs: null,
+        action: async () => {
+          try {
+            await deps.quitAndInstall()
+          } catch (error) {
+            deps.pushToast({
+              kind: 'error',
+              message: 'Update install failed',
+              detail: errorMessage(error),
+            })
+          }
+        },
+      })
+    }],
+    ['app:update-error', () => {
+      // Background update checks should not interrupt the user. Download and
+      // install errors from explicit user actions are surfaced by their actions.
+    }],
   ]
 
   for (const [channel, handler] of registrations) {
@@ -128,4 +189,31 @@ function appUpdatesMap(payload: unknown): Record<string, { installed: string; la
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function updateVersion(payload: unknown): string {
+  if (isRecord(payload) && typeof payload.version === 'string' && payload.version.length > 0) {
+    return payload.version
+  }
+  return 'update'
+}
+
+function updateReleaseNotes(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined
+  const notes = payload.releaseNotes
+  if (typeof notes === 'string' && notes.trim().length > 0) return notes
+  if (Array.isArray(notes)) {
+    const text = notes
+      .map(item => isRecord(item) && typeof item.note === 'string' ? item.note : undefined)
+      .filter((item): item is string => !!item && item.trim().length > 0)
+      .join('\n')
+    return text || undefined
+  }
+  return undefined
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === 'string' && error.length > 0) return error
+  return 'Unknown update error'
 }

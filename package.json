@@ -59,6 +59,7 @@
     "citeproc": "^2.4.63",
     "docx": "^9.7.1",
     "dompurify": "^3.4.9",
+    "electron-updater": "^6.8.9",
     "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "highlight.js": "^11.11.1",

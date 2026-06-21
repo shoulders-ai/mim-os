@@ -38,6 +38,9 @@ function makeHarness(overrides: Partial<AppKernelEventDeps> = {}) {
     dispatchTerminalRun: vi.fn(),
     onPackageJobEvent: vi.fn(),
     onAgentSessionEvent: vi.fn(),
+    pushToast: vi.fn(),
+    downloadUpdate: vi.fn().mockResolvedValue(undefined),
+    quitAndInstall: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
   return {
@@ -83,11 +86,15 @@ describe('app shell kernel events', () => {
       'bridge:terminal:run',
       'package:job:event',
       'agent:session-event',
+      'app:update-available',
+      'app:update-progress',
+      'app:update-downloaded',
+      'app:update-error',
     ])
 
     unregister()
 
-    expect(kernel.off).toHaveBeenCalledTimes(24)
+    expect(kernel.off).toHaveBeenCalledTimes(28)
     expect(registeredChannels()).toEqual([])
     expect(deps.refreshApps).not.toHaveBeenCalled()
   })
@@ -175,5 +182,65 @@ describe('app shell kernel events', () => {
     expect(deps.openWelcome).toHaveBeenCalledOnce()
     expect(deps.onPackageJobEvent).toHaveBeenCalledWith(packageEvent)
     expect(deps.onAgentSessionEvent).toHaveBeenCalledWith(agentEvent)
+  })
+
+  it('shows a persistent download toast when an app update is available', async () => {
+    const { deps, kernel, emit } = makeHarness()
+    registerAppKernelEvents(kernel, deps)
+
+    emit('app:update-available', { version: '1.2.3', releaseNotes: 'Fixes' })
+
+    expect(deps.pushToast).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'info',
+      message: 'Mim 1.2.3 is available',
+      detail: 'Fixes',
+      actionLabel: 'Download',
+      durationMs: null,
+    }))
+    const toast = vi.mocked(deps.pushToast).mock.calls[0][0]
+    await toast.action?.()
+    expect(deps.downloadUpdate).toHaveBeenCalledOnce()
+  })
+
+  it('shows an error toast if a user-triggered update download fails', async () => {
+    const downloadUpdate = vi.fn().mockRejectedValue(new Error('network down'))
+    const { deps, kernel, emit } = makeHarness({ downloadUpdate })
+    registerAppKernelEvents(kernel, deps)
+
+    emit('app:update-available', { version: '1.2.3' })
+    const toast = vi.mocked(deps.pushToast).mock.calls[0][0]
+    await toast.action?.()
+
+    expect(deps.pushToast).toHaveBeenLastCalledWith({
+      kind: 'error',
+      message: 'Update download failed',
+      detail: 'network down',
+    })
+  })
+
+  it('shows a persistent restart toast when an app update has downloaded', async () => {
+    const { deps, kernel, emit } = makeHarness()
+    registerAppKernelEvents(kernel, deps)
+
+    emit('app:update-downloaded', { version: '1.2.3' })
+
+    expect(deps.pushToast).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'info',
+      message: 'Mim 1.2.3 is ready to install',
+      actionLabel: 'Restart',
+      durationMs: null,
+    }))
+    const toast = vi.mocked(deps.pushToast).mock.calls[0][0]
+    await toast.action?.()
+    expect(deps.quitAndInstall).toHaveBeenCalledOnce()
+  })
+
+  it('keeps background updater error events quiet', () => {
+    const { deps, kernel, emit } = makeHarness()
+    registerAppKernelEvents(kernel, deps)
+
+    emit('app:update-error', { message: 'metadata missing' })
+
+    expect(deps.pushToast).not.toHaveBeenCalled()
   })
 })

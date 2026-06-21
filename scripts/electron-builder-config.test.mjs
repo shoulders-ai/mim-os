@@ -1,0 +1,32 @@
+import { readFile } from 'node:fs/promises'
+import { describe, expect, it } from 'vitest'
+import config from '../electron-builder.config.mjs'
+
+describe('electron-builder updater configuration', () => {
+  it('uses GitHub publish config for built-in updater metadata', () => {
+    expect(config.publish).toEqual({
+      provider: 'github',
+      owner: 'shoulders-ai',
+      repo: 'mim-os',
+    })
+    expect(config.afterPack).toBeUndefined()
+  })
+
+  it('builds mac ZIPs and keeps deb out of updater metadata', () => {
+    expect(config.mac.target).toContainEqual({ target: 'zip', arch: ['arm64', 'x64'] })
+    expect(config.deb.publish).toBeNull()
+  })
+
+  it('keeps CI manual-publish only while uploading builder metadata', async () => {
+    const workflow = await readFile('.github/workflows/release.yml', 'utf8')
+
+    expect(workflow).toContain('--publish never')
+    expect(workflow).toContain('dist-installers/latest*.yml')
+    expect(workflow).toContain('node scripts/build-docx-worker.mjs osx-arm64')
+    expect(workflow).toContain('node scripts/build-docx-worker.mjs osx-x64')
+    expect(workflow).toContain('label: macOS')
+    expect(workflow).not.toContain('label: macOS ARM')
+    expect(workflow).not.toContain('label: macOS Intel')
+    expect(workflow).not.toContain('generate-update-manifests')
+  })
+})

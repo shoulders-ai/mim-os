@@ -33,19 +33,15 @@ jobs:
         include:
           - os: macos-latest
             platform: mac
-            arch: arm64
-            label: macOS-ARM
-          - os: macos-latest
-            platform: mac
-            arch: x64
-            label: macOS-Intel
+            build_args: ''
+            label: macOS
           - os: ubuntu-22.04
             platform: linux
-            arch: x64
+            build_args: '--x64'
             label: Linux
           - os: windows-latest
             platform: win
-            arch: x64
+            build_args: '--x64'
             label: Windows
 
     runs-on: ${{ matrix.os }}
@@ -72,11 +68,24 @@ jobs:
       - run: npm ci
 
       - name: Build docx sidecar
-        run: node scripts/build-docx-worker.mjs
         shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "mac" ]; then
+            node scripts/build-docx-worker.mjs osx-arm64
+            node scripts/build-docx-worker.mjs osx-x64
+          else
+            node scripts/build-docx-worker.mjs
+          fi
 
       - name: Verify docx sidecar resource
-        run: node scripts/verify-docx-worker-resource.mjs
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "mac" ]; then
+            test -f resources/docx-worker/mac-arm64/docx-worker
+            test -f resources/docx-worker/mac-x64/docx-worker
+          else
+            node scripts/verify-docx-worker-resource.mjs
+          fi
 
       - name: Build & package
         env:
@@ -90,7 +99,7 @@ jobs:
           AZURE_CLIENT_ID: ${{ matrix.platform == 'win' && secrets.AZURE_CLIENT_ID || '' }}
           AZURE_CLIENT_SECRET: ${{ matrix.platform == 'win' && secrets.AZURE_CLIENT_SECRET || '' }}
           AZURE_CERT_PROFILE_NAME: ${{ matrix.platform == 'win' && vars.AZURE_CERT_PROFILE_NAME || '' }}
-        run: npm run dist:${{ matrix.platform }} -- --${{ matrix.arch }}
+        run: npm run dist:${{ matrix.platform }} -- ${{ matrix.build_args }} --publish never
 
       - name: Upload artifacts
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
@@ -99,10 +108,13 @@ jobs:
           name: app-${{ matrix.label }}
           path: |
             dist-installers/*.dmg
+            dist-installers/*.zip
             dist-installers/*.exe
             dist-installers/*.AppImage
             dist-installers/*.deb
             dist-installers/*.tar.gz
+            dist-installers/*.blockmap
+            dist-installers/latest*.yml
           if-no-files-found: warn
 
       - name: Upload to release
@@ -113,7 +125,7 @@ jobs:
         run: |
           TAG="${{ github.ref_name }}"
           REPO="${{ github.repository }}"
-          for f in dist-installers/*.dmg dist-installers/*.exe dist-installers/*.AppImage dist-installers/*.deb dist-installers/*.tar.gz; do
+          for f in dist-installers/*.dmg dist-installers/*.zip dist-installers/*.exe dist-installers/*.AppImage dist-installers/*.deb dist-installers/*.tar.gz dist-installers/*.blockmap dist-installers/latest*.yml; do
             [ -f "$f" ] && gh release upload "$TAG" "$f" --repo "$REPO" --clobber || true
           done
 

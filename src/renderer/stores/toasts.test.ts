@@ -42,6 +42,16 @@ describe('useToastStore', () => {
     expect(store.list).toHaveLength(0)
   })
 
+  it('keeps persistent toasts until manually dismissed', () => {
+    const store = useToastStore()
+    const id = store.push({ kind: 'info', message: 'Update ready', durationMs: null })
+    expect(store.list).toHaveLength(1)
+    vi.advanceTimersByTime(60000)
+    expect(store.list).toHaveLength(1)
+    store.dismiss(id)
+    expect(store.list).toHaveLength(0)
+  })
+
   it('manual dismiss removes immediately', () => {
     const store = useToastStore()
     const id = store.push({ kind: 'error', message: 'Dismiss me' })

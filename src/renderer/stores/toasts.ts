@@ -7,7 +7,8 @@ export interface Toast {
   message: string
   detail?: string
   actionLabel?: string
-  action?: () => void
+  action?: () => void | Promise<void>
+  durationMs?: number | null
 }
 
 const AUTO_DISMISS_MS = 6000
@@ -22,10 +23,13 @@ export const useToastStore = defineStore('toasts', () => {
   function push(toast: Omit<Toast, 'id'>): number {
     const id = nextId++
     items.value.push({ ...toast, id })
-    const timer = setTimeout(() => {
-      dismiss(id)
-    }, AUTO_DISMISS_MS)
-    timers.set(id, timer)
+    const durationMs = toast.durationMs === undefined ? AUTO_DISMISS_MS : toast.durationMs
+    if (durationMs !== null) {
+      const timer = setTimeout(() => {
+        dismiss(id)
+      }, durationMs)
+      timers.set(id, timer)
+    }
     return id
   }
 

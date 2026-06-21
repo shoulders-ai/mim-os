@@ -5,6 +5,7 @@ import type { ApprovalMode, PermissionApprovalDecision } from '@main/security/ga
 import { cloneRepo } from '@main/git.js'
 import { closeGuardDecision } from '@main/closeGuard.js'
 import { installApplicationMenu } from '@main/menu.js'
+import { initAutoUpdater, shouldInitializeAutoUpdater } from '@main/autoUpdater.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -81,6 +82,8 @@ let mainWindow: BrowserWindow | null = null
 let recentFiles: string[] = []
 let workspaceFileWatcher: ReturnType<typeof createWorkspaceFileWatcher> | null = null
 let telemetryShutdown: (() => Promise<void>) | null = null
+let appUpdateInitialTimer: ReturnType<typeof setTimeout> | null = null
+let appUpdateInterval: ReturnType<typeof setInterval> | null = null
 
 export const OPEN_DIRECTORY_DIALOG_PROPERTIES = ['openDirectory', 'createDirectory'] as const
 
@@ -144,6 +147,30 @@ function rebuildApplicationMenu(): void {
       onShowWelcome: () => sendToRenderer('menu:welcome'),
     },
   })
+}
+
+function scheduleAppUpdateChecks(updater: ReturnType<typeof initAutoUpdater>): void {
+  clearAppUpdateTimers()
+
+  const runCheck = () => {
+    void updater.checkForUpdates().catch(() => {})
+  }
+
+  appUpdateInitialTimer = setTimeout(runCheck, 30_000)
+  appUpdateInitialTimer.unref?.()
+  appUpdateInterval = setInterval(runCheck, 4 * 60 * 60 * 1000)
+  appUpdateInterval.unref?.()
+}
+
+function clearAppUpdateTimers(): void {
+  if (appUpdateInitialTimer != null) {
+    clearTimeout(appUpdateInitialTimer)
+    appUpdateInitialTimer = null
+  }
+  if (appUpdateInterval != null) {
+    clearInterval(appUpdateInterval)
+    appUpdateInterval = null
+  }
 }
 
 function toWorkspaceRelative(workspace: string | null, absPath: string): string {
@@ -232,6 +259,7 @@ async function boot(): Promise<void> {
   let packages: Awaited<ReturnType<typeof createPackageLoader>> | null = null
   let namedPackageTools: NamedPackageToolSync | null = null
   let packageEnablement: ReturnType<typeof createPackageEnablementStore> | null = null
+  let appUpdater: ReturnType<typeof initAutoUpdater> | null = null
   let lastDirtyTabCount = 0
   let dirtyOpenFilePaths = new Set<string>()
 
@@ -816,6 +844,14 @@ async function boot(): Promise<void> {
   ipcMain.handle('kernel:package-launch-url', (_event, packageId: string, viewId?: string) =>
     server!.createPackageLaunchUrl(packageId, viewId),
   )
+  ipcMain.handle('kernel:download-update', async () => {
+    if (!appUpdater) throw new Error('App updates are unavailable in this build')
+    await appUpdater.downloadUpdate()
+  })
+  ipcMain.handle('kernel:quit-and-install', async () => {
+    if (!appUpdater) throw new Error('App updates are unavailable in this build')
+    appUpdater.quitAndInstall()
+  })
 
   packages.onChange(() => {
     packageRuntime.invalidate()
@@ -824,6 +860,22 @@ async function boot(): Promise<void> {
   })
 
   mainWindow = createMainWindow()
+
+  if (shouldInitializeAutoUpdater({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    appImage: process.env.APPIMAGE,
+  })) {
+    appUpdater = initAutoUpdater({
+      send: (channel, data) => {
+        mainWindow?.webContents.send(channel, data)
+      },
+      broadcast: (channel, data) => {
+        server?.broadcast(channel, data)
+      },
+    })
+    scheduleAppUpdateChecks(appUpdater)
+  }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
@@ -915,6 +967,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  clearAppUpdateTimers()
   void telemetryShutdown?.()
   telemetryShutdown = null
   void workspaceFileWatcher?.close()

@@ -988,6 +988,9 @@ onMounted(async () => {
     dispatchTerminalRun: command => dispatchWorkbenchCommand({ type: 'terminal.run', command }),
     onPackageJobEvent,
     onAgentSessionEvent,
+    pushToast: toast => { toastStore.push(toast) },
+    downloadUpdate: () => window.kernel.downloadUpdate(),
+    quitAndInstall: () => window.kernel.quitAndInstall(),
   })
 })
 

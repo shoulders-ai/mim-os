@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('kernel', {
   getWorkspace: () => ipcRenderer.invoke('kernel:workspace'),
   getPackageLaunchUrl: (packageId: string, viewId?: string) =>
     ipcRenderer.invoke('kernel:package-launch-url', packageId, viewId),
+  downloadUpdate: () => ipcRenderer.invoke('kernel:download-update'),
+  quitAndInstall: () => ipcRenderer.invoke('kernel:quit-and-install'),
   openWorkspace: () => ipcRenderer.invoke('kernel:open-workspace'),
   openWorkspacePath: (path: string) => ipcRenderer.invoke('kernel:open-workspace-path', path),
 

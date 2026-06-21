@@ -41,6 +41,8 @@ const expectedRootFiles = new Set([
   'atomicJson.ts',
   'attachments.test.ts',
   'attachments.ts',
+  'autoUpdater.test.ts',
+  'autoUpdater.ts',
   'cli.test.ts',
   'cli.ts',
   'closeGuard.test.ts',

@@ -56,6 +56,7 @@ export default {
     entitlementsInherit: 'build/entitlements.mac.inherit.plist',
     target: [
       { target: 'dmg', arch: ['arm64', 'x64'] },
+      { target: 'zip', arch: ['arm64', 'x64'] },
     ],
   },
   dmg: {
@@ -89,9 +90,14 @@ export default {
   },
   deb: {
     depends: ['libsecret-1-0', 'libnotify4'],
+    publish: null,
   },
 
   afterSign: 'scripts/notarize.mjs',
 
-  publish: null,
+  publish: {
+    provider: 'github',
+    owner: 'shoulders-ai',
+    repo: 'mim-os',
+  },
 }
