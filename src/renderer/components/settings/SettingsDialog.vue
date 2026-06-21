@@ -10,6 +10,7 @@ import ResourcesSettingsPanel from './ResourcesSettingsPanel.vue'
 import StorageSettingsPanel from './StorageSettingsPanel.vue'
 import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue'
 import EditorSettingsPanel from './EditorSettingsPanel.vue'
+import InstructionsSettingsPanel from './InstructionsSettingsPanel.vue'
 import AboutSettingsPanel from './AboutSettingsPanel.vue'
 import {
   SETTINGS_NAV_GROUPS,
@@ -119,6 +120,7 @@ function onNavKeydown(e: KeyboardEvent) {
           :class="activeSection === 'apps' || activeSection === 'agents' ? 'overflow-hidden' : 'overflow-y-auto px-8 py-6'"
         >
           <AiSettingsPanel v-if="activeSection === 'ai'" />
+          <InstructionsSettingsPanel v-else-if="activeSection === 'instructions'" />
           <AppsSettingsPanel
             v-else-if="activeSection === 'apps'"
             @open-package="emit('openPackage', $event)"

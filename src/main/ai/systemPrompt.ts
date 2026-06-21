@@ -3,9 +3,11 @@ import { join } from 'path'
 import { userHomeDir } from '@main/platform.js'
 import { createSkillLoader } from '@main/skills.js'
 import { loadUserConfig } from '@main/userConfig.js'
+import { DEFAULT_AGENTS_MD } from '@main/workspace/workspaceContract.js'
 
 export interface SystemPromptOptions {
   includeSkillCatalog?: boolean
+  skillCatalog?: string
 }
 
 export interface PromptSkillMetadata {
@@ -24,41 +26,7 @@ function readFileSafe(path: string): string | null {
   }
 }
 
-export function getSystemPrompt(workspacePath?: string, options: SystemPromptOptions = {}): string {
-  const now = new Date()
-  const weekday = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()]
-  const date = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
-
-  const preamble = `# ROLE
-
-You are the AI agent in Mim, a workspace kernel for research teams. Mim runs as an Electron desktop app with three core surfaces: Chat (you), Editor (document viewer/editor), and Terminal (shell).
-
-Be precise and concise. Flag uncertainty. Never fabricate citations.
-
-Mim may show progress while you work. After finishing, progress may be collapsed. Make the final response stand on its own, including anything important the user needs to know.
-
-Today is ${weekday}, ${date}.
-
-
-# WORKSPACE
-
-The workspace is a directory on the user's machine. Committed layout:
-- mim.yaml — workspace config (name, enabled core apps)
-- AGENTS.md — the durable contract for any agent working here
-- CLAUDE.md — contract pointer (usually references AGENTS.md)
-- issues/ — issue records, one markdown file each (present when the issues app is enabled)
-- knowledge/ — knowledge records, one markdown file each (present when the knowledge app is enabled)
-- packages/ — installed packages (UI extensions)
-
-Runtime (gitignored, not committed):
-- .mim/ — runtime config, event log, chat sessions, and agent-context.md (the volatile current-state digest)
-
-You can read, write, and manage files within the workspace. File mutation tools perform the real filesystem action after the system permission gate allows them. If approval is required, the tool call pauses until the user approves or denies it.
-
-
-# TOOLS
-
-File operations:
+export const TOOL_CATALOG = `File operations:
 - fs_read(path, start_line?, limit?, max_chars?) — returns content plus total_lines, total_chars, full-file hash/version, and truncated
 - fs_write(path, content) — overwrite an entire file (creates parent directories) after permission approval when required
 - fs_edit(path, old_text, new_text) — search-and-replace after permission approval when required; exactly one match required
@@ -103,12 +71,9 @@ Registry and install:
 - package_uninstall(id, version) — remove an installed version from the global dir.
 
 Enablement:
-- Packages are enabled per workspace via the committed mim.yaml apps map (keyed by package id) or the local .mim/packages/enabled.json layer. Global (registry-installed) packages in ~/.mim/packages/ are shared across workspaces; enablement is per workspace.
+- Packages are enabled per workspace via the committed mim.yaml apps map (keyed by package id) or the local .mim/packages/enabled.json layer. Global (registry-installed) packages in ~/.mim/packages/ are shared across workspaces; enablement is per workspace.`
 
-
-# PACKAGES
-
-Packages are UI extensions that run in sandboxed iframes. Each package lives in packages/{id}/ and contains:
+export const PACKAGES_SECTION = `Packages are UI extensions that run in sandboxed iframes. Each package lives in packages/{id}/ and contains:
 - package.json — manifest with id, name, description, icon, ui path
 - ui/index.html — the UI entry point
 
@@ -136,17 +101,92 @@ Packages use the SDK at /sdk/mim.js to interact with the kernel:
 
 When the user asks you to build a UI, create a package. Use plain HTML + JS with the SDK. The tokens.css file provides design tokens (--color-ink, --color-accent, --font-sans, etc.) so packages match the Mim aesthetic.`
 
+export function resolveTemplateVars(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (match, key) => key in vars ? vars[key] : match)
+}
+
+function buildLegacyPreamble(weekday: string, date: string): string {
+  return `# ROLE
+
+You are the AI agent in Mim, a workspace kernel for research teams. Mim runs as an Electron desktop app with three core surfaces: Chat (you), Editor (document viewer/editor), and Terminal (shell).
+
+Be precise and concise. Flag uncertainty. Never fabricate citations.
+
+Mim may show progress while you work. After finishing, progress may be collapsed. Make the final response stand on its own, including anything important the user needs to know.
+
+Today is ${weekday}, ${date}.
+
+
+# WORKSPACE
+
+The workspace is a directory on the user's machine. Committed layout:
+- mim.yaml — workspace config (name, enabled core apps)
+- AGENTS.md — the durable contract for any agent working here
+- CLAUDE.md — contract pointer (usually references AGENTS.md)
+- issues/ — issue records, one markdown file each (present when the issues app is enabled)
+- knowledge/ — knowledge records, one markdown file each (present when the knowledge app is enabled)
+- packages/ — installed packages (UI extensions)
+
+Runtime (gitignored, not committed):
+- .mim/ — runtime config, event log, chat sessions, and agent-context.md (the volatile current-state digest)
+
+You can read, write, and manage files within the workspace. File mutation tools perform the real filesystem action after the system permission gate allows them. If approval is required, the tool call pauses until the user approves or denies it.
+
+
+# TOOLS
+
+${TOOL_CATALOG}
+
+
+# PACKAGES
+
+${PACKAGES_SECTION}`
+}
+
+export function getSystemPrompt(workspacePath?: string, options: SystemPromptOptions = {}): string {
+  const now = new Date()
+  const weekday = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()]
+  const date = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+
+  const agentsContent = workspacePath
+    ? readFileSafe(join(workspacePath, 'AGENTS.md'))
+    : null
+
+  const isTemplateMode = agentsContent !== null
+    ? agentsContent.includes('{{TOOL_SET}}')
+    : DEFAULT_AGENTS_MD.includes('{{TOOL_SET}}')
+
+  if (isTemplateMode) {
+    const template = agentsContent ?? DEFAULT_AGENTS_MD
+    const skillCatalogValue = options.skillCatalog
+      ?? (options.includeSkillCatalog !== false ? skillCatalogSection(workspacePath) : null)
+      ?? ''
+    const agentContext = workspacePath
+      ? readFileSafe(join(workspacePath, '.mim', 'agent-context.md')) ?? ''
+      : ''
+    const vars: Record<string, string> = {
+      DATE_TODAY: `${weekday}, ${date}`,
+      TOOL_SET: TOOL_CATALOG,
+      SKILL_CATALOG: skillCatalogValue,
+      AGENT_CONTEXT: agentContext,
+    }
+    return resolveTemplateVars(template, vars)
+  }
+
+  const preamble = buildLegacyPreamble(weekday, date)
   const sections: string[] = [preamble]
-  if (options.includeSkillCatalog !== false) {
+
+  if (options.skillCatalog) {
+    sections.push(options.skillCatalog)
+  } else if (options.includeSkillCatalog !== false) {
     const skills = skillCatalogSection(workspacePath)
     if (skills) sections.push(skills)
   }
 
   if (!workspacePath) return sections.join('\n\n\n')
 
-  const agents = readFileSafe(join(workspacePath, 'AGENTS.md'))
-  if (agents !== null) {
-    sections.push(`# WORKSPACE CONTRACT (AGENTS.md)\n\n${agents}`)
+  if (agentsContent !== null) {
+    sections.push(`# WORKSPACE CONTRACT (AGENTS.md)\n\n${agentsContent}`)
   }
 
   const context = readFileSafe(join(workspacePath, '.mim', 'agent-context.md'))

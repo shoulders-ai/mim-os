@@ -12,26 +12,10 @@ import {
   readCommittedApp,
   setAppEnabled,
   removeApp,
+  DEFAULT_AGENTS_MD,
 } from '@main/workspace/workspaceContract.js'
 
-const EXPECTED_AGENTS_MD = `# Agent Instructions
-
-This is a Mim workspace. These instructions are the durable contract for any agent (the Mim desktop app, the \`mim\` CLI, or external coding agents) working here.
-
-## Workspace rules
-- Treat files in this folder as the shared source of truth.
-- Committed contract files are \`mim.yaml\`, \`AGENTS.md\`, and \`CLAUDE.md\`. Keep them deterministic; do not write volatile state (dates, inbox/calendar summaries, secrets) into them.
-- Runtime state lives in \`.mim/\` and is gitignored. Do not commit it.
-- Issues live in \`issues/\` and knowledge in \`knowledge/\` when those folders exist. They are optional.
-
-## Runtime context
-- If \`.mim/agent-context.md\` exists, read it for the current state of this workspace (open issues, recent changes, what is waiting).
-- It is generated and may be stale or absent. Regenerate it with the relevant Mim orientation command when needed. Never treat it as part of the committed contract.
-
-## Conventions
-- Make focused, reviewable changes.
-- Prefer existing files and patterns over introducing new ones.
-`
+const EXPECTED_AGENTS_MD = DEFAULT_AGENTS_MD
 
 describe('workspaceContract — mim.yaml parse/serialize', () => {
   it('round-trips { name }', () => {

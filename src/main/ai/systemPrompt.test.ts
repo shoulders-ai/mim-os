@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { getSystemPrompt } from '@main/ai/systemPrompt.js'
+import { getSystemPrompt, resolveTemplateVars } from '@main/ai/systemPrompt.js'
 
 describe('getSystemPrompt', () => {
   let dir: string
@@ -15,12 +15,12 @@ describe('getSystemPrompt', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('returns the bare preamble with no path and no contract/context headers', () => {
+  it('returns the default template prompt with no path and resolves template vars', () => {
     const out = getSystemPrompt()
-    expect(out).toContain('# ROLE')
-    expect(out).toContain('# WORKSPACE')
-    expect(out).not.toContain('# WORKSPACE CONTRACT')
-    expect(out).not.toContain('# WORKSPACE CONTEXT')
+    expect(out).toContain('Agent Instructions')
+    expect(out).toContain('fs_read')
+    expect(out).not.toContain('{{TOOL_SET}}')
+    expect(out).not.toContain('{{DATE_TODAY}}')
   })
 
   it('no longer describes the false docs/ layout', () => {
@@ -36,7 +36,7 @@ describe('getSystemPrompt', () => {
     expect(out).toContain('Make the final response stand on its own')
   })
 
-  it('appends AGENTS.md and agent-context.md sections with their contents', () => {
+  it('appends AGENTS.md and agent-context.md sections with their contents in legacy mode', () => {
     writeFileSync(join(dir, 'AGENTS.md'), 'CONTRACT BODY HERE')
     mkdirSync(join(dir, '.mim'), { recursive: true })
     writeFileSync(join(dir, '.mim', 'agent-context.md'), 'CONTEXT BODY HERE')
@@ -47,7 +47,7 @@ describe('getSystemPrompt', () => {
     expect(out).toContain('CONTEXT BODY HERE')
   })
 
-  it('omits a section when its file is absent', () => {
+  it('omits a section when its file is absent in legacy mode', () => {
     writeFileSync(join(dir, 'AGENTS.md'), 'ONLY CONTRACT')
     const out = getSystemPrompt(dir)
     expect(out).toContain('# WORKSPACE CONTRACT (AGENTS.md)')
@@ -69,8 +69,63 @@ describe('getSystemPrompt', () => {
 
   it('describes the enablement model briefly', () => {
     const out = getSystemPrompt()
-    // Should mention per-workspace enablement via mim.yaml.
     expect(out).toContain('mim.yaml')
     expect(out).toContain('enabl')
+  })
+
+  it('resolves template variables in AGENTS.md', () => {
+    writeFileSync(join(dir, 'AGENTS.md'), 'Date: {{DATE_TODAY}}\nTools: {{TOOL_SET}}')
+    const out = getSystemPrompt(dir)
+    expect(out).not.toContain('{{DATE_TODAY}}')
+    expect(out).not.toContain('{{TOOL_SET}}')
+    expect(out).toContain('fs_read')
+    expect(out).toMatch(/\w+day, \d+ \w+ \d{4}/)
+  })
+
+  it('falls back to legacy mode when AGENTS.md has no templates', () => {
+    writeFileSync(join(dir, 'AGENTS.md'), 'Plain workspace contract without templates')
+    const out = getSystemPrompt(dir)
+    expect(out).toContain('# WORKSPACE CONTRACT (AGENTS.md)')
+    expect(out).toContain('# ROLE')
+  })
+
+  it('resolves {{AGENT_CONTEXT}} from .mim/agent-context.md', () => {
+    writeFileSync(join(dir, 'AGENTS.md'), 'Context: {{AGENT_CONTEXT}}\nTools: {{TOOL_SET}}')
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    writeFileSync(join(dir, '.mim', 'agent-context.md'), 'Current sprint: fixing bugs')
+    const out = getSystemPrompt(dir)
+    expect(out).toContain('Current sprint: fixing bugs')
+    expect(out).not.toContain('{{AGENT_CONTEXT}}')
+  })
+
+  it('leaves unknown template variables as-is', () => {
+    writeFileSync(join(dir, 'AGENTS.md'), '{{UNKNOWN_VAR}} and {{TOOL_SET}}')
+    const out = getSystemPrompt(dir)
+    expect(out).toContain('{{UNKNOWN_VAR}}')
+    expect(out).not.toContain('{{TOOL_SET}}')
+  })
+})
+
+describe('resolveTemplateVars', () => {
+  it('is a pure function that replaces known vars and preserves unknown ones', () => {
+    const template = 'Hello {{NAME}}, today is {{DATE}}. {{MISSING}} stays.'
+    const vars = { NAME: 'World', DATE: '2026-06-21' }
+    const result = resolveTemplateVars(template, vars)
+    expect(result).toBe('Hello World, today is 2026-06-21. {{MISSING}} stays.')
+  })
+
+  it('returns the template unchanged when no vars match', () => {
+    const template = 'No {{VARS}} here'
+    const result = resolveTemplateVars(template, {})
+    expect(result).toBe('No {{VARS}} here')
+  })
+
+  it('handles empty template', () => {
+    expect(resolveTemplateVars('', { A: 'B' })).toBe('')
+  })
+
+  it('replaces multiple occurrences of the same variable', () => {
+    const result = resolveTemplateVars('{{X}} and {{X}}', { X: 'Y' })
+    expect(result).toBe('Y and Y')
   })
 })

@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'fs'
 import { basename, join } from 'path'
 import type { ToolRegistry } from '@main/tools/registry.js'
-import { classifyWorkspace, scaffoldWorkspace, parseMimYaml } from '@main/workspace/workspaceContract.js'
+import { classifyWorkspace, scaffoldWorkspace, parseMimYaml, DEFAULT_AGENTS_MD } from '@main/workspace/workspaceContract.js'
 import { writeAgentContext } from '@main/ai/agentContext.js'
 import { atomicWriteJson } from '@main/atomicJson.js'
 
@@ -108,5 +108,12 @@ export function registerWorkspaceTools(tools: ToolRegistry): void {
 
       return { open: true, path, name, initialized: contract.initialized, missing: contract.missing, config }
     }
+  })
+
+  tools.register({
+    name: 'workspace.defaultAgentsMd',
+    description: 'Return the default AGENTS.md template content.',
+    inputSchema: objectSchema({}),
+    execute: async () => ({ content: DEFAULT_AGENTS_MD }),
   })
 }

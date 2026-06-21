@@ -924,8 +924,9 @@ async function streamProfileResponse({
     model,
     instructions: profile === 'chat'
       ? [
-          getSystemPrompt(tools.getWorkspacePath() ?? undefined, { includeSkillCatalog: false }),
-          formatSkillCatalogSection(skillCatalog),
+          getSystemPrompt(tools.getWorkspacePath() ?? undefined, {
+            skillCatalog: formatSkillCatalogSection(skillCatalog) ?? undefined,
+          }),
           selectedSkills.promptSection,
         ]
         .filter(Boolean).join('\n\n\n')
