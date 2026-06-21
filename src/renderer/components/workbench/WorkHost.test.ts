@@ -301,7 +301,7 @@ describe('WorkHost', () => {
     expect(root.querySelector('[data-testid="chat-view"]')?.getAttribute('data-session-id')).toBe('s2')
   })
 
-  it('keeps package views and Work-surface events behind the Work host boundary', async () => {
+  it('keeps app views and Work-surface events behind the Work host boundary', async () => {
     const onOpenFile = vi.fn()
     const packageWork = {
       id: 'work:package-view:demo:main',
@@ -389,7 +389,7 @@ describe('WorkHost', () => {
     expect(view?.dataset.active).toBe('true')
   })
 
-  it('shows package runs as Work without reopening the package launcher', async () => {
+  it('shows app runs as Work without reopening the app launcher', async () => {
     const onOpenPackage = vi.fn()
     mountHost('package-run', {
       id: 'work:package-run:demo:run-1',
@@ -409,7 +409,7 @@ describe('WorkHost', () => {
     expect(onOpenPackage).toHaveBeenCalledWith('demo')
   })
 
-  it('caches package Work views across Work navigation', async () => {
+  it('caches app Work views across Work navigation', async () => {
     const packageWork = ref<WorkEntry | null>({
       id: 'work:package-view:demo:main',
       kind: 'package-view',
@@ -501,7 +501,7 @@ describe('WorkHost', () => {
     expect(root.querySelector('[data-testid="agent-session-view"]')?.textContent).toBe('claude-code:sess-1:1')
   })
 
-  it('caches package run Work views across Work navigation', async () => {
+  it('caches app run Work views across Work navigation', async () => {
     const activeWork = ref<WorkEntry | null>({
       id: 'work:package-run:demo:run-1',
       kind: 'package-run',

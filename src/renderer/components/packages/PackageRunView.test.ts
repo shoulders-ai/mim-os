@@ -47,7 +47,7 @@ function packageRun(overrides: Partial<PackageRunRecord> = {}): PackageRunRecord
   }
 }
 
-describe('PackageRunView', () => {
+describe('AppRunView', () => {
   let root: HTMLElement
   let app: ReturnType<typeof createApp> | null = null
   let call: ReturnType<typeof vi.fn>

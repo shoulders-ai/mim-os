@@ -699,7 +699,7 @@ async function openPackageDocs(id: string) {
     )
   } catch (err) {
     workbenchStore.setNavigationError('artifact', err)
-    console.error('[packages] open README', err)
+    console.error('[apps] open README', err)
   }
 }
 

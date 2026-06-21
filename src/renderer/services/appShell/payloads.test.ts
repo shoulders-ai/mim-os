@@ -7,7 +7,7 @@ import {
 } from './payloads.js'
 
 describe('app shell payload guards', () => {
-  it('accepts valid package view bridge payloads only', () => {
+  it('accepts valid app view bridge payloads only', () => {
     expect(isPackageViewBridgePayload({
       kind: 'package-view',
       packageId: 'references',
@@ -28,7 +28,7 @@ describe('app shell payload guards', () => {
     })).toBe(false)
   })
 
-  it('accepts valid package run bridge payloads only', () => {
+  it('accepts valid app run bridge payloads only', () => {
     expect(isPackageRunBridgePayload({
       kind: 'package-run',
       packageId: 'scholar',
@@ -42,7 +42,7 @@ describe('app shell payload guards', () => {
     expect(isPackageRunBridgePayload(null)).toBe(false)
   })
 
-  it('accepts package job events with required identity and ordering fields', () => {
+  it('accepts app job events with required identity and ordering fields', () => {
     expect(isPackageJobEventPayload({
       type: 'job.started',
       packageId: 'slides',

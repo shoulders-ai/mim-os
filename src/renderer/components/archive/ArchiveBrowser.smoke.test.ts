@@ -244,7 +244,7 @@ describe('ArchiveBrowser smoke', () => {
     expect(call).toHaveBeenCalledWith('agent.sessions.delete', { sessionId: 'agent-sess-1' })
   })
 
-  it('restores and opens archived package runs', async () => {
+  it('restores and opens archived app runs', async () => {
     const onOpenPackageRun = vi.fn()
     app = createApp(ArchiveBrowser, { onOpenPackageRun })
     app.use(pinia)

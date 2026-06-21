@@ -131,7 +131,7 @@ function isFileMutationTool(toolName: string | undefined): boolean {
 }
 
 function packageLabel(event: TraceEvent): string {
-  if (!event.packageId) return 'Package'
+  if (!event.packageId) return 'App'
   return event.packageVersion ? `${event.packageId}@${event.packageVersion}` : event.packageId
 }
 
@@ -158,7 +158,7 @@ function capitalize(value: string): string {
 
 function actorLabel(actor: TraceEvent['actor']): string {
   if (actor === 'ai') return 'Mim'
-  if (actor === 'package') return 'A package'
+  if (actor === 'package') return 'An app'
   if (actor === 'system') return 'System'
   return 'You'
 }

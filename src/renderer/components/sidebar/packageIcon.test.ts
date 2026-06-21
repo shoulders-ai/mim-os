@@ -26,7 +26,7 @@ describe('iconUiRel', () => {
 })
 
 describe('packageIconUrl', () => {
-  it('builds the served package asset URL, encoding segments', () => {
+  it('builds the served app asset URL, encoding segments', () => {
     expect(packageIconUrl('./ui/icon.svg', 'github-monitor', 43211)).toBe(
       'http://127.0.0.1:43211/packages/github-monitor/icon.svg',
     )

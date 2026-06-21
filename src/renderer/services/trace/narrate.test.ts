@@ -56,7 +56,7 @@ describe('summarizeRun', () => {
     expect(run.title).toBe('Edited a.md and 1 more')
   })
 
-  it('titles a package job run', () => {
+  it('titles an app job run', () => {
     const run = summarizeRun([
       { ts: '2026-06-12T10:00:00.000Z', traceId: 'R', spanId: 'R', kind: 'job.started', actor: 'package', packageId: 'slides', subject: 'slides.render' },
       { ts: '2026-06-12T10:00:05.000Z', traceId: 'R', spanId: 'd', parentSpanId: 'R', kind: 'job.done', actor: 'package', packageId: 'slides', status: 'ok', durationMs: 5000 },

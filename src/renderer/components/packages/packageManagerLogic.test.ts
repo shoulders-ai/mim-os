@@ -10,7 +10,7 @@ import {
   runDurationLabel,
 } from './packageManagerLogic.js'
 
-describe('package manager logic', () => {
+describe('app manager logic', () => {
   it('parses job input text as a JSON object', () => {
     expect(parseJobInputText('')).toEqual({})
     expect(parseJobInputText('{ "path": "README.md" }')).toEqual({ path: 'README.md' })
@@ -46,7 +46,7 @@ describe('package manager logic', () => {
     expect(jobInputSummary()).toBe('No declared inputs')
   })
 
-  it('labels package run timeline events with user-facing text', () => {
+  it('labels app run timeline events with user-facing text', () => {
     expect(packageRunEventLabel({ type: 'job.step', data: { name: 'Reading files' } })).toBe('Reading files')
     expect(packageRunEventLabel({ type: 'job.progress', data: { label: 'Indexing', value: 0.42 } })).toBe('Indexing 42%')
     expect(packageRunEventLabel({ type: 'job.failed', data: { error: 'boom' } })).toBe('boom')

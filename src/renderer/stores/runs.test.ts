@@ -78,7 +78,7 @@ describe('runs store', () => {
     ])
   })
 
-  it('aggregates package jobs without becoming their persistence layer', () => {
+  it('aggregates app jobs without becoming their persistence layer', () => {
     const runs = useRunsStore()
     runs.setPackageRuns([
       packageRun({ runId: 'done', status: 'completed', packageId: 'docs', jobId: 'review' }),
@@ -94,7 +94,7 @@ describe('runs store', () => {
     ])
   })
 
-  it('can remove package runs from the Navigator aggregate after deletion', () => {
+  it('can remove app runs from the Navigator aggregate after deletion', () => {
     const runs = useRunsStore()
     runs.setPackageRuns([
       packageRun({ runId: 'done', status: 'completed', packageId: 'docs', jobId: 'review' }),
@@ -106,7 +106,7 @@ describe('runs store', () => {
     expect(runs.allRuns).toEqual([])
   })
 
-  it('updates package run records from job events without requiring a full reload', () => {
+  it('updates app run records from job events without requiring a full reload', () => {
     const runs = useRunsStore()
 
     runs.applyPackageJobEvent({
@@ -136,7 +136,7 @@ describe('runs store', () => {
     }))
   })
 
-  it('ignores ephemeral package job events so they never reach Activity', () => {
+  it('ignores ephemeral app job events so they never reach Activity', () => {
     const runs = useRunsStore()
 
     runs.applyPackageJobEvent({
@@ -200,7 +200,7 @@ describe('runs store', () => {
   })
 })
 
-describe('runs store package run rename', () => {
+describe('runs store app run rename', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
@@ -286,7 +286,7 @@ describe('runs store agent sessions', () => {
       agentSession({ sessionId: 'error', status: 'error' }),
       agentSession({ sessionId: 'stopped', status: 'stopped' }),
       // Interrupted sessions (app quit mid-run) surface as errors, mirroring
-      // packageJobs boot reconciliation marking interrupted runs failed.
+      // app jobs boot reconciliation marking interrupted runs failed.
       agentSession({ sessionId: 'interrupted', status: 'interrupted' }),
     ])
 
@@ -324,7 +324,7 @@ describe('runs store agent sessions', () => {
     expect(runs.archivedAgentSessions.map(item => item.sessionId)).toEqual(['old'])
   })
 
-  it('merges agent sessions into allRuns after chats and package runs', () => {
+  it('merges agent sessions into allRuns after chats and app runs', () => {
     const sessions = useSessionStore()
     const runs = useRunsStore()
     sessions.sessions = [session({ id: 's1', label: 'Chat', messages: [{ id: 'm1', role: 'user', content: 'hi' }] })]

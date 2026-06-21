@@ -174,7 +174,7 @@ describe('AppsSettingsPanel registry UI', () => {
     expect(updateBtn!.textContent).toContain('Update')
   })
 
-  it('calls package.update when Update is clicked', async () => {
+  it('calls package.update when Update button is clicked', async () => {
     registryEntries = [makeRegistryEntry({ version: '1.2.0', installedVersions: ['1.0.0'] })]
     mount()
     await flushUi()

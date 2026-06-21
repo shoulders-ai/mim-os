@@ -151,7 +151,7 @@ describe('AppsSettingsPanel detail expansion', () => {
     expect(root.textContent).toContain('api.example.com')
   })
 
-  it('shows "No special access" when a package declares none', async () => {
+  it('shows "No special access" when an app declares none', async () => {
     call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
       if (tool === 'app.status') {
         return { apps: [{ id: 'slides', enabled: true, layer: 'workspace', installed: true, installedVersions: ['1.0.0'], source: 'workspace', shadowed: false, needsTrust: false, needsInstall: false, folderPresent: false }] }
@@ -204,7 +204,7 @@ describe('AppsSettingsPanel detail expansion', () => {
     expect(root.textContent).toContain('Runtime skill')
   })
 
-  it('shows package version in developer details', async () => {
+  it('shows app version in developer details', async () => {
     mount()
     await flushUi()
 
@@ -251,7 +251,7 @@ describe('AppsSettingsPanel detail expansion', () => {
 
   // ---- Open button ----
 
-  it('emits openPackage when Open is clicked for an enabled app with views', async () => {
+  it('emits openApp when Open is clicked for an enabled app with views', async () => {
     const onOpenPackage = vi.fn()
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -270,7 +270,7 @@ describe('AppsSettingsPanel detail expansion', () => {
     expect(onOpenPackage).toHaveBeenCalledWith('runtime-demo')
   })
 
-  it('shows Documentation for apps with README metadata and emits openPackageDocs', async () => {
+  it('shows Documentation for apps with README metadata and emits openAppDocs', async () => {
     const onOpenPackageDocs = vi.fn()
     const pinia = createPinia()
     setActivePinia(pinia)

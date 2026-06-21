@@ -16,7 +16,7 @@ function pkg(views: PackageWithViews['manifest']['views']): PackageWithViews {
   }
 }
 
-describe('package view roles', () => {
+describe('app view roles', () => {
   it('selects Work-capable views for Navigator/Work entries', () => {
     const item = pkg([
       { id: 'report', label: 'Report', src: './ui/report.html', role: 'artifact' },
@@ -35,7 +35,7 @@ describe('package view roles', () => {
     expect(defaultWorkPackageView(item)?.id).toBe('detail')
   })
 
-  it('keeps Navigator package selection Work-only', () => {
+  it('keeps Navigator app selection Work-only', () => {
     const artifactOnly = pkg([
       { id: 'report', label: 'Report', src: './ui/report.html', role: 'artifact' },
     ])
@@ -50,7 +50,7 @@ describe('package view roles', () => {
     expect(packageNavigatorTarget(artifactOnly)).toEqual({ pane: 'settings' })
   })
 
-  it('sends explicit opens for Artifact-only packages to Settings', () => {
+  it('sends explicit opens for Artifact-only apps to Settings', () => {
     const artifactOnly = pkg([
       { id: 'report', label: 'Report', src: './ui/report.html', role: 'artifact' },
     ])

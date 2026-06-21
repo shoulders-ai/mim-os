@@ -42,7 +42,7 @@ watch(
     />
 
     <div v-else class="flex flex-1 items-center justify-center font-sans text-[12px] text-ink-3">
-      <p>{{ error || 'Loading package view' }}</p>
+      <p>{{ error || 'Loading app view' }}</p>
     </div>
   </section>
 </template>

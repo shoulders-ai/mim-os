@@ -75,7 +75,7 @@ describe('apps store (resolved state)', () => {
 
     expect(store.isVisible('board')).toBe(true)
     expect(store.isVisible('knowledge')).toBe(false)
-    // Unknown packages are not visible
+    // Unknown apps are not visible
     expect(store.isVisible('unknown')).toBe(false)
   })
 
@@ -164,13 +164,13 @@ describe('apps store (resolved state)', () => {
     await store.refresh()
 
     // The store's isVisible reflects the resolved visible flag.
-    // Disabled packages are not visible in launchers.
+    // Disabled apps are not visible in launchers.
     expect(store.isVisible('board')).toBe(false)
     expect(store.isVisible('hello')).toBe(true)
   })
 
   it('PACKAGE_APP_MAP is no longer exported', () => {
-    // The hardcoded package-to-app mapping is deleted; all state comes from
+    // The hardcoded app mapping is deleted; all state comes from
     // resolved app.status. Verify the module does not export it.
     const mod = coreAppsModule as Record<string, unknown>
     expect(mod.PACKAGE_APP_MAP).toBeUndefined()

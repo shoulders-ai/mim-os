@@ -99,7 +99,7 @@ describe('app shell kernel events', () => {
     expect(deps.refreshApps).not.toHaveBeenCalled()
   })
 
-  it('updates package state and app-update badges from kernel events', () => {
+  it('updates app state and app-update badges from kernel events', () => {
     const { deps, kernel, emit } = makeHarness()
     registerAppKernelEvents(kernel, deps)
 
@@ -148,7 +148,7 @@ describe('app shell kernel events', () => {
     expect(deps.handleSaveFile).toHaveBeenNthCalledWith(2, true)
   })
 
-  it('routes direct menu, approval, key, package, and agent events', () => {
+  it('routes direct menu, approval, key, app, and agent events', () => {
     const { deps, kernel, emit } = makeHarness()
     registerAppKernelEvents(kernel, deps)
     const approval = { requestId: 'req-1' }

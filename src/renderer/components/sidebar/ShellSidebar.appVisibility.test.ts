@@ -114,9 +114,9 @@ describe('ShellSidebar core-app visibility', () => {
     const ids = visiblePackageIds(root)
     expect(ids).not.toContain('board')
     expect(ids).toContain('knowledge')
-    // Non-core user package is always visible.
+    // Non-core user app is always visible.
     expect(ids).toContain('docx-review')
-    // Demo packages stay out of the normal Navigator.
+    // Demo apps stay out of the normal Navigator.
     expect(ids).not.toContain('runtime-demo')
   })
 

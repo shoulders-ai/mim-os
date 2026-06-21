@@ -105,7 +105,7 @@ describe('AppsSettingsPanel sections', () => {
     expect(root.textContent).not.toContain('Built in')
   })
 
-  it('shows package skills only inside Developer details', async () => {
+  it('shows app skills only inside Developer details', async () => {
     mount()
     await flushUi()
 
@@ -281,7 +281,7 @@ describe('AppsSettingsPanel sections', () => {
 
   // ---- Override badge ----
 
-  it('shows Local override badge on shadowed packages', async () => {
+  it('shows Local override badge on shadowed apps', async () => {
     appsState = [
       { id: 'my-pkg', enabled: true, layer: 'local', installed: true, installedVersions: ['1.0.0'], source: 'workspace', shadowed: true, needsTrust: false, needsInstall: false, folderPresent: false },
     ]
@@ -303,7 +303,7 @@ describe('AppsSettingsPanel sections', () => {
 
   // ---- Install from source ----
 
-  it('calls package.install from expanded needsInstall row', async () => {
+  it('calls package.install from expanded needs-install row', async () => {
     appsState = [
       { id: 'github-monitor', enabled: true, layer: 'workspace', installed: false, installedVersions: [], source: 'https://github.com/shoulders-ai/mim-github-monitor', shadowed: false, needsTrust: false, needsInstall: true, folderPresent: false },
     ]

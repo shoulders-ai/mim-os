@@ -142,7 +142,7 @@ describe('composer @ mention logic', () => {
     expect(filterAtItems('triage', false, items)).toEqual([])
   })
 
-  it('filters dynamic @ items by path and package name', () => {
+  it('filters dynamic @ items by path and app name', () => {
     const items = buildAtItems({
       projectFiles: [{ path: 'src/renderer/App.vue' }],
       packageTools: [{ name: 'lookup', packageName: 'Knowledge Base' }],

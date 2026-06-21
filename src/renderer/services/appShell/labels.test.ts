@@ -30,7 +30,7 @@ describe('app shell labels', () => {
     ])
   })
 
-  it('prefers live package-run and agent-session titles over stale Work titles', () => {
+  it('prefers live app-run and agent-session titles over stale Work titles', () => {
     const packageWork: WorkEntry = {
       id: 'work:package-run:pkg:run-1',
       kind: 'package-run',

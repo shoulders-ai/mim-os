@@ -85,7 +85,7 @@ describe('Mim runtime SDK workbench navigation', () => {
     vi.resetModules()
   })
 
-  it('opens a persistent package-run Work entry after starting a package job', async () => {
+  it('opens a persistent app-run Work entry after starting an app job', async () => {
     const { runtime, socket } = await loadRuntime()
 
     const run = await runtime.jobs.start('reviewDocx', { path: 'docs/input.docx' })
@@ -98,7 +98,7 @@ describe('Mim runtime SDK workbench navigation', () => {
     ])
   })
 
-  it('allows deliberately background package jobs without opening Work', async () => {
+  it('allows deliberately background app jobs without opening Work', async () => {
     const { runtime, socket } = await loadRuntime()
 
     await runtime.jobs.start('buildIndex', {}, { openWork: false })
@@ -110,18 +110,18 @@ describe('Mim runtime SDK workbench navigation', () => {
   })
 
   it('rejects runtime calls when identify fails instead of calling unidentified', async () => {
-    MockWebSocket.identifyError = 'Invalid package launch token'
+    MockWebSocket.identifyError = 'Invalid app launch token'
     const module = await import('../../sdk/mim.js')
     const socket = MockWebSocket.instances.at(-1)
     if (!socket) throw new Error('SDK did not create a WebSocket')
     socket.emit('open')
 
     await expect(module.runtime.jobs.start('reviewDocx', {}))
-      .rejects.toThrow('Invalid package launch token')
+      .rejects.toThrow('Invalid app launch token')
     expect(socket.sent.map(message => message.method)).toEqual(['identify'])
   })
 
-  it('exposes an explicit openRun helper for persisted package runs', async () => {
+  it('exposes an explicit openRun helper for persisted app runs', async () => {
     const { runtime, socket } = await loadRuntime()
 
     await runtime.workbench.openRun('run-2')

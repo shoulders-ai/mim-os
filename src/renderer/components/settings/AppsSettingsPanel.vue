@@ -687,7 +687,7 @@ watch(inWorkspaceRows, (rows) => {
                   class="mt-1.5 flex flex-col gap-1.5 rounded-[6px] border border-rule-light bg-surface px-2.5 py-2 text-[10px] text-ink-3"
                 >
                   <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <span class="w-[58px] shrink-0 font-medium text-ink-4">Package</span>
+                    <span class="w-[58px] shrink-0 font-medium text-ink-4">App</span>
                     <code class="font-mono text-ink-2">{{ row.id }}</code>
                   </div>
                   <div v-if="row.pkg?.backend" class="flex flex-wrap items-baseline gap-x-2 gap-y-1">

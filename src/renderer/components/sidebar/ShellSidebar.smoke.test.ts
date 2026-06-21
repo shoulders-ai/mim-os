@@ -329,7 +329,7 @@ describe('ShellSidebar smoke', () => {
     root.querySelector<HTMLButtonElement>('[data-testid="section-toggle-apps"]')?.click()
     await flushUi()
 
-    // Collapsing Apps hides packages only; core surfaces are fixed rows.
+    // Collapsing Apps hides app rows only; core surfaces are fixed rows.
     expect(root.textContent).not.toContain('DOCX Review')
     expect(root.textContent).toContain('Files')
     expect(root.textContent).toContain('Chat')
@@ -429,7 +429,7 @@ describe('ShellSidebar smoke', () => {
     expect(labels[1]).toContain('Ordered old')
   })
 
-  it('orders app rows manually and hides demo packages from the Navigator', async () => {
+  it('orders app rows manually and hides demo apps from the Navigator', async () => {
     useSettingsStore().navigatorAppOrder = ['slack-digest', 'docx-review']
     app = createApp(ShellSidebar, {
       width: 220,
@@ -466,7 +466,7 @@ describe('ShellSidebar smoke', () => {
     expect(root.querySelector('.app-list [data-work-key]')).toBeNull()
   })
 
-  it('routes package runs through package-run Work selection', async () => {
+  it('routes app runs through app-run Work selection', async () => {
     const onSelectPackageRun = vi.fn()
     const runsStore = useRunsStore()
     const packageRun: PackageRunRecord = {
@@ -529,7 +529,7 @@ describe('ShellSidebar smoke', () => {
     expect(call.mock.calls.some(([tool]) => tool === 'session.create')).toBe(false)
   })
 
-  it('offers archive and delete commands for package run rows', async () => {
+  it('offers archive and delete commands for app run rows', async () => {
     const onArchivePackageRun = vi.fn()
     const onDeletePackageRun = vi.fn()
     const runsStore = useRunsStore()
@@ -735,7 +735,7 @@ describe('ShellSidebar smoke', () => {
     }
   }
 
-  it('renders enabled installed agents as launcher rows after package launchers', async () => {
+  it('renders enabled installed agents as launcher rows after app launchers', async () => {
     const onLaunchAgent = vi.fn()
     useAgentsStore().agents = [
       makeAgent(),
@@ -817,7 +817,7 @@ describe('ShellSidebar smoke', () => {
     expect(row?.className).toContain('bg-accent-tint')
   })
 
-  it('highlights the package run Activity row when its Work entry is active', async () => {
+  it('highlights the app run Activity row when its Work entry is active', async () => {
     useRunsStore().setPackageRuns([{
       runId: 'run-1',
       packageId: 'doc-review',
@@ -842,7 +842,7 @@ describe('ShellSidebar smoke', () => {
     expect(row?.className).toContain('bg-accent-tint')
   })
 
-  it('shows a plus icon on agent launcher rows but not package launcher rows', async () => {
+  it('shows a plus icon on agent launcher rows but not app launcher rows', async () => {
     useAgentsStore().agents = [makeAgent()]
     useSettingsStore().enabledAgents = ['claude-code']
     app = createApp(ShellSidebar, {
@@ -985,7 +985,7 @@ describe('ShellSidebar smoke', () => {
     expect(onArchiveAgentSession).toHaveBeenCalledWith('sess-1')
   })
 
-  it('renames package run rows from the context menu', async () => {
+  it('renames app run rows from the context menu', async () => {
     const packageRun: PackageRunRecord = {
       runId: 'run-review-1',
       packageId: 'doc-review',
@@ -1032,7 +1032,7 @@ describe('ShellSidebar smoke', () => {
     expect(root.textContent).toContain('Contract review')
   })
 
-  it('renders an image-icon package as a masked mark and a text-icon package as its token', async () => {
+  it('renders an image-icon app as a masked mark and a text-icon app as its token', async () => {
     app = createApp(ShellSidebar, {
       width: 220,
       packages: [

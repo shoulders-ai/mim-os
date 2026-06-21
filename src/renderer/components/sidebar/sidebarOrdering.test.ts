@@ -65,7 +65,7 @@ describe('applyManualOrder', () => {
   })
 
   it('appends rows missing from the saved order in canonical order', () => {
-    // New destinations (e.g. a freshly enabled package) appear after the
+    // New destinations (e.g. a freshly enabled app) appear after the
     // saved order rather than disappearing or jumping to the top.
     expect(applyManualOrder(rows, ['b']).map(row => row.key)).toEqual(['b', 'a', 'c'])
   })

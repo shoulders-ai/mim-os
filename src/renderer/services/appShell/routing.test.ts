@@ -36,7 +36,7 @@ describe('app shell routing', () => {
     expect(resolveNavigatorSurfaceAction('__archive__', packages)).toEqual({ type: 'open-archive' })
   })
 
-  it('routes packages with Work views to package Work and others to Apps settings', () => {
+  it('routes apps with Work views to app Work and others to Apps settings', () => {
     expect(resolveNavigatorSurfaceAction('references', packages)).toEqual({
       type: 'open-package-work',
       packageId: 'references',
@@ -49,7 +49,7 @@ describe('app shell routing', () => {
     expect(resolveNavigatorSurfaceAction('missing', packages)).toEqual({ type: 'none' })
   })
 
-  it('uses explicit package-open rules for WorkHost and Settings launches', () => {
+  it('uses explicit app-open rules for WorkHost and Settings launches', () => {
     expect(resolvePackageOpenAction('references', packages)).toEqual({
       type: 'open-package-work',
       packageId: 'references',

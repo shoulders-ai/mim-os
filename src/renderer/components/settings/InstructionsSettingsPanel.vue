@@ -82,7 +82,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="flex flex-col gap-3 text-ink" aria-label="Instructions settings">
+  <section class="flex min-h-0 flex-1 flex-col gap-3 text-ink" aria-label="Instructions settings">
     <div>
       <p class="text-[12px] text-ink-2">
         Edit <span class="font-mono text-[11px]">AGENTS.md</span> — the workspace contract injected into every AI system prompt.
@@ -95,7 +95,7 @@ onMounted(() => {
 
     <template v-else>
       <textarea
-        class="min-h-[280px] w-full resize-y rounded-[6px] border border-rule-light bg-surface px-3 py-2.5 font-mono text-[11.5px] leading-5 text-ink outline-none placeholder:text-ink-4 focus:border-accent"
+        class="min-h-0 flex-1 w-full resize-none rounded-[6px] border border-rule-light bg-surface px-3 py-2.5 font-mono text-[11.5px] leading-5 text-ink outline-none placeholder:text-ink-4 focus:border-accent"
         :value="content"
         @input="onInput"
       />

@@ -56,7 +56,7 @@ describe('work entry factories', () => {
     expect(filesWorkEntry('report').query).toBe('report')
   })
 
-  it('builds package view entries with a main default view', () => {
+  it('builds app view entries with a main default view', () => {
     expect(packageViewWorkEntry('slides', 'Slides')).toEqual({
       id: 'work:package-view:slides:main',
       kind: 'package-view',
@@ -67,7 +67,7 @@ describe('work entry factories', () => {
     expect(packageViewWorkEntry('slides', 'Slides', 'config').id).toBe('work:package-view:slides:config')
   })
 
-  it('builds package run entries keyed by package and run with a default title', () => {
+  it('builds app run entries keyed by app and run with a default title', () => {
     const entry = packageRunWorkEntry('slides', 'r1')
     expect(entry).toEqual({
       id: 'work:package-run:slides:r1',

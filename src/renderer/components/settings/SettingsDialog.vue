@@ -117,7 +117,7 @@ function onNavKeydown(e: KeyboardEvent) {
 
         <div
           class="flex-1"
-          :class="activeSection === 'apps' || activeSection === 'agents' ? 'overflow-hidden' : 'overflow-y-auto px-8 py-6'"
+          :class="activeSection === 'apps' || activeSection === 'agents' ? 'overflow-hidden' : activeSection === 'instructions' ? 'flex flex-col px-8 py-6' : 'overflow-y-auto px-8 py-6'"
         >
           <AiSettingsPanel v-if="activeSection === 'ai'" />
           <InstructionsSettingsPanel v-else-if="activeSection === 'instructions'" />

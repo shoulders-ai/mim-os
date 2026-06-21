@@ -139,7 +139,7 @@ export const useRunsStore = defineStore('runs', () => {
       if (result.run?.runId) upsertPackageRun(result.run)
       return true
     } catch (err) {
-      console.error('[runs] failed to rename package run:', err)
+      console.error('[runs] failed to rename app run:', err)
       return false
     }
   }

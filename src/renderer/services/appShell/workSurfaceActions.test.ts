@@ -121,7 +121,7 @@ describe('app shell Work surface actions', () => {
     }, { preserveArtifact: true })
   })
 
-  it('opens requested and default package Work views and ignores non-Work views', async () => {
+  it('opens requested and default app Work views and ignores non-Work views', async () => {
     const { deps } = makeDeps()
     const actions = createWorkSurfaceActions(deps)
 

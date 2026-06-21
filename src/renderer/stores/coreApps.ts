@@ -1,8 +1,8 @@
 // Resolved-state apps store — the renderer's single source of truth for
-// package enablement, visibility, install, trust, and override state.
+// app enablement, visibility, install, trust, and override state.
 //
 // Replaces the old hardcoded PACKAGE_APP_MAP + per-app-name refs with a flat
-// map keyed by package id, populated from the resolved app.status tool (which
+// map keyed by app id, populated from the resolved app.status tool (which
 // merges committed mim.yaml, local overlay, and loader state in one pass).
 //
 // Refresh triggers: apps:changed AND packages:changed events from main.
@@ -54,7 +54,7 @@ function toResolved(entry: AppStatusEntry): ResolvedApp {
     shadowed: entry.shadowed,
     needsTrust: entry.needsTrust,
     needsInstall: entry.needsInstall,
-    // Visibility for launchers: enabled packages are visible; disabled are
+    // Visibility for launchers: enabled apps are visible; disabled are
     // hidden. (The launcher filters on this flag, settings panels show all.)
     visible: entry.enabled,
     folderPresent: entry.folderPresent,
@@ -87,12 +87,12 @@ export const useAppsStore = defineStore('coreApps', () => {
     return apps[id]?.folderPresent === true
   }
 
-  // A package's launch row is shown iff the resolved state says it is visible.
+  // An app's launch row is shown iff the resolved state says it is visible.
   // This replaces the old PACKAGE_APP_MAP-based isPackageVisible().
   function isPackageVisible(packageId: string): boolean {
     const entry = apps[packageId]
-    // Unknown packages (not in resolved state) are assumed visible — they are
-    // non-app packages that have no enablement gate.
+    // Unknown apps (not in resolved state) are assumed visible — they have
+    // no enablement gate.
     if (!entry) return true
     return entry.visible
   }
@@ -116,7 +116,7 @@ export const useAppsStore = defineStore('coreApps', () => {
     await refresh()
   }
 
-  // Acknowledge trust for a vendored workspace package. Called from the
+  // Acknowledge trust for a vendored workspace app. Called from the
   // renderer as the USER actor (the default — the preload bridge does not set
   // an explicit actor, and kernel:call defaults to 'user'). The gate
   // hard-denies ai/package actors on app.trust (spec decision 12).

@@ -4,7 +4,7 @@
 // and only genuinely irreversible actions are set apart.
 //
 // Only AI actions ever reach this surface. The gate auto-allows direct user and
-// package actions, so there is no package/permission/risk-jargon UI here.
+// app actions, so there is no app/permission/risk-jargon UI here.
 
 export interface ApprovalPreviewLike {
   kind: 'edit' | 'write' | 'create' | 'delete'
@@ -44,9 +44,9 @@ const ACTION_PHRASES: Record<string, string> = {
   'terminal.run': 'run a terminal command',
   'terminal.spawn': 'open a terminal',
   'terminal.write': 'send input to the terminal',
-  'package.create': 'create a package',
-  'package.edit': 'edit a package file',
-  'package.delete': 'delete a package',
+  'package.create': 'create an app',
+  'package.edit': 'edit an app file',
+  'package.delete': 'delete an app',
   'slack.send': 'send a Slack message',
   'gmail.send': 'send an email',
   'calendar.create': 'add a calendar event',

@@ -117,7 +117,7 @@ const statusOptions: MimSelectOption[] = [
 const actorOptions: MimSelectOption[] = [
   { value: 'all', label: 'All actors' },
   { value: 'ai', label: 'Mim' },
-  { value: 'package', label: 'Packages' },
+  { value: 'package', label: 'Apps' },
   { value: 'user', label: 'You' },
   { value: 'system', label: 'System' },
 ]

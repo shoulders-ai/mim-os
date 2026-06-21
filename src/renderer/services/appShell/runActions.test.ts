@@ -80,7 +80,7 @@ function makeDeps(overrides: Partial<RunActionsDeps> = {}) {
 }
 
 describe('app shell run actions', () => {
-  it('hydrates missing package runs before opening package-run Work', async () => {
+  it('hydrates missing app runs before opening app-run Work', async () => {
     const hydrated = makePackageRun({ label: 'Hydrated run title' })
     const { deps } = makeDeps({
       callKernel: vi.fn(async tool => {
@@ -102,7 +102,7 @@ describe('app shell run actions', () => {
     })
   })
 
-  it('archives active package runs, prunes Work history, falls back, and refreshes archive state', async () => {
+  it('archives active app runs, prunes Work history, falls back, and refreshes archive state', async () => {
     const archived = makePackageRun({ archived: true })
     const { deps, setActiveWork } = makeDeps({
       callKernel: vi.fn(async tool => {

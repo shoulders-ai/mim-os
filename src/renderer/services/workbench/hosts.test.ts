@@ -14,7 +14,7 @@ describe('workbench host resolvers', () => {
     expect(resolveWorkHost({ id: 'work:package-view:p:main', kind: 'package-view', title: 'Package', packageId: 'p', viewId: 'main' })).toBe('package-view')
   })
 
-  it('resolves package runs to their own Work identity', () => {
+  it('resolves app runs to their own Work identity', () => {
     const run = {
       id: 'work:package-run:p:r1',
       kind: 'package-run',
