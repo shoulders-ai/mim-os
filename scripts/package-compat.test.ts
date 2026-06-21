@@ -28,9 +28,9 @@ import { registerReferencesTools } from '@main/tools/references.js'
 const runCompat = process.env.MIM_PACKAGE_COMPAT === '1'
 const describeCompat = runCompat ? describe : describe.skip
 
-// `scholar` exists as a planned package today but has no backend entrypoint yet.
-// Use MIM_COMPAT_PACKAGES=all to force every local package directory through
-// this gate once planned packages graduate.
+// `scholar` exists as a planned app today but has no backend entrypoint yet.
+// Use MIM_COMPAT_PACKAGES=all to force every local app directory through
+// this gate once planned apps graduate.
 const DEFAULT_ALLOWED_OMISSIONS = ['scholar']
 
 interface PackageJson {
@@ -139,7 +139,7 @@ describeCompat('mim-apps compatibility', () => {
     harness = null
   })
 
-  it('uses every local package directory except allowed omissions by default', () => {
+  it('uses every local app directory except allowed omissions by default', () => {
     const h = requireHarness()
     if (process.env.MIM_COMPAT_PACKAGES) return
 
@@ -150,14 +150,14 @@ describeCompat('mim-apps compatibility', () => {
     expect(h.selectedIds).toEqual(expected)
   })
 
-  it('loads selected package manifests without loader diagnostics', () => {
+  it('loads selected app manifests without loader diagnostics', () => {
     const h = requireHarness()
     expect(h.packages.diagnostics(), `loader diagnostics:\n${JSON.stringify(h.packages.diagnostics(), null, 2)}`).toEqual([])
     const loadedIds = h.packages.list().map(pkg => pkg.manifest.id).sort()
     expect(loadedIds).toEqual([...h.selectedIds].sort())
   })
 
-  it('enables every selected package through app.enable', async () => {
+  it('enables every selected app through app.enable', async () => {
     const h = requireHarness()
     const result = await h.tools.call('app.status', {}, { actor: 'user' }) as {
       apps: Array<{ id: string; enabled: boolean; installed: boolean; folderPresent: boolean }>
@@ -177,7 +177,7 @@ describeCompat('mim-apps compatibility', () => {
     }
   })
 
-  it('imports selected package backends and exposes valid capabilities', async () => {
+  it('imports selected app backends and exposes valid capabilities', async () => {
     const h = requireHarness()
     const result = await h.tools.call('package.capabilities.list', {}, { actor: 'user' }) as {
       packages: Array<{
@@ -191,7 +191,7 @@ describeCompat('mim-apps compatibility', () => {
 
     for (const id of h.selectedIds) {
       const capabilities = capabilitiesById.get(id)
-      expect(capabilities, `${id} should appear in package.capabilities.list`).toBeDefined()
+      expect(capabilities, `${id} should appear in app capabilities list`).toBeDefined()
       expect(capabilities?.diagnostics, `${id} backend diagnostics`).toEqual([])
 
       const declaredBackend = h.packageJsonById.get(id)?.mim?.backend
@@ -202,7 +202,7 @@ describeCompat('mim-apps compatibility', () => {
     }
   })
 
-  it('registers manifest-granted named package tools', () => {
+  it('registers manifest-granted named app tools', () => {
     const h = requireHarness()
     expect(h.namedTools.diagnostics()).toEqual([])
 
@@ -217,7 +217,7 @@ describeCompat('mim-apps compatibility', () => {
     }
   })
 
-  it('runs package-owned compatibility smoke hooks', async () => {
+  it('runs app-owned compatibility smoke hooks', async () => {
     const h = requireHarness()
     const hooks: string[] = []
 

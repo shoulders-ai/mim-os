@@ -54,7 +54,7 @@ describe.skipIf(!process.env.MIM_E2E)('live registry end-to-end', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('lists the three packages from the live registry', async () => {
+  it('lists the three apps from the live registry', async () => {
     const result = await tools.call('registry.list', {}, { actor: 'user' }) as {
       registries: Array<{ id: string; kind: string; location: string; origin: string; status: string; diagnostics: string[] }>
       entries: Array<{ id: string; registryId: string; path?: string; commit: string }>
@@ -67,7 +67,7 @@ describe.skipIf(!process.env.MIM_E2E)('live registry end-to-end', () => {
     expect(result.registries[0].origin).toBe('default')
     expect(result.registries[0].diagnostics).toEqual([])
 
-    // Should have the three packages from the live registry
+    // Should have the three apps from the live registry
     expect(result.entries.map(e => e.id).sort()).toEqual(['docx-review', 'github-monitor', 'slides'])
     for (const entry of result.entries) {
       expect(entry.registryId).toBe('default')
