@@ -127,4 +127,27 @@ describe('InstructionsSettingsPanel', () => {
     expect(annotation!.textContent).toContain('{{DATE_TODAY}}')
     expect(annotation!.textContent).toContain('{{TOOL_SET}}')
   })
+
+  it('shows default content and Save button when AGENTS.md does not exist', async () => {
+    call = vi.fn(async (tool: string) => {
+      if (tool === 'fs.read') throw new Error('File not found')
+      if (tool === 'fs.write') return { ok: true }
+      if (tool === 'workspace.defaultAgentsMd') return { content: '# Default\n' }
+      return {}
+    })
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call, on: vi.fn(), off: vi.fn() },
+    })
+
+    mount()
+    await flushUi()
+
+    const textarea = root.querySelector<HTMLTextAreaElement>('textarea')
+    expect(textarea).toBeTruthy()
+    expect(textarea!.value).toBe('# Default\n')
+
+    const saveBtn = root.querySelector('[data-testid="save-btn"]')
+    expect(saveBtn).toBeTruthy()
+  })
 })

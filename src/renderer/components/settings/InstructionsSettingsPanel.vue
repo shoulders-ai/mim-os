@@ -23,13 +23,17 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const [fileResult, defaultResult] = await Promise.all([
-      window.kernel.call('fs.read', { path: 'AGENTS.md', full: true }) as Promise<{ content?: string }>,
-      window.kernel.call('workspace.defaultAgentsMd', {}) as Promise<{ content: string }>,
-    ])
-    content.value = fileResult.content ?? ''
-    savedContent.value = content.value
+    const defaultResult = await window.kernel.call('workspace.defaultAgentsMd', {}) as { content: string }
     defaultContent.value = defaultResult.content ?? ''
+    let fileContent: string | null = null
+    try {
+      const fileResult = await window.kernel.call('fs.read', { path: 'AGENTS.md', full: true }) as { content?: string }
+      fileContent = fileResult.content ?? null
+    } catch {
+      // AGENTS.md doesn't exist yet — start with the default
+    }
+    content.value = fileContent ?? defaultContent.value
+    savedContent.value = fileContent ?? ''
   } catch (err) {
     error.value = (err as Error).message
   } finally {
