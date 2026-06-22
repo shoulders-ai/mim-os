@@ -13,7 +13,7 @@ The app ships three integrated surfaces:
 - **Document pane** — unified text/PDF/file-card tabs; text uses CodeMirror 6 with formatting, live preview, comments, citations, export, and ghost suggestions.
 - **Terminal** — multi-tab shell (xterm.js + node-pty); detected CLI coding agents (Claude Code, Codex, Gemini CLI) launch as first-class agent sessions with status, persisted scrollback, and history.
 
-Packages extend the shell with custom UI mounted in sandboxed iframes, backed by a WebSocket SDK that gives them access to the full tool registry.
+Apps extend the shell with custom UI mounted in sandboxed iframes, backed by a WebSocket SDK that gives them access to the full tool registry.
 
 Core also provides local audit and recovery infrastructure: permissioned tool
 execution, trace logging, and per-file local history under `.mim/` so important
@@ -50,7 +50,7 @@ The key resolver checks, in order:
 1. Environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`)
 2. `~/.mim/keys.env`
 
-Keys can be set from the app via the `ai.setKey` tool and removed via `ai.clearKey`, both of which write `~/.mim/keys.env`. Settings > Models exposes a key field plus a Remove control for file-stored keys. Key changes apply live to every AI surface (chat, inline rewrite, ghost, packages) with no app restart: `setKey`/`clearKey` emit `ai:keys-changed`, and the renderer caches key status reactively in the settings store.
+Keys can be set from the app via the `ai.setKey` tool and removed via `ai.clearKey`, both of which write `~/.mim/keys.env`. Settings > Models exposes a key field plus a Remove control for file-stored keys. Key changes apply live to every AI surface (chat, inline rewrite, ghost, apps) with no app restart: `setKey`/`clearKey` emit `ai:keys-changed`, and the renderer caches key status reactively in the settings store.
 
 `~/.mim/config.yaml` may hold identity, model defaults, and integration account labels. It never holds API keys or integration tokens.
 
@@ -58,7 +58,7 @@ Keys can be set from the app via the `ai.setKey` tool and removed via `ai.clearK
 ## Concepts
 
 - **Mim** = product.
-- Single window with Navigator, Work, and Artifact panes. The Navigator selects Work; Work opens durable Artifacts; package runs are Work,
+- Single window with Navigator, Work, and Artifact panes. The Navigator selects Work; Work opens durable Artifacts; app runs are Work,
   not launcher/config panels.
 - Internal package name is `mim`.
 - `localStorage` keys use `mim:` prefix.
@@ -66,8 +66,8 @@ Keys can be set from the app via the `ai.setKey` tool and removed via `ai.clearK
 - API keys live in `~/.mim/keys.env`.
 - Integration tokens live in the OS keychain.
 
-## Packages
+## Apps
 
-User-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulders-ai/mim-apps), one per `packages/<id>/`. This repo is the core runtime — no built-in apps. Install packages via `app.add` in Settings > Apps or `package.install`; they land in `~/.mim/packages/<id>/<version>/`. To develop, clone mim-apps and open it as a Mim workspace — edits show on reload. See the [mim-apps README](https://github.com/shoulders-ai/mim-apps) for publishing. Package-root `README.md` files are auto-discovered as read-only documentation tabs.
+User-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulders-ai/mim-apps), one per `packages/<id>/`. This repo is the core runtime — no built-in apps. Install apps via `app.add` in Settings > Apps or `package.install`; they land in `~/.mim/packages/<id>/<version>/`. To develop, clone mim-apps and open it as a Mim workspace — edits show on reload. See the [mim-apps README](https://github.com/shoulders-ai/mim-apps) for publishing. App-root `README.md` files are auto-discovered as read-only documentation tabs.
 
 For building workspace-specific capabilities, see [docs/custom-apps.md](docs/custom-apps.md).

@@ -4,7 +4,7 @@ The logbook is an optional human-readable workspace activity file at `.mim/log.m
 
 It is separate from the trace stream (`.mim/traces/`):
 
-- `.mim/traces/*.jsonl` is the machine-readable audit/observability stream produced by every tool call, model call, gate decision, and package job event.
+- `.mim/traces/*.jsonl` is the machine-readable audit/observability stream produced by every tool call, model call, gate decision, and app job event.
 - `log.md` is a compact human and agent logbook for deliberate notes such as "finished review pass" or "waiting for client reply".
 
 The logbook is gitignored runtime state. It is never required for a valid Mim workspace.
@@ -16,7 +16,7 @@ The logbook is gitignored runtime state. It is never required for a valid Mim wo
 - Input: `{ message: string }`
 - Appends one normalized single-line entry to `.mim/log.md`.
 - Creates `.mim/` and `log.md` on first write.
-- Records actor identity from the tool context. Package entries render as `[package {id}]`.
+- Records actor identity from the tool context. App entries render as `[package {id}]`.
 - Exposed to chat as `log_append`.
 - Gate policy: write, low risk.
 

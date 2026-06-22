@@ -77,13 +77,36 @@ tool names.
 | `export_docx` | `export.docx` |
 | `export_pdf` | `export.pdf` |
 | `workspace_orient` | `workspace.orient` |
+| `fs_read` | `fs.read` |
+| `search_files` | `search.files` |
+| `skill_list` | `skill.list` |
+| `skill_get` | `skill.get` |
+| `log_append` | `log.append` |
+| `workspace_info` | `workspace.info` |
+| `system_prompt` | `system.prompt` |
 
 Each exposed Mim tool must have an `inputSchema`; missing schemas fail MCP
-metadata generation loudly.
+metadata generation loudly for core tools. Named tools from enabled apps are
+exposed dynamically alongside the core set — the server queries the active named
+tool registrations at request time. Named tools without an `inputSchema` are
+silently excluded from the MCP catalog.
 
 ## Client Config
 
-Claude Code users can add:
+Settings > Agents shows a **Connect** button next to each installed CLI agent.
+Clicking it runs the agent's native `mcp add` command behind the scenes:
+
+| Agent | Command |
+|---|---|
+| Claude Code | `claude mcp add mim -- mim mcp` |
+| Codex | `codex mcp add mim -- mim mcp` |
+| Gemini CLI | `gemini mcp add mim mim mcp` |
+
+This is a one-time setup — the config persists across sessions. The
+**Disconnect** option is in the agent's Customise section.
+
+Manual setup is also possible. The equivalent JSON config (for agents that
+accept it):
 
 ```json
 { "mcpServers": { "mim": { "command": "mim", "args": ["mcp"] } } }

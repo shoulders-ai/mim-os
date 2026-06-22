@@ -19,10 +19,10 @@ scratch terminal tab is not promoted into a session.
 | Agent session | Run: Activity row + `agent-session` Work entry |
 | Scratch terminal | Unchanged fixed Terminal fixture, multi-tab panel, no Activity rows |
 
-An agent session is the closest sibling of a package run: persisted record,
+An agent session is the closest sibling of an app run: persisted record,
 status lifecycle, boot-time stale reconciliation, close-guard participation,
 archive/History membership. `agentSessions.ts` deliberately mirrors
-`packageJobs.ts` shapes. Agents are **not** packages: no `app.status` rows,
+`packageJobs.ts` shapes. Agents are **not** apps: no `app.status` rows,
 no trust layers. Launcher visibility is **opt-in**: a row appears iff the
 binary is installed on this machine **and** the user enabled the agent in
 Settings → Agents (the `enabledAgents` workspace setting,
@@ -38,9 +38,9 @@ records, relaunch, Activity rows, and History are unaffected by toggling off.
 | `src/main/agents/agentSessions.ts` | Session lifecycle service (`createAgentSessions`): launch/stop/list/get/rename/archive/delete, persistence, scrollback capture, event emission, `reconcileStaleSessions`, `activeSessionCount`. System boundaries (pty spawn factory, MCP token/port providers, emit, clock, id generator) are injected. |
 | `src/main/agents/agentStatus.ts` | Pure runtime-status tracker over the pty output stream (see Status signals). Dependency-free, chunk-split-safe escape-sequence parser. Derives `idle` from a 5-second timeout after entering `needs-input`. |
 | `src/main/tools/agents.ts` | Registers the `agent.*` tools over injected detect/sessions deps. |
-| `src/main/pty.ts` | Shared `spawnPtyProcess` helper used by both `terminal.spawn` and agent sessions: every pty lives in the same instances map and forwards on the same `pty:output:<id>` / `pty:exit:<id>` channels. Renderer keystrokes use a fast-path `pty:input` IPC channel (`writePty`) that bypasses the tool registry; the `terminal.write` registry tool remains for programmatic use (bridge commands, AI/package callers). `terminal.resize/kill` and renderer xterm attachment work uniformly on both scratch and agent ptys. |
+| `src/main/pty.ts` | Shared `spawnPtyProcess` helper used by both `terminal.spawn` and agent sessions: every pty lives in the same instances map and forwards on the same `pty:output:<id>` / `pty:exit:<id>` channels. Renderer keystrokes use a fast-path `pty:input` IPC channel (`writePty`) that bypasses the tool registry; the `terminal.write` registry tool remains for programmatic use (bridge commands, AI/app callers). `terminal.resize/kill` and renderer xterm attachment work uniformly on both scratch and agent ptys. |
 | `src/main/closeGuard.ts` | `closeGuardDecision(dirtyTabCount, activeRunCount, activeAgentCount)` — third count produces "N running agent sessions" in the quit prompt. |
-| `src/main/index.ts` | Wiring: `createAgentSessions({ getWorkspacePath, spawnPty: spawnPtyProcess, getMcpServerPort, createMcpToken, revokeMcpToken, emit })` (emit sends to the main window and broadcasts on the package server), `reconcileStaleSessions()` at boot, `registerAgentTools(tools, { sessions })`, agent count into the close guard. |
+| `src/main/index.ts` | Wiring: `createAgentSessions({ getWorkspacePath, spawnPty: spawnPtyProcess, getMcpServerPort, createMcpToken, revokeMcpToken, emit })` (emit sends to the main window and broadcasts on the app server), `reconcileStaleSessions()` at boot, `registerAgentTools(tools, { sessions })`, agent count into the close guard. |
 | `src/main/tools/archive.ts` | `archive.list` also returns `agentSessions` — archived records read straight from their files so the tool works without the live service (headless). |
 
 Launched agent ptys receive `MIM_PORT` and a per-session `MIM_TOKEN` in their
@@ -142,7 +142,7 @@ Once any TUI signal (OSC 9, title spinner, or OSC 777) is seen,
 
 ### Events
 
-`agent:session-event` (sent to all windows + broadcast on the package
+`agent:session-event` (sent to all windows + broadcast on the app
 server) carries `{ type, session }` where `session` is the full
 `AgentSessionRuntime`:
 
@@ -169,7 +169,7 @@ carries the full record.
 | `agent.sessions.archive` | mutate (ui/low) | `archived: false` restores |
 | `agent.sessions.delete` | mutate (ui/medium) | Removes record + scrollback; fails while running |
 
-The **whole `agent.*` surface is denied to package actors** — agent sessions
+The **whole `agent.*` surface is denied to app actors** — agent sessions
 run with the user's full shell authority. Policies live in `TOOL_POLICIES`
 and the hard-deny branches in `src/main/security/gate.ts`; see
 [security.md](security.md).
@@ -179,13 +179,13 @@ and the hard-deny branches in `src/main/security/gate.ts`; see
 | File | Owns |
 |---|---|
 | `src/renderer/stores/agents.ts` | Detected-agent catalog mirror (`agent.list`); `enabledAgents` (installed ∩ user-enabled) for launcher rows, `isEnabled`/`setEnabled` persisting the `enabledAgents` setting; error-tolerant refresh keeps the last known catalog |
-| `src/renderer/stores/runs.ts` | `agentSessions` state + `agent-session` `NavigatorRun` kind. Status mapping: `running` + runtime overlay → `working`/`needs-input`/`idle`; `interrupted` maps to `error` (mirrors packageJobs boot reconciliation); rename via `agent.sessions.rename` |
+| `src/renderer/stores/runs.ts` | `agentSessions` state + `agent-session` `NavigatorRun` kind. Status mapping: `running` + runtime overlay → `working`/`needs-input`/`idle`; `interrupted` maps to `error` (mirrors app jobs boot reconciliation); rename via `agent.sessions.rename` |
 | `src/renderer/services/workbench/entries.ts` | `agentSessionWorkEntry(agentId, sessionId, title)` → id `work:agent-session:<sessionId>` (identity is the session id alone; agentId rides along for the view) |
 | `src/renderer/services/workbench/hosts.ts` | `agent-session` Work host kind |
 | `src/renderer/components/terminal/TerminalSurface.vue` | One xterm instance bound to one pty (live) **or** replaying a static scrollback string (replay). Extracted from `TerminalPanel.vue`, which keeps tabs, spawn ownership, and restart semantics for scratch terminals |
 | `src/renderer/components/agents/AgentSessionView.vue` | The `agent-session` Work surface: header with title/status/subtitle, Stop while running (confirm-free; relaunch recovers), live `TerminalSurface` bound to `ptyId`, ended banner (Exited / Failed (exit N) / Stopped / Interrupted) + Relaunch (spawns a fresh session and navigates to it), scrollback replay fetched once per ended session, missing-record recovery state |
 | `src/renderer/components/workbench/WorkHost.vue` | Mounts `AgentSessionView` for `agent-session` Work |
-| `src/renderer/components/sidebar/ShellSidebar.vue` | Apps section: launcher rows for enabled agents (IconRobot) after package launchers, participating in `navigatorAppOrder` (plain ids; catalogs cannot collide). Launcher rows are pure launchers — every click spawns a new session, never "active". Activity: agent-session rows with status; context menu (`RunContextMenu.vue`) offers Stop only on live sessions and Delete only on ended ones; batch archive includes agent sessions, batch delete skips live ones |
+| `src/renderer/components/sidebar/ShellSidebar.vue` | Apps section: launcher rows for enabled agents (IconRobot) after app launchers, participating in `navigatorAppOrder` (plain ids; catalogs cannot collide). Launcher rows are pure launchers — every click spawns a new session, never "active". Activity: agent-session rows with status; context menu (`RunContextMenu.vue`) offers Stop only on live sessions and Delete only on ended ones; batch archive includes agent sessions, batch delete skips live ones |
 | `src/renderer/App.vue` | Adapter: hydrates `agentsStore` + `runsStore.agentSessions` at boot and on workspace switch (`agent.list` + `agent.sessions.list`), subscribes `agent:session-event`, launch/open/stop/archive/delete handlers; archive and delete prune the matching Work history entry and fall back to Files Work when the pruned entry was active |
 | `src/renderer/components/archive/ArchiveBrowser.vue` | History shows active and archived agent sessions; Open on an archived one un-archives it and reopens `agent-session` Work; Delete calls `agent.sessions.delete` |
 
@@ -198,7 +198,7 @@ and the hard-deny branches in `src/main/security/gate.ts`; see
   CLI flags (e.g. `--dangerously-skip-permissions`, `--model o3`), persisted
   per workspace as `agentFlags: Record<string, string>` and appended to the
   launch command as `extraArgs`.
-- **Apps launcher rows**: one row per enabled installed agent, robot icon,
+- **App launcher rows**: one row per enabled installed agent, robot icon,
   click = launch a new session and open its Work surface.
 - **Activity rows**: one row per non-archived session, status dot/tag
   (`working`, `needs-input`, `idle`, `done`, `stopped`, error for both `error`
@@ -207,7 +207,7 @@ and the hard-deny branches in `src/main/security/gate.ts`; see
 - **AgentSessionView**: live terminal while running; ended banner + Relaunch
   + scrollback replay after; "Session not found" recovery if the record is
   gone.
-- **History**: agent sessions appear next to chats and package runs,
+- **History**: agent sessions appear next to chats and app runs,
   archived previews come from `archive.list` (`titleHint` as preview).
 - **Close guard**: running sessions add "N running agent sessions" to the
   quit confirmation.

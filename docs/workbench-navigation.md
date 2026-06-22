@@ -40,7 +40,7 @@ chrome inset, 4px horizontally, 8px at the top, and 10px at the bottom, so their
 
 ## Core Model
 
-Apps are capabilities, not destinations. A package can create or expose work,
+Apps are capabilities, not destinations. An app can create or expose work,
 artifacts, or both.
 
 ```
@@ -84,7 +84,7 @@ A run has three possible surfaces:
 | Process/transcript/input/approval view | Work |
 | Output/report/diff/exportable record | Artifact |
 
-Navigator must show run status for chats, workflow agents, package jobs,
+Navigator must show run status for chats, workflow agents, app jobs,
 agent sessions, and other long-running work:
 
 - Working
@@ -153,7 +153,7 @@ Examples of Work contexts:
 - knowledge base overview
 - file browser/search
 - workflow launch config
-- package manager or package workflow view
+- app manager or app workflow view
 
 The Artifact pane is stable: Artifact remains open when Navigator changes Work.
 
@@ -187,7 +187,7 @@ Work and Artifact each have their own full back/forward history.
 
 | Pane | History entries |
 |---|---|
-| Work | places, runs, chats, workflows, package overviews, searches, terminal context |
+| Work | places, runs, chats, workflows, app overviews, searches, terminal context |
 | Artifact | editor-backed file slots, issues, KB entries, diffs, reports, exportable run records |
 
 Each pane header should expose local controls:
@@ -213,7 +213,7 @@ component state:
 
 | Entry kind | Required recovery data |
 |---|---|
-| Work entry | kind, title, source package/app if any, run id or place id, query/filter state, last known status |
+| Work entry | kind, title, source app if any, run id or place id, query/filter state, last known status |
 | Artifact entry | kind, title, source Work id if any, path/id/version if any, dirty state if editable |
 
 ## Recovery UX
@@ -241,7 +241,7 @@ Examples:
 | Failure | Artifact/Work behavior |
 |---|---|
 | File deleted | Artifact shows "File no longer exists" with Locate, Remove from history, Go Back |
-| Package disabled | Work or Artifact shows package-disabled recovery with Enable package and Go Back |
+| App disabled | Work or Artifact shows app-disabled recovery with Enable app and Go Back |
 | Run data missing | Work shows missing-run recovery; Navigator row shows Error/Missing |
 | Permission denied | Pane shows permission recovery and the action that needs approval |
 | Artifact renderer crashed | Artifact offers Reload artifact, Go Back, View details |
@@ -260,20 +260,20 @@ Navigator should contain:
   draggable. Chat opens a sessionless draft composer and creates the real
   chat row only on first send; from an open session, New chat is the Work
   pane header action plus Cmd+N.
-- Apps: enabled core apps such as Board or Knowledge, user package launchers,
+- Apps: enabled core apps such as Board or Knowledge, user app launchers,
   and detected CLI agent launchers (Claude Code, Codex, Gemini CLI — visible
   iff installed on this machine; clicking one launches a new agent session).
   Rows are manually reorderable per workspace. The Apps header gear opens
   the Apps surface.
-- Activity: one flat list for active chats, agent sessions, package jobs,
+- Activity: one flat list for active chats, agent sessions, app jobs,
   approvals, and review states. Activity rows show status, open Work, and can
-  be manually reordered by drag and drop. Chat, package-run, and
+  be manually reordered by drag and drop. Chat, app-run, and
   agent-session rows can be renamed inline. New unordered activity appears at
   the top. The Activity header carries right-aligned History and New chat
   icon actions. Rows multi-select with Cmd/Ctrl-click and Shift-click for
   batch archive/delete from the context menu; plain click or Escape clears
   the selection.
-- History opens Work for active and archived chats, package runs, and agent
+- History opens Work for active and archived chats, app runs, and agent
   sessions from the Activity header icon.
 - Apps and Activity headers are clickable collapse/expand controls.
 - footer controls only for global actions such as Settings

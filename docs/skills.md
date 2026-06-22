@@ -3,7 +3,7 @@
 Filesystem skill system for the Mim AI agent. **Status: implemented.**
 
 Skills are markdown instruction folders. Authored skills are managed in
-Settings -> Skills. App-bundled skills are owned by apps and are managed in
+Settings -> Skills. App-bundled skills are owned by their apps and are managed in
 Settings -> Apps.
 
 ## What a skill is
@@ -61,11 +61,11 @@ Authored skills use `id === name`. Precedence is last-wins:
 with the same name shadows the lower copy; diagnostics retain the shadow chain.
 
 The built-in `build-app` skill teaches the agent to create or debug workspace
-skills and packages. It gates package authoring tools such as
+skills and apps. It gates app authoring tools such as
 `package_create`, `package_validate`, `package_reload`, `app_status`,
-`app_enable`, and package runtime test tools until the skill is active.
+`app_enable`, and app runtime test tools until the skill is active.
 
-Enabled app packages can also ship `skills/<name>/SKILL.md`. Package skills do
+Enabled apps can also ship `skills/<name>/SKILL.md`. App skills do
 not participate in authored-skill shadowing and do not appear in Settings ->
 Skills. Their activation id is:
 
@@ -73,7 +73,7 @@ Skills. Their activation id is:
 package:<packageId>/<skillName>
 ```
 
-A package skill cannot be activated by bare name. This prevents an app skill and
+An app skill cannot be activated by bare name. This prevents an app skill and
 a Personal/Workspace skill with the same folder name from silently hijacking
 each other.
 
@@ -97,7 +97,7 @@ skills:
 ```
 
 `skills.disabled` contains authored skill names only. It does not target
-`package:<packageId>/<skillName>` ids; package skills are controlled by app
+`package:<packageId>/<skillName>` ids; app skills are controlled by app
 enablement/trust.
 
 Git skill sources are cloned/refreshed under
@@ -113,14 +113,14 @@ Sources must be inspected and confirmed before they are written to config.
 | 2 | referenced files/assets/scripts | when the active skill instructs the agent to read/run them | ordinary file and terminal tools |
 
 Composer skill chips are one-send context and can include multiple skills.
-Authored chips use bare names; app-bundled chips use package-qualified ids.
+Authored chips use bare names; app-bundled chips use app-qualified ids.
 
 ## Tools
 
-- `skill.list` returns active authored skills plus package skills for chat.
+- `skill.list` returns active authored skills plus app skills for chat.
   With `{ detailed: true }`, it returns Settings metadata for authored skills
   only, including disabled rows and shadow chains.
-- `skill.get` activates an authored name or a package-qualified id and returns
+- `skill.get` activates an authored name or an app-qualified id and returns
   the skill body.
 - `skill.setDisabled` writes global `skills.disabled`.
 - `skill.create` creates a Personal skill in `~/.mim/skills/<name>/`.
@@ -136,7 +136,7 @@ Authored chips use bare names; app-bundled chips use package-qualified ids.
 - `skillSource.remove` removes the source config. Git mirrors are deleted;
   local source folders are untouched.
 
-`skill.*` and `skillSource.*` are denied to package actors.
+`skill.*` and `skillSource.*` are denied to app actors.
 
 ## Tool gating
 
@@ -155,8 +155,8 @@ The `skill` activation tool itself is never gated.
 Settings -> Skills is a management and audit surface, not an authoring editor.
 
 It shows authored skills grouped as Personal, added sources, Workspace
-overrides, and Built-in. App-bundled package skills remain in Settings -> Apps
-under "Teaches the agent".
+overrides, and Built-in. App-bundled skills remain in Settings -> Apps under
+"Teaches the agent".
 
 Row actions:
 
@@ -170,16 +170,16 @@ folder, New Personal skill. Import and source add both show inspection results
 before the operation becomes active. Creating a Personal skill reveals the
 folder; it does not auto-open an editor.
 
-## Package capability display
+## App capability display
 
 `package.capabilities.list` scans `{package.dir}/skills/` and returns
 `skills: [{ id, label }]` beside jobs and tools. Settings -> Apps renders this
-as "Teaches the agent". The scan is lightweight and does not import package
-backend code.
+as "Teaches the agent". The scan is lightweight and does not import app backend
+code.
 
 ## Implementation map
 
-- `src/main/skills.ts` - filesystem loader, source/package identity,
+- `src/main/skills.ts` - filesystem loader, source/app identity,
   precedence, shadow diagnostics, disabled filtering.
 - `src/main/userConfig.ts` - global `skillSources` and `skills.disabled`
   parsing/writing.
@@ -187,10 +187,10 @@ backend code.
 - `src/main/ai/aiRuntime.ts` - skill activation tool, composer
   pre-activation, gated-tool derivation.
 - `src/main/ai/systemPrompt.ts` - catalog formatter and standalone prompt path.
-- `src/main/tools/packageRuntime.ts` - package capability skill summaries.
+- `src/main/tools/packageRuntime.ts` - app capability skill summaries.
 - `src/renderer/components/settings/SkillsSettingsPanel.vue` - Settings ->
   Skills.
-- `src/renderer/components/settings/AppsSettingsPanel.vue` - package skills
+- `src/renderer/components/settings/AppsSettingsPanel.vue` - app skills
   under app capabilities.
 - `src/renderer/components/chat/ChatView.vue` and
   `src/renderer/components/chat/ChatComposer.vue` - composer skill suggestions

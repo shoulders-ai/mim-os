@@ -1,6 +1,6 @@
 # Security & Permission Model
 
-What the gate is: a speed-bump on **AI/package automation** so a user can catch an
+What the gate is: a speed-bump on **AI/app automation** so a user can catch an
 unintended or destructive action before it runs. Defense in depth: the renderer is
 hardened against XSS (DOMPurify on all v-html), IPC is locked to `actor: 'user'`,
 and the local server restricts CORS to known origins.
@@ -22,9 +22,9 @@ nothing.
   originate in main from the AI runtime with `actor: 'ai'` (`src/main/ai/aiRuntime.ts`), not via
   renderer IPC.
 - **`package`** → declared-permission check only (`packagePermissionViolation`);
-  pass → allowed silently, fail → throw. Packages never get an interactive prompt.
+  pass → allowed silently, fail → throw. Apps never get an interactive prompt.
 
-Consequence: the gate defends against the agent's autonomous actions and package
+Consequence: the gate defends against the agent's autonomous actions and app
 automation. The renderer cannot escalate because IPC is hardcoded to `user`.
 
 ## Modes
@@ -69,9 +69,9 @@ specially:
   **hard-denied** before any approval flow or developer-mode bypass — the same
   pattern as `app.trust`. AI already has `terminal.run` for command execution;
   it cannot start or stop agent sessions.
-- **The whole `agent.*` surface is denied to package actors**
+- **The whole `agent.*` surface is denied to app actors**
   (`packagePermissionViolation` matches the `agent.` prefix): catalog,
-  launch/kill, session records, and scrollback are all off-limits to packages.
+  launch/kill, session records, and scrollback are all off-limits to apps.
 - Effects for the `ai` actor where calls are allowed: `agent.list`,
   `agent.sessions.list`, and `agent.sessions.get` are `read` (no prompt in
   Normal, prompt in Strict). `agent.sessions.rename`/`archive` (category
@@ -141,27 +141,27 @@ clears the approval store queue so inline cards disappear immediately.
   the app's own `127.0.0.1:<port>`, `localhost:<port>`, `null` (file://), and
   the dev server origin. Foreign web pages get no CORS headers.
 - **WebSocket identification**: every WS method including `packages.list` and
-  `__meta.tools` requires `identify` first. Package iframes identify with
+  `__meta.tools` requires `identify` first. App iframes identify with
   launch tokens. MCP clients identify with desktop-minted MCP bearer tokens.
   MCP connections are bound as `actor: "ai"` and are server-allowlisted before
-  tool dispatch; `packages.list` stays package-only. The discovery MCP token is
+  tool dispatch; `packages.list` stays app-only. The discovery MCP token is
   valid for the desktop process lifetime; per-agent MCP tokens are revoked when
   their live agent session ends.
 - **IPC actor**: renderer IPC is hardcoded `actor: 'user'` — the renderer cannot
-  claim AI or package identity.
+  claim AI or app identity.
 - **API key hygiene**: `~/.mim/keys.env` is written with `mode: 0o600` and
   re-`chmod`ed on every write (the mode option alone does not fix pre-existing
   files); Gemini API key uses the `x-goog-api-key` header (not the URL query
   string).
-- **Package HTTP redirects**: `redirect: 'manual'` prevents automatic redirect
+- **App HTTP redirects**: `redirect: 'manual'` prevents automatic redirect
   following that could bypass the host allowlist.
 
 ## Known limits
 
 - `developer` mode and `user`/`system`/`package` actors all bypass interactive prompts.
-- No durable package permission manifest or policy engine (README tech debt).
+- No durable app permission manifest or policy engine (README tech debt).
 - `BrowserWindow` uses `sandbox: false`; enabling sandbox is a future hardening step.
-- Package iframes use `allow-same-origin` (required for SDK WebSocket); full
+- App iframes use `allow-same-origin` (required for SDK WebSocket); full
   origin isolation is an architectural follow-up.
 - Local images must go through `fs.readImageDataUrl`, not `file://`.
 
@@ -183,8 +183,8 @@ clears the approval store queue so inline cards disappear immediately.
   event handlers, iframes, forms, `javascript:` hrefs, and `data-*` attributes.
 - `src/main/server/server.test.ts` — CORS origin restriction: allows same-origin
   and `null`, denies foreign origins; `packages.list` refused before WS
-  identification; MCP identify, metadata, server-side allowlist, package-only
-  package listing, and AI actor/session routing.
+  identification; MCP identify, metadata, server-side allowlist, app-only
+  app listing, and AI actor/session routing.
 - `src/main/packages/packageHttp.test.ts` — verifies `redirect: manual` is passed
   to the HTTP client.
 - UI: `InlineApproval.smoke.test.ts`, `approvalLogic.test.ts`,

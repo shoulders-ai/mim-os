@@ -1,37 +1,37 @@
-# Package Runtime And Job SDK
+# App Runtime And Job SDK
 
 Status: core subsystem implemented, including `ctx.http` and `ctx.secrets`;
-sandboxed execution and package-tool settings remain follow-up work.
+sandboxed execution and app-tool settings remain follow-up work.
 
-This document defines the target architecture and TDD plan for the package
-runtime. The package system is the reason this repo exists: Mim should be
+This document defines the target architecture and TDD plan for the app
+runtime. The app system is the reason this repo exists: Mim should be
 a local-first desktop runtime for bespoke workflow software, not a fixed app
 with a plugin drawer.
 
 ## Objectives
 
-The runtime must make packages feel first-class, safe, and pleasant to build.
+The runtime must make apps feel first-class, safe, and pleasant to build.
 
-- Packages are installable capability bundles. UI is optional.
-- A package may contribute views, jobs, AI tools, filesystem skills
+- Apps are installable capability bundles. UI is optional.
+- An app may contribute views, jobs, AI tools, filesystem skills
   (`skills/<name>/SKILL.md`, see [skills.md](skills.md)), templates, data
   collections, or any combination of those.
-- Headless packages must work. Example: a `stats-checker` package can add chat
-  tools without ever opening a package view.
-- Package backend code runs through a runtime context that enforces package
+- Headless apps must work. Example: a `stats-checker` app can add chat
+  tools without ever opening an app view.
+- App backend code runs through a runtime context that enforces app
   identity, permissions, audit, output limits, cancellation, and data scoping.
-- Package UI uses a small SDK, not raw tool registry calls as the normal path.
-- The general chat agent can use enabled package AI tools exactly like core
+- App UI uses a small SDK, not raw tool registry calls as the normal path.
+- The general chat agent can use enabled app AI tools exactly like core
   tools, with clear provenance and user control.
 - Job execution is visible, cancellable, recoverable, and auditable.
 
-Design bar: the package runtime should be the best-engineered subsystem in the
+Design bar: the app runtime should be the best-engineered subsystem in the
 repo. DX should feel boring in the best way: small concepts, normal JavaScript,
 excellent errors, and no framework ceremony.
 
 ## Product Principles
 
-- Visibility: users can see what package is running, what it is doing, and what
+- Visibility: users can see what app is running, what it is doing, and what
   tools it has made available to chat.
 - Mapping: each user action maps to one clear runtime action: start job, cancel
   job, enable tool pack, activate skill.
@@ -39,29 +39,29 @@ excellent errors, and no framework ceremony.
   runtime identity, and approval gates before damage can happen.
 - Recovery: failed jobs keep a run summary and timeline. The user can retry from
   a known state instead of guessing what happened.
-- Normal code: package authors write JavaScript modules that export jobs and
+- Normal code: app authors write JavaScript modules that export jobs and
   tools. The manifest stays small and static. Skills are markdown files.
-- Great errors: every package-runtime error should name the package, capability,
+- Great errors: every app-runtime error should name the app, capability,
   action, and fix when possible.
 
-## Package States
+## App States
 
-Package state is intentionally split into separate concepts:
+App state is intentionally split into separate concepts:
 
 | State | Meaning |
 |---|---|
-| Installed | The package exists on disk and has a readable manifest. |
-| Enabled | The workspace or user has allowed the package to contribute capabilities. |
+| Installed | The app exists on disk and has a readable manifest. |
+| Enabled | The workspace or user has allowed the app to contribute capabilities. |
 | Loaded | The backend module has been imported and descriptors are available. |
-| Active | A view, job, or tool call from the package is currently in use. |
+| Active | A view, job, or tool call from the app is currently in use. |
 
 Installed does not imply enabled. Enabled does not imply UI is open. Headless
-tool and skill packages are expected.
+tool and skill apps are expected.
 
 ## Manifest V1
 
 The manifest is a stable envelope, not the programming model. It answers only
-questions the shell must know before executing package code: identity, view pane
+questions the shell must know before executing app code: identity, view pane
 roles, backend entry, compatibility, and declared permissions.
 
 Use `package.json` with a `mim` block:
@@ -98,7 +98,7 @@ Rules:
 - Work views appear in Navigator and open in the Work pane.
 - Artifact views are opened only by explicit Work-surface actions.
 - `views` is optional and may be empty.
-- `backend` is optional. A UI-only package does not need backend code.
+- `backend` is optional. A UI-only app does not need backend code.
 - Permissions are declarative because the shell must know them before loading
   backend code.
 - Jobs, tools, data collections, and workflow schemas do not belong in
@@ -114,8 +114,8 @@ permission review.
 ## Backend Capabilities
 
 Backend code is normal JavaScript. The runtime imports the backend module only
-when the package is enabled and capabilities are needed. V1 must accept plain
-descriptor objects so package authors do not need a build step or a helper
+when the app is enabled and capabilities are needed. V1 must accept plain
+descriptor objects so app authors do not need a build step or a helper
 dependency.
 
 ```js
@@ -171,20 +171,20 @@ errors. They should remain zero-magic helpers, not a framework requirement.
 PackageLoader
   reads package.json mim blocks
   validates static manifest
-  reports installed packages and diagnostics
+  reports installed apps and diagnostics
 
 EnabledPackageStore
-  records which packages are enabled for this workspace
+  records which apps are enabled for this workspace
   persists under .mim/packages/enabled.json
 
 PackageRuntime
   imports enabled backend modules on demand
   validates exported jobs and tools
-  builds package-scoped runtime ctx
+  builds app-scoped runtime ctx
 
 CapabilityRegistry
-  indexes enabled package jobs/tools
-  exposes descriptors to package UI, chat, and command surfaces
+  indexes enabled app jobs/tools
+  exposes descriptors to app UI, chat, and command surfaces
 
 PackageJobRunner
   starts/cancels jobs
@@ -193,52 +193,52 @@ PackageJobRunner
   keeps ephemeral runs in memory only, no record
 
 PackageServer + SDK
-  serves package views
+  serves app views
   authenticates launch tokens
   routes runtime RPC and job events
 
 Chat Tool Builder
-  combines core tools with enabled package chat tools
-  executes package tools through PackageRuntime ctx
+  combines core tools with enabled app chat tools
+  executes app tools through PackageRuntime ctx
 ```
 
 ## Identity And Trust
 
-Current package WebSocket identity is claim-based. Runtime v1 must replace it
+Current app WebSocket identity is claim-based. Runtime v1 must replace it
 with launch tokens.
 
 Flow:
 
-1. Renderer asks main for a launch URL for package view `stats-checker`.
-2. Main creates a short-lived launch token bound to package id and view id.
+1. Renderer asks main for a launch URL for app view `stats-checker`.
+2. Main creates a short-lived launch token bound to app id and view id.
 3. Iframe loads `/packages/stats-checker/index.html?launch=...`.
 4. SDK identifies with the launch token.
-5. Server binds that WebSocket connection to the package identity.
+5. Server binds that WebSocket connection to the app identity.
 
 Requirements:
 
-- A package iframe cannot forge another package id.
-- Tokens are bound to package/view identity. An unused token must complete a
+- An app iframe cannot forge another app id.
+- Tokens are bound to app/view identity. An unused token must complete a
   first identify within a short window (60s); after a successful identify the
   token stays valid for the server lifetime, because the renderer keeps iframe
   launch URLs alive indefinitely and iframe reloads / SDK reconnects replay the
   same token. (See "Package launch tokens" in `docs/gotchas.md`.)
-- Backend job/tool calls from package UI never accept a forged `packageId` from
+- Backend job/tool calls from app UI never accept a forged `packageId` from
   caller params. The runtime injects identity from the authenticated context.
-- Package tools and jobs are unavailable when the package is disabled.
-- Package file access is constrained by declared manifest permissions before it
+- App tools and jobs are unavailable when the app is disabled.
+- App file access is constrained by declared manifest permissions before it
   reaches the normal approval gate.
 
 ## Runtime Context
 
-Backend jobs and tools receive a package-scoped context:
+Backend jobs and tools receive an app-scoped context:
 
 ```js
 ctx.package        // { id, name, version, source }
 ctx.job            // { id, runId, startedAt } for jobs, null for tools
 ctx.inputs         // frozen input object for jobs
 ctx.data           // kv and collection storage
-ctx.files          // package resource reads and workspace text reads
+ctx.files          // app resource reads and workspace text reads
 ctx.ai             // model calls through main-process key resolver
 ctx.documents      // document helpers such as DOCX read/annotate and PDF text extraction
 ctx.http           // permission-checked fetch
@@ -258,10 +258,10 @@ keychain secrets (`src/main/packages/packageSecrets.ts`). See
 [package-system-api.md](package-system-api.md) for the contract details.
 
 Document helpers are intentionally under `ctx.documents`, not directly on the
-core context. They still call main-process tools, so path checks, package
+core context. They still call main-process tools, so path checks, app
 permissions, approval policy, and audit behavior stay centralized.
 
-## Package Data
+## App Data
 
 Workspace-scoped data lives under:
 
@@ -288,8 +288,8 @@ await reports.delete(id)
 await reports.list()
 ```
 
-Use file-backed JSON first. Do not introduce SQLite for package data until a
-real package proves query needs that JSON cannot satisfy cleanly.
+Use file-backed JSON first. Do not introduce SQLite for app data until a
+real app proves query needs that JSON cannot satisfy cleanly.
 
 ## Job Runner
 
@@ -328,12 +328,12 @@ Rules:
 - Default concurrency is one active run per `{packageId, jobId}`.
 - Jobs receive an `AbortSignal`.
 - Cancellation is reflected in UI immediately, even if cleanup continues.
-- Every run stores a summary and event timeline under package run storage.
-- Job errors include package id, job id, run id, and original error message.
+- Every run stores a summary and event timeline under app run storage.
+- Job errors include app id, job id, run id, and original error message.
 
-## Package Tools In Chat
+## App Tools In Chat
 
-Enabled package tools become first-class chat tools:
+Enabled app tools become first-class chat tools:
 
 ```txt
 core.search
@@ -346,33 +346,33 @@ Execution flow:
 
 ```txt
 chat tool builder asks CapabilityRegistry for enabled chat tools
-  -> AI SDK receives collision-safe package tool definitions
+  -> AI SDK receives collision-safe app tool definitions
   -> model calls pkg_1a2b3c4d__checkDataset
   -> PackageRuntime builds ctx for stats-checker
   -> tool executes with permissions, audit, output caps, cancellation
-  -> ChatMessage renders the same tool-call UI with package provenance
+  -> ChatMessage renders the same tool-call UI with app provenance
 ```
 
 UX requirements:
 
-- Installed package tools are not silently available. The package must be
+- Installed app tools are not silently available. The app must be
   enabled.
 - Tool calls show provider: "Check dataset, provided by Stats Checker."
-- Permission prompts name the package: "Stats Checker wants to read data.csv."
-- Tool settings can disable a package or individual package tool.
-- Audit records include package id and tool id.
+- Permission prompts name the app: "Stats Checker wants to read data.csv."
+- Tool settings can disable an app or individual app tool.
+- Audit records include app id and tool id.
 
 ## Skills
 
-Package skills are filesystem skills: `{package}/skills/<name>/SKILL.md` in the
-format described in [skills.md](skills.md), available only while the package is
+App skills are filesystem skills: `{package}/skills/<name>/SKILL.md` in the
+format described in [skills.md](skills.md), available only while the app is
 enabled (loading not yet wired). Backend `export const skills` is ignored.
-Skills may reference package tools, which still execute under package identity
+Skills may reference app tools, which still execute under app identity
 and permissions.
 
 ## SDK Shape
 
-`sdk/mim.js` should grow from raw RPC into a small product SDK:
+`sdk/mim.js` should grow from raw RPC into a small app SDK:
 
 ```js
 runtime.package.id
@@ -402,7 +402,7 @@ runtime.off(event, callback)
 `runtime.call()` remains for low-level escape hatches, but it should not be the
 happy path for jobs, data, tools, or Workbench navigation.
 
-Package skills use the filesystem skill system: `{package}/skills/<name>/SKILL.md` with canonical id `packageId:name`. See [skills.md](skills.md).
+App skills use the filesystem skill system: `{package}/skills/<name>/SKILL.md` with canonical id `packageId:name`. See [skills.md](skills.md).
 
 ## Decisions
 
@@ -411,12 +411,12 @@ Settled for v1:
 - Use `package.json` with a small `mim` block as the static manifest.
 - Keep jobs and tools in backend JavaScript exports, not in the manifest.
   Skills are `skills/<name>/SKILL.md` files (see [skills.md](skills.md)).
-- Support headless packages.
-- Allow enabled package tools to become first-class chat tools even when no
-  package UI is active.
+- Support headless apps.
+- Allow enabled app tools to become first-class chat tools even when no
+  app UI is active.
 - Execute backend modules in the Electron main process initially. Revisit
-  worker or child-process isolation when untrusted third-party packages become a
+  worker or child-process isolation when untrusted third-party apps become a
   real requirement.
-- Store package data and run history as workspace-scoped JSON files first.
-- Use launch tokens for package iframe identity.
+- Store app data and run history as workspace-scoped JSON files first.
+- Use launch tokens for app iframe identity.
 

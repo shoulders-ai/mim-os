@@ -5,7 +5,7 @@ Mim has two separate runtime records:
 - **Trace stream**: machine-readable audit and observability events in `.mim/traces/`.
 - **Logbook**: optional human-readable notes in `.mim/log.md`.
 
-Use the trace stream for accountability, debugging, cost analysis, agent self-review, and package/job health. Use the logbook for deliberate narrative notes the user or agent wants to keep.
+Use the trace stream for accountability, debugging, cost analysis, agent self-review, and app/job health. Use the logbook for deliberate narrative notes the user or agent wants to keep.
 
 Anonymous hosted usage telemetry is a separate redacted projection of selected
 trace events plus lifecycle/UI events. See [telemetry.md](telemetry.md) before
@@ -54,26 +54,26 @@ Core emitters:
 - `src/main/tools/registry.ts`: `tool.call`, `tool.result`, `tool.error`; one span per tool call.
 - `src/main/security/gate.ts`: `gate.decision`, parented to the gated tool span.
 - `src/main/ai/aiRuntime.ts`: `chat.turn`, per-step `model.call`, `chat.turn.done`, plus single-shot model calls for ghost, task labels, and summaries. The `chat.turn` root span is created up front so the turn's pre-flight `skill.list`/`package.tools.list` listing and its closing `session.update` persistence nest under it — one chat send is one trace, not a scatter of orphan traces. The single-shot housekeeping calls (ghost/task-label/summary) trace on their own ids and are intentionally excluded from the Review Run feed; they remain visible in Audit Full log and trace statistics.
-- `src/main/packages/packageJobs.ts`: `job.started`, `job.step`, `job.progress`, `job.log`, `job.done`, `job.failed`, `job.cancelled`; the package run id is the trace id.
-- `src/main/packages/packageRuntime.ts`: package audit, HTTP, and package tool activity with package version.
-- `src/main/trace/outcomes.ts`: `outcome.edit` after user edits following AI/package file mutations.
+- `src/main/packages/packageJobs.ts`: `job.started`, `job.step`, `job.progress`, `job.log`, `job.done`, `job.failed`, `job.cancelled`; the app run id is the trace id.
+- `src/main/packages/packageRuntime.ts`: app audit, HTTP, and app tool activity with app version.
+- `src/main/trace/outcomes.ts`: `outcome.edit` after user edits following AI/app file mutations.
 
 ## Outcome Signals
 
-`TraceOutcomeTracker` keeps an in-memory index of the latest AI/package file mutation per path. It observes:
+`TraceOutcomeTracker` keeps an in-memory index of the latest AI/app file mutation per path. It observes:
 
-- successful AI/package `fs.write`, `fs.edit`, and `fs.create` tool calls
+- successful AI/app `fs.write`, `fs.edit`, and `fs.create` tool calls
 - subsequent user `fs.write`, `fs.edit`, and `fs.create` tool calls
 - workspace file watcher changes for edits made outside the kernel
 
-When a user edit follows an AI/package mutation within the correlation window, it emits `outcome.edit` with:
+When a user edit follows an AI/app mutation within the correlation window, it emits `outcome.edit` with:
 
 - `diffBytes`
 - `diffRatio`
 - `sinceMs`
 - `aiTraceId`
 - `aiSpanId`
-- origin actor/tool/session/package fields
+- origin actor/tool/session/app fields
 - `reverted` when the user content matches the pre-AI snapshot
 
 On restart, the tracker lazily rebuilds recent write/create correlations from trace blobs. It does not scan day files on every watcher tick.
@@ -83,7 +83,7 @@ On restart, the tracker lazily rebuilds recent write/create correlations from tr
 Kernel tools:
 
 - `trace.query`: streams day-file JSONL and returns capped redacted digest events. Filters: `from`, `to`, `days`, `kind`, `actor`, `tool`, `packageId`, `sessionId`, `runId`, `traceId`, `status`, `order`, `limit`. Chronological order is the default; `order: "desc"` returns newest events first for UI timelines.
-- `trace.stats`: aggregates tool calls/errors/durations, package errors, model tokens/cost, day trends, gate approvals/denials, job health, and outcome signals.
+- `trace.stats`: aggregates tool calls/errors/durations, app errors, model tokens/cost, day trends, gate approvals/denials, job health, and outcome signals.
 - `trace.payload`: reads one captured blob by its `payloadRef`. Validates the ref shape (`blobs/<traceId>/<spanId>.<name>.json`) and confines reads to the traces dir. Returns `{ ref, found, payload? }`. Kernel-only — not exposed to chat (blobs can carry full content).
 
 Chat exposes the same read-only surface as:
@@ -96,7 +96,7 @@ Blob payloads are never inlined into query results; `trace.query`/`trace.stats` 
 ## In-App Access
 
 Open the Navigator and choose **Review**. This opens the Review Work surface, a
-user-facing console for understanding what Mim, packages, and the user have done
+user-facing console for understanding what Mim, apps, and the user have done
 in the workspace. Keyboard users can also open `Cmd+P` and choose **Review**.
 
 The surface has two jobs:
@@ -120,7 +120,7 @@ In the app chat, ask for trace analysis in plain language. The model can call th
 ```text
 Show trace stats for the last 7 days.
 List recent tool errors from the trace.
-Which package jobs failed today?
+Which app jobs failed today?
 Summarize post-AI edit outcomes this week.
 ```
 

@@ -18,7 +18,7 @@ Never attempt to take screenshots via `screencapture`, `osascript`, or any other
 
 **TDD.** Tests are co-located: `foo.ts` tested by `foo.test.ts` in the same directory. Write the test file first with failing tests that describe the contract, then implement until they pass.
 
-**Testing rules.** Mock only at system boundaries (Electron IPC, AI SDK providers). Use real Pinia stores. No snapshot tests. Run: `npm run test`. The suite includes `src/**/*.test.ts` plus co-located `*.test.{ts,mjs}` under `sdk/` and `scripts/` (see `vitest.config.ts`). App-package tests run in `shoulders-ai/mim-apps`. To verify current Mim against the external app repo, run `npm run test:packages:compat`; it stages local packages into a temp global install layout and exercises the real package loader/runtime, named-tool path, and package-root `compat.mjs` smoke hooks.
+**Testing rules.** Mock only at system boundaries (Electron IPC, AI SDK providers). Use real Pinia stores. No snapshot tests. Run: `npm run test`. The suite includes `src/**/*.test.ts` plus co-located `*.test.{ts,mjs}` under `sdk/` and `scripts/` (see `vitest.config.ts`). App tests run in `shoulders-ai/mim-apps`. To verify current Mim against the external app repo, run `npm run test:packages:compat`; it stages local apps into a temp global install layout and exercises the real app loader/runtime, named-tool path, and app-root `compat.mjs` smoke hooks.
 
 **Styles — TAILWIND ONLY.** All styling MUST use Tailwind v4 utility classes. Design tokens are defined in `src/renderer/styles.css` via `@theme`. Use the project's semantic classes: `text-ink-3`, `bg-chrome-mid`, `border-rule-light`, `bg-surface`, `text-accent`, etc.
 
@@ -47,6 +47,6 @@ Never attempt to take screenshots via `screencapture`, `osascript`, or any other
 - Read [docs/history.md](docs/history.md) and [docs/git.md](docs/git.md) before changing recovery, pruning, git, or sync behavior.
 - Read [docs/observability.md](docs/observability.md) for trace logging, audit events, retention, and agent-facing trace tools.
 - Read [docs/telemetry.md](docs/telemetry.md) for anonymous usage telemetry, privacy invariants, endpoint config, and kill switches.
-- Read [docs/custom-apps.md](docs/custom-apps.md) before changing the user-facing flow for building workspace skills or custom packages.
+- Read [docs/custom-apps.md](docs/custom-apps.md) before changing the user-facing flow for building workspace skills or custom apps.
 - Read [docs/gotchas.md](docs/gotchas.md) for non-obvious constraints.
 - Whenever you work on frontend / UI, check [docs/design-system.md](docs/design-system.md).

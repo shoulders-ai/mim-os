@@ -1,6 +1,6 @@
 # Shared Resource Collections
 
-Mounted company libraries (templates, guidance, reference files) that humans, agents, and packages all access through normal workspace paths. Mim points at folders teams already maintain — it never becomes a second copy they have to keep in sync.
+Mounted company libraries (templates, guidance, reference files) that humans, agents, and apps all access through normal workspace paths. Mim points at folders teams already maintain — it never becomes a second copy they have to keep in sync.
 
 ## Using it (for humans)
 
@@ -80,7 +80,7 @@ resources.sync { id? }                      git clone/pull mirrors, refresh moun
 resources.resolvePath { id }                mount path + backing root
 ```
 
-Package rules: `resources.collections`/`resolvePath` need `workspace.read`; `add`/`setPolicy`/`remove`/`sync` are denied for packages. File reads inside mounts follow existing `fs.*` package rules.
+App rules: `resources.collections`/`resolvePath` need `workspace.read`; `add`/`setPolicy`/`remove`/`sync` are denied for apps. File reads inside mounts follow existing `fs.*` app rules.
 
 ## Integration map
 

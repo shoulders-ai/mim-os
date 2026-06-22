@@ -1,38 +1,38 @@
-# Package System API
+# App System API
 
 Status: implemented core API.
 
-This is the internal contract for the Mim package system. It describes how
-packages are discovered, enabled, loaded, authorized, served, and executed. It
-also documents the author-facing API for package UIs, backend jobs, AI tools,
-and package-scoped data.
+This is the internal contract for the Mim app system. It describes how
+apps are discovered, enabled, loaded, authorized, served, and executed. It
+also documents the author-facing API for app UIs, backend jobs, AI tools,
+and app-scoped data.
 
-The goal is simple: a package should feel like normal JavaScript with a small
+The goal is simple: an app should feel like normal JavaScript with a small
 manifest, clear runtime identity, and predictable guardrails.
 
 ## Start Here
 
-A package is an installable capability bundle. UI is optional.
+An app is an installable capability bundle. UI is optional.
 
-Packages can contribute:
+Apps can contribute:
 
-- Views: iframe UI served from the package `ui/` directory.
+- Views: iframe UI served from the app `ui/` directory.
 - Jobs: cancellable backend work with progress events and persisted run records. Ephemeral jobs skip the record.
-- AI tools: package-owned tools that chat can call once the package is enabled.
-- Skills: filesystem `skills/<name>/SKILL.md` instruction bundles under the package's own namespace (see [skills.md](skills.md)).
-- Data: package-scoped JSON KV and collection storage.
+- AI tools: app-owned tools that chat can call once the app is enabled.
+- Skills: filesystem `skills/<name>/SKILL.md` instruction bundles under the app's own namespace (see [skills.md](skills.md)).
+- Data: app-scoped JSON KV and collection storage.
 
-The package system has four states:
+The app system has four states:
 
 | State | Meaning |
 |---|---|
-| Installed | The package exists on disk and has a valid `package.json` `mim` block. |
-| Enabled | The current workspace allows the package to contribute capabilities. |
+| Installed | The app exists on disk and has a valid `package.json` `mim` block. |
+| Enabled | The current workspace allows the app to contribute capabilities. |
 | Loaded | The backend module has been imported and descriptors are available. |
 | Active | A view, job, or tool call is currently using the runtime. |
 
 Installed does not imply enabled. Enabled does not imply visible UI. Headless
-packages are first-class.
+apps are first-class.
 
 ## System Map
 
@@ -40,9 +40,9 @@ The core runtime is made of small, explicit pieces.
 
 | Component | Source | Responsibility |
 |---|---|---|
-| Package manifest | `src/main/packages/packageManifest.ts` | Validates `package.json.mim`, paths, ids, permissions. |
-| Package loader | `src/main/packages/packages.ts` | Discovers global and workspace packages; precedence workspace > global; two-level global layout; pinned-version selection. |
-| Enablement store | `src/main/packages/packageEnablement.ts` | Resolution layers (committed mim.yaml > local enabled.json > defaults), wildcard trust ledger for vendored workspace packages, provenance-verified-global rule. |
+| App manifest | `src/main/packages/packageManifest.ts` | Validates `package.json.mim`, paths, ids, permissions. |
+| App loader | `src/main/packages/packages.ts` | Discovers global and workspace apps; precedence workspace > global; two-level global layout; pinned-version selection. |
+| Enablement store | `src/main/packages/packageEnablement.ts` | Resolution layers (committed mim.yaml > local enabled.json > defaults), wildcard trust ledger for vendored workspace apps, provenance-verified-global rule. |
 | Semver | `src/main/packages/semver.ts` | Minimal strict-semver validate + compare, no new dependency. |
 | Registry index | `src/main/packages/registryIndex.ts` | Registry `index.json` parser/validator (manifestVersion 1, HTTPS-only repo URLs, optional repo-relative `path`, local `dir` entries behind `allowLocalDirs`). |
 | Registry sources | `src/main/packages/registrySources.ts` | Multi-source resolution: ordered source list (workspace > machine > user > default), `readSourceIndex`, `lookupRegistryEntry` with ownership/anti-dependency-confusion rule. |
@@ -51,20 +51,20 @@ The core runtime is made of small, explicit pieces.
 | App tools | `src/main/tools/coreApps.ts` | `app.status/enable/disable/trust` — the one write path for enablement. |
 | Registry tools | `src/main/tools/registryTools.ts` | `registry.list` — walk all configured sources, per-source status/stale fallback, enrich entries with install state and shadowing. `registry.trust` — ack trust for workspace-declared registries. |
 | Install tools | `src/main/tools/install.ts` | `package.install/update/uninstall`, `app.add` — global layout, provenance, security checks, one-action add, local-dir installs with `file://` provenance. |
-| Package runtime | `src/main/packages/packageRuntime.ts` | Imports backend modules and builds package-scoped `ctx`. |
-| Job runner | `src/main/packages/packageJobs.ts` | Starts, cancels, tracks, emits, and persists package job runs. |
-| Package data | `src/main/packages/packageData.ts` | Provides package-scoped JSON KV and collections. |
-| Runtime tools | `src/main/tools/packageRuntime.ts` | Exposes package APIs through the tool registry. |
-| Package server | `src/main/server/server.ts` | Serves package UI and SDK, authenticates launch tokens, routes RPC. |
-| Browser SDK | `sdk/mim.js` | UI-facing `runtime` object for package iframes. |
+| App runtime | `src/main/packages/packageRuntime.ts` | Imports backend modules and builds app-scoped `ctx`. |
+| Job runner | `src/main/packages/packageJobs.ts` | Starts, cancels, tracks, emits, and persists app job runs. |
+| App data | `src/main/packages/packageData.ts` | Provides app-scoped JSON KV and collections. |
+| Runtime tools | `src/main/tools/packageRuntime.ts` | Exposes app APIs through the tool registry. |
+| App server | `src/main/server/server.ts` | Serves app UI and SDK, authenticates launch tokens, routes RPC. |
+| Browser SDK | `sdk/mim.js` | UI-facing `runtime` object for app iframes. |
 | Permission gate | `src/main/security/gate.ts` | Enforces manifest permissions and user approval policy. |
 
 ## Trust Model
 
-Package identity is injected by the runtime. Package UI and backend code do not
-get to choose their own package identity.
+App identity is injected by the runtime. App UI and backend code do not
+get to choose their own app identity.
 
-For UI packages:
+For UI apps:
 
 1. Renderer asks main for a launch URL.
 2. Main creates a short-lived launch token bound to `{ packageId, viewId }`.
@@ -76,16 +76,16 @@ For UI packages:
 
 Launch tokens are short-lived and reusable while valid so iframe reloads and SDK
 reconnects do not break the view. They are not an authorization model by
-themselves. The permission gate still enforces package permissions on every
+themselves. The permission gate still enforces app permissions on every
 tool call.
 
-Backend jobs and package AI tools receive a runtime context built from the
-enabled package descriptor. They never receive caller-supplied package identity.
+Backend jobs and app AI tools receive a runtime context built from the
+enabled app descriptor. They never receive caller-supplied app identity.
 
 ## Permissions
 
 Permissions are declared in the manifest because the shell must know them before
-loading package code.
+loading app code.
 
 ```json
 {
@@ -102,40 +102,40 @@ Current enforcement:
 
 | Permission | Enforced behavior |
 |---|---|
-| `workspace.read` | Required for package file reads and file search. |
-| `workspace.write` | Required for package file writes. |
-| `ai` | Required for package use of AI-category tools. |
+| `workspace.read` | Required for app file reads and file search. |
+| `workspace.write` | Required for app file writes. |
+| `ai` | Required for app use of AI-category tools. |
 | `http` | Host allowlist for `ctx.http` requests. Exact host, `*.` subdomain wildcard, or `*` for any host. HTTPS only, default port only. |
 | `secrets` | Names the keychain secrets reachable through `ctx.secrets` and the `package.secrets.*` tools. |
 
 `ctx.ai`, `ctx.http`, and `ctx.secrets` follow the same consent model: the
-manifest declaration is checked at call time, and enabling the package is the
-user's consent. There is no per-call approval prompt (packages have no
+manifest declaration is checked at call time, and enabling the app is the
+user's consent. There is no per-call approval prompt (apps have no
 interactive approval surface); every HTTP request is audited as
 method + host + path + status (status 0 for failed or aborted requests) —
 never headers, bodies, or query strings, and long path segments are redacted,
 because all of those can carry tokens.
 
-Packages cannot directly use:
+Apps cannot directly use:
 
 - registry tools (`registry.list`, `registry.trust`).
 - install tools (`package.install`, `package.update`, `package.uninstall`, `app.add`).
 - trust acknowledgement (`app.trust`, `registry.trust`).
-- enablement of other packages (`app.enable`/`app.disable` are scoped to the calling package's own id).
-- package installation or scaffolding tools (`package.create`/`package.edit`/`package.delete`).
+- enablement of other apps (`app.enable`/`app.disable` are scoped to the calling app's own id).
+- app installation or scaffolding tools (`package.create`/`package.edit`/`package.delete`).
 - workspace settings tools.
 - provider key tools.
 - terminal/system tools.
 - chat session storage tools.
 - chat session search.
 
-All package tool calls still pass through the normal approval gate. For example,
-a package with `workspace.write: true` may still prompt in strict mode before a
+All app tool calls still pass through the normal approval gate. For example,
+an app with `workspace.write: true` may still prompt in strict mode before a
 write happens.
 
 ## Manifest V1
 
-Packages use normal `package.json` with a `mim` block.
+Apps use normal `package.json` with a `mim` block.
 
 ```json
 {
@@ -167,15 +167,15 @@ Fields:
 |---|---:|---|
 | `manifestVersion` | Yes | Must be `1`. |
 | `id` | Yes | Lowercase letters, numbers, hyphens, underscores. Max 60 chars. |
-| `name` | Yes | Human-facing package name. |
-| `description` | No | Used in package lists and review UI. |
-| `icon` | No | Navigator token. Either a short text token (commonly one or two letters, e.g. `"B"`), or an image asset path ending in `.svg`/`.png` placed under `ui/` (e.g. `"./ui/icon.svg"`). Image icons render as a theme-aware masked mark that inherits the nav-token color and follows the active grammar (ink-3 → accent) in both the expanded tray and the collapsed rail; text tokens render as-is. No `v-html` — image icons are served through `/packages/:id/<path>` and applied via a CSS mask, so package content never enters the privileged sidebar DOM as HTML. |
-| `views` | No | Array. Empty means headless package. View files must live under `ui/`. |
+| `name` | Yes | Human-facing app name. |
+| `description` | No | Used in app lists and review UI. |
+| `icon` | No | Navigator token. Either a short text token (commonly one or two letters, e.g. `"B"`), or an image asset path ending in `.svg`/`.png` placed under `ui/` (e.g. `"./ui/icon.svg"`). Image icons render as a theme-aware masked mark that inherits the nav-token color and follows the active grammar (ink-3 → accent) in both the expanded tray and the collapsed rail; text tokens render as-is. No `v-html` — image icons are served through `/packages/:id/<path>` and applied via a CSS mask, so app content never enters the privileged sidebar DOM as HTML. |
+| `views` | No | Array. Empty means headless app. View files must live under `ui/`. |
 | `views[].role` | Yes for views | `work`, `artifact`, or `either`. Work views open in the Work pane; Artifact views open only through explicit Artifact commands. |
-| `backend` | No | Relative path to backend module. Must stay inside package and exist. |
+| `backend` | No | Relative path to backend module. Must stay inside the app and exist. |
 | `permissions` | No | Object. Missing means no declared permissions. |
 | `provides.tools` | No | Named-tool grants — see "Named tools" below. String shorthand (`"issues.*"`) or `{ "name", "category", "risk" }`. |
-| `dataFolder` | No | Single workspace-relative folder name (e.g. `"issues"`) the app stores data in. Created by `app.enable`; reported as `folderPresent` in `app.status`; never deleted by disable/remove. Reserved names (`packages`, `skills`, `node_modules`, `sessions`) rejected. |
+| `dataFolder` | No | Single workspace-relative folder name (e.g. `"issues"`) the app stores data in. Created by `app.enable`; reported as `folderPresent` in `app.status`; never deleted by disable/remove. Reserved names (`packages`, `skills`, `node_modules`, `sessions`) are rejected. |
 | `engines.mim` | No | Runtime marker. Current value: `runtime-v1`. |
 
 Unknown keys inside `mim` fail validation unless they start with `x-`.
@@ -183,15 +183,15 @@ Normal `package.json` keys remain normal npm/package metadata.
 
 ### README.md convention
 
-A `README.md` at the package root is auto-discovered (no manifest field). When
-present, `hasReadme: true` is included in the loaded package data, and the app
+A `README.md` at the app root is auto-discovered (no manifest field). When
+present, `hasReadme: true` is included in the loaded app data, and the app
 surfaces a documentation door: a `?` icon next to the Work header title and a
 "Documentation" link in Settings > Apps expanded detail. Both open the README
 as a read-only text tab in the Artifact document pane via the `package.readme`
 kernel tool. The AI can also call `package_readme` in chat to read app docs on
 demand.
 
-## Package Locations
+## App Locations
 
 The loader scans two sources, in order of precedence (highest wins):
 
@@ -200,7 +200,7 @@ The loader scans two sources, in order of precedence (highest wins):
 | Workspace | `{workspace}/packages/<id>/` | Flat (one level) | Never default-enabled |
 | Global | `~/.mim/packages/<id>/<version>/` | Two-level (id dir -> version dirs) | Never default-enabled |
 
-When a package id appears in more than one source, the higher-precedence copy
+When an app id appears in more than one source, the higher-precedence copy
 wins and the others are reported as shadow diagnostics (non-error, surfaces as
 a "local override" badge in the UI). Within the global source, version
 selection is: the active workspace's `mim.yaml` pin (if declared), else
@@ -219,11 +219,11 @@ file at `~/.mim/packages/<id>/<version>/.mim-install.json`:
 
 No tokens in provenance. Install rejects source URLs carrying credentials.
 
-### Multi-package repos (`path`)
+### Multi-app repos (`path`)
 
 A registry entry may declare an optional `path`: a repo-relative subdirectory
-(validated, no "." or ".." segments) so one repo can host many packages. The
-shoulders-ai/mim-apps monorepo works this way — one package per
+(validated, no "." or ".." segments) so one repo can host many apps. The
+shoulders-ai/mim-apps monorepo works this way — one app per
 `packages/<id>/`. When `path` is declared, install reads the manifest from,
 scopes the symlink refusal to, and copies only that subdirectory; provenance
 records `path`, and committed `mim.yaml` pins carry it so other machines
@@ -235,7 +235,7 @@ Mirrors live under `~/.mim/cache/` (deliberately not Electron `userData`) so
 the headless CLI shares them:
 
 - Registry mirror: `~/.mim/cache/registry/<sha256(url)[0..12]>/repo`
-- Package mirrors: `~/.mim/cache/package-mirrors/<sha256(url)[0..12]>/repo`
+- App mirrors: `~/.mim/cache/package-mirrors/<sha256(url)[0..12]>/repo`
 
 ## Enablement Model
 
@@ -244,14 +244,14 @@ source default:
 
 ### Committed layer (mim.yaml)
 
-The `mim.yaml` `apps:` map is keyed by **package id** (not app name — the old
+The `mim.yaml` `apps:` map is keyed by **app id** (not app name — the old
 `issues`/`knowledge` keys are dropped by the parser and resolve to nothing).
 Entry values:
 
 ```yaml
 apps:
   board: true                       # app enabled in this workspace
-  github-monitor:                   # installed package: committed expectation + pin
+  github-monitor:                   # installed app: committed expectation + pin
     source: https://github.com/shoulders-ai/mim-apps
     path: packages/github-monitor
     version: 1.2.0
@@ -259,8 +259,8 @@ apps:
 ```
 
 `boolean | { source?, path?, version?, enabled? }` — `enabled` defaults true in
-object form; `path` is the repo-relative package subdirectory when the source
-repo hosts many packages. Object form is a committed expectation: the
+object form; `path` is the repo-relative app subdirectory when the source
+repo hosts many apps. Object form is a committed expectation: the
 workspace commits intent (and optionally a source + path + version pin), each
 machine satisfies it. When `mim.yaml` names apps that are not installed on
 this machine, `MissingAppsBanner.vue` offers "Add all", installing each from
@@ -275,25 +275,25 @@ ledger:
 { "enabled": ["some-addon"], "disabled": ["docx-review"], "trusted": ["my-pkg@*"] }
 ```
 
-### Resolution: "is package X enabled here"
+### Resolution: "is app X enabled here"
 
-1. **Committed mim.yaml entry** — authoritative for workspace packages and
-   provenance-verified global (registry-installed) packages. A global package
+1. **Committed mim.yaml entry** — authoritative for workspace apps and
+   provenance-verified global (registry-installed) apps. A global app
    is provenance-verified when a valid `.mim-install.json` exists and (when the
    committed entry declares a source) its source is consistent with the
-   provenance. For workspace (vendored) packages with a backend or effective
+   provenance. For workspace (vendored) apps with a backend or effective
    permissions, the committed entry only activates with a per-machine trust
    ack; otherwise resolution falls through.
-2. **Local enabled.json** enabled/disabled lists. For workspace packages, the
+2. **Local enabled.json** enabled/disabled lists. For workspace apps, the
    same trust gate applies: a local enable does not activate untrusted
    vendored code.
-3. **Default**: disabled. No package source and no manifest field can implicitly
+3. **Default**: disabled. No app source and no manifest field can implicitly
    enable an app.
 
 ### Trust boundary
 
 A committed or local enable must never execute cloned code without local
-consent. Workspace-source packages that declare a backend or any effective
+consent. Workspace-source apps that declare a backend or any effective
 permissions require a per-machine trust ack recorded in `enabled.json`:
 `"id@*"`. Trust is binary and persists until the ledger entry is removed.
 `app.trust` records the ack — it is hard-denied to `ai` and `package` actors
@@ -309,7 +309,7 @@ additionally triggers enablement invalidation + `packages.rescan()` on
 
 ## Resolved App State
 
-`app.status` returns the resolved state for every known package (loaded copies
+`app.status` returns the resolved state for every known app (loaded copies
 plus committed-but-not-installed entries):
 
 ```typescript
@@ -321,7 +321,7 @@ interface AppStatus {
   installedVersions: string[]
   source?: string          // loader source or committed entry's declared source
   shadowed: boolean        // true when this loaded copy shadows duplicates of the same id from lower-ranked sources
-  needsTrust: boolean      // vendored workspace package awaiting trust ack
+  needsTrust: boolean      // vendored workspace app awaiting trust ack
   needsInstall: boolean    // committed entry with no installed copy
   folderPresent: boolean   // for apps with a registered data folder
 }
@@ -337,7 +337,7 @@ export const tools = {}
 ```
 
 No helper library is required. Descriptor helper functions can be added later,
-but v1 intentionally keeps authoring close to normal JavaScript.
+but v1 intentionally keeps app authoring close to normal JavaScript.
 
 ### Jobs
 
@@ -417,7 +417,7 @@ Run records are persisted under:
 #### Ephemeral jobs
 
 Mark a job `ephemeral: true` when it is internal housekeeping, such as a
-background sync, whose feedback belongs inside the package UI rather than the
+background sync, whose feedback belongs inside the app UI rather than the
 workspace record.
 
 ```js
@@ -438,14 +438,14 @@ Ephemeral runs behave like normal runs while active, with three differences:
 
 - No run record is written to `runs/`, so the run never appears in
   `package.jobs.list`, the Activity list, run history, or the archive.
-- Every emitted job event carries `ephemeral: true`. Package UIs still receive
+- Every emitted job event carries `ephemeral: true`. App UIs still receive
   the events through `runtime.jobs.on(runId, cb)`; the app shell ignores them.
 - `runtime.jobs.start()` does not open the run in Work, and `package.jobs.get`
   only resolves while the run is in flight. Once it finishes, the run is gone.
 
 ### AI Tools
 
-Package tools can be made available to chat.
+App tools can be made available to chat.
 
 ```js
 export const tools = {
@@ -476,12 +476,12 @@ Tool descriptor fields:
 | `description` | Yes | Used by the chat model. Write this like tool-use guidance. |
 | `inputSchema` | No | JSON Schema object. Defaults to empty object schema. |
 | `audience` | No | Defaults to `["chat"]`. |
-| `execute(ctx, input)` | Yes | Runs under package identity. |
+| `execute(ctx, input)` | Yes | Runs under app identity. |
 
 Public chat tool names are collision-safe by default:
 
 ```txt
-pkg_<8-char package hash>__<toolId>
+pkg_<8-char app hash>__<toolId>
 ```
 
 Example:
@@ -490,16 +490,16 @@ Example:
 pkg_c97fd4d0__checkDataset
 ```
 
-The model sees the public name. The package author writes the local id
+The model sees the public name. The app author writes the local id
 `checkDataset`.
 
 Tool results are capped at 24,000 characters before returning to chat.
 
 ### Named tools
 
-A package can register tools under stable dotted names instead of the hash-mangled
-form, making them first-class ToolRegistry tools — callable by AI, package UIs
-(`kernel.call`), other packages, and the CLI exactly like core tools.
+An app can register tools under stable dotted names instead of the hash-mangled
+form, making them first-class ToolRegistry tools — callable by AI, app UIs
+(`kernel.call`), other apps, and the CLI exactly like core tools.
 
 Two declarations are required:
 
@@ -535,14 +535,14 @@ Rules:
 - **Risk floor**: a tool whose final segment is `delete`, `remove`, `purge`,
   `destroy`, `uninstall`, or `reset` is always at least risk `high`, whatever
   the manifest declares — including through wildcard grants.
-- **Collisions**: core tool names can never be claimed. Between packages, the
-  first enabled package wins; losers keep working under their mangled names and
+- **Collisions**: core tool names can never be claimed. Between apps, the
+  first enabled app wins; losers keep working under their mangled names and
   a diagnostic is recorded.
 - Registration follows enablement: disable/remove unregisters on the next sync.
 - A declared `name` that is invalid or not granted falls back to the mangled
   name with a diagnostic — the tool still works.
 - In chat, dotted names appear with underscores (`issues.list` → `issues_list`).
-  A package tool can never shadow a core chat tool.
+  An app tool can never shadow a core chat tool.
 
 ### Agent context contribution
 
@@ -557,36 +557,36 @@ export const agentContext = async (ctx) => {
 }
 ```
 
-Return a string (section titled with the package name) or `{ title, body }`.
+Return a string (section titled with the app name) or `{ title, body }`.
 Budgets are enforced by core: title 80 chars, body 1,500 chars, at most 8
 sections across all apps, 3-second total timeout. Errors skip the section.
 
 ### Skills
 
-Backend modules do not export skills. Package skills are filesystem skills:
+Backend modules do not export skills. App skills are filesystem skills:
 `{package}/skills/<name>/SKILL.md` in the Anthropic Agent Skills format, loaded
-only while the package is enabled. A legacy `export const skills` is ignored by
+only while the app is enabled. A legacy `export const skills` is ignored by
 the runtime.
 
 ### App-shipped AI skills (SKILL.md)
 
-Separate from backend-export skills, an enabled package can ship AI skills the
-chat assistant activates by package-qualified id: put
-`skills/<name>/SKILL.md` in the package, same format as authored skills.
+Separate from backend-export skills, an enabled app can ship AI skills the
+chat assistant activates by app-qualified id: put
+`skills/<name>/SKILL.md` in the app, same format as authored skills.
 
-The activation id is `package:<packageId>/<skillName>`. Package skills are in a
+The activation id is `package:<packageId>/<skillName>`. App skills are in a
 separate namespace from authored skills, so an app skill does not shadow or get
 shadowed by a Personal/Workspace skill with the same folder name. They appear in
 Settings -> Apps ("Teaches the agent"), not Settings -> Skills.
 
 The `unlocks:` frontmatter list names AI tools that stay hidden from the model
-until the skill is activated (`tools:` remains informational). Dotted package
-tool names are matched in their chat form, e.g. `unlocks: [issues_list]` or
+until the skill is activated (`tools:` remains informational). Dotted app tool
+names are matched in their chat form, e.g. `unlocks: [issues_list]` or
 `unlocks: [issues.list]` both gate the `issues.list` named tool.
 
 ## Runtime Context
 
-Jobs and tools receive a package-scoped context.
+Jobs and tools receive an app-scoped context.
 
 ```js
 async function run(ctx, input) {}
@@ -597,19 +597,19 @@ Context fields:
 
 | Field | Shape | Notes |
 |---|---|---|
-| `ctx.package` | `{ id, name, version, source }` | Injected from the enabled package. |
+| `ctx.package` | `{ id, name, version, source }` | Injected from the enabled app. |
 | `ctx.job` | `{ id, runId, startedAt } \| null` | Present for jobs, `null` for tools. |
 | `ctx.inputs` | frozen object | Copy of job/tool inputs. |
-| `ctx.data` | package data API | Scoped to this package id. |
-| `ctx.files` | file helpers | Package resource reads and workspace text reads. |
+| `ctx.data` | app data API | Scoped to this app id. |
+| `ctx.files` | file helpers | App resource reads and workspace text reads. |
 | `ctx.http` | HTTP API | Outbound HTTPS requests against the manifest host allowlist. |
 | `ctx.secrets` | secret API | Keychain get/set/delete/has for manifest-declared secret names. |
 | `ctx.ai` | AI helpers | Structured calls plus Anthropic/Gemini text/tool-loop calls through the main-process key resolver. |
 | `ctx.documents` | document helpers | DOCX/PDF extraction plus DOCX read/comment/validate helpers routed through main-process tools. |
 | `ctx.progress` | progress API | Emits normalized job events. |
-| `ctx.audit` | audit API | Appends explicit package audit events. |
+| `ctx.audit` | audit API | Appends explicit app audit events. |
 | `ctx.abort` | cancellation API | AbortSignal plus `throwIfAborted()`. |
-| `ctx.tools` | tool registry bridge | Calls core tools with package actor and package id. |
+| `ctx.tools` | tool registry bridge | Calls core tools with app actor and app id. |
 
 ### `ctx.files`
 
@@ -618,7 +618,7 @@ await ctx.files.readPackageText('resources/template.md')
 await ctx.files.readWorkspaceText('data/input.csv')
 ```
 
-`readPackageText` reads files inside the package directory and rejects path
+`readPackageText` reads files inside the app directory and rejects path
 escapes. `readWorkspaceText` calls `fs.read` through the tool registry, so it
 requires `workspace.read` and still goes through the approval gate.
 
@@ -644,7 +644,7 @@ longer than 20 characters are replaced with `***` (paths can carry credentials
 too: Telegram bot tokens, Slack webhook secrets, signed URLs).
 
 The allowlist is checked on the request URL. It is declared intent and audit
-for trusted packages, not a sandbox: backend modules run in the main process,
+for trusted apps, not a sandbox: backend modules run in the main process,
 and redirects are not re-checked against the allowlist.
 
 ### `ctx.secrets`
@@ -657,10 +657,10 @@ await ctx.secrets.delete('github_token')
 ```
 
 Secrets live in the OS keychain (service `Mim`, account
-`package:{packageId}:{name}`), never in package data or workspace files. Only
-names declared in the manifest `secrets` list are reachable, and packages can
-never read another package's secrets. Secret values are available only to
-backend code; package UI manages secrets through `runtime.secrets`, which
+`package:{packageId}:{name}`), never in app data or workspace files. Only
+names declared in the manifest `secrets` list are reachable, and apps can
+never read another app's secrets. Secret values are available only to
+backend code; app UI manages secrets through `runtime.secrets`, which
 never returns values.
 
 ### `ctx.ai`
@@ -680,10 +680,10 @@ const result = await ctx.ai.generateObject({
 ```
 
 `generateObject` resolves provider keys in the main process and requires the
-package manifest to declare `"ai": true`. It returns the generated object,
+app manifest to declare `"ai": true`. It returns the generated object,
 usage metadata, provider, and model id.
 
-Packages that need old-style tool-loop agents can use the lower-level helpers:
+Apps that need old-style tool-loop agents can use the lower-level helpers:
 
 ```js
 const review = await ctx.ai.callAnthropic({
@@ -768,7 +768,7 @@ await ctx.progress.progress(0.5, 'Halfway')
 await ctx.progress.done('Checks complete')
 ```
 
-Progress events include `packageId`, `jobId`, `runId`, timestamp, and sequence.
+Progress events include `appId`, `jobId`, `runId`, timestamp, and sequence.
 
 ### `ctx.abort`
 
@@ -802,7 +802,7 @@ The permission gate decides whether the call is allowed.
 
 ## Browser SDK
 
-Package UIs import the runtime SDK from the server.
+App UIs import the runtime SDK from the server.
 
 ```html
 <script type="module">
@@ -828,7 +828,7 @@ await runtime.ready
 
 #### `runtime.package`
 
-Current package identity.
+Current app identity.
 
 ```js
 runtime.package.id
@@ -836,8 +836,8 @@ runtime.package.id
 
 #### `runtime.jobs.start(jobId, inputs, options?)`
 
-Starts a package-owned job. Package UIs do not pass `packageId`; the server uses
-the authenticated package identity. The default behavior is to open the new run
+Starts an app-owned job. App UIs do not pass `packageId`; the server uses
+the authenticated app identity. The default behavior is to open the new run
 as Work after it starts; pass `{ openWork: false }` only for a deliberately
 background job.
 
@@ -865,14 +865,14 @@ const { run } = await runtime.jobs.get(runId)
 
 #### `runtime.jobs.list()`
 
-Lists runs for the current package.
+Lists runs for the current app.
 
 ```js
 const { runs } = await runtime.jobs.list()
 ```
 
-Package run rename, archive, restore, and delete lifecycle tools exist at the
-tool layer for Navigator and Archive UI. Package UIs normally reopen concrete
+App run rename, archive, restore, and delete lifecycle tools exist at the
+tool layer for Navigator and Archive UI. App UIs normally reopen concrete
 runs with `runtime.workbench.openRun(runId)` and let the shell own rename,
 archive, and delete affordances.
 
@@ -890,7 +890,7 @@ off()
 
 #### `runtime.data.kv`
 
-Package-scoped key-value storage.
+App-scoped key-value storage.
 
 ```js
 await runtime.data.kv.set('viewState', { tab: 'runs' })
@@ -901,7 +901,7 @@ await runtime.data.kv.delete('viewState')
 
 #### `runtime.data.collection(name)`
 
-Package-scoped record collection.
+App-scoped record collection.
 
 ```js
 const runs = runtime.data.collection('favorite-runs')
@@ -913,7 +913,7 @@ await runs.delete('run-123')
 
 #### `runtime.tools.list()`
 
-Lists enabled package tools available to chat.
+Lists enabled app tools available to chat.
 
 ```js
 const tools = await runtime.tools.list()
@@ -921,7 +921,7 @@ const tools = await runtime.tools.list()
 
 #### `runtime.secrets.set(name, secret)`, `runtime.secrets.delete(name)`, and `runtime.secrets.status()`
 
-Manage manifest-declared package secrets from package UI. Values go straight
+Manage manifest-declared app secrets from app UI. Values go straight
 to the OS keychain and are never returned to the iframe; `status()` reports
 existence only. Backend code reads values through `ctx.secrets`.
 
@@ -933,13 +933,13 @@ await runtime.secrets.delete('github_token')
 
 #### `runtime.workbench.openWork(viewId)`, `runtime.workbench.openRun(runId)`, and `runtime.workbench.openArtifact(viewId)`
 
-Requests package-view navigation through the app Workbench. Package UIs do not
-pass `packageId`; the server uses the authenticated package identity and the
+Requests app-view navigation through the app Workbench. App UIs do not
+pass `packageId`; the server uses the authenticated app identity and the
 renderer applies the manifest view role before opening the view.
 
-Starting a package job with `runtime.jobs.start()` opens the persisted run in
+Starting an app job with `runtime.jobs.start()` opens the persisted run in
 Work by default. Ephemeral jobs skip this because they have no run record. Use
-`runtime.workbench.openRun(runId)` when a package UI needs to reopen a specific
+`runtime.workbench.openRun(runId)` when an app UI needs to reopen a specific
 run explicitly.
 
 ```js
@@ -950,7 +950,7 @@ await runtime.workbench.openArtifact('report')
 
 #### `runtime.ai.registry()` and `runtime.ai.keyStatus()`
 
-Returns the app model registry and provider key status for package UI controls.
+Returns the app model registry and provider key status for app UI controls.
 These helpers do not expose API keys.
 
 ```js
@@ -984,23 +984,23 @@ runtime.off('workspace:changed', onWorkspaceChanged)
 
 ## Enablement and Registry Tools
 
-These are the tools for managing package enablement, trust, registry discovery,
+These are the tools for managing app enablement, trust, registry discovery,
 and installation. Gate categories and actor restrictions are enforced in
 `src/main/gate.ts`.
 
 | Tool | Gate category | Actor restrictions | Behavior |
 |---|---|---|---|
-| `app.status` | `read` | none | Resolved state for every known package |
-| `app.enable` | `settings` | package: own id only | Enable a package; `layer` selects committed or local; mkdirs registered folder |
-| `app.disable` | `settings` | package: own id only | Disable a package; same layer semantics; never touches data. Leaves the app in the Installed set as a disabled-but-kept row (local override stays) |
-| `app.remove` | `settings` | package: own id only | Remove a package from the workspace: delete the `mim.yaml` pin **and** clear any local `enabled.json` override so the app drops to the `default` layer and leaves the Installed set (back to Available). Never touches install dirs or data folders. Clearing (not writing a disabled override) is what distinguishes remove from disable |
-| `app.trust` | `settings` (high) | **user-only** (hard-denied to ai and package) | Record trust ack for vendored workspace package |
-| `registry.list` | `network` (external) | denied to package actors | Walk all configured registry sources (workspace, machine, user, default), return `{ registries: [...per-source status], entries: [...enriched with registryId, shadowed, install state] }`. Per-source try/catch with stale-mirror fallback. Workspace sources gated on trust ack |
-| `registry.trust` | `settings` (high) | **user-only** (hard-denied to ai and package) | Acknowledge trust for a workspace-declared registry source by id |
-| `package.install` | `network` (external) | denied to package actors | Install by registry id or direct repo URL; commit/engines/id/permission verification; symlink/submodule/credential refusal; copies only the entry's `path` subdirectory when declared; provenance write. For local-dir registry entries: skips git work and commit verification, provenance `source: file://...` |
-| `app.add` | `network` (medium) | denied to package actors | One-action add: install from the registry if needed, write the committed `mim.yaml` pin (`source`, `path`, `version`), enable on the workspace layer. For local registry entries: enables on the **local layer only** (no mim.yaml pin — a `file://` pin would break on other machines). The registry browse UI's "Add to workspace" action calls this after a plain-language permission confirm (`src/renderer/components/packages/permissionSummary.ts`) |
-| `package.update` | `network` (external) | denied to package actors | Install latest registry version side-by-side, repoint workspace pin if one exists |
-| `package.uninstall` | `settings` | denied to package actors | Remove `~/.mim/packages/<id>/<version>/`; fix-forward (no refusal when enabled) |
+| `app.status` | `read` | none | Resolved state for every known app |
+| `app.enable` | `settings` | app: own id only | Enable an app; `layer` selects committed or local; mkdirs registered folder |
+| `app.disable` | `settings` | app: own id only | Disable an app; same layer semantics; never touches data. Leaves the app in the Installed set as a disabled-but-kept row (local override stays) |
+| `app.remove` | `settings` | app: own id only | Remove an app from the workspace: delete the `mim.yaml` pin **and** clear any local `enabled.json` override so the app drops to the `default` layer and leaves the Installed set (back to Available). Never touches install dirs or data folders. Clearing (not writing a disabled override) is what distinguishes remove from disable |
+| `app.trust` | `settings` (high) | **user-only** (hard-denied to ai and app) | Record trust ack for vendored workspace app |
+| `registry.list` | `network` (external) | denied to app actors | Walk all configured registry sources (workspace, machine, user, default), return `{ registries: [...per-source status], entries: [...enriched with registryId, shadowed, install state] }`. Per-source try/catch with stale-mirror fallback. Workspace sources gated on trust ack |
+| `registry.trust` | `settings` (high) | **user-only** (hard-denied to ai and app) | Acknowledge trust for a workspace-declared registry source by id |
+| `package.install` | `network` (external) | denied to app actors | Install by registry id or direct repo URL; commit/engines/id/permission verification; symlink/submodule/credential refusal; copies only the entry's `path` subdirectory when declared; provenance write. For local-dir registry entries: skips git work and commit verification, provenance `source: file://...` |
+| `app.add` | `network` (medium) | denied to app actors | One-action add: install from the registry if needed, write the committed `mim.yaml` pin (`source`, `path`, `version`), enable on the workspace layer. For local registry entries: enables on the **local layer only** (no mim.yaml pin — a `file://` pin would break on other machines). The registry browse UI's "Add to workspace" action calls this after a plain-language permission confirm (`src/renderer/components/packages/permissionSummary.ts`) |
+| `package.update` | `network` (external) | denied to app actors | Install latest registry version side-by-side, repoint workspace pin if one exists |
+| `package.uninstall` | `settings` | denied to app actors | Remove `~/.mim/packages/<id>/<version>/`; fix-forward (no refusal when enabled) |
 
 AI may call registry and install tools with user approval ("install the github
 monitor" in chat). `app.trust` and `registry.trust` are the only tools that
@@ -1042,13 +1042,13 @@ trusted report `status: 'needs-trust'` and contribute no entries.
 ### `registry.trust`
 
 Acknowledges trust for a workspace-declared registry source. Params: `{ id }`.
-Gate: `settings`/`high`, user-only (hard-denied to AI and package actors).
+Gate: `settings`/`high`, user-only (hard-denied to AI and app actors).
 Machine-local, user, and default sources do not need trust acknowledgement.
 
 ### Local `dir` index entries
 
 A local or path-source registry's `index.json` entries may use `dir` (a
-registry-relative package directory) instead of `repo`/`ref`/`commit`. `dir`
+registry-relative app directory) instead of `repo`/`ref`/`commit`. `dir`
 entries are only accepted from sources where `allowLocalDirs` applies (local
 and path sources; git registries reject them). Install runs the same content
 checks but skips commit verification; provenance records
@@ -1065,7 +1065,7 @@ owns it), and returns a `LookupResult` including `registryId`,
 
 ## Tool Registry API
 
-These are main-process runtime tools. Package UIs reach them through the SDK.
+These are main-process runtime tools. App UIs reach them through the SDK.
 Chat and other internal surfaces reach them through `window.kernel.call()`.
 
 | Tool | Caller | Result |
@@ -1073,56 +1073,56 @@ Chat and other internal surfaces reach them through `window.kernel.call()`.
 | `package.validate` | user/AI | `{ valid, errors, warnings, summary }` |
 | `package.reload` | user/AI | `{ reloaded, packages, diagnostics }` |
 | `package.capabilities.list` | any allowed caller | `{ packages }` |
-| `package.tools.list` | chat/system/package UI | `{ tools }` |
-| `package.tools.execute` | chat/system | package tool result |
-| `package.jobs.start` | package UI/user/system | `{ runId, status }` |
-| `package.jobs.cancel` | package UI/user/system | run record |
-| `package.jobs.get` | package UI/user/system | `{ run }` |
-| `package.jobs.list` | package UI/user/system | `{ runs }` |
-| `package.jobs.rename` | package UI/user/system | `{ run }` |
-| `package.jobs.archive` | package UI/user/system | `{ run }` |
-| `package.jobs.restore` | package UI/user/system | `{ run }` |
-| `package.jobs.delete` | package UI/user/system | `{ deleted }` |
-| `workbench.openWork` | package UI/user/system | `{ opened, pane, kind, packageId, viewId? \| runId? }` |
-| `workbench.openArtifact` | package UI/user/system | `{ opened, pane, packageId, viewId }` |
-| `package.data.kv.get` | package UI | stored value or `null` |
-| `package.data.kv.set` | package UI | `{ ok: true }` |
-| `package.data.kv.delete` | package UI | `{ ok: true }` |
-| `package.data.kv.keys` | package UI | `{ keys }` |
-| `package.data.collection.list` | package UI | `{ records }` |
-| `package.data.collection.get` | package UI | stored value or `null` |
-| `package.data.collection.put` | package UI | `{ ok: true }` |
-| `package.data.collection.delete` | package UI | `{ ok: true }` |
-| `package.secrets.set` | package UI | `{ ok: true }` |
-| `package.secrets.delete` | package UI | `{ ok: true }` |
-| `package.secrets.status` | package UI | `{ secrets: [{ name, exists }] }` |
+| `package.tools.list` | chat/system/app UI | `{ tools }` |
+| `package.tools.execute` | chat/system | app tool result |
+| `package.jobs.start` | app UI/user/system | `{ runId, status }` |
+| `package.jobs.cancel` | app UI/user/system | run record |
+| `package.jobs.get` | app UI/user/system | `{ run }` |
+| `package.jobs.list` | app UI/user/system | `{ runs }` |
+| `package.jobs.rename` | app UI/user/system | `{ run }` |
+| `package.jobs.archive` | app UI/user/system | `{ run }` |
+| `package.jobs.restore` | app UI/user/system | `{ run }` |
+| `package.jobs.delete` | app UI/user/system | `{ deleted }` |
+| `workbench.openWork` | app UI/user/system | `{ opened, pane, kind, packageId, viewId? \| runId? }` |
+| `workbench.openArtifact` | app UI/user/system | `{ opened, pane, packageId, viewId }` |
+| `package.data.kv.get` | app UI | stored value or `null` |
+| `package.data.kv.set` | app UI | `{ ok: true }` |
+| `package.data.kv.delete` | app UI | `{ ok: true }` |
+| `package.data.kv.keys` | app UI | `{ keys }` |
+| `package.data.collection.list` | app UI | `{ records }` |
+| `package.data.collection.get` | app UI | stored value or `null` |
+| `package.data.collection.put` | app UI | `{ ok: true }` |
+| `package.data.collection.delete` | app UI | `{ ok: true }` |
+| `package.secrets.set` | app UI | `{ ok: true }` |
+| `package.secrets.delete` | app UI | `{ ok: true }` |
+| `package.secrets.status` | app UI | `{ secrets: [{ name, exists }] }` |
 
-Package data and secret tools require package identity. A package UI cannot
-read or write another package's data by passing a different `packageId`, and
+App data and secret tools require app identity. An app UI cannot
+read or write another app's data by passing a different `packageId`, and
 there is no tool that returns a secret value.
 
-## Building A Package
+## Building An App
 
 This section is the short, practical path.
 
 For the user-facing "teach Mim a capability" workflow, start with
-[custom-apps.md](custom-apps.md). This section is the lower-level package
+[custom-apps.md](custom-apps.md). This section is the lower-level app
 contract path.
 
-Agents should treat package authoring as teaching Mim a capability. Prefer
+Agents should treat app authoring as teaching Mim a capability. Prefer
 `package.create` for the first scaffold, then run the dev loop:
 
 ```text
 package.validate -> package.reload -> app.status/app.enable -> package.capabilities.list -> package.tools.execute or package.jobs.start
 ```
 
-`app.trust` remains user-only. If a workspace package with a backend or
+`app.trust` remains user-only. If a workspace app with a backend or
 permissions needs trust, the agent must ask the user to review and trust it in
 Settings -> Apps before enablement and testing can finish.
 
-### 1. Create The Package Directory
+### 1. Create The App Directory
 
-Workspace package:
+Workspace app:
 
 ```txt
 {workspace}/packages/stats-checker/
@@ -1133,7 +1133,7 @@ Workspace package:
     index.html
 ```
 
-Headless package:
+Headless app:
 
 ```txt
 {workspace}/packages/stats-checker/
@@ -1168,7 +1168,7 @@ one call.
 }
 ```
 
-Use `views: []` for a headless package.
+Use `views: []` for a headless app.
 
 ### 3. Add A Chat Tool
 
@@ -1196,7 +1196,7 @@ export const tools = {
 }
 ```
 
-Enable the package for the workspace. Chat will receive a public tool named like:
+Enable the app for the workspace. Chat will receive a public tool named like:
 
 ```txt
 pkg_1a2b3c4d__summarizeFile
@@ -1270,7 +1270,7 @@ Add the view to the manifest:
 }
 ```
 
-### 6. Store Package UI State
+### 6. Store App UI State
 
 ```js
 await runtime.data.kv.set('filters', { status: 'failed' })
@@ -1279,23 +1279,23 @@ const filters = await runtime.data.kv.get('filters')
 
 ### 7. Add A Skill
 
-Create `skills/review-methods/SKILL.md` inside the package, in the format
+Create `skills/review-methods/SKILL.md` inside the app, in the format
 described in [skills.md](skills.md). Backend `export const skills` is ignored.
 
 ## Publishing
 
-Packages are published through the
+Apps are published through the
 [mim-apps](https://github.com/shoulders-ai/mim-apps) repo. Bump
-`version` in the package's `package.json` and push to `main` — CI regenerates
+`version` in the app's `package.json` and push to `main` — CI regenerates
 the registry `index.json` from every manifest and the current HEAD commit.
-Packages hosted in other repos can be added via `external.json` in
+Apps hosted in other repos can be added via `external.json` in
 mim-apps. On install, Mim verifies that manifest permissions exactly match
 the registry declaration, checks commit integrity, and refuses symlinks and
 submodules. See the mim-apps README for the full workflow.
 
 ## Diagnostics And Errors
 
-Package discovery returns diagnostics instead of crashing the app.
+App discovery returns diagnostics instead of crashing the shell.
 
 Common manifest diagnostics:
 
@@ -1312,35 +1312,35 @@ Common runtime errors:
 
 | Error | Meaning |
 |---|---|
-| `Package not found: <id>` | The package is not installed or failed manifest validation. |
-| `Package is disabled: <id>` | Enable the package before using jobs/tools. |
+| `Package not found: <id>` | The app is not installed or failed manifest validation. |
+| `Package is disabled: <id>` | Enable the app before using jobs/tools. |
 | `Package job not found: <id>.<job>` | Backend did not export that job. |
 | `Job already running: <id>.<job>` | Default concurrency is `single`. |
-| `Package data tools require package identity` | Data APIs must be called from package UI/runtime context. |
+| `Package data tools require package identity` | Data APIs must be called from app UI/runtime context. |
 | `Permission denied: Package <id> did not declare workspace read permission` | Add manifest permission or remove the file read. |
 
 ## UX Rules
 
-Package APIs should be visible, reversible, and unsurprising.
+App APIs should be visible, reversible, and unsurprising.
 
-- Enablement is explicit for workspace and global packages.
-- Runtime errors should name the package, capability, and action.
+- Enablement is explicit for workspace and global apps.
+- Runtime errors should name the app, capability, and action.
 - Long work should be a job, not a hidden UI request.
 - Jobs should emit progress before and after expensive work.
-- Package tools should have clear `description` text because chat depends on it.
-- Package UI should prefer SDK helpers over `runtime.call()`.
-- Package data should store user-visible state and run artifacts, not secrets.
+- App tools should have clear `description` text because chat depends on it.
+- App UI should prefer SDK helpers over `runtime.call()`.
+- App data should store user-visible state and run artifacts, not secrets.
 
 ## Current Limits
 
-The implemented core is designed for trusted or reviewed packages. Important
+The implemented core is designed for trusted or reviewed apps. Important
 limits remain:
 
-- Backend package modules run in the main process. True untrusted third-party
-  packages need worker/process isolation. The `ctx.http` allowlist is declared
+- Backend app modules run in the main process. True untrusted third-party
+  apps need worker/process isolation. The `ctx.http` allowlist is declared
   intent and audit, not a sandbox; redirects are not re-checked.
-- Package tool settings are package-level today. Individual package-tool toggles
-  should be added before a large package marketplace.
+- App tool settings are app-level today. Individual app-tool toggles
+  should be added before a large app marketplace.
 
 ## Test Coverage
 
@@ -1357,7 +1357,7 @@ Primary tests:
 | Launch identity/server | `src/main/server/server.test.ts` |
 | Permission enforcement | `src/main/security/gate.test.ts` |
 | Chat tool integration | `src/main/ai/aiRuntime.test.ts`, `src/main/server/server-ai.test.ts` |
-| Cross-repo package compatibility | `scripts/package-compat.test.ts` via `npm run test:packages:compat` |
+| Cross-repo app compatibility | `scripts/package-compat.test.ts` via `npm run test:packages:compat` |
 
 Run:
 
@@ -1366,8 +1366,8 @@ npm run test
 npm run build
 ```
 
-When changing the package runtime contract, app manifests, backend exports, or
-named package tools, also run:
+When changing the app runtime contract, app manifests, backend exports, or
+named app tools, also run:
 
 ```bash
 MIM_PACKAGES_DIR=/path/to/mim-apps npm run test:packages:compat
@@ -1375,8 +1375,8 @@ MIM_PACKAGES_DIR=/path/to/mim-apps npm run test:packages:compat
 
 The compatibility suite is intentionally outside the default test command. It
 depends on a local `mim-apps` checkout and verifies that current external
-packages load, enable, import, and register tools through the real Mim runtime.
-When a staged package has a root `compat.mjs`, the suite also imports it and
+apps load, enable, import, and register tools through the real Mim runtime.
+When a staged app has a root `compat.mjs`, the suite also imports it and
 runs `smoke({ tools, packageId, workspacePath, packageDir })`. Hooks should be
-deterministic, local-only smoke workflows that exercise real package tools or
+deterministic, local-only smoke workflows that exercise real app tools or
 jobs without AI, network, secrets, or browser UI.
