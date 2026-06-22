@@ -46,7 +46,7 @@ interface McpToken {
   sessionId: string
 }
 
-interface McpToolSpec {
+export interface McpToolSpec {
   name: string
   mimName: string
   description: string
@@ -66,13 +66,25 @@ export const MCP_TOOL_SPECS: McpToolSpec[] = [
   { name: 'export_docx', mimName: 'export.docx', description: 'Export markdown to DOCX' },
   { name: 'export_pdf', mimName: 'export.pdf', description: 'Export markdown to PDF' },
   { name: 'workspace_orient', mimName: 'workspace.orient', description: 'Regenerate agent context' },
+  { name: 'fs_read', mimName: 'fs.read', description: 'Read a file from the workspace' },
+  { name: 'search_files', mimName: 'search.files', description: 'Search for files by name or content' },
+  { name: 'skill_list', mimName: 'skill.list', description: 'List available workspace skills' },
+  { name: 'skill_get', mimName: 'skill.get', description: 'Get a skill definition' },
+  { name: 'log_append', mimName: 'log.append', description: 'Append an entry to the workspace log' },
+  { name: 'workspace_info', mimName: 'workspace.info', description: 'Get workspace metadata' },
+  { name: 'system_prompt', mimName: 'system.prompt', description: 'Get the resolved AI system prompt' },
 ]
 
 const MCP_ALLOWED_TOOLS = new Set(MCP_TOOL_SPECS.map(tool => tool.mimName))
 
+export interface McpServerOptions {
+  getNamedMcpTools?: () => McpToolSpec[]
+}
+
 export async function createServer(
   tools: ToolRegistry,
-  packages: PackageLoader
+  packages: PackageLoader,
+  options?: McpServerOptions
 ): Promise<ServerHandle> {
   const app = express()
   const server = createHttpServer(app)
@@ -81,6 +93,12 @@ export async function createServer(
   const mcpTokens = new Map<string, McpToken>()
   const mcpConnections = new Map<string, Set<WebSocket>>()
   const aiRuntime = createAiRuntime({ tools })
+  const getNamedMcpTools = options?.getNamedMcpTools ?? (() => [])
+
+  function isMcpAllowed(method: string): boolean {
+    if (MCP_ALLOWED_TOOLS.has(method)) return true
+    return getNamedMcpTools().some(s => s.mimName === method)
+  }
 
   const sdkDir = join(import.meta.dirname, '../../sdk')
   // Populated after port assignment; checked at request time.
@@ -333,11 +351,11 @@ export async function createServer(
             sendWs(ws, { id, error: 'Method is only available for MCP connections' })
             return
           }
-          sendWs(ws, { id, result: { tools: mcpToolMetadata(tools) } })
+          sendWs(ws, { id, result: { tools: mcpToolMetadata(tools, getNamedMcpTools()) } })
           return
         }
 
-        if (connectionType === 'mcp' && !MCP_ALLOWED_TOOLS.has(method)) {
+        if (connectionType === 'mcp' && !isMcpAllowed(method)) {
           sendWs(ws, { id, error: `Tool is not exposed over MCP: ${method}` })
           return
         }
@@ -509,16 +527,20 @@ function errorMessage(err: unknown): string {
   return 'Unknown error'
 }
 
-function mcpToolMetadata(tools: ToolRegistry): Array<McpToolSpec & { inputSchema: Record<string, unknown> }> {
-  return MCP_TOOL_SPECS.map((spec) => {
+function mcpToolMetadata(tools: ToolRegistry, namedSpecs: McpToolSpec[] = []): Array<McpToolSpec & { inputSchema: Record<string, unknown> }> {
+  const result: Array<McpToolSpec & { inputSchema: Record<string, unknown> }> = []
+  for (const spec of MCP_TOOL_SPECS) {
     const tool = tools.get(spec.mimName)
     if (!tool) throw new Error(`MCP tool is not registered: ${spec.mimName}`)
     if (!tool.inputSchema) throw new Error(`MCP tool is missing inputSchema: ${spec.mimName}`)
-    return {
-      ...spec,
-      inputSchema: tool.inputSchema,
-    }
-  })
+    result.push({ ...spec, inputSchema: tool.inputSchema })
+  }
+  for (const spec of namedSpecs) {
+    const tool = tools.get(spec.mimName)
+    if (!tool?.inputSchema) continue
+    result.push({ ...spec, inputSchema: tool.inputSchema })
+  }
+  return result
 }
 
 export function resolveWorkspaceFilePath(workspace: string, requestPath: string): string | null {

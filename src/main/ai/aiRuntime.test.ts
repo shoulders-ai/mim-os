@@ -5,6 +5,7 @@ import {
   buildTaskLabelSystemPrompt,
   cleanTaskLabel,
   activateSelectedSkills,
+  createAiRuntime,
   createAiSdkTools,
   createSkillActiveToolPolicy,
   convertMimDataPart,
@@ -13,7 +14,22 @@ import {
   providerBaseUrl,
   summarizeTurnUsage,
 } from '@main/ai/aiRuntime.js'
+import { generateObject } from 'ai'
 import type { ToolRegistry } from '@main/tools/registry.js'
+
+vi.mock('ai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('ai')>()
+  return { ...actual, generateObject: vi.fn() }
+})
+
+vi.mock('@main/ai/ai.js', () => ({
+  loadRegistry: vi.fn(() => ({
+    models: [{ id: 'test-model', model: 'test-model', provider: 'anthropic' }],
+    defaults: { ghost: ['test-model'], extract: ['test-model'] },
+    providers: { anthropic: { url: 'https://api.anthropic.com/v1/messages' } },
+  })),
+  resolveKey: vi.fn(() => ({ key: 'sk-test', source: 'env' })),
+}))
 
 function mockRegistry() {
   const calls: Array<{ name: string; params: Record<string, unknown>; ctx: Record<string, unknown> }> = []
@@ -984,5 +1000,80 @@ describe('summarizeTurnUsage', () => {
     expect(result.usage.outputTokens).toBe(4200)
     expect(result.usage.estimatedCost).toBeCloseTo(1.53)
     expect(result.contextTokens).toBe(101000)
+  })
+})
+
+describe('single-shot generation functions trace through the tool registry', () => {
+  const mockedGenerateObject = vi.mocked(generateObject)
+
+  function mockToolsWithTrace() {
+    const traced: Array<Record<string, unknown>> = []
+    const tools = {
+      call: vi.fn(),
+      trace: { append: vi.fn((event: Record<string, unknown>) => traced.push(event)) },
+    } as unknown as ToolRegistry
+    return { tools, traced }
+  }
+
+  const stubUsage = { totalTokens: 42, promptTokens: 30, completionTokens: 12 }
+
+  it('ghost suggestions traces a model.call event with profile "ghost"', async () => {
+    mockedGenerateObject.mockResolvedValueOnce({
+      object: { suggestions: ['hello world'] },
+      usage: stubUsage,
+    } as never)
+    const { tools, traced } = mockToolsWithTrace()
+    const runtime = createAiRuntime({ tools })
+
+    const result = await runtime.generateGhostSuggestions({ before: 'Hello ', after: '', fallback: [] })
+
+    expect(result.suggestions).toEqual(['hello world'])
+    expect(traced).toHaveLength(1)
+    expect(traced[0]).toMatchObject({ kind: 'model.call', actor: 'ai', data: expect.objectContaining({ profile: 'ghost' }) })
+  })
+
+  it('ghost returns cleaned fallback when model returns empty suggestions', async () => {
+    mockedGenerateObject.mockResolvedValueOnce({
+      object: { suggestions: [] },
+      usage: stubUsage,
+    } as never)
+    const { tools } = mockToolsWithTrace()
+    const runtime = createAiRuntime({ tools })
+
+    const result = await runtime.generateGhostSuggestions({ before: 'Hi', after: '', fallback: ['fallback text'] })
+
+    expect(result.suggestions).toEqual(['fallback text'])
+  })
+
+  it('task label traces a model.call event with profile "task-label"', async () => {
+    mockedGenerateObject.mockResolvedValueOnce({
+      object: { label: 'Compare quotes' },
+      usage: stubUsage,
+    } as never)
+    const { tools, traced } = mockToolsWithTrace()
+    const runtime = createAiRuntime({ tools })
+
+    const result = await runtime.generateTaskLabel({ userText: 'Compare supplier quotes' })
+
+    expect(result.label).toBe('Compare quotes')
+    expect(traced).toHaveLength(1)
+    expect(traced[0]).toMatchObject({ kind: 'model.call', data: expect.objectContaining({ profile: 'task-label' }) })
+  })
+
+  it('summary traces a model.call event with profile "summary"', async () => {
+    mockedGenerateObject.mockResolvedValueOnce({
+      object: { summary: 'Discussed ghost fix.' },
+      usage: stubUsage,
+    } as never)
+    const { tools, traced } = mockToolsWithTrace()
+    const runtime = createAiRuntime({ tools })
+
+    const result = await runtime.generateSummary({
+      messages: [{ role: 'user', content: 'Fix ghost', parts: [{ type: 'text', text: 'Fix ghost' }] }],
+    })
+
+    expect(result.summary).toBe('Discussed ghost fix.')
+    expect(traced).toHaveLength(1)
+    expect(traced[0]).toMatchObject({ kind: 'model.call', data: expect.objectContaining({ profile: 'summary' }) })
   })
 })

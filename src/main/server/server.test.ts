@@ -263,7 +263,7 @@ describe('app server', () => {
 
     expect(call).not.toHaveBeenCalled()
     expect(meta.id).toBe('meta-1')
-    expect((meta.result as { tools: unknown[] }).tools).toHaveLength(13)
+    expect((meta.result as { tools: unknown[] }).tools).toHaveLength(MCP_TOOL_SPECS.length)
     expect((meta.result as { tools: Array<Record<string, unknown>> }).tools[0]).toEqual({
       name: 'editor_open',
       mimName: 'editor.open',
@@ -346,13 +346,13 @@ describe('app server', () => {
       params: { path: 'README.md' },
     })
     const denied = await sendJson(socket, {
-      id: 'read-1',
-      method: 'fs.read',
-      params: { path: 'README.md' },
+      id: 'write-1',
+      method: 'fs.write',
+      params: { path: 'README.md', content: 'hacked' },
     })
 
     expect(allowed).toEqual({ id: 'open-1', result: { ok: true } })
-    expect(denied).toEqual({ id: 'read-1', error: 'Tool is not exposed over MCP: fs.read' })
+    expect(denied).toEqual({ id: 'write-1', error: 'Tool is not exposed over MCP: fs.write' })
     expect(call).toHaveBeenCalledTimes(1)
     expect(call).toHaveBeenCalledWith('editor.open', { path: 'README.md' }, {
       actor: 'ai',
@@ -377,6 +377,66 @@ describe('app server', () => {
     expect(call).not.toHaveBeenCalled()
   })
 
+  it('exposes dynamic named tools over MCP alongside core tools', async () => {
+    const call = vi.fn(async () => ({ rows: [] }))
+    const namedTool: ToolDef = {
+      name: 'issues.list',
+      description: 'List project issues',
+      inputSchema: { type: 'object', properties: { status: { type: 'string' } } },
+      execute: async () => ({ rows: [] }),
+    }
+    const toolDefs = [...makeMcpToolDefs(), namedTool]
+    const getNamedMcpTools = () => [
+      { name: 'issues_list', mimName: 'issues.list', description: 'List project issues' },
+    ]
+    server = await createServer(makeTools(call, null, toolDefs), makePackages([addPackage()]), { getNamedMcpTools })
+    const socket = await openSocket(server.port)
+    const token = server.createMcpToken('named-test')
+    await sendJson(socket, { id: 'id-1', method: 'identify', params: { type: 'mcp', token } })
+
+    const meta = await sendJson(socket, { id: 'meta-1', method: '__meta.tools' })
+    const tools = (meta.result as { tools: Array<{ name: string }> }).tools
+    expect(tools).toHaveLength(MCP_TOOL_SPECS.length + 1)
+    expect(tools.find(t => t.name === 'issues_list')).toMatchObject({
+      name: 'issues_list',
+      mimName: 'issues.list',
+      description: 'List project issues',
+    })
+
+    const result = await sendJson(socket, {
+      id: 'issues-1',
+      method: 'issues.list',
+      params: { status: 'open' },
+    })
+    expect(result).toEqual({ id: 'issues-1', result: { rows: [] } })
+    expect(call).toHaveBeenCalledWith('issues.list', { status: 'open' }, {
+      actor: 'ai',
+      sessionId: 'named-test',
+    })
+  })
+
+  it('skips named tools without inputSchema in the MCP catalog', async () => {
+    const call = vi.fn(async () => ({}))
+    const noSchemaTool: ToolDef = {
+      name: 'broken.tool',
+      description: 'Missing schema',
+      execute: async () => ({}),
+    }
+    const toolDefs = [...makeMcpToolDefs(), noSchemaTool]
+    const getNamedMcpTools = () => [
+      { name: 'broken_tool', mimName: 'broken.tool', description: 'Missing schema' },
+    ]
+    server = await createServer(makeTools(call, null, toolDefs), makePackages([addPackage()]), { getNamedMcpTools })
+    const socket = await openSocket(server.port)
+    const token = server.createMcpToken('schema-test')
+    await sendJson(socket, { id: 'id-1', method: 'identify', params: { type: 'mcp', token } })
+
+    const meta = await sendJson(socket, { id: 'meta-1', method: '__meta.tools' })
+    const tools = (meta.result as { tools: Array<{ name: string }> }).tools
+    expect(tools).toHaveLength(MCP_TOOL_SPECS.length)
+    expect(tools.find(t => t.name === 'broken_tool')).toBeUndefined()
+  })
+
   it('does not allow an identified MCP socket to re-identify as a package', async () => {
     const call = vi.fn()
     server = await createServer(makeTools(call, null, makeMcpToolDefs()), makePackages([addPackage()]))
@@ -395,13 +455,13 @@ describe('app server', () => {
       params: { launch },
     })
     const denied = await sendJson(socket, {
-      id: 'read-1',
-      method: 'fs.read',
-      params: { path: 'README.md' },
+      id: 'write-1',
+      method: 'fs.write',
+      params: { path: 'README.md', content: 'hacked' },
     })
 
     expect(reidentify).toEqual({ id: 'identify-2', error: 'Connection is already identified' })
-    expect(denied).toEqual({ id: 'read-1', error: 'Tool is not exposed over MCP: fs.read' })
+    expect(denied).toEqual({ id: 'write-1', error: 'Tool is not exposed over MCP: fs.write' })
     expect(call).not.toHaveBeenCalled()
   })
 

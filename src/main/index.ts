@@ -29,7 +29,7 @@ import { registerWorkspaceTools } from '@main/tools/workspace.js'
 import { registerPackageTools } from '@main/tools/packages.js'
 import { registerPackageRuntimeTools } from '@main/tools/packageRuntime.js'
 import { registerRegistryTools } from '@main/tools/registryTools.js'
-import { lookupRegistryEntry } from '@main/packages/registrySources.js'
+import { lookupRegistryEntry, setAccountRegistryDev } from '@main/packages/registrySources.js'
 import { registerInstallTools } from '@main/tools/install.js'
 import { DEFAULT_CACHE_ROOT } from '@main/packages/cacheLayout.js'
 import { registerBridgeTools } from '@main/tools/bridge.js'
@@ -58,6 +58,7 @@ import { registerCoreAppTools } from '@main/tools/coreApps.js'
 import { checkForUpdates } from '@main/packages/updateCheck.js'
 import { registerLogbookTools } from '@main/tools/logbook.js'
 import { registerWebTools } from '@main/tools/web.js'
+import { registerAccountTools, readAccountToken, setAccountDev } from '@main/tools/account.js'
 import { registerSlackTools } from '@main/tools/slack.js'
 import { registerGoogleTools } from '@main/tools/google.js'
 import { registerTelemetryTools } from '@main/tools/telemetry.js'
@@ -403,6 +404,12 @@ async function boot(): Promise<void> {
   registerSlackTools(tools)
   registerGoogleTools(tools)
   registerTelemetryTools(tools, telemetry)
+  setAccountDev(is.dev)
+  setAccountRegistryDev(is.dev)
+  registerAccountTools(tools, (channel) => {
+    mainWindow?.webContents.send(channel)
+    server?.broadcast(channel, {})
+  })
   telemetry.track('app_open', {
     appVersion,
     platform: telemetryConfig.platform,
@@ -569,6 +576,7 @@ async function boot(): Promise<void> {
     cacheRoot,
     globalDir: installGlobalDir,
     getWorkspacePath: () => tools.getWorkspacePath(),
+    getAccountToken: () => readAccountToken(),
   })
   registerInstallTools(tools, {
     packages,
@@ -581,7 +589,7 @@ async function boot(): Promise<void> {
       cacheRoot,
       version,
       isSourceTrusted: (s) => packageEnablement.isRegistryTrusted(s),
-    }),
+    }, { getAccountToken: () => readAccountToken() }),
   })
   registerCoreAppTools(tools, {
     packages,
@@ -646,10 +654,24 @@ async function boot(): Promise<void> {
   tools.register({
     name: 'system.prompt',
     description: 'Get the system prompt for the AI chat',
+    inputSchema: { type: 'object', properties: {} },
     execute: async () => ({ prompt: getSystemPrompt(tools.getWorkspacePath() ?? undefined) })
   })
 
-  server = await createServer(tools, packages)
+  server = await createServer(tools, packages, {
+    getNamedMcpTools: () => {
+      if (!namedPackageTools) return []
+      return namedPackageTools.ownedNames().map(name => {
+        const tool = tools.get(name)
+        if (!tool) return null
+        return {
+          name: name.replace(/\./g, '_'),
+          mimName: name,
+          description: tool.description,
+        }
+      }).filter((s): s is NonNullable<typeof s> => s !== null)
+    },
+  })
   try {
     writeMcpDiscoveryFile({
       port: server.port,
@@ -668,6 +690,7 @@ async function boot(): Promise<void> {
       cacheRoot,
       globalDir: installGlobalDir,
       isSourceTrusted: (s) => packageEnablement.isRegistryTrusted(s),
+      getAccountToken: () => readAccountToken(),
     }).then((result) => {
       mainWindow?.webContents.send('apps:updates', result)
       server?.broadcast('apps:updates', result)
