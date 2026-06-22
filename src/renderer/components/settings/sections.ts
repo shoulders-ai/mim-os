@@ -6,7 +6,7 @@
 // grouping are free to change; ids must stay stable. 'ai' keeps its historic
 // id even though the label is now "AI" (it was "Models").
 
-export type SettingsSection = 'appearance' | 'editor' | 'ai' | 'instructions' | 'apps' | 'agents' | 'skills' | 'resources' | 'storage' | 'about'
+export type SettingsSection = 'account' | 'appearance' | 'editor' | 'ai' | 'instructions' | 'apps' | 'agents' | 'skills' | 'resources' | 'storage' | 'about'
 
 export interface SettingsNavItem {
   id: SettingsSection
@@ -30,6 +30,7 @@ export const SETTINGS_NAV_GROUPS: SettingsNavItem[][] = [
     { id: 'agents', label: 'CLI tools' },
   ],
   [
+    { id: 'account', label: 'Account' },
     { id: 'about', label: 'About' },
   ],
 ]

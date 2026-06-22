@@ -2,6 +2,7 @@
 import { ref, watch } from 'vue'
 import { IconX } from '@tabler/icons-vue'
 import MimDialog from '../ui/MimDialog.vue'
+import AccountSettingsPanel from './AccountSettingsPanel.vue'
 import AiSettingsPanel from './AiSettingsPanel.vue'
 import AppsSettingsPanel from './AppsSettingsPanel.vue'
 import AgentsSettingsPanel from './AgentsSettingsPanel.vue'
@@ -119,7 +120,8 @@ function onNavKeydown(e: KeyboardEvent) {
           class="flex-1"
           :class="activeSection === 'apps' || activeSection === 'agents' ? 'overflow-hidden' : activeSection === 'instructions' ? 'flex flex-col px-8 py-6' : 'overflow-y-auto px-8 py-6'"
         >
-          <AiSettingsPanel v-if="activeSection === 'ai'" />
+          <AccountSettingsPanel v-if="activeSection === 'account'" />
+          <AiSettingsPanel v-else-if="activeSection === 'ai'" />
           <InstructionsSettingsPanel v-else-if="activeSection === 'instructions'" />
           <AppsSettingsPanel
             v-else-if="activeSection === 'apps'"
