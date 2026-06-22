@@ -63,6 +63,9 @@ describe('agent tools', () => {
     expect(agentTools.map(t => t.name).sort()).toEqual([
       'agent.launch',
       'agent.list',
+      'agent.mcp.connect',
+      'agent.mcp.disconnect',
+      'agent.mcp.status',
       'agent.sessions.archive',
       'agent.sessions.delete',
       'agent.sessions.get',

@@ -8,6 +8,8 @@ const agentsStore = useAgentsStore()
 const error = ref<string | null>(null)
 const agentBusyId = ref<string | null>(null)
 const agentAdvancedOpen = ref<string | null>(null)
+const mcpStatus = ref<Record<string, 'checking' | 'connected' | 'disconnected' | 'busy'>>({})
+const mcpError = ref<Record<string, string>>({})
 
 const AGENT_FLAGS_PLACEHOLDER: Record<string, string> = {
   'claude-code': 'e.g. --dangerously-skip-permissions --verbose',
@@ -46,8 +48,50 @@ function agentToggleTitle(agent: DetectedAgent): string {
   return agentsStore.isEnabled(agent.id) ? 'Hide launcher in Navigator' : 'Show launcher in Navigator'
 }
 
+async function checkMcpStatus() {
+  for (const agent of agentsStore.agents) {
+    if (agent.installed) mcpStatus.value[agent.id] = 'checking'
+  }
+  try {
+    const result = await window.kernel.call('agent.mcp.status', {}) as { statuses: Record<string, boolean> }
+    for (const [id, connected] of Object.entries(result.statuses)) {
+      mcpStatus.value[id] = connected ? 'connected' : 'disconnected'
+    }
+  } catch {
+    for (const agent of agentsStore.agents) {
+      if (agent.installed && mcpStatus.value[agent.id] === 'checking') {
+        mcpStatus.value[agent.id] = 'disconnected'
+      }
+    }
+  }
+}
+
+async function connectMcp(agentId: string) {
+  mcpStatus.value[agentId] = 'busy'
+  mcpError.value[agentId] = ''
+  try {
+    await window.kernel.call('agent.mcp.connect', { agentId })
+    mcpStatus.value[agentId] = 'connected'
+  } catch (err) {
+    mcpStatus.value[agentId] = 'disconnected'
+    mcpError.value[agentId] = (err as Error).message
+  }
+}
+
+async function disconnectMcp(agentId: string) {
+  mcpStatus.value[agentId] = 'busy'
+  mcpError.value[agentId] = ''
+  try {
+    await window.kernel.call('agent.mcp.disconnect', { agentId })
+    mcpStatus.value[agentId] = 'disconnected'
+  } catch (err) {
+    mcpStatus.value[agentId] = 'connected'
+    mcpError.value[agentId] = (err as Error).message
+  }
+}
+
 function refreshAgents() {
-  void agentsStore.refresh()
+  void agentsStore.refresh().then(() => void checkMcpStatus())
 }
 
 onMounted(() => {
@@ -94,6 +138,28 @@ onBeforeUnmount(() => {
                       {{ agentsStore.getFlags(agent.id) }}
                     </span>
                     <button
+                      v-if="mcpStatus[agent.id] === 'disconnected'"
+                      type="button"
+                      :data-testid="`agent-mcp-connect-${agent.id}`"
+                      class="shrink-0 rounded-[4px] px-1 text-[10px] font-medium text-accent hover:bg-accent-tint hover:text-accent"
+                      @click="connectMcp(agent.id)"
+                    >
+                      Connect
+                    </button>
+                    <span
+                      v-else-if="mcpStatus[agent.id] === 'connected'"
+                      :data-testid="`agent-mcp-status-${agent.id}`"
+                      class="shrink-0 px-1 text-[10px] text-ink-4"
+                    >
+                      Connected
+                    </span>
+                    <span
+                      v-else-if="mcpStatus[agent.id] === 'busy' || mcpStatus[agent.id] === 'checking'"
+                      class="shrink-0 px-1 text-[10px] text-ink-4"
+                    >
+                      {{ mcpStatus[agent.id] === 'checking' ? 'Checking…' : 'Connecting…' }}
+                    </span>
+                    <button
                       type="button"
                       class="shrink-0 rounded-[4px] px-1 text-[10px] font-medium text-accent hover:bg-accent-tint hover:text-accent"
                       :data-testid="`agent-advanced-${agent.id}`"
@@ -117,17 +183,42 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div v-if="agent.installed && agentAdvancedOpen === agent.id" class="flex flex-col gap-1 px-3 pb-3 pl-3">
-            <label class="text-[10px] font-medium text-ink-3">CLI flags</label>
-            <input
-              type="text"
-              class="h-[26px] min-w-[140px] flex-1 rounded-[5px] border border-rule-light bg-surface px-2 text-[11px] text-ink outline-none placeholder:text-ink-4 focus:border-accent"
-              :data-testid="`agent-flags-${agent.id}`"
-              :value="agentsStore.getFlags(agent.id)"
-              :placeholder="agentFlagsPlaceholder(agent.id)"
-              @change="onAgentFlagsChange(agent.id, $event)"
-            />
-            <span class="text-[10px] text-ink-4">Appended to the launch command. Saved per workspace.</span>
+          <div v-if="agent.installed && agentAdvancedOpen === agent.id" class="flex flex-col gap-2 px-3 pb-3 pl-3">
+            <div class="flex flex-col gap-1">
+              <label class="text-[10px] font-medium text-ink-3">CLI flags</label>
+              <input
+                type="text"
+                class="h-[26px] min-w-[140px] flex-1 rounded-[5px] border border-rule-light bg-surface px-2 text-[11px] text-ink outline-none placeholder:text-ink-4 focus:border-accent"
+                :data-testid="`agent-flags-${agent.id}`"
+                :value="agentsStore.getFlags(agent.id)"
+                :placeholder="agentFlagsPlaceholder(agent.id)"
+                @change="onAgentFlagsChange(agent.id, $event)"
+              />
+              <span class="text-[10px] text-ink-4">Appended to the launch command. Saved per workspace.</span>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] font-medium text-ink-3">MCP</span>
+              <span v-if="mcpStatus[agent.id] === 'connected'" class="text-[10px] text-ink-4">
+                Connected to Mim
+              </span>
+              <span v-else class="text-[10px] text-ink-4">
+                Not connected
+              </span>
+              <button
+                v-if="mcpStatus[agent.id] === 'connected'"
+                type="button"
+                :data-testid="`agent-mcp-disconnect-${agent.id}`"
+                class="rounded-[4px] px-1.5 text-[10px] font-medium text-ink-3 hover:bg-chrome-mid hover:text-ink-2"
+                @click="disconnectMcp(agent.id)"
+              >
+                Disconnect
+              </button>
+            </div>
+
+            <div v-if="mcpError[agent.id]" class="text-[10px] text-rem">
+              {{ mcpError[agent.id] }}
+            </div>
           </div>
         </div>
 

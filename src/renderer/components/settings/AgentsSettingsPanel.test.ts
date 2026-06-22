@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
-// Coding agents section: detected CLI agents with opt-in launcher visibility
-// and per-agent custom flags.
+// Coding agents section: detected CLI agents with opt-in launcher visibility,
+// per-agent custom flags, and one-click MCP connection.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick } from 'vue'
@@ -33,6 +33,9 @@ describe('AgentsSettingsPanel', () => {
 
     call = vi.fn(async (tool: string) => {
       if (tool === 'agent.list') return { agents: detectedAgents }
+      if (tool === 'agent.mcp.status') return { statuses: { 'claude-code': false } }
+      if (tool === 'agent.mcp.connect') return { ok: true }
+      if (tool === 'agent.mcp.disconnect') return { ok: true }
       if (tool === 'settings.set') return { ok: true }
       return {}
     })
@@ -95,15 +98,92 @@ describe('AgentsSettingsPanel', () => {
     expect(call).toHaveBeenCalledWith('settings.set', { key: 'enabledAgents', value: [] })
   })
 
+  it('shows Connect button for installed agents that are not MCP-connected', async () => {
+    mount()
+    await flushUi()
+
+    const connectBtn = root.querySelector('[data-testid="agent-mcp-connect-claude-code"]')
+    expect(connectBtn).toBeTruthy()
+    expect(connectBtn!.textContent?.trim()).toBe('Connect')
+  })
+
+  it('shows Connected status when MCP is configured', async () => {
+    call = vi.fn(async (tool: string) => {
+      if (tool === 'agent.list') return { agents: detectedAgents }
+      if (tool === 'agent.mcp.status') return { statuses: { 'claude-code': true } }
+      if (tool === 'settings.set') return { ok: true }
+      return {}
+    })
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call, on: vi.fn(), off: vi.fn() },
+    })
+
+    mount()
+    await flushUi()
+
+    const status = root.querySelector('[data-testid="agent-mcp-status-claude-code"]')
+    expect(status).toBeTruthy()
+    expect(status!.textContent?.trim()).toBe('Connected')
+    expect(root.querySelector('[data-testid="agent-mcp-connect-claude-code"]')).toBeNull()
+  })
+
+  it('clicking Connect calls agent.mcp.connect and updates status', async () => {
+    mount()
+    await flushUi()
+
+    const connectBtn = root.querySelector<HTMLButtonElement>('[data-testid="agent-mcp-connect-claude-code"]')!
+    connectBtn.click()
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('agent.mcp.connect', { agentId: 'claude-code' })
+    const status = root.querySelector('[data-testid="agent-mcp-status-claude-code"]')
+    expect(status?.textContent?.trim()).toBe('Connected')
+  })
+
+  it('shows Disconnect button in the advanced section when connected', async () => {
+    call = vi.fn(async (tool: string) => {
+      if (tool === 'agent.list') return { agents: detectedAgents }
+      if (tool === 'agent.mcp.status') return { statuses: { 'claude-code': true } }
+      if (tool === 'agent.mcp.disconnect') return { ok: true }
+      if (tool === 'settings.set') return { ok: true }
+      return {}
+    })
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call, on: vi.fn(), off: vi.fn() },
+    })
+
+    mount()
+    await flushUi()
+
+    const disclosure = root.querySelector<HTMLButtonElement>('[data-testid="agent-advanced-claude-code"]')!
+    disclosure.click()
+    await flushUi()
+
+    const disconnectBtn = root.querySelector<HTMLButtonElement>('[data-testid="agent-mcp-disconnect-claude-code"]')
+    expect(disconnectBtn).toBeTruthy()
+    disconnectBtn!.click()
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('agent.mcp.disconnect', { agentId: 'claude-code' })
+  })
+
+  it('does not show MCP JSON config section (replaced by per-agent Connect)', async () => {
+    mount()
+    await flushUi()
+
+    expect(root.querySelector('[data-testid="mcp-config-section"]')).toBeNull()
+    expect(root.querySelector('[data-testid="mcp-config-copy"]')).toBeNull()
+  })
+
   it('shows a collapsed flags input that persists custom CLI flags', async () => {
     mount()
     await flushUi()
 
-    // Advanced flags section collapsed by default.
     const flagsInput = root.querySelector<HTMLInputElement>('[data-testid="agent-flags-claude-code"]')
     expect(flagsInput).toBeNull()
 
-    // Expand via the disclosure toggle.
     const disclosure = root.querySelector<HTMLButtonElement>('[data-testid="agent-advanced-claude-code"]')
     expect(disclosure).toBeTruthy()
     disclosure!.click()
@@ -112,7 +192,6 @@ describe('AgentsSettingsPanel', () => {
     const input = root.querySelector<HTMLInputElement>('[data-testid="agent-flags-claude-code"]')
     expect(input).toBeTruthy()
 
-    // Type flags and blur to save.
     input!.value = '--dangerously-skip-permissions'
     input!.dispatchEvent(new Event('change', { bubbles: true }))
     await flushUi()

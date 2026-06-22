@@ -1,6 +1,7 @@
 import type { ToolRegistry } from '@main/tools/registry.js'
 import { detectAgents, type DetectedAgent } from '@main/agents/agentCatalog.js'
 import type { AgentSessions } from '@main/agents/agentSessions.js'
+import { getAgentMcpSetup, checkMimMcpConfigured, addMimMcp, removeMimMcp } from '@main/agents/agentMcp.js'
 
 export interface AgentToolsDeps {
   // System boundaries: injected by tests so agent tools never spawn a login
@@ -96,5 +97,54 @@ export function registerAgentTools(tools: ToolRegistry, deps?: AgentToolsDeps): 
     description: 'Delete an agent session record and its scrollback file. Fails while the session is running.',
     inputSchema: objectSchema({ sessionId: { type: 'string' } }, ['sessionId']),
     execute: async (params) => sessions().delete(params.sessionId as string),
+  })
+
+  tools.register({
+    name: 'agent.mcp.status',
+    description: 'Check which installed agents have the mim MCP server configured.',
+    inputSchema: objectSchema({}),
+    execute: async () => {
+      const agents = await detect()
+      const statuses: Record<string, boolean> = {}
+      await Promise.all(agents.map(async (agent) => {
+        if (!agent.installed || !agent.binPath) return
+        const setup = getAgentMcpSetup(agent.id)
+        if (!setup) return
+        statuses[agent.id] = await checkMimMcpConfigured(agent.binPath, setup.listArgs)
+      }))
+      return { statuses }
+    },
+  })
+
+  tools.register({
+    name: 'agent.mcp.connect',
+    description: 'Configure the mim MCP server for a CLI agent so it can access Mim tools.',
+    inputSchema: objectSchema({ agentId: { type: 'string' } }, ['agentId']),
+    execute: async (params) => {
+      const agentId = params.agentId as string
+      const agents = await detect()
+      const agent = agents.find(a => a.id === agentId)
+      if (!agent?.installed || !agent.binPath) throw new Error(`Agent not installed: ${agentId}`)
+      const setup = getAgentMcpSetup(agentId)
+      if (!setup) throw new Error(`MCP setup not available for: ${agentId}`)
+      await addMimMcp(agent.binPath, setup.addArgs)
+      return { ok: true }
+    },
+  })
+
+  tools.register({
+    name: 'agent.mcp.disconnect',
+    description: 'Remove the mim MCP server from a CLI agent.',
+    inputSchema: objectSchema({ agentId: { type: 'string' } }, ['agentId']),
+    execute: async (params) => {
+      const agentId = params.agentId as string
+      const agents = await detect()
+      const agent = agents.find(a => a.id === agentId)
+      if (!agent?.installed || !agent.binPath) throw new Error(`Agent not installed: ${agentId}`)
+      const setup = getAgentMcpSetup(agentId)
+      if (!setup) throw new Error(`MCP setup not available for: ${agentId}`)
+      await removeMimMcp(agent.binPath, setup.removeArgs)
+      return { ok: true }
+    },
   })
 }
