@@ -17,11 +17,12 @@ import { cloneRepo } from '@main/git.js'
 // ---------------------------------------------------------------------------
 
 export interface RegistrySource {
-  id: string                    // 'default' | 'user' | mim.yaml key | registries.json key
+  id: string                    // 'default' | 'user' | 'account' | mim.yaml key | registries.json key
   kind: 'git' | 'local' | 'url'
   location: string              // git HTTPS URL, ABSOLUTE directory path, or index.json URL
   name?: string
-  origin: 'default' | 'user' | 'workspace' | 'machine'
+  origin: 'default' | 'user' | 'workspace' | 'machine' | 'account'
+  auth?: { token: string }
 }
 
 export interface ReadSourceIndexResult {
@@ -36,6 +37,8 @@ export type LookupResult = RegistryEntry & {
   registryLocation: string
   /** Absolute package dir for local-dir entries; absent for git/url entries. */
   localPackageDir?: string
+  /** Auth credentials from the source, for install to use at download time. */
+  auth?: { token: string }
 }
 
 // ---------------------------------------------------------------------------
@@ -46,11 +49,12 @@ export interface RegistrySourcesDeps {
   getUserRegistryUrl?: () => string
   readMimYaml?: (workspacePath: string) => string | null
   readMachineRegistries?: (workspacePath: string) => string | null
+  getAccountToken?: () => string | null
 }
 
 export interface ReadSourceIndexDeps {
   cloneRepo?: typeof cloneRepo
-  fetchUrl?: (url: string) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>
+  fetchUrl?: (url: string, opts?: { headers?: Record<string, string> }) => Promise<{ ok: boolean; status: number; text: () => Promise<string> }>
 }
 
 export interface LookupDeps extends RegistrySourcesDeps, ReadSourceIndexDeps {
@@ -60,7 +64,17 @@ export interface LookupDeps extends RegistrySourcesDeps, ReadSourceIndexDeps {
 // registrySources — ordered source list, highest precedence first
 // ---------------------------------------------------------------------------
 
-const RESERVED_IDS = new Set(['default', 'user'])
+let _accountIsDev = false
+export function setAccountRegistryDev(dev: boolean): void { _accountIsDev = dev }
+
+export function accountRegistryUrl(): string {
+  if (process.env.MIM_ACCOUNT_REGISTRY_URL) return process.env.MIM_ACCOUNT_REGISTRY_URL
+  return _accountIsDev
+    ? 'http://localhost:3000/api/v1/registry'
+    : 'https://mim.shoulde.rs/api/v1/registry'
+}
+
+const RESERVED_IDS = new Set(['default', 'user', 'account'])
 
 export function registrySources(
   workspacePath: string | null,
@@ -109,7 +123,20 @@ export function registrySources(
     }
   }
 
-  // 3. user: custom registry URL replaces default
+  // 3. account: authenticated Mim account registry
+  const accountToken = deps?.getAccountToken?.() ?? null
+  if (accountToken) {
+    sources.push({
+      id: 'account',
+      kind: 'url',
+      location: accountRegistryUrl(),
+      name: 'Mim Account',
+      origin: 'account',
+      auth: { token: accountToken },
+    })
+  }
+
+  // 4. user: custom registry URL replaces default
   const userUrl = deps?.getUserRegistryUrl ? deps.getUserRegistryUrl() : registryUrl()
   if (userUrl !== DEFAULT_REGISTRY_URL) {
     sources.push({ id: 'user', kind: 'git', location: userUrl, origin: 'user' })
@@ -139,7 +166,9 @@ export async function readSourceIndex(
 
     if (opts.sync) {
       try {
-        const res = await doFetch(source.location)
+        const res = source.auth
+          ? await doFetch(source.location, { headers: { Authorization: `Bearer ${source.auth.token}` } })
+          : await doFetch(source.location)
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const text = await res.text()
         const raw = JSON.parse(text)
@@ -192,8 +221,11 @@ export async function readSourceIndex(
   return readIndexFile(join(source.location, 'index.json'), true, source.id)
 }
 
-async function defaultFetch(url: string): Promise<{ ok: boolean; status: number; text: () => Promise<string> }> {
-  return fetch(url)
+async function defaultFetch(
+  url: string,
+  opts?: { headers?: Record<string, string> },
+): Promise<{ ok: boolean; status: number; text: () => Promise<string> }> {
+  return opts ? fetch(url, opts) : fetch(url)
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +279,10 @@ export async function lookupRegistryEntry(
       registryId: source.id,
       registryKind: source.kind,
       registryLocation: source.location,
+    }
+
+    if (source.auth) {
+      out.auth = source.auth
     }
 
     // For local-dir entries, resolve the absolute package dir with escape guard.

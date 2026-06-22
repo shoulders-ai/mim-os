@@ -1030,6 +1030,368 @@ describe('local-dir installs', () => {
   })
 })
 
+describe('archive installs', () => {
+  let dir: string
+  let cacheRoot: string
+  let globalDir: string
+  let tools: ReturnType<typeof createToolRegistry>
+  const FIXED_CLOCK = 1718000000000
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mim-archive-install-test-'))
+    cacheRoot = join(dir, 'cache')
+    globalDir = join(dir, 'global-packages')
+    mkdirSync(globalDir, { recursive: true })
+
+    const trace = createTraceLog()
+    tools = createToolRegistry(trace)
+    tools.setWorkspacePath(dir)
+
+    writeFileSync(join(dir, 'mim.yaml'), 'name: test-workspace\n')
+
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  /**
+   * Build a real .tar.gz from a directory. Returns the buffer and its sha256 hex hash.
+   */
+  function buildTarball(sourceDir: string): { buffer: Buffer; hash: string } {
+    const { execFileSync } = require('child_process') as typeof import('child_process')
+    const { createHash } = require('crypto') as typeof import('crypto')
+
+    const tmpTar = join(dir, 'test-archive.tar.gz')
+    execFileSync('tar', ['czf', tmpTar, '-C', sourceDir, '.'])
+    const buffer = readFileSync(tmpTar)
+    const hash = createHash('sha256').update(buffer).digest('hex')
+    rmSync(tmpTar, { force: true })
+    return { buffer, hash }
+  }
+
+  function archiveRegistryEntry(overrides?: Partial<RegistryEntry>): RegistryEntry {
+    return {
+      id: 'github-monitor',
+      name: 'GitHub Monitor',
+      description: 'Org-wide issues/PRs/activity monitoring',
+      archive: 'https://registry.example.com/packages/github-monitor-1.2.0.tar.gz',
+      hash: 'sha256:placeholder',
+      version: '1.2.0',
+      permissions: { http: ['api.github.com'], secrets: ['github_token'] },
+      engines: { mim: 'runtime-v1' },
+      ...overrides,
+    }
+  }
+
+  function asArchiveLookup(entry: RegistryEntry, auth?: { token: string }): LookupResult {
+    const result: LookupResult = {
+      ...entry,
+      registryId: 'account',
+      registryKind: 'url',
+      registryLocation: 'https://mim.shoulde.rs/api/v1/registry/index',
+    }
+    if (auth) result.auth = auth
+    return result
+  }
+
+  /** Seed a directory with a valid package structure (to be tarred up). */
+  function seedArchiveContent(pkgDir: string, packageJson?: Record<string, unknown>): void {
+    mkdirSync(join(pkgDir, 'ui'), { recursive: true })
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify(packageJson ?? validPackageJson()))
+    writeFileSync(join(pkgDir, 'ui', 'index.html'), '<h1>GitHub Monitor</h1>')
+  }
+
+  async function makeDeps(
+    lookupFn: InstallToolDeps['lookupRegistryEntry'],
+    fetchUrlFn?: InstallToolDeps['fetchUrl'],
+  ): Promise<InstallToolDeps> {
+    const packages = await createPackageLoader(tools, { globalDir })
+    const enablement = createPackageEnablementStore({
+      getWorkspacePath: () => dir,
+    })
+    return {
+      packages,
+      enablement,
+      cacheRoot,
+      globalDir,
+      clock: () => FIXED_CLOCK,
+      lookupRegistryEntry: lookupFn,
+      ...(fetchUrlFn ? { fetchUrl: fetchUrlFn } : {}),
+    }
+  }
+
+  async function callInstall(deps: InstallToolDeps, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+    registerInstallTools(tools, deps)
+    return (await tools.call('package.install', params, { actor: 'user' })) as Record<string, unknown>
+  }
+
+  it('installs an archive entry (happy path)', async () => {
+    // Build a real tarball from a valid package.
+    const contentDir = join(dir, 'archive-content')
+    seedArchiveContent(contentDir)
+    const { buffer, hash } = buildTarball(contentDir)
+
+    const entry = archiveRegistryEntry({ hash: `sha256:${hash}` })
+    const lookup = asArchiveLookup(entry)
+
+    const mockFetch = vi.fn<InstallToolDeps['fetchUrl']>().mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+    } as Response)
+
+    const deps = await makeDeps(
+      async (id) => id === 'github-monitor' ? lookup : undefined,
+      mockFetch,
+    )
+    const result = await callInstall(deps, { id: 'github-monitor' })
+
+    expect(result.installed).toBe('github-monitor')
+    expect(result.version).toBe('1.2.0')
+
+    // Package was copied to global dir.
+    const installDir = join(globalDir, 'github-monitor', '1.2.0')
+    expect(existsSync(join(installDir, 'package.json'))).toBe(true)
+    expect(existsSync(join(installDir, 'ui', 'index.html'))).toBe(true)
+
+    // Provenance records archive URL, no git info.
+    const provenance = JSON.parse(readFileSync(join(installDir, '.mim-install.json'), 'utf-8'))
+    expect(provenance.source).toBe('https://registry.example.com/packages/github-monitor-1.2.0.tar.gz')
+    expect(provenance.path).toBeNull()
+    expect(provenance.ref).toBeNull()
+    expect(provenance.commit).toBeNull()
+    expect(provenance.installedAt).toBe(FIXED_CLOCK)
+
+    // No git calls made.
+    expect(vi.mocked(cloneRepo)).not.toHaveBeenCalled()
+    expect(vi.mocked(fetchRepo)).not.toHaveBeenCalled()
+
+    // Temp files cleaned up.
+    const tmpDir = join(cacheRoot, 'tmp')
+    const tmpTarball = join(tmpDir, 'github-monitor-1.2.0.tar.gz')
+    const tmpExtract = join(tmpDir, 'github-monitor-1.2.0')
+    expect(existsSync(tmpTarball)).toBe(false)
+    expect(existsSync(tmpExtract)).toBe(false)
+  })
+
+  it('throws on hash mismatch', async () => {
+    const contentDir = join(dir, 'archive-content')
+    seedArchiveContent(contentDir)
+    const { buffer } = buildTarball(contentDir)
+
+    const wrongHash = 'f'.repeat(64)
+    const entry = archiveRegistryEntry({ hash: `sha256:${wrongHash}` })
+    const lookup = asArchiveLookup(entry)
+
+    const mockFetch = vi.fn<InstallToolDeps['fetchUrl']>().mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+    } as Response)
+
+    const deps = await makeDeps(
+      async (id) => id === 'github-monitor' ? lookup : undefined,
+      mockFetch,
+    )
+
+    await expect(callInstall(deps, { id: 'github-monitor' })).rejects.toThrow(/hash mismatch/i)
+  })
+
+  it('throws on non-HTTPS archive URL', async () => {
+    const entry = archiveRegistryEntry({
+      archive: 'http://insecure.example.com/pkg.tar.gz',
+      hash: 'sha256:' + 'a'.repeat(64),
+    })
+    const lookup = asArchiveLookup(entry)
+
+    const deps = await makeDeps(
+      async (id) => id === 'github-monitor' ? lookup : undefined,
+    )
+
+    await expect(callInstall(deps, { id: 'github-monitor' })).rejects.toThrow(/HTTPS/)
+  })
+
+  it('throws on credential URL in archive', async () => {
+    const entry = archiveRegistryEntry({
+      archive: 'https://user:pass@registry.example.com/pkg.tar.gz',
+      hash: 'sha256:' + 'a'.repeat(64),
+    })
+    const lookup = asArchiveLookup(entry)
+
+    const deps = await makeDeps(
+      async (id) => id === 'github-monitor' ? lookup : undefined,
+    )
+
+    await expect(callInstall(deps, { id: 'github-monitor' })).rejects.toThrow(/credential/)
+  })
+
+  it('passes Authorization header when auth is present', async () => {
+    const contentDir = join(dir, 'archive-content')
+    seedArchiveContent(contentDir)
+    const { buffer, hash } = buildTarball(contentDir)
+
+    const entry = archiveRegistryEntry({ hash: `sha256:${hash}` })
+    const lookup = asArchiveLookup(entry, { token: 'secret-token-123' })
+
+    const mockFetch = vi.fn<InstallToolDeps['fetchUrl']>().mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+    } as Response)
+
+    const deps = await makeDeps(
+      async (id) => id === 'github-monitor' ? lookup : undefined,
+      mockFetch,
+    )
+    await callInstall(deps, { id: 'github-monitor' })
+
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://registry.example.com/packages/github-monitor-1.2.0.tar.gz',
+      { headers: { Authorization: 'Bearer secret-token-123' } },
+    )
+  })
+
+  it('throws when archive download fails (HTTP error)', async () => {
+    const entry = archiveRegistryEntry({ hash: 'sha256:' + 'a'.repeat(64) })
+    const lookup = asArchiveLookup(entry)
+
+    const mockFetch = vi.fn<InstallToolDeps['fetchUrl']>().mockResolvedValue({
+      ok: false,
+      status: 403,
+    } as Response)
+
+    const deps = await makeDeps(
+      async (id) => id === 'github-monitor' ? lookup : undefined,
+      mockFetch,
+    )
+
+    await expect(callInstall(deps, { id: 'github-monitor' })).rejects.toThrow(/failed to download archive.*403/i)
+  })
+
+  it('provenance file does not contain tokens', async () => {
+    const contentDir = join(dir, 'archive-content')
+    seedArchiveContent(contentDir)
+    const { buffer, hash } = buildTarball(contentDir)
+
+    const entry = archiveRegistryEntry({ hash: `sha256:${hash}` })
+    const lookup = asArchiveLookup(entry, { token: 'super-secret-token' })
+
+    const mockFetch = vi.fn<InstallToolDeps['fetchUrl']>().mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+    } as Response)
+
+    const deps = await makeDeps(
+      async (id) => id === 'github-monitor' ? lookup : undefined,
+      mockFetch,
+    )
+    await callInstall(deps, { id: 'github-monitor' })
+
+    const installDir = join(globalDir, 'github-monitor', '1.2.0')
+    const raw = readFileSync(join(installDir, '.mim-install.json'), 'utf-8')
+    expect(raw).not.toContain('token')
+    expect(raw).not.toContain('secret')
+  })
+})
+
+describe('app.add archive entry', () => {
+  let dir: string
+  let cacheRoot: string
+  let globalDir: string
+  let tools: ReturnType<typeof createToolRegistry>
+  const FIXED_CLOCK = 1718000000000
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mim-app-add-archive-'))
+    cacheRoot = join(dir, 'cache')
+    globalDir = join(dir, 'global-packages')
+    mkdirSync(globalDir, { recursive: true })
+
+    const eventLog = createTraceLog()
+    tools = createToolRegistry(eventLog)
+    tools.setWorkspacePath(dir)
+    writeFileSync(join(dir, 'mim.yaml'), 'name: test-workspace\n')
+    vi.clearAllMocks()
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('enables on the local layer and does not write a mim.yaml pin', async () => {
+    // Build a real tarball.
+    const contentDir = join(dir, 'archive-content')
+    mkdirSync(join(contentDir, 'ui'), { recursive: true })
+    writeFileSync(join(contentDir, 'package.json'), JSON.stringify(validPackageJson()))
+    writeFileSync(join(contentDir, 'ui', 'index.html'), '<h1>GM</h1>')
+    const { execFileSync } = require('child_process') as typeof import('child_process')
+    const { createHash } = require('crypto') as typeof import('crypto')
+    const tmpTar = join(dir, 'test-archive.tar.gz')
+    execFileSync('tar', ['czf', tmpTar, '-C', contentDir, '.'])
+    const buffer = readFileSync(tmpTar)
+    const hash = createHash('sha256').update(buffer).digest('hex')
+    rmSync(tmpTar, { force: true })
+
+    const entry: RegistryEntry = {
+      id: 'github-monitor',
+      name: 'GitHub Monitor',
+      archive: 'https://registry.example.com/packages/github-monitor-1.2.0.tar.gz',
+      hash: `sha256:${hash}`,
+      version: '1.2.0',
+      permissions: { http: ['api.github.com'], secrets: ['github_token'] },
+      engines: { mim: 'runtime-v1' },
+    }
+    const lookup: LookupResult = {
+      ...entry,
+      registryId: 'account',
+      registryKind: 'url',
+      registryLocation: 'https://mim.shoulde.rs/api/v1/registry/index',
+      auth: { token: 'my-token' },
+    }
+
+    const mockFetch = vi.fn<InstallToolDeps['fetchUrl']>().mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+    } as Response)
+
+    const packages = await createPackageLoader(tools, { globalDir })
+    const enablement = createPackageEnablementStore({ getWorkspacePath: () => dir })
+    const { registerCoreAppTools } = await import('@main/tools/coreApps.js')
+    registerCoreAppTools(tools, { packages, enablement })
+
+    const deps: InstallToolDeps = {
+      packages,
+      enablement,
+      cacheRoot,
+      globalDir,
+      clock: () => FIXED_CLOCK,
+      lookupRegistryEntry: async (id) => id === entry.id ? lookup : undefined,
+      fetchUrl: mockFetch,
+    }
+
+    registerInstallTools(tools, deps)
+    const result = (await tools.call('app.add', { id: 'github-monitor' }, { actor: 'user' })) as Record<string, unknown>
+
+    expect(result.added).toBe('github-monitor')
+    expect(result.version).toBe('1.2.0')
+    expect(result.local).toBe(true)
+
+    // Installed to global dir.
+    expect(existsSync(join(globalDir, 'github-monitor', '1.2.0', 'package.json'))).toBe(true)
+
+    // mim.yaml must NOT have an apps entry (archive entries use local layer).
+    const config = parseMimYaml(readFileSync(join(dir, 'mim.yaml'), 'utf-8'))
+    expect(config.apps?.['github-monitor']).toBeUndefined()
+
+    // Enabled on the local layer.
+    expect(enablement.localOverride('github-monitor')).toBe(true)
+  })
+})
+
 describe('app.add local entry', () => {
   let dir: string
   let cacheRoot: string

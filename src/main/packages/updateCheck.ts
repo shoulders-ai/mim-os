@@ -9,6 +9,7 @@ import {
   registrySources,
   readSourceIndex,
   type RegistrySource,
+  type RegistrySourcesDeps,
 } from '@main/packages/registrySources.js'
 import { listInstalledVersions } from '@main/tools/registryTools.js'
 
@@ -29,6 +30,7 @@ export interface CheckForUpdatesOpts {
   cacheRoot: string
   globalDir: string
   isSourceTrusted: (s: RegistrySource) => boolean
+  getAccountToken?: () => string | null
   force?: boolean
 }
 
@@ -64,7 +66,10 @@ export async function checkForUpdates(opts: CheckForUpdatesOpts): Promise<Update
 
   // Walk sources with the same ownership rule as registry.list:
   // the first trusted source that contains a package id owns it.
-  const sources = registrySources(workspacePath)
+  const sourceDeps: RegistrySourcesDeps = opts.getAccountToken
+    ? { getAccountToken: opts.getAccountToken }
+    : {}
+  const sources = registrySources(workspacePath, sourceDeps)
   const ownerByPackageId = new Map<string, { registryId: string; latestVersion: string }>()
 
   for (const source of sources) {

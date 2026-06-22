@@ -9,6 +9,8 @@ export interface NamedPackageToolSync {
   sync(): Promise<void>
   /** Per-tool gate policy for names this registrar owns; wired into gate.getDynamicToolPolicy by the kernel. */
   getPolicy(name: string): ToolPolicy | undefined
+  /** Currently registered named tool names (for MCP dynamic allowlist). */
+  ownedNames(): string[]
   /** Collision and grant problems from the last sync. */
   diagnostics(): string[]
 }
@@ -91,6 +93,10 @@ export function createNamedPackageToolSync(options: {
 
     getPolicy(name) {
       return policyMap.get(name)
+    },
+
+    ownedNames() {
+      return [...owned]
     },
 
     diagnostics() {

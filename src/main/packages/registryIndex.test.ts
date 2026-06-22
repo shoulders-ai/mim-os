@@ -243,7 +243,7 @@ describe('local dir entries', () => {
     const result = parseRegistryIndex(dirIndex([conflict]), { allowLocalDirs: true })
     expect(result.entries).toHaveLength(0)
     expect(result.diagnostics).toContainEqual(
-      expect.stringContaining('either repo or dir, not both'),
+      expect.stringContaining('ambiguous'),
     )
   })
 
@@ -306,6 +306,132 @@ describe('local dir entries', () => {
     expect(result.diagnostics).toContainEqual(
       expect.stringContaining('local dir entries are not allowed'),
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// archive entries
+// ---------------------------------------------------------------------------
+
+function validArchiveEntry(overrides?: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id: 'slides',
+    name: 'Slides',
+    version: '2.0.0',
+    archive: 'https://mim.shoulde.rs/api/v1/packages/slides/2.0.0.tar.gz',
+    hash: 'sha256:' + 'ab'.repeat(32),
+    permissions: { http: ['example.com'] },
+    ...overrides,
+  }
+}
+
+function archiveIndex(packages?: Record<string, unknown>[]): unknown {
+  return {
+    manifestVersion: 1,
+    packages: packages ?? [validArchiveEntry()],
+  }
+}
+
+describe('archive entries', () => {
+  it('accepts a valid archive entry with HTTPS URL and sha256 hash', () => {
+    const result = parseRegistryIndex(archiveIndex())
+    expect(result.entries).toHaveLength(1)
+    expect(result.diagnostics).toHaveLength(0)
+    expect(result.entries[0]).toMatchObject({
+      id: 'slides',
+      name: 'Slides',
+      version: '2.0.0',
+      archive: 'https://mim.shoulde.rs/api/v1/packages/slides/2.0.0.tar.gz',
+      hash: 'sha256:' + 'ab'.repeat(32),
+    })
+    expect(result.entries[0].repo).toBeUndefined()
+    expect(result.entries[0].dir).toBeUndefined()
+    expect(result.entries[0].ref).toBeUndefined()
+    expect(result.entries[0].commit).toBeUndefined()
+  })
+
+  it('rejects an archive entry with non-HTTPS URL', () => {
+    const result = parseRegistryIndex(archiveIndex([
+      validArchiveEntry({ archive: 'http://example.com/pkg.tar.gz' }),
+    ]))
+    expect(result.entries).toHaveLength(0)
+    expect(result.diagnostics).toContainEqual(expect.stringContaining('HTTPS'))
+  })
+
+  it('rejects an archive entry with invalid hash format', () => {
+    const result = parseRegistryIndex(archiveIndex([
+      validArchiveEntry({ hash: 'md5:abc123' }),
+    ]))
+    expect(result.entries).toHaveLength(0)
+    expect(result.diagnostics).toContainEqual(expect.stringContaining('hash'))
+  })
+
+  it('rejects an archive entry with missing hash', () => {
+    const entry = validArchiveEntry()
+    delete entry.hash
+    const result = parseRegistryIndex(archiveIndex([entry]))
+    expect(result.entries).toHaveLength(0)
+    expect(result.diagnostics).toContainEqual(expect.stringContaining('hash'))
+  })
+
+  it('rejects an entry with both archive and repo', () => {
+    const result = parseRegistryIndex(archiveIndex([
+      validArchiveEntry({
+        repo: 'https://github.com/acme/tool',
+        ref: 'v1.0.0',
+        commit: 'a'.repeat(40),
+      }),
+    ]))
+    expect(result.entries).toHaveLength(0)
+    expect(result.diagnostics).toContainEqual(expect.stringContaining('ambiguous'))
+  })
+
+  it('rejects an entry with both archive and dir', () => {
+    const result = parseRegistryIndex(archiveIndex([
+      validArchiveEntry({ dir: 'packages/slides' }),
+    ]), { allowLocalDirs: true })
+    expect(result.entries).toHaveLength(0)
+    expect(result.diagnostics).toContainEqual(expect.stringContaining('ambiguous'))
+  })
+
+  it('does not require ref or commit for archive entries', () => {
+    const entry = validArchiveEntry()
+    // Explicitly ensure ref and commit are absent
+    delete entry.ref
+    delete entry.commit
+    const result = parseRegistryIndex(archiveIndex([entry]))
+    expect(result.entries).toHaveLength(1)
+    expect(result.diagnostics).toHaveLength(0)
+  })
+
+  it('still requires id, name, version, permissions for archive entries', () => {
+    const noId = validArchiveEntry()
+    delete noId.id
+    expect(parseRegistryIndex(archiveIndex([noId])).entries).toHaveLength(0)
+
+    const noName = validArchiveEntry()
+    delete noName.name
+    expect(parseRegistryIndex(archiveIndex([noName])).entries).toHaveLength(0)
+
+    const noVersion = validArchiveEntry()
+    delete noVersion.version
+    expect(parseRegistryIndex(archiveIndex([noVersion])).entries).toHaveLength(0)
+  })
+
+  it('rejects an archive entry with a hash that has wrong length', () => {
+    const result = parseRegistryIndex(archiveIndex([
+      validArchiveEntry({ hash: 'sha256:abcd' }),
+    ]))
+    expect(result.entries).toHaveLength(0)
+    expect(result.diagnostics).toContainEqual(expect.stringContaining('hash'))
+  })
+
+  it('rejects an archive entry with uppercase hex in hash', () => {
+    const result = parseRegistryIndex(archiveIndex([
+      validArchiveEntry({ hash: 'sha256:' + 'AB'.repeat(32) }),
+    ]))
+    expect(result.entries).toHaveLength(0)
+    expect(result.diagnostics).toContainEqual(expect.stringContaining('hash'))
   })
 })
 

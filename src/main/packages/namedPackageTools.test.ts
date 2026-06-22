@@ -240,6 +240,44 @@ describe('namedPackageTools', () => {
     expect(deletePolicy?.label).toBe('Board: Delete issue')
   })
 
+  it('ownedNames returns the currently registered named tool names', async () => {
+    const pkg = fakePackage('board', 'Board', { tools: [{ pattern: 'issues.*', category: 'write', risk: 'medium' }] })
+    const enabledCaps: PackageCapabilities[] = [{
+      packageId: 'board',
+      jobs: [],
+      tools: [
+        fakeTool({ id: 'list', publicName: 'issues.list', packageId: 'board', named: true }),
+        fakeTool({ id: 'create', publicName: 'issues.create', packageId: 'board', named: true }),
+      ],
+      skills: [],
+      diagnostics: [],
+    }]
+
+    let currentCaps = enabledCaps
+    const runtime = {
+      listCapabilities: vi.fn(async () => currentCaps),
+      executeTool: vi.fn(async () => ({ ok: true })),
+    } as unknown as PackageRuntime
+
+    const sync = createNamedPackageToolSync({
+      runtime,
+      tools,
+      packages: makePackages([pkg]),
+    })
+
+    expect(sync.ownedNames()).toEqual([])
+
+    await sync.sync()
+    const names = sync.ownedNames()
+    expect(names).toContain('issues.list')
+    expect(names).toContain('issues.create')
+    expect(names).toHaveLength(2)
+
+    currentCaps = []
+    await sync.sync()
+    expect(sync.ownedNames()).toEqual([])
+  })
+
   it('sync is idempotent — no collision diagnostics for own names', async () => {
     const pkg = fakePackage('board', 'Board', { tools: [{ pattern: 'issues.*', category: 'write', risk: 'medium' }] })
     const caps: PackageCapabilities[] = [{

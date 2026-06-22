@@ -22,6 +22,7 @@ import {
   registrySources,
   readSourceIndex,
   lookupRegistryEntry,
+  accountRegistryUrl,
   type RegistrySource,
   type RegistrySourcesDeps,
 } from '@main/packages/registrySources.js'
@@ -233,6 +234,48 @@ registries:
       { id: 'default', kind: 'url', location: DEFAULT_REGISTRY_INDEX_URL, origin: 'default' },
     ])
   })
+
+  it('includes account source when getAccountToken returns a string', () => {
+    const sources = registrySources(null, defaultDeps({
+      getAccountToken: () => 'tok_abc123',
+    }))
+    expect(sources).toHaveLength(2)
+    expect(sources[0]).toMatchObject({
+      id: 'account',
+      kind: 'url',
+      location: accountRegistryUrl(),
+      origin: 'account',
+      auth: { token: 'tok_abc123' },
+    })
+    expect(sources[1]).toMatchObject({ id: 'default', origin: 'default' })
+  })
+
+  it('omits account source when getAccountToken returns null', () => {
+    const sources = registrySources(null, defaultDeps({
+      getAccountToken: () => null,
+    }))
+    expect(sources.find(s => s.id === 'account')).toBeUndefined()
+  })
+
+  it('omits account source when getAccountToken is not provided', () => {
+    const sources = registrySources(null, defaultDeps())
+    expect(sources.find(s => s.id === 'account')).toBeUndefined()
+  })
+
+  it('account source appears after machine and before user/default', () => {
+    const machine = JSON.stringify({
+      registries: {
+        dev: { path: '/abs/dev' },
+      },
+    })
+    const sources = registrySources('/workspace', defaultDeps({
+      readMachineRegistries: () => machine,
+      getAccountToken: () => 'tok_xyz',
+    }))
+    const ids = sources.map(s => s.id)
+    expect(ids.indexOf('dev')).toBeLessThan(ids.indexOf('account'))
+    expect(ids.indexOf('account')).toBeLessThan(ids.indexOf('default'))
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -378,6 +421,40 @@ describe('readSourceIndex', () => {
 
     const result = await readSourceIndex(source, { cacheRoot, sync: false })
     expect(result.status).toBe('missing')
+  })
+
+  it('passes Authorization header when source has auth', async () => {
+    const cacheRoot = join(dir, 'cache')
+    const source: RegistrySource = {
+      id: 'account',
+      kind: 'url',
+      location: 'https://mim.shoulde.rs/api/v1/registry',
+      origin: 'account',
+      auth: { token: 'tok_secret' },
+    }
+    const mockFetch = vi.fn(async () => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify(validGitIndex()),
+    }))
+
+    const result = await readSourceIndex(source, { cacheRoot, sync: true }, { fetchUrl: mockFetch })
+    expect(result.status).toBe('ok')
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://mim.shoulde.rs/api/v1/registry',
+      { headers: { Authorization: 'Bearer tok_secret' } },
+    )
+  })
+
+  it('does not pass headers when source has no auth', async () => {
+    const cacheRoot = join(dir, 'cache')
+    const source: RegistrySource = { id: 'remote', kind: 'url', location: 'https://example.com/index.json', origin: 'machine' }
+    const mockFetch = vi.fn(async () => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify(validGitIndex()),
+    }))
+
+    await readSourceIndex(source, { cacheRoot, sync: true }, { fetchUrl: mockFetch })
+    expect(mockFetch).toHaveBeenCalledWith('https://example.com/index.json')
   })
 })
 
@@ -663,6 +740,40 @@ registries:
     }, defaultDeps())
 
     expect(result).toBeUndefined()
+  })
+
+  it('propagates auth from account source to LookupResult', async () => {
+    const cacheRoot = join(dir, 'cache')
+    const index = validGitIndex()
+    const mockFetch = vi.fn(async () => ({
+      ok: true, status: 200,
+      text: async () => JSON.stringify(index),
+    }))
+
+    const result = await lookupRegistryEntry('github-monitor', {
+      workspacePath: null,
+      cacheRoot,
+    }, {
+      ...defaultDeps({ getAccountToken: () => 'tok_lookup' }),
+      fetchUrl: mockFetch,
+    })
+
+    expect(result).toBeDefined()
+    expect(result!.auth).toEqual({ token: 'tok_lookup' })
+    expect(result!.registryId).toBe('account')
+  })
+
+  it('LookupResult has no auth when source has no auth', async () => {
+    const cacheRoot = join(dir, 'cache')
+    seedUrlCache(cacheRoot, DEFAULT_REGISTRY_INDEX_URL, validGitIndex())
+
+    const result = await lookupRegistryEntry('github-monitor', {
+      workspacePath: null,
+      cacheRoot,
+    }, defaultDeps())
+
+    expect(result).toBeDefined()
+    expect(result!.auth).toBeUndefined()
   })
 
   it('machine source is implicitly trusted (no isSourceTrusted needed)', async () => {

@@ -13,6 +13,7 @@ import {
   registrySources,
   readSourceIndex,
   type RegistrySource,
+  type RegistrySourcesDeps,
 } from '@main/packages/registrySources.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
 import type { PackageLoader } from '@main/packages/packages.js'
@@ -25,6 +26,7 @@ export interface RegistryToolDeps {
   cacheRoot: string
   globalDir: string
   getWorkspacePath: () => string | null
+  getAccountToken?: () => string | null
 }
 
 const SOURCE_ID_RE = /^[a-z0-9][a-z0-9_-]{0,59}$/
@@ -34,13 +36,16 @@ export function registerRegistryTools(
   tools: ToolRegistry,
   deps: RegistryToolDeps,
 ): void {
+  const sourceDeps: RegistrySourcesDeps = deps.getAccountToken
+    ? { getAccountToken: deps.getAccountToken }
+    : {}
 
   tools.register({
     name: 'registry.list',
     description: 'List packages available across all configured registries, with install state and shadowing.',
     execute: async () => {
       const workspacePath = deps.getWorkspacePath()
-      const sources = registrySources(workspacePath)
+      const sources = registrySources(workspacePath, sourceDeps)
 
       const registries: RegistryListSourceStatus[] = []
       // Entries keyed by source index order; first trusted ok/stale source owning an id wins.
@@ -166,7 +171,7 @@ export function registerRegistryTools(
       if (!id) throw new Error('registry.trust requires an id parameter')
 
       const workspacePath = deps.getWorkspacePath()
-      const sources = registrySources(workspacePath)
+      const sources = registrySources(workspacePath, sourceDeps)
       const source = sources.find(s => s.id === id)
 
       if (!source) throw new Error(`Unknown registry source: ${id}`)
@@ -188,6 +193,7 @@ export function registerRegistryTools(
         cacheRoot: deps.cacheRoot,
         globalDir: deps.globalDir,
         isSourceTrusted: (s) => deps.enablement.isRegistryTrusted(s),
+        getAccountToken: deps.getAccountToken ?? undefined,
       })
     },
   })

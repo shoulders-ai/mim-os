@@ -12,6 +12,8 @@ export function isValidPackagePath(path: string): boolean {
   return path.split('/').every(segment => PATH_SEGMENT_RE.test(segment))
 }
 
+const HASH_RE = /^sha256:[0-9a-f]{64}$/
+
 export interface RegistryEntry {
   id: string
   name: string
@@ -21,6 +23,10 @@ export interface RegistryEntry {
   path?: string
   /** Registry-relative directory containing the package (local-folder registries only). */
   dir?: string
+  /** HTTPS URL to a downloadable archive (.tar.gz). */
+  archive?: string
+  /** Content hash of the archive (sha256:<64 hex chars>). */
+  hash?: string
   version: string
   ref?: string
   commit?: string
@@ -82,10 +88,12 @@ export function parseRegistryIndex(raw: unknown, options?: ParseRegistryIndexOpt
 
     const hasDir = typeof e.dir === 'string'
     const hasRepo = typeof e.repo === 'string'
+    const hasArchive = typeof e.archive === 'string'
 
-    // An entry with both repo and dir is ambiguous — reject it
-    if (hasRepo && hasDir) {
-      entryDiags.push(`Registry entry "${id ?? `[${i}]`}": entry must use either repo or dir, not both`)
+    // An entry must use exactly one source type — reject ambiguous combinations
+    const sourceCount = [hasDir, hasRepo, hasArchive].filter(Boolean).length
+    if (sourceCount > 1) {
+      entryDiags.push(`Registry entry "${id ?? `[${i}]`}": ambiguous source — entry must use exactly one of repo, dir, or archive`)
     } else if (hasDir) {
       // --- dir entry (local-folder registry) ---
       if (!allowLocalDirs) {
@@ -95,6 +103,16 @@ export function parseRegistryIndex(raw: unknown, options?: ParseRegistryIndexOpt
         if (dir !== '.' && !isValidPackagePath(dir)) {
           entryDiags.push(`Registry entry "${id ?? `[${i}]`}": invalid dir "${dir}" — must be a relative path with no "." or ".." segments`)
         }
+      }
+    } else if (hasArchive) {
+      // --- archive entry ---
+      const archive = e.archive as string
+      if (!isHttpsUrl(archive)) {
+        entryDiags.push(`Registry entry "${id ?? `[${i}]`}": archive URL must be HTTPS, got: ${archive}`)
+      }
+      const hash = typeof e.hash === 'string' ? e.hash : undefined
+      if (!hash || !HASH_RE.test(hash)) {
+        entryDiags.push(`Registry entry "${id ?? `[${i}]`}": hash must be sha256:<64 lowercase hex chars>`)
       }
     } else {
       // --- git entry (existing behaviour) ---
@@ -149,6 +167,17 @@ export function parseRegistryIndex(raw: unknown, options?: ParseRegistryIndexOpt
         permissions,
         engines,
       })
+    } else if (hasArchive) {
+      entries.push({
+        id: id!,
+        name: name!,
+        description,
+        archive: e.archive as string,
+        hash: e.hash as string,
+        version: version!,
+        permissions,
+        engines,
+      })
     } else {
       entries.push({
         id: id!,
@@ -170,7 +199,10 @@ export function parseRegistryIndex(raw: unknown, options?: ParseRegistryIndexOpt
 
 function isHttpsUrl(url: string): boolean {
   try {
-    return new URL(url).protocol === 'https:'
+    const u = new URL(url)
+    if (u.protocol === 'https:') return true
+    if (u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')) return true
+    return false
   } catch {
     return false
   }

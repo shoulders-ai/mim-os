@@ -13,6 +13,8 @@ import {
   rmSync,
   writeFileSync,
 } from 'fs'
+import { createHash } from 'crypto'
+import { execFileSync } from 'child_process'
 import { dirname, join, resolve, sep } from 'path'
 import { cloneRepo, fetchRepo, checkoutRef, checkoutRemoteDefault, resolveHead } from '@main/git.js'
 import { isValidPackagePath } from '@main/packages/registryIndex.js'
@@ -42,6 +44,8 @@ export interface InstallToolDeps {
   clock: () => number
   /** Resolve a registry entry for an app id (and optional version). */
   lookupRegistryEntry: (id: string, version?: string) => Promise<LookupResult | undefined>
+  /** Injectable fetch for testability; defaults to global fetch. */
+  fetchUrl?: (url: string, opts?: { headers?: Record<string, string> }) => Promise<Response>
 }
 
 export function registerInstallTools(
@@ -77,7 +81,7 @@ export function registerInstallTools(
         if (!lookupResult) throw new Error(`App "${id}" not found in registry`)
         registryEntry = lookupResult
         isLocal = lookupResult.registryKind === 'local' && !!lookupResult.localPackageDir
-        if (!isLocal) {
+        if (!isLocal && !lookupResult.archive) {
           // Git entries must have repo/ref/commit.
           if (!lookupResult.repo) throw new Error(`Git registry entry for app "${id}" is missing repo`)
           sourceUrl = lookupResult.repo
@@ -91,6 +95,8 @@ export function registerInstallTools(
         packagePath = pathParam
       }
 
+      const isArchive = !isLocal && !!lookupResult?.archive && !!lookupResult?.hash
+
       // ---- Resolve packageRoot: git checkout vs local dir ----
       let packageRoot: string
       let resolvedCommit: string | undefined
@@ -99,12 +105,70 @@ export function registerInstallTools(
       let provenanceRef: string | null
       let provenanceCommit: string | null
 
+      // Temp files to clean up after archive installs.
+      let archiveTmpFile: string | undefined
+      let archiveExtractDir: string | undefined
+
       if (isLocal) {
         // Local-dir entry: no git work, no commit verification.
         packageRoot = lookupResult!.localPackageDir!
         resolvedCommit = undefined
         provenanceSource = 'file://' + lookupResult!.registryLocation
         provenancePath = lookupResult!.dir ?? null
+        provenanceRef = null
+        provenanceCommit = null
+      } else if (isArchive) {
+        // ---- Archive entry: download, verify, extract ----
+
+        const archiveUrl = lookupResult!.archive!
+
+        // SECURITY: archive URL must be HTTPS.
+        if (!isHttpsUrl(archiveUrl)) {
+          throw new Error(
+            `Archive URL must be HTTPS, got: ${archiveUrl}`,
+          )
+        }
+
+        // SECURITY: reject archive URLs carrying credentials.
+        rejectCredentialUrl(archiveUrl)
+
+        // Download the tarball to a temp file.
+        const tmpDir = join(deps.cacheRoot, 'tmp')
+        mkdirSync(tmpDir, { recursive: true })
+        const tmpFile = join(tmpDir, `${id}-${lookupResult!.version}.tar.gz`)
+        archiveTmpFile = tmpFile
+
+        const fetchHeaders: Record<string, string> = {}
+        if (lookupResult!.auth?.token) {
+          fetchHeaders['Authorization'] = `Bearer ${lookupResult!.auth.token}`
+        }
+
+        const doFetch = deps.fetchUrl ?? globalThis.fetch
+        const response = await doFetch(archiveUrl, { headers: fetchHeaders })
+        if (!response.ok) throw new Error(`Failed to download archive: HTTP ${response.status}`)
+
+        const buffer = Buffer.from(await response.arrayBuffer())
+        writeFileSync(tmpFile, buffer)
+
+        // Verify SHA-256 hash.
+        const computedHash = createHash('sha256').update(readFileSync(tmpFile)).digest('hex')
+        const expectedHash = lookupResult!.hash!.replace(/^sha256:/, '')
+        if (computedHash !== expectedHash) {
+          rmSync(tmpFile, { force: true })
+          throw new Error(`Hash mismatch for "${id}": expected ${expectedHash}, got ${computedHash}`)
+        }
+
+        // Extract to a temp directory.
+        const extractDir = join(tmpDir, `${id}-${lookupResult!.version}`)
+        archiveExtractDir = extractDir
+        if (existsSync(extractDir)) rmSync(extractDir, { recursive: true, force: true })
+        mkdirSync(extractDir, { recursive: true })
+        execFileSync('tar', ['xzf', tmpFile, '-C', extractDir])
+
+        packageRoot = extractDir
+        resolvedCommit = undefined
+        provenanceSource = archiveUrl
+        provenancePath = null
         provenanceRef = null
         provenanceCommit = null
       } else {
@@ -278,6 +342,10 @@ export function registerInstallTools(
       // Rescan so the loader picks up the new app.
       await deps.packages.rescan()
 
+      // Clean up archive temp files after successful install.
+      if (archiveTmpFile) rmSync(archiveTmpFile, { force: true })
+      if (archiveExtractDir) rmSync(archiveExtractDir, { recursive: true, force: true })
+
       return { installed: manifestId, version: installVersion, dir: installDir }
     },
   })
@@ -306,15 +374,20 @@ export function registerInstallTools(
       // installed copy's provenance source doesn't match the registry
       // (e.g. after a repo rename).
       const installDir = join(deps.globalDir, id, entry.version)
-      if (!existsSync(join(installDir, 'package.json'))
-        || (entry.repo && provenanceSourceChanged(installDir, entry.repo))) {
+      const provenanceCheck = entry.repo
+        ? provenanceSourceChanged(installDir, entry.repo)
+        : entry.archive
+          ? provenanceSourceChanged(installDir, entry.archive)
+          : false
+      if (!existsSync(join(installDir, 'package.json')) || provenanceCheck) {
         await tools.call('package.install', { id, version: entry.version }, { actor: 'system' })
       }
 
       const isLocal = entry.registryKind === 'local'
-      if (isLocal) {
-        // Local entries: enable on the local layer only — a file:// pin in
-        // mim.yaml doesn't travel to teammates.
+      const isArchiveEntry = !!entry.archive && !!entry.hash
+      if (isLocal || isArchiveEntry) {
+        // Local and archive entries: enable on the local layer only —
+        // file:// pins and auth-gated archive tokens don't travel to teammates.
         await tools.call('app.enable', { id, layer: 'local' }, { actor: 'system' })
         return { added: id, version: entry.version, local: true }
       }
@@ -395,6 +468,18 @@ export function registerInstallTools(
 }
 
 // ---- Helpers ----
+
+/** Check that a URL uses HTTPS, or HTTP localhost in dev. */
+function isHttpsUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    if (u.protocol === 'https:') return true
+    if (u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')) return true
+    return false
+  } catch {
+    return false
+  }
+}
 
 /** Reject URLs that carry embedded credentials (username, password, token). */
 function rejectCredentialUrl(url: string): void {
