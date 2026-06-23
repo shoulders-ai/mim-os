@@ -13,12 +13,15 @@ import { dirname, join, relative, resolve, sep } from 'path'
 import { homedir, tmpdir } from 'os'
 import { pathToFileURL } from 'url'
 import { createTraceLog } from '@main/trace/trace.js'
+import { type HttpClient, type HttpResponse } from '@main/integrations/http.js'
+import { createMemorySecretStore, MIM_KEYCHAIN_SERVICE } from '@main/integrations/secrets.js'
 import { createToolRegistry, type ToolRegistry } from '@main/tools/registry.js'
 import { createPackageLoader, type PackageLoader } from '@main/packages/packages.js'
 import { createPackageEnablementStore, type PackageEnablementStore } from '@main/packages/packageEnablement.js'
 import { createPackageRuntime, type PackageRuntime } from '@main/packages/packageRuntime.js'
 import { createPackageJobRunner } from '@main/packages/packageJobs.js'
 import { createNamedPackageToolSync, type NamedPackageToolSync } from '@main/packages/namedPackageTools.js'
+import { packageSecretAccount } from '@main/packages/packageSecrets.js'
 import { registerCoreAppTools } from '@main/tools/coreApps.js'
 import { registerPackageRuntimeTools } from '@main/tools/packageRuntime.js'
 import { registerFileTools } from '@main/tools/fs.js'
@@ -39,6 +42,9 @@ interface PackageJson {
   mim?: {
     id?: string
     backend?: string
+    permissions?: {
+      secrets?: string[]
+    }
     provides?: {
       tools?: Array<string | { name?: string }>
     }
@@ -97,7 +103,20 @@ describeCompat('mim-apps compatibility', () => {
 
     const packages = await createPackageLoader(tools, { globalDir })
     const enablement = createPackageEnablementStore({ getWorkspacePath: () => workspace })
-    const runtime = createPackageRuntime({ packages, enablement, tools, trace })
+    const secrets = createMemorySecretStore()
+    for (const [id, packageJson] of packageJsonById) {
+      for (const secret of packageJson.mim?.permissions?.secrets ?? []) {
+        await secrets.set(MIM_KEYCHAIN_SERVICE, packageSecretAccount(id, secret), `compat-${secret}`)
+      }
+    }
+    const runtime = createPackageRuntime({
+      packages,
+      enablement,
+      tools,
+      trace,
+      secrets,
+      http: compatHttpClient,
+    })
     const jobs = createPackageJobRunner({
       runtime,
       trace,
@@ -245,10 +264,37 @@ describeCompat('mim-apps compatibility', () => {
       hooks.push(id)
     }
 
-    const expectedHooks = h.selectedIds.filter(id => ['board', 'import-md', 'knowledge', 'references'].includes(id)).sort()
+    const expectedHooks = h.selectedIds.filter(id => {
+      const pkg = h.packages.get(id)
+      return pkg ? existsSync(join(pkg.dir, 'compat.mjs')) : false
+    }).sort()
     expect(hooks.sort()).toEqual(expectedHooks)
   }, 60_000)
 })
+
+const compatHttpClient: HttpClient = {
+  async request(input) {
+    const url = new URL(input.url)
+    if (url.hostname === 'sf.shoulde.rs') {
+      return jsonResponse({ data: [] })
+    }
+    return jsonResponse({})
+  },
+}
+
+function jsonResponse(value: unknown, status = 200): HttpResponse {
+  const text = JSON.stringify(value)
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async json() {
+      return value
+    },
+    async text() {
+      return text
+    },
+  }
+}
 
 function requireHarness(): Harness {
   if (!harness) throw new Error('compat harness was not initialized')
