@@ -631,15 +631,24 @@ describe('app, skill, and app-owned named tool policies', () => {
     expect(getToolPolicy('skill.get')).toMatchObject({ category: 'read', risk: 'low', targetParam: 'name' })
     expect(getToolPolicy('skill.setDisabled')).toMatchObject({ category: 'settings', risk: 'medium', targetParam: 'name' })
     expect(getToolPolicy('skill.create')).toMatchObject({ category: 'write', risk: 'medium', targetParam: 'name' })
+    expect(getToolPolicy('skill.templateList')).toMatchObject({ category: 'read', risk: 'low' })
+    expect(getToolPolicy('skill.templateContent')).toMatchObject({ category: 'read', risk: 'low', targetParam: 'templateId' })
     expect(getToolPolicy('app.status')).toMatchObject({ category: 'read', risk: 'low' })
     expect(getToolPolicy('app.add')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'id' })
+    expect(getToolPolicy('app.share')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'id' })
     expect(getToolPolicy('app.enable')).toMatchObject({ category: 'settings', risk: 'medium', targetParam: 'id' })
     expect(getToolPolicy('app.disable')).toMatchObject({ category: 'settings', risk: 'medium', targetParam: 'id' })
     expect(getToolPolicy('app.trust')).toMatchObject({ category: 'settings', risk: 'high', targetParam: 'id' })
     expect(getToolPolicy('app.remove')).toMatchObject({ category: 'settings', risk: 'medium', targetParam: 'id' })
     expect(getToolPolicy('app.updates')).toMatchObject({ category: 'read', risk: 'low' })
+    expect(getToolPolicy('app.templateList')).toMatchObject({ category: 'read', risk: 'low' })
+    expect(getToolPolicy('app.templateContent')).toMatchObject({ category: 'read', risk: 'low', targetParam: 'templateId' })
     expect(getToolPolicy('package.validate')).toMatchObject({ category: 'read', risk: 'low', targetParam: 'id' })
     expect(getToolPolicy('package.reload')).toMatchObject({ category: 'settings', risk: 'medium', targetParam: 'id' })
+    expect(getToolPolicy('account.status')).toMatchObject({ category: 'read', risk: 'low' })
+    expect(getToolPolicy('account.validate')).toMatchObject({ category: 'network', risk: 'medium' })
+    expect(getToolPolicy('account.setToken')).toMatchObject({ category: 'secrets', risk: 'high' })
+    expect(getToolPolicy('account.clearToken')).toMatchObject({ category: 'secrets', risk: 'high' })
   })
 
   it('classifies registry.trust as settings/high with targetParam id', () => {
@@ -699,8 +708,15 @@ describe('app-owned named tool permission enforcement', () => {
 
   it('denies skill catalog tools to apps', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
-    for (const name of ['skill.list', 'skill.get', 'skill.setDisabled', 'skill.create']) {
+    for (const name of ['skill.list', 'skill.get', 'skill.setDisabled', 'skill.create', 'skill.templateList', 'skill.templateContent']) {
       await expect(gate.check(tool(name), {}, pkg)).rejects.toThrow('cannot access AI skill activation state')
+    }
+  })
+
+  it('denies app template authoring tools to apps', async () => {
+    const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
+    for (const name of ['app.templateList', 'app.templateContent']) {
+      await expect(gate.check(tool(name), { templateId: 'word-count' }, pkg)).rejects.toThrow('cannot access app starter templates')
     }
   })
 
@@ -758,6 +774,22 @@ describe('app-owned named tool permission enforcement', () => {
     ).rejects.toThrow('cannot remove apps')
   })
 
+  it('denies app.share to app actors', async () => {
+    const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
+    await expect(
+      gate.check(tool('app.share'), { id: 'github-monitor' }, { actor: 'package', package_id: 'board' }),
+    ).rejects.toThrow('cannot manage app installation')
+  })
+
+  it('denies account tools to app actors', async () => {
+    const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
+    for (const name of ['account.status', 'account.validate', 'account.setToken', 'account.clearToken']) {
+      await expect(
+        gate.check(tool(name), { token: 'secret' }, { actor: 'package', package_id: 'board' }),
+      ).rejects.toThrow('cannot access account settings')
+    }
+  })
+
   it('denies app.updates to app actors (same class as registry.list)', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
     await expect(
@@ -775,7 +807,8 @@ describe('app-owned named tool permission enforcement', () => {
     for (const name of [
       'issues.delete',
       'skill.list', 'skill.get',
-      'app.status', 'app.enable', 'app.disable', 'app.trust', 'app.remove', 'app.updates',
+      'app.status', 'app.enable', 'app.disable', 'app.trust', 'app.remove', 'app.share', 'app.updates',
+      'account.status', 'account.validate', 'account.setToken', 'account.clearToken',
     ]) {
       await gate.check(tool(name), { id: 'board' }, u)
     }

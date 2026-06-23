@@ -264,6 +264,8 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'skill.get': { category: 'read', risk: 'low', targetParam: 'name' },
   'skill.setDisabled': { category: 'settings', risk: 'medium', targetParam: 'name' },
   'skill.create': { category: 'write', risk: 'medium', targetParam: 'name' },
+  'skill.templateList': { category: 'read', risk: 'low' },
+  'skill.templateContent': { category: 'read', risk: 'low', targetParam: 'templateId' },
   'skill.inspectImport': { category: 'read', risk: 'medium', targetParam: 'folder' },
   'skill.import': { category: 'write', risk: 'medium', targetParam: 'folder' },
   'skill.delete': { category: 'write', risk: 'medium', targetParam: 'name' },
@@ -285,11 +287,14 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'resources.setPolicy': { category: 'write', risk: 'medium', targetParam: 'id' },
   'app.status': { category: 'read', risk: 'low' },
   'app.add': { category: 'network', risk: 'medium', targetParam: 'id' },
+  'app.share': { category: 'network', risk: 'medium', targetParam: 'id' },
   'app.enable': { category: 'settings', risk: 'medium', targetParam: 'id' },
   'app.disable': { category: 'settings', risk: 'medium', targetParam: 'id' },
   'app.trust': { category: 'settings', risk: 'high', targetParam: 'id' },
   'app.remove': { category: 'settings', risk: 'medium', targetParam: 'id' },
   'app.updates': { category: 'read', risk: 'low' },
+  'app.templateList': { category: 'read', risk: 'low' },
+  'app.templateContent': { category: 'read', risk: 'low', targetParam: 'templateId' },
   'registry.list': { category: 'network', risk: 'medium' },
   'registry.trust': { category: 'settings', risk: 'high', targetParam: 'id' },
   'registry.inspectSource': { category: 'read', risk: 'low', targetParam: 'path' },
@@ -298,6 +303,10 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'package.install': { category: 'network', risk: 'medium', targetParam: 'id' },
   'package.update': { category: 'network', risk: 'medium', targetParam: 'id' },
   'package.uninstall': { category: 'settings', risk: 'medium', targetParam: 'id' },
+  'account.status': { category: 'read', risk: 'low' },
+  'account.validate': { category: 'network', risk: 'medium' },
+  'account.setToken': { category: 'secrets', risk: 'high' },
+  'account.clearToken': { category: 'secrets', risk: 'high' },
 }
 
 export function getToolPolicy(name: string): ToolPolicy {
@@ -709,7 +718,7 @@ function packagePermissionViolation(
   if (toolName === 'registry.list' || toolName === 'registry.trust' || toolName === 'registry.inspectSource' || toolName === 'registry.addSource' || toolName === 'registry.removeSource' || toolName === 'app.updates') {
     return `App ${ctx.package_id} cannot access the app registry`
   }
-  if (toolName === 'package.install' || toolName === 'package.update' || toolName === 'package.uninstall' || toolName === 'app.add') {
+  if (toolName === 'package.install' || toolName === 'package.update' || toolName === 'package.uninstall' || toolName === 'app.add' || toolName === 'app.share') {
     return `App ${ctx.package_id} cannot manage app installation`
   }
 
@@ -722,6 +731,9 @@ function packagePermissionViolation(
   }
   if (toolName === 'app.trust') {
     return `App ${ctx.package_id} cannot acknowledge app trust`
+  }
+  if (toolName === 'app.templateList' || toolName === 'app.templateContent') {
+    return `App ${ctx.package_id} cannot access app starter templates`
   }
 
   // The whole agent.* surface (catalog, launch/kill, session records and
@@ -750,6 +762,10 @@ function packagePermissionViolation(
 
   if (toolName.startsWith('settings.')) {
     return `App ${ctx.package_id} cannot access workspace settings`
+  }
+
+  if (toolName.startsWith('account.')) {
+    return `App ${ctx.package_id} cannot access account settings`
   }
 
   if (toolName.startsWith('session.')) {
