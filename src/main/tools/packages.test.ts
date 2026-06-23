@@ -143,6 +143,33 @@ describe('App tools', () => {
     expect(readFileSync(join(pkgDir, 'README.md'), 'utf-8')).toContain('pull requests')
   })
 
+  it('app template tools render package.create params with rewritten named-tool identifiers', async () => {
+    const list = await tools.call('app.templateList', {}, ctx) as {
+      templates: Array<{ id: string; defaultId: string; defaultName: string }>
+    }
+    expect(list.templates.map(template => template.id)).toEqual(['word-count', 'summarize'])
+
+    const params = await tools.call('app.templateContent', {
+      templateId: 'word-count',
+      id: 'trial-counter',
+      name: 'Trial Counter',
+    }, ctx) as Record<string, unknown>
+
+    expect(params).toMatchObject({
+      id: 'trial-counter',
+      name: 'Trial Counter',
+      provides: {
+        tools: [{ name: 'trial_counter.analyze', category: 'read', risk: 'low' }],
+      },
+    })
+    expect(String(params.backend)).toContain("name: 'trial_counter.analyze'")
+    expect(String(params.readme)).toContain('trial_counter.analyze')
+    const skill = (params.skills as Array<{ name: string; content: string }>)[0]
+    expect(skill.name).toBe('trial-counter')
+    expect(skill.content).toContain('unlocks:')
+    expect(skill.content).toContain('trial_counter.analyze')
+  })
+
   it('package.validate reports a complete app as valid', async () => {
     await tools.call('package.create', {
       id: 'valid-tools',

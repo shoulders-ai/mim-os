@@ -9,7 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from 'fs'
-import { basename, dirname, isAbsolute, join, resolve } from 'path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { parse as parseYaml } from 'yaml'
@@ -33,6 +33,7 @@ import {
   type SkillSourceConfig,
 } from '@main/userConfig.js'
 import { userHomeDir } from '@main/platform.js'
+import { listSkillTemplates, renderSkillTemplate } from '@main/templates/skillTemplates.js'
 
 export interface SkillToolOptions {
   loader?: SkillLoader
@@ -111,21 +112,41 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
 
   tools.register({
     name: 'skill.create',
-    description: 'Create a new Personal skill template at ~/.mim/skills/<name>/SKILL.md.',
+    description: 'Create a new Personal skill at ~/.mim/skills/<name>/SKILL.md.',
     inputSchema: objectSchema({
       name: { type: 'string' },
       description: { type: 'string' },
+      content: { type: 'string' },
+      files: { type: 'object' },
     }, ['name']),
     execute: async (params) => {
       const name = requireSkillName(params.name)
-      const description = typeof params.description === 'string' && params.description.trim()
-        ? params.description.trim()
-        : `Use when the user wants help with ${name.replace(/-/g, ' ')}.`
       const dir = join(personalDir, name)
       const path = join(dir, 'SKILL.md')
+      const extraFiles = validateSkillExtraFiles(params.files, dir)
+      const requestedDescription = optionalStringParam(params.description)
+      const suppliedContent = optionalStringParam(params.content)
+      const parsedContent = suppliedContent
+        ? validateSkillCreateContent(suppliedContent, name, requestedDescription)
+        : null
+      const description = parsedContent?.description
+        ?? requestedDescription
+        ?? `Use when the user wants help with ${name.replace(/-/g, ' ')}.`
+      const content = suppliedContent ?? personalSkillTemplate(name, description)
+
       if (existsSync(path)) throw new Error(`Skill already exists: ${name}`)
+      if (existsSync(dir) && lstatSync(dir).isSymbolicLink()) {
+        throw new Error(`Symlink paths are not allowed: ${dir}`)
+      }
+      for (const file of extraFiles) assertNoExistingSymlinkParent(dir, file.path)
+
       mkdirSync(dir, { recursive: true })
-      writeFileSync(path, personalSkillTemplate(name, description), 'utf-8')
+      writeFileSync(path, content, 'utf-8')
+      for (const file of extraFiles) {
+        assertNoExistingSymlinkParent(dir, file.path)
+        mkdirSync(dirname(file.path), { recursive: true })
+        writeFileSync(file.path, file.content, 'utf-8')
+      }
       emitChanged()
       return {
         skill: {
@@ -137,6 +158,30 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
           path,
         },
       }
+    },
+  })
+
+  tools.register({
+    name: 'skill.templateList',
+    description: 'List built-in starter templates for creating Personal skills.',
+    inputSchema: objectSchema({}),
+    execute: async () => listSkillTemplates(),
+  })
+
+  tools.register({
+    name: 'skill.templateContent',
+    description: 'Render a built-in starter skill template without writing files.',
+    inputSchema: objectSchema({
+      templateId: { type: 'string' },
+      name: { type: 'string' },
+      description: { type: 'string' },
+    }, ['templateId']),
+    execute: async (params) => {
+      const templateId = requireNonEmptyString(params.templateId, 'templateId')
+      const name = optionalStringParam(params.name)
+      if (name) requireSkillName(name)
+      const description = optionalStringParam(params.description)
+      return renderSkillTemplate(templateId, { name, description })
     },
   })
 
@@ -472,6 +517,102 @@ function requireSkillName(value: unknown): string {
   const name = typeof value === 'string' ? value.trim() : ''
   if (!USER_SKILL_NAME_PATTERN.test(name)) throw new Error(`Invalid skill name: ${name || String(value)}`)
   return name
+}
+
+function requireNonEmptyString(value: unknown, key: string): string {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (!text) throw new Error(`Missing required parameter: ${key}`)
+  return text
+}
+
+function optionalStringParam(value: unknown): string | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') throw new Error('Parameter must be a string')
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+function validateSkillCreateContent(
+  content: string,
+  expectedName: string,
+  expectedDescription?: string,
+): { description: string } {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content)
+  if (!match) throw new Error('SKILL.md content must start with YAML frontmatter')
+
+  let frontmatter: unknown
+  try {
+    frontmatter = parseYaml(match[1])
+  } catch (err) {
+    throw new Error(`Invalid YAML frontmatter: ${(err as Error).message}`)
+  }
+  if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) {
+    throw new Error('SKILL.md frontmatter must be an object')
+  }
+
+  const meta = frontmatter as Record<string, unknown>
+  const name = typeof meta.name === 'string' ? meta.name.trim() : ''
+  const description = typeof meta.description === 'string' ? meta.description.trim() : ''
+  if (name !== expectedName) throw new Error('Skill content frontmatter name must match requested name')
+  if (!description) throw new Error('Skill content frontmatter requires description')
+  if (expectedDescription && description !== expectedDescription) {
+    throw new Error('Skill content frontmatter description must match requested description')
+  }
+  return { description }
+}
+
+function validateSkillExtraFiles(value: unknown, skillDir: string): Array<{ path: string; content: string }> {
+  if (value === undefined) return []
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Parameter files must be an object')
+  }
+
+  const files: Array<{ path: string; content: string }> = []
+  for (const [rawPath, content] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof content !== 'string') throw new Error(`Skill extra file ${rawPath} content must be a string`)
+    const normalized = rawPath.trim().replace(/\\/g, '/')
+    if (!normalized) throw new Error('Skill extra file paths must be non-empty relative paths')
+    if (isAbsolute(normalized)) throw new Error(`Skill extra file path must be relative: ${rawPath}`)
+    const parts = normalized.split('/')
+    if (parts.some(part => part === '' || part === '.' || part === '..')) {
+      throw new Error(`Skill extra file path contains traversal: ${rawPath}`)
+    }
+    if (parts.some(part => part === '.git')) {
+      throw new Error(`Skill extra file path cannot include .git: ${rawPath}`)
+    }
+    if (parts.some(part => part.toLowerCase() === 'skill.md')) {
+      throw new Error('Skill extra files cannot replace SKILL.md')
+    }
+
+    const target = resolve(skillDir, ...parts)
+    const rel = relative(skillDir, target)
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      throw new Error(`Skill extra file path escapes skill directory: ${rawPath}`)
+    }
+    files.push({ path: target, content })
+  }
+  return files
+}
+
+function assertNoExistingSymlinkParent(root: string, target: string): void {
+  const rel = relative(root, target)
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(`Path escapes skill directory: ${target}`)
+  }
+  let current = root
+  if (existsSync(current)) {
+    const stat = lstatSync(current)
+    if (stat.isSymbolicLink()) throw new Error(`Symlink paths are not allowed: ${current}`)
+    if (!stat.isDirectory()) throw new Error(`Skill path is not a directory: ${current}`)
+  }
+  for (const part of rel.split(/[\\/]/).slice(0, -1)) {
+    if (!part) continue
+    current = join(current, part)
+    if (!existsSync(current)) continue
+    const stat = lstatSync(current)
+    if (stat.isSymbolicLink()) throw new Error(`Symlink paths are not allowed: ${current}`)
+    if (!stat.isDirectory()) throw new Error(`Skill parent path is not a directory: ${current}`)
+  }
 }
 
 function requireSourceId(value: unknown): string {

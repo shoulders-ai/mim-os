@@ -13,6 +13,7 @@ import {
   resolveInsidePackage,
   type MimPackageManifest,
 } from '@main/packages/packageManifest.js'
+import { listAppTemplates, renderAppTemplate } from '@main/templates/appTemplates.js'
 
 export interface PackageToolReloadDeps {
   invalidate?: (packageId?: string) => void
@@ -26,6 +27,32 @@ export function registerPackageTools(
   enablement?: PackageEnablementStore,
   reloadDeps: PackageToolReloadDeps = {},
 ): void {
+  tools.register({
+    name: 'app.templateList',
+    description: 'List built-in starter templates for workspace apps.',
+    inputSchema: objectSchema({}),
+    execute: async () => listAppTemplates(),
+  })
+
+  tools.register({
+    name: 'app.templateContent',
+    description: 'Render a built-in starter app template as package.create parameters without writing files.',
+    inputSchema: objectSchema({
+      templateId: { type: 'string' },
+      id: { type: 'string' },
+      name: { type: 'string' },
+    }, ['templateId']),
+    execute: async (params) => {
+      const templateId = requireString(params, 'templateId')
+      const id = optionalString(params, 'id')
+      if (id && id.trim()) validatePackageId(id.trim())
+      const name = optionalString(params, 'name')
+      return renderAppTemplate(templateId, {
+        ...(id ? { id } : {}),
+        ...(name ? { name } : {}),
+      })
+    },
+  })
 
   tools.register({
     name: 'package.create',

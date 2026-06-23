@@ -59,6 +59,8 @@ describe('skill tools', () => {
       'skill.get',
       'skill.setDisabled',
       'skill.create',
+      'skill.templateList',
+      'skill.templateContent',
       'skill.inspectImport',
       'skill.import',
       'skill.delete',
@@ -135,6 +137,117 @@ describe('skill tools', () => {
         body: expect.stringContaining('## When to use'),
       },
     })
+  })
+
+  it('creates a personal skill from supplied content and extra files', async () => {
+    const content = [
+      '---',
+      'name: review-checklist',
+      'description: Use when reviewing a checklist.',
+      'tools: [fs_read, fs_write]',
+      'unlocks: []',
+      '---',
+      '',
+      '# Review Checklist',
+      '',
+      'Follow the checklist.',
+    ].join('\n')
+
+    const result = await tools.call('skill.create', {
+      name: 'review-checklist',
+      description: 'Use when reviewing a checklist.',
+      content,
+      files: {
+        'references/checklist.md': '# Checklist\n',
+      },
+    }, ctx) as { skill: Record<string, unknown> }
+
+    expect(result.skill).toMatchObject({
+      name: 'review-checklist',
+      source: 'personal',
+      dir: join(home, '.mim', 'skills', 'review-checklist'),
+      path: join(home, '.mim', 'skills', 'review-checklist', 'SKILL.md'),
+    })
+    expect(readFileSync(join(home, '.mim', 'skills', 'review-checklist', 'SKILL.md'), 'utf-8')).toBe(content)
+    expect(readFileSync(join(home, '.mim', 'skills', 'review-checklist', 'references', 'checklist.md'), 'utf-8')).toBe('# Checklist\n')
+    await expect(tools.call('skill.get', { name: 'review-checklist' }, ctx)).resolves.toMatchObject({
+      skill: {
+        name: 'review-checklist',
+        description: 'Use when reviewing a checklist.',
+        body: expect.stringContaining('Follow the checklist.'),
+      },
+    })
+  })
+
+  it('rejects supplied skill content whose frontmatter name does not match the requested name', async () => {
+    await expect(tools.call('skill.create', {
+      name: 'expected-name',
+      content: [
+        '---',
+        'name: wrong-name',
+        'description: Use when wrong.',
+        '---',
+        '',
+        '# Wrong',
+      ].join('\n'),
+    }, ctx)).rejects.toThrow('name must match')
+  })
+
+  it('rejects unsafe extra file paths for supplied skill content', async () => {
+    const content = [
+      '---',
+      'name: safe-files',
+      'description: Use when testing safe files.',
+      '---',
+      '',
+      '# Safe files',
+    ].join('\n')
+
+    await expect(tools.call('skill.create', {
+      name: 'safe-files',
+      content,
+      files: { '../escape.md': 'no' },
+    }, ctx)).rejects.toThrow(/outside|traversal|relative/i)
+
+    await expect(tools.call('skill.create', {
+      name: 'safe-files',
+      content,
+      files: { '/tmp/escape.md': 'no' },
+    }, ctx)).rejects.toThrow(/absolute|relative/i)
+
+    await expect(tools.call('skill.create', {
+      name: 'safe-files',
+      content,
+      files: { 'SKILL.md': 'no' },
+    }, ctx)).rejects.toThrow(/SKILL\.md/)
+
+    await expect(tools.call('skill.create', {
+      name: 'safe-files',
+      content,
+      files: { 'references/a.md': 7 },
+    }, ctx)).rejects.toThrow(/string/)
+
+    expect(existsSync(join(home, '.mim', 'skills', 'safe-files'))).toBe(false)
+  })
+
+  it('returns skill template content with name and description overrides applied', async () => {
+    const list = await tools.call('skill.templateList', {}, ctx) as {
+      templates: Array<{ id: string; defaultName: string; defaultDescription: string }>
+    }
+    expect(list.templates.map(template => template.id)).toEqual(['review-checklist', 'house-style'])
+
+    const rendered = await tools.call('skill.templateContent', {
+      templateId: 'review-checklist',
+      name: 'review-checklist-custom',
+      description: 'Use when custom review is needed.',
+    }, ctx) as { name: string; description: string; content: string }
+
+    expect(rendered).toMatchObject({
+      name: 'review-checklist-custom',
+      description: 'Use when custom review is needed.',
+    })
+    expect(rendered.content).toContain('name: review-checklist-custom')
+    expect(rendered.content).toContain('description: Use when custom review is needed.')
   })
 
   it('inspects then imports a skill folder into Personal only after confirmation', async () => {

@@ -1,0 +1,123 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { parse as parseYaml } from 'yaml'
+import { createTraceLog } from '@main/trace/trace.js'
+import { createToolRegistry } from '@main/tools/registry.js'
+import { registerPackageTools } from '@main/tools/packages.js'
+import { listSkillTemplates, renderSkillTemplate } from '@main/templates/skillTemplates.js'
+import { listAppTemplates, renderAppTemplate } from '@main/templates/appTemplates.js'
+
+function frontmatterOf(content: string): Record<string, unknown> {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content)
+  expect(match).toBeTruthy()
+  const parsed = parseYaml(match![1])
+  expect(parsed).toBeTruthy()
+  expect(typeof parsed).toBe('object')
+  expect(Array.isArray(parsed)).toBe(false)
+  return parsed as Record<string, unknown>
+}
+
+function stubPackageLoader() {
+  return {
+    list: () => [],
+    get: () => undefined,
+    diagnostics: () => [],
+    onChange: () => {},
+    rescan: async () => {},
+  }
+}
+
+describe('starter templates', () => {
+  let root: string | null = null
+
+  afterEach(() => {
+    if (root) rmSync(root, { recursive: true, force: true })
+    root = null
+  })
+
+  it('renders skill templates with override-safe frontmatter', () => {
+    const listed = listSkillTemplates()
+    expect(listed.templates.map(template => template.id)).toEqual(['review-checklist', 'house-style'])
+
+    const rendered = renderSkillTemplate('review-checklist', {
+      name: 'clinical-review',
+      description: 'Use when reviewing CRO documents against the clinical checklist.',
+    })
+    const meta = frontmatterOf(rendered.content)
+
+    expect(meta.name).toBe('clinical-review')
+    expect(meta.description).toBe('Use when reviewing CRO documents against the clinical checklist.')
+    expect(meta.tools).toEqual(['fs_read', 'fs_write'])
+    expect(meta.unlocks).toEqual([])
+  })
+
+  it('renders house style with bundled relative reference files', () => {
+    const rendered = renderSkillTemplate('house-style', {
+      name: 'team-style',
+      description: 'Use when applying the team house style.',
+    })
+
+    expect(rendered.files).toEqual({
+      'references/glossary.md': expect.stringContaining('preferred terms'),
+    })
+    expect(rendered.content).toContain('references/glossary.md')
+  })
+
+  it('rewrites every coupled Word Count identifier from the app id override', () => {
+    const params = renderAppTemplate('word-count', {
+      id: 'trial-counter',
+      name: 'Trial Counter',
+    })
+    const backend = String(params.backend)
+    const readme = String(params.readme)
+    const skill = (params.skills as Array<{ name: string; content: string }>)[0]
+    const skillMeta = frontmatterOf(skill.content)
+
+    expect(params.id).toBe('trial-counter')
+    expect(params.name).toBe('Trial Counter')
+    expect(params.provides).toEqual({
+      tools: [{ name: 'trial_counter.analyze', category: 'read', risk: 'low' }],
+    })
+    expect(backend).toContain("name: 'trial_counter.analyze'")
+    expect(skill.name).toBe('trial-counter')
+    expect(skillMeta.name).toBe('trial-counter')
+    expect(skillMeta.unlocks).toEqual(['trial_counter.analyze'])
+    expect(readme).toContain('trial_counter.analyze')
+    expect(readme).not.toContain('word_count.analyze')
+  })
+
+  it('uses current package job event names in the Summarize UI template', () => {
+    const params = renderAppTemplate('summarize')
+    const js = String(params.js)
+
+    expect(js).toContain("jobEvent.type === 'job.done'")
+    expect(js).not.toContain('job.completed')
+  })
+
+  it('creates and validates every rendered app template', async () => {
+    root = mkdtempSync(join(tmpdir(), 'mim-template-test-'))
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(root)
+    registerPackageTools(tools, stubPackageLoader() as never)
+
+    for (const template of listAppTemplates().templates) {
+      const id = `${template.defaultId}-demo`
+      const params = renderAppTemplate(template.id, { id, name: `${template.defaultName} Demo` })
+      await tools.call('package.create', params as Record<string, unknown>, { actor: 'user' })
+      const validation = await tools.call('package.validate', { id }, { actor: 'user' }) as {
+        valid: boolean
+        errors: unknown[]
+        warnings: unknown[]
+      }
+
+      expect(validation.valid, `${template.id} should validate`).toBe(true)
+      expect(validation.errors).toEqual([])
+      expect(validation.warnings).toEqual([])
+      const packageJson = JSON.parse(readFileSync(join(root, 'packages', id, 'package.json'), 'utf-8'))
+      expect(packageJson.mim.id).toBe(id)
+      expect(packageJson.mim.name).toBe(`${template.defaultName} Demo`)
+    }
+  })
+})
