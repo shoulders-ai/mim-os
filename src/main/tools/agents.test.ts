@@ -161,4 +161,14 @@ describe('agent tools', () => {
     expect(sessions.delete).toHaveBeenCalledWith('s1')
     expect(deleted.deleted).toBe('s1')
   })
+
+  it('agent.mcp.connect rejects uninstalled agents', async () => {
+    const { tools } = harness()
+    await expect(tools.call('agent.mcp.connect', { agentId: 'codex' }, ctx)).rejects.toThrow('Agent not installed: codex')
+  })
+
+  it('agent.mcp.disconnect rejects uninstalled agents', async () => {
+    const { tools } = harness()
+    await expect(tools.call('agent.mcp.disconnect', { agentId: 'codex' }, ctx)).rejects.toThrow('Agent not installed: codex')
+  })
 })

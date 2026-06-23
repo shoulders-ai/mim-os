@@ -143,8 +143,9 @@ clears the approval store queue so inline cards disappear immediately.
 - **WebSocket identification**: every WS method including `packages.list` and
   `__meta.tools` requires `identify` first. App iframes identify with
   launch tokens. MCP clients identify with desktop-minted MCP bearer tokens.
-  MCP connections are bound as `actor: "ai"` and are server-allowlisted before
-  tool dispatch; `packages.list` stays app-only. The discovery MCP token is
+  MCP connections are bound as `actor: "user"` — CLI agents have their own
+  permission gates, and the MCP allowlist is the security boundary. Tools are
+  server-allowlisted before tool dispatch; `packages.list` stays app-only. The discovery MCP token is
   valid for the desktop process lifetime; per-agent MCP tokens are revoked when
   their live agent session ends.
 - **IPC actor**: renderer IPC is hardcoded `actor: 'user'` — the renderer cannot
