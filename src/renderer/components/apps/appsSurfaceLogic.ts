@@ -47,11 +47,12 @@ export interface UpdateInfo {
 
 // ---- Settings membership ----
 
-/** An app belongs in Settings > Apps when it is enabled, shared, blocked, or missing. */
+/** An app belongs in Settings > Apps when it is enabled, in the workspace, blocked, or missing. */
 export function isManageableApp(app: ResolvedApp): boolean {
   return (
     app.enabled
     || app.layer === 'workspace'
+    || app.source === 'workspace'
     || app.needsTrust
     || app.needsInstall
   )

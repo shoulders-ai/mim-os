@@ -65,8 +65,8 @@ describe('isManageableApp', () => {
     expect(isManageableApp(makeApp({ layer: 'workspace' }))).toBe(true)
   })
 
-  it('returns false for local-layer apps that are no longer enabled', () => {
-    expect(isManageableApp(makeApp({ layer: 'local' }))).toBe(false)
+  it('returns true for disabled local-layer workspace package apps', () => {
+    expect(isManageableApp(makeApp({ layer: 'local', source: 'workspace' }))).toBe(true)
   })
 
   it('returns true for needsTrust apps', () => {
@@ -77,8 +77,12 @@ describe('isManageableApp', () => {
     expect(isManageableApp(makeApp({ needsInstall: true }))).toBe(true)
   })
 
-  it('returns false for disabled default-layer external apps', () => {
-    expect(isManageableApp(makeApp({ enabled: false, layer: 'default', source: 'workspace' }))).toBe(false)
+  it('returns true for disabled default-layer workspace package apps', () => {
+    expect(isManageableApp(makeApp({ enabled: false, layer: 'default', source: 'workspace' }))).toBe(true)
+  })
+
+  it('returns false for disabled default-layer global apps', () => {
+    expect(isManageableApp(makeApp({ enabled: false, layer: 'default', source: 'global' }))).toBe(false)
   })
 })
 

@@ -51,6 +51,10 @@ Settings includes starter paths for small manual builds:
   runs `package.validate`, only reloads packages when validation passes, then
   reveals the new app folder and shows a confirmation toast.
 
+Disabling a workspace app removes it from the current user's sidebar and
+capability set, but leaves the app folder installed and visible under Settings
+> Apps > Workspace Apps. Removing a workspace app is a separate action.
+
 Good self-build prompts:
 
 ```text

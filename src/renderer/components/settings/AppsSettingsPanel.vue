@@ -174,9 +174,13 @@ const mySidebarRows = computed(() =>
   filteredInWorkspace.value.filter(row => row.enabled && row.installed),
 )
 
+function isWorkspacePackageRow(row: WorkspaceRow): boolean {
+  return row.source === 'workspace' || row.pkg?.source === 'workspace'
+}
+
 const workspaceRows = computed(() =>
   filteredInWorkspace.value.filter(row =>
-    (row.app?.layer === 'workspace' || row.needsTrust || row.needsInstall)
+    (row.app?.layer === 'workspace' || row.needsTrust || row.needsInstall || isWorkspacePackageRow(row))
     && !(row.enabled && row.installed),
   ),
 )
@@ -298,6 +302,7 @@ function rowSubtitle(row: WorkspaceRow): string {
   if (row.needsTrust) return 'Review access to enable'
   if (row.enabled) return row.app?.layer === 'workspace' ? 'In my sidebar, shared with workspace' : 'In my sidebar'
   if (row.app?.layer === 'workspace') return 'Shared with workspace'
+  if (isWorkspacePackageRow(row)) return 'In workspace, not in my sidebar'
   return 'Available'
 }
 

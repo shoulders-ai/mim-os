@@ -185,6 +185,40 @@ describe('AppsSettingsPanel sections', () => {
     expect(installRow).toBeTruthy()
   })
 
+  it('keeps disabled workspace package apps visible outside the sidebar', async () => {
+    appsEnabled = { board: true, knowledge: true, 'runtime-demo': false }
+    appsState = [
+      { id: 'runtime-demo', enabled: false, layer: 'local', installed: true, installedVersions: ['1.0.0'], source: 'workspace', shadowed: false, needsTrust: false, needsInstall: false, folderPresent: false },
+    ]
+    call.mockImplementation(async (tool: string) => {
+      if (tool === 'app.status') return { apps: appsState }
+      if (tool === 'app.updates') return { updates: [] }
+      if (tool === 'package.list') {
+        return {
+          packages: [{
+            id: 'runtime-demo',
+            name: 'Runtime Demo',
+            enabled: false,
+            source: 'workspace',
+            views: [{ id: 'main', label: 'Runtime', src: './ui/index.html', role: 'work' }],
+            permissions: {},
+          }],
+          diagnostics: [],
+        }
+      }
+      if (tool === 'package.capabilities.list') return { packages: [] }
+      if (tool === 'package.jobs.list') return { runs: [] }
+      if (tool === 'registry.list') return { registries: [], entries: [] }
+      return {}
+    })
+    mount()
+    await flushUi()
+
+    const row = root.querySelector('[data-testid="apps-row-runtime-demo"]')
+    expect(row).toBeTruthy()
+    expect(root.textContent).toContain('In workspace, not in my sidebar')
+  })
+
   it('shows current built-in apps even when disabled', async () => {
     appsEnabled = { board: false, knowledge: false, 'runtime-demo': false }
     appsState = [
