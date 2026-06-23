@@ -92,13 +92,14 @@ describe('AppsSettingsPanel sections', () => {
     app.mount(root)
   }
 
-  // ---- Installed section ----
+  // ---- App sections ----
 
-  it('renders an Installed section with all workspace apps, including current built-in apps', async () => {
+  it('renders personal sidebar and workspace sections', async () => {
     mount()
     await flushUi()
 
-    expect(root.textContent).toContain('Installed')
+    expect(root.textContent).toContain('My Sidebar')
+    expect(root.textContent).toContain('Workspace Apps')
     expect(root.querySelector('[data-testid="apps-row-board"]')).toBeTruthy()
     expect(root.querySelector('[data-testid="apps-row-knowledge"]')).toBeTruthy()
     expect(root.querySelector('[data-testid="apps-row-runtime-demo"]')).toBeTruthy()
@@ -158,7 +159,7 @@ describe('AppsSettingsPanel sections', () => {
 
   it('includes needsInstall apps in the workspace section with install action', async () => {
     appsState = [
-      { id: 'github-monitor', enabled: true, layer: 'workspace', installed: false, installedVersions: [], source: 'https://github.com/shoulders-ai/mim-github-monitor', shadowed: false, needsTrust: false, needsInstall: true, folderPresent: false },
+      { id: 'github-monitor', enabled: false, layer: 'workspace', installed: false, installedVersions: [], source: 'https://mim.shoulde.rs/api/v1/registry', version: '1.2.0', shadowed: false, needsTrust: false, needsInstall: true, folderPresent: false },
     ]
     call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
       if (tool === 'app.status') return { apps: appsState }
@@ -202,7 +203,7 @@ describe('AppsSettingsPanel sections', () => {
     await flushUi()
 
     expect(root.querySelector('[data-testid="apps-row-board"]')).toBeTruthy()
-    expect(root.textContent).toContain('Disabled')
+    expect(root.textContent).toContain('Shared with workspace')
   })
 
   // ---- Toggles ----
@@ -305,7 +306,7 @@ describe('AppsSettingsPanel sections', () => {
 
   it('calls package.install from expanded needs-install row', async () => {
     appsState = [
-      { id: 'github-monitor', enabled: true, layer: 'workspace', installed: false, installedVersions: [], source: 'https://github.com/shoulders-ai/mim-github-monitor', shadowed: false, needsTrust: false, needsInstall: true, folderPresent: false },
+      { id: 'github-monitor', enabled: false, layer: 'workspace', installed: false, installedVersions: [], source: 'https://mim.shoulde.rs/api/v1/registry', version: '1.2.0', shadowed: false, needsTrust: false, needsInstall: true, folderPresent: false },
     ]
     call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
       if (tool === 'app.status') return { apps: appsState }
@@ -330,12 +331,12 @@ describe('AppsSettingsPanel sections', () => {
     installBtn!.click()
     await flushUi()
 
-    expect(call).toHaveBeenCalledWith('package.install', { repo: 'https://github.com/shoulders-ai/mim-github-monitor' })
+    expect(call).toHaveBeenCalledWith('package.install', { id: 'github-monitor', version: '1.2.0' })
   })
 
   it('passes monorepo path to install-from-source', async () => {
     appsState = [
-      { id: 'slides', enabled: true, layer: 'workspace', installed: false, installedVersions: [], source: 'https://github.com/shoulders-ai/mim-apps', path: 'packages/slides', shadowed: false, needsTrust: false, needsInstall: true, folderPresent: false },
+      { id: 'slides', enabled: false, layer: 'workspace', installed: false, installedVersions: [], source: 'https://github.com/shoulders-ai/mim-apps', path: 'packages/slides', version: '0.4.0', shadowed: false, needsTrust: false, needsInstall: true, folderPresent: false },
     ]
     call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
       if (tool === 'app.status') return { apps: appsState }
@@ -359,6 +360,6 @@ describe('AppsSettingsPanel sections', () => {
     installBtn.click()
     await flushUi()
 
-    expect(call).toHaveBeenCalledWith('package.install', { repo: 'https://github.com/shoulders-ai/mim-apps', path: 'packages/slides' })
+    expect(call).toHaveBeenCalledWith('package.install', { id: 'slides', version: '0.4.0' })
   })
 })

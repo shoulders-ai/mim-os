@@ -11,7 +11,7 @@ export interface RegistryInfo {
   kind: 'git' | 'local' | 'url'
   location: string
   name?: string
-  origin: 'default' | 'user' | 'workspace' | 'machine'
+  origin: 'default' | 'user' | 'workspace' | 'machine' | 'account'
   status: 'ok' | 'stale' | 'error' | 'needs-trust'
   error?: string
   diagnostics: string[]
@@ -22,6 +22,8 @@ export interface RegistryEntry {
   name: string
   description?: string
   repo?: string
+  archive?: string
+  hash?: string
   path?: string
   dir?: string
   version: string
@@ -43,14 +45,13 @@ export interface UpdateInfo {
   registryId: string
 }
 
-// ---- Manageable app membership ----
+// ---- Settings membership ----
 
-/** An app belongs in the Settings > Apps Installed set when any of these hold. */
+/** An app belongs in Settings > Apps when it is enabled, shared, blocked, or missing. */
 export function isManageableApp(app: ResolvedApp): boolean {
   return (
     app.enabled
     || app.layer === 'workspace'
-    || app.layer === 'local'
     || app.needsTrust
     || app.needsInstall
   )
@@ -62,7 +63,15 @@ export function availableEntries(
   entries: RegistryEntry[],
   inWorkspaceIds: Set<string>,
 ): RegistryEntry[] {
-  return entries.filter(e => !e.shadowed && !inWorkspaceIds.has(e.id))
+  const latestById = new Map<string, RegistryEntry>()
+  for (const entry of entries) {
+    if (entry.shadowed || inWorkspaceIds.has(entry.id)) continue
+    const current = latestById.get(entry.id)
+    if (!current || compareSemver(entry.version, current.version) > 0) {
+      latestById.set(entry.id, entry)
+    }
+  }
+  return [...latestById.values()]
 }
 
 // ---- Registry entry action ----
@@ -111,4 +120,41 @@ export function filterByText<T extends { id: string; label: string; description:
 
 export function hasUpdate(updates: Record<string, UpdateInfo>, id: string): boolean {
   return id in updates
+}
+
+function compareSemver(a: string, b: string): number {
+  const parsedA = parseSemver(a)
+  const parsedB = parseSemver(b)
+  if (!parsedA || !parsedB) return a.localeCompare(b)
+  for (let i = 0; i < 3; i += 1) {
+    const diff = parsedA.core[i] - parsedB.core[i]
+    if (diff !== 0) return diff
+  }
+  if (!parsedA.pre.length && !parsedB.pre.length) return 0
+  if (!parsedA.pre.length) return 1
+  if (!parsedB.pre.length) return -1
+  const len = Math.max(parsedA.pre.length, parsedB.pre.length)
+  for (let i = 0; i < len; i += 1) {
+    const left = parsedA.pre[i]
+    const right = parsedB.pre[i]
+    if (left === undefined) return -1
+    if (right === undefined) return 1
+    const leftNum = /^\d+$/.test(left) ? Number(left) : null
+    const rightNum = /^\d+$/.test(right) ? Number(right) : null
+    if (leftNum !== null && rightNum !== null && leftNum !== rightNum) return leftNum - rightNum
+    if (leftNum !== null && rightNum === null) return -1
+    if (leftNum === null && rightNum !== null) return 1
+    const lexical = left.localeCompare(right)
+    if (lexical !== 0) return lexical
+  }
+  return 0
+}
+
+function parseSemver(version: string): { core: [number, number, number]; pre: string[] } | null {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/)
+  if (!match) return null
+  return {
+    core: [Number(match[1]), Number(match[2]), Number(match[3])],
+    pre: match[4] ? match[4].split('.') : [],
+  }
 }

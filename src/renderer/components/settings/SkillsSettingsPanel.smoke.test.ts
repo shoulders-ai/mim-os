@@ -2,7 +2,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import SkillsSettingsPanel from './SkillsSettingsPanel.vue'
+import { useToastStore } from '../../stores/toasts.js'
 
 async function flushUi() {
   await Promise.resolve()
@@ -37,6 +39,7 @@ describe('SkillsSettingsPanel', () => {
   beforeEach(() => {
     root = document.createElement('div')
     document.body.appendChild(root)
+    setActivePinia(createPinia())
     app = null
     skills = [
       {
@@ -93,6 +96,45 @@ describe('SkillsSettingsPanel', () => {
     call = vi.fn(async (tool: string, params?: Record<string, unknown>) => {
       if (tool === 'skill.list') return { skills: skills.map(skill => ({ ...skill })), diagnostics: [] }
       if (tool === 'skillSource.list') return { sources: sources.map(source => ({ ...source })) }
+      if (tool === 'skill.templateList') {
+        return {
+          templates: [
+            {
+              id: 'review-checklist',
+              label: 'Review Checklist',
+              summary: 'Review a document against a checklist.',
+              defaultName: 'review-checklist',
+              defaultDescription: 'Use when reviewing a document against a checklist.',
+            },
+            {
+              id: 'house-style',
+              label: 'House Style',
+              summary: 'Apply a house writing style.',
+              defaultName: 'house-style',
+              defaultDescription: 'Use when applying the house style.',
+            },
+          ],
+        }
+      }
+      if (tool === 'skill.templateContent') {
+        return {
+          name: params?.name,
+          description: params?.description,
+          content: [
+            '---',
+            `name: ${params?.name}`,
+            `description: ${params?.description}`,
+            'tools: [fs_read, fs_write]',
+            'unlocks: []',
+            '---',
+            '',
+            '# Review Checklist',
+          ].join('\n'),
+          files: {
+            'references/checklist.md': '# Checklist\n',
+          },
+        }
+      }
       if (tool === 'skill.setDisabled') {
         const skill = skills.find(item => item.name === params?.name)
         if (skill) skill.enabled = params?.disabled !== true
@@ -223,7 +265,10 @@ describe('SkillsSettingsPanel', () => {
   })
 
   function mount() {
+    const pinia = createPinia()
+    setActivePinia(pinia)
     app = createApp(SkillsSettingsPanel)
+    app.use(pinia)
     app.mount(root)
   }
 
@@ -255,7 +300,7 @@ describe('SkillsSettingsPanel', () => {
     expect(labels).toEqual([
       'Add a source...',
       'Import skill from folder...',
-      'New Personal skill...',
+      'New Personal skill from template...',
     ])
   })
 
@@ -301,8 +346,52 @@ describe('SkillsSettingsPanel', () => {
 
     expect(call).toHaveBeenCalledWith('skill.create', { name: 'research-plan' })
     expect(revealInFinder).toHaveBeenCalledWith('/home/.mim/skills/research-plan')
+    const toasts = useToastStore()
+    expect(toasts.list.at(-1)).toMatchObject({
+      kind: 'info',
+      message: 'Skill created, showing folder contents',
+    })
     expect(call).not.toHaveBeenCalledWith('editor.open', expect.anything())
     expect(root.textContent).toContain('research-plan')
+  })
+
+  it('creates a Personal skill from a starter template and reveals the folder', async () => {
+    mount()
+    await flushUi()
+
+    click(root.querySelector('[data-testid="skill-add-menu"]'))
+    await flushUi()
+    click(document.body.querySelector('[data-testid="skill-new-open"]'))
+    await flushUi()
+
+    click(document.body.querySelector('[data-testid="skill-new-template"]'))
+    await flushUi()
+    click(document.body.querySelector('[data-testid="skill-template-option-review-checklist"]'))
+    await flushUi()
+
+    expect(document.body.querySelector<HTMLInputElement>('[data-testid="skill-new-name"]')?.value).toBe('review-checklist')
+    expect(document.body.querySelector<HTMLInputElement>('[data-testid="skill-new-description"]')?.value).toBe('Use when reviewing a document against a checklist.')
+
+    click(document.body.querySelector('[data-testid="skill-create"]'))
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('skill.templateContent', {
+      templateId: 'review-checklist',
+      name: 'review-checklist',
+      description: 'Use when reviewing a document against a checklist.',
+    })
+    expect(call).toHaveBeenCalledWith('skill.create', {
+      name: 'review-checklist',
+      description: 'Use when reviewing a document against a checklist.',
+      content: expect.stringContaining('name: review-checklist'),
+      files: { 'references/checklist.md': '# Checklist\n' },
+    })
+    expect(revealInFinder).toHaveBeenCalledWith('/home/.mim/skills/review-checklist')
+    const toasts = useToastStore()
+    expect(toasts.list.at(-1)).toMatchObject({
+      kind: 'info',
+      message: 'Skill created, showing folder contents',
+    })
   })
 
   it('inspects then imports a skill before revealing the Personal copy', async () => {

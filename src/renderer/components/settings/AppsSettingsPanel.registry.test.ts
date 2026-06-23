@@ -76,6 +76,7 @@ describe('AppsSettingsPanel registry UI', () => {
       if (tool === 'package.install') return { installed: params?.id ?? 'pkg', version: params?.version ?? '1.0.0', dir: '/install' }
       if (tool === 'package.update') return { installed: params?.id ?? 'pkg', version: '2.0.0', dir: '/install' }
       if (tool === 'app.add') return { added: params?.id, version: params?.version }
+      if (tool === 'app.share') return { shared: params?.id, version: params?.version }
       return {}
     })
     Object.defineProperty(window, 'kernel', {
@@ -122,6 +123,19 @@ describe('AppsSettingsPanel registry UI', () => {
     expect(root.textContent).toContain('Org-wide issues/PRs/activity monitoring')
   })
 
+  it('collapses multiple registry versions of the same app to the newest Browse row', async () => {
+    registryEntries = [
+      makeRegistryEntry({ id: 'test-private', name: 'Test Private App', version: '0.1.0' }),
+      makeRegistryEntry({ id: 'test-private', name: 'Test Private App', version: '0.2.0' }),
+    ]
+    mount()
+    await flushUi()
+
+    expect(root.querySelectorAll('[data-testid="registry-add-test-private"]')).toHaveLength(1)
+    expect(root.textContent).toContain('0.2.0')
+    expect(root.textContent).not.toContain('0.1.0')
+  })
+
   it('shows Add button for registry entries not in this workspace', async () => {
     registryEntries = [makeRegistryEntry({ installedVersions: [] })]
     mount()
@@ -129,7 +143,8 @@ describe('AppsSettingsPanel registry UI', () => {
 
     const addBtn = root.querySelector<HTMLButtonElement>('[data-testid="registry-add-github-monitor"]')
     expect(addBtn).toBeTruthy()
-    expect(addBtn!.textContent).toContain('Add')
+    expect(addBtn!.textContent).toContain('Add to sidebar')
+    expect(root.querySelector<HTMLButtonElement>('[data-testid="registry-share-github-monitor"]')).toBeTruthy()
   })
 
   it('shows a plain-language permission confirm before adding', async () => {
@@ -151,7 +166,7 @@ describe('AppsSettingsPanel registry UI', () => {
     expect(call).not.toHaveBeenCalledWith('app.add', expect.anything())
   })
 
-  it('calls app.add once the permission confirm is accepted', async () => {
+  it('calls app.add once the add-to-sidebar permission confirm is accepted', async () => {
     registryEntries = [makeRegistryEntry({ installedVersions: [] })]
     mount()
     await flushUi()
@@ -162,6 +177,19 @@ describe('AppsSettingsPanel registry UI', () => {
     await flushUi()
 
     expect(call).toHaveBeenCalledWith('app.add', { id: 'github-monitor', version: '1.2.0' })
+  })
+
+  it('calls app.share once the share permission confirm is accepted', async () => {
+    registryEntries = [makeRegistryEntry({ installedVersions: [] })]
+    mount()
+    await flushUi()
+
+    root.querySelector<HTMLButtonElement>('[data-testid="registry-share-github-monitor"]')!.click()
+    await flushUi()
+    document.body.querySelector<HTMLButtonElement>('[data-testid="registry-share-confirm-github-monitor"]')!.click()
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('app.share', { id: 'github-monitor', version: '1.2.0' })
   })
 
   it('shows Update button for registry entries with a newer version', async () => {
@@ -185,14 +213,14 @@ describe('AppsSettingsPanel registry UI', () => {
     expect(call).toHaveBeenCalledWith('package.update', { id: 'github-monitor' })
   })
 
-  it('shows In workspace label when the app is added at the current version', async () => {
+  it('shows In sidebar label when the app is added at the current version', async () => {
     registryEntries = [makeRegistryEntry({ version: '1.2.0', installedVersions: ['1.2.0'], enabledHere: true })]
     mount()
     await flushUi()
 
     expect(root.querySelector('[data-testid="registry-add-github-monitor"]')).toBeNull()
     expect(root.querySelector('[data-testid="registry-update-github-monitor"]')).toBeNull()
-    expect(root.querySelector('[data-testid="registry-added-github-monitor"]')?.textContent).toContain('In workspace')
+    expect(root.querySelector('[data-testid="registry-added-github-monitor"]')?.textContent).toContain('In sidebar')
   })
 
   it('still offers Add when installed elsewhere but not in this workspace', async () => {

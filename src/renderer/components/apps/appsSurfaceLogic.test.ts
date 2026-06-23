@@ -65,8 +65,8 @@ describe('isManageableApp', () => {
     expect(isManageableApp(makeApp({ layer: 'workspace' }))).toBe(true)
   })
 
-  it('returns true for local-layer apps', () => {
-    expect(isManageableApp(makeApp({ layer: 'local' }))).toBe(true)
+  it('returns false for local-layer apps that are no longer enabled', () => {
+    expect(isManageableApp(makeApp({ layer: 'local' }))).toBe(false)
   })
 
   it('returns true for needsTrust apps', () => {
@@ -98,6 +98,16 @@ describe('availableEntries', () => {
     const entries = [makeEntry({ id: 'a' }), makeEntry({ id: 'b' })]
     expect(availableEntries(entries, new Set(['a']))).toHaveLength(1)
     expect(availableEntries(entries, new Set(['a']))[0].id).toBe('b')
+  })
+
+  it('collapses multiple registry versions of the same app to the newest version', () => {
+    const entries = [
+      makeEntry({ id: 'test-private', version: '0.1.0' }),
+      makeEntry({ id: 'test-private', version: '0.2.0' }),
+    ]
+    const result = availableEntries(entries, new Set())
+    expect(result).toHaveLength(1)
+    expect(result[0].version).toBe('0.2.0')
   })
 })
 

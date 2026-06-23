@@ -9,9 +9,11 @@ import {
   IconSearch,
   IconTrash,
 } from '@tabler/icons-vue'
+import { useToastStore } from '../../stores/toasts.js'
 import MimDialog from '../ui/MimDialog.vue'
 import MimMenu from '../ui/MimMenu.vue'
 import MimMenuItem from '../ui/MimMenuItem.vue'
+import MimSelect from '../ui/MimSelect.vue'
 import MimToggle from '../ui/MimToggle.vue'
 
 type SkillSource = 'builtin' | 'personal' | 'source' | 'workspace'
@@ -59,6 +61,21 @@ interface SkillReview {
   collision?: boolean
 }
 
+interface SkillTemplateSummary {
+  id: string
+  label: string
+  summary: string
+  defaultName: string
+  defaultDescription: string
+}
+
+interface RenderedSkillTemplate {
+  name: string
+  description: string
+  content: string
+  files?: Record<string, string>
+}
+
 interface SourceReview {
   id: string
   name?: string
@@ -92,13 +109,18 @@ const actionBusy = ref<string | null>(null)
 const skills = ref<SkillMetadata[]>([])
 const diagnostics = ref<SkillDiagnostic[]>([])
 const sources = ref<SkillSourceItem[]>([])
+const templates = ref<SkillTemplateSummary[]>([])
 const activeDialog = ref<null | 'new' | 'import' | 'source'>(null)
 const dialogError = ref<string | null>(null)
 const confirmingDelete = ref<string | null>(null)
 const confirmingSourceRemove = ref<string | null>(null)
 
+const BLANK_SKILL_TEMPLATE_ID = 'blank'
+const BLANK_SKILL_TEMPLATE_SUMMARY = 'Creates only SKILL.md. Templates may also add reference files.'
+const newSkillTemplateId = ref(BLANK_SKILL_TEMPLATE_ID)
 const newSkillName = ref('')
 const newSkillDescription = ref('')
+const toastStore = useToastStore()
 
 const importFolder = ref('')
 const importReview = ref<SkillReview | null>(null)
@@ -147,20 +169,35 @@ const groupedSkills = computed<SkillGroup[]>(() => {
 const canCreate = computed(() => /^[a-z0-9][a-z0-9-]{0,63}$/.test(newSkillName.value.trim()))
 const canInspectImport = computed(() => importFolder.value.trim().length > 0)
 const canInspectSource = computed(() => sourceLocation.value.trim().length > 0)
+const skillTemplateOptions = computed(() => [
+  { value: BLANK_SKILL_TEMPLATE_ID, label: 'Blank skill', title: BLANK_SKILL_TEMPLATE_SUMMARY },
+  ...templates.value.map(template => ({
+    value: template.id,
+    label: template.label,
+    title: template.summary,
+    testId: `skill-template-option-${template.id}`,
+  })),
+])
+const selectedSkillTemplate = computed(() =>
+  templates.value.find(template => template.id === newSkillTemplateId.value) ?? null,
+)
 
 async function refresh() {
   loading.value = true
   error.value = null
   try {
-    const [skillResult, sourceResult] = await Promise.all([
+    const [skillResult, sourceResult, templateResult] = await Promise.all([
       window.kernel.call('skill.list', { detailed: true }),
       window.kernel.call('skillSource.list', {}),
+      window.kernel.call('skill.templateList', {}),
     ])
     const skillPayload = skillResult as { skills?: SkillMetadata[]; diagnostics?: SkillDiagnostic[] }
     const sourcePayload = sourceResult as { sources?: SkillSourceItem[] }
+    const templatePayload = templateResult as { templates?: SkillTemplateSummary[] }
     skills.value = skillPayload.skills ?? []
     diagnostics.value = skillPayload.diagnostics ?? []
     sources.value = sourcePayload.sources ?? []
+    templates.value = templatePayload.templates ?? []
   } catch (err) {
     error.value = (err as Error).message
   } finally {
@@ -234,8 +271,24 @@ function clearDialogState() {
   sourceId.value = ''
   sourceName.value = ''
   sourceReview.value = null
+  newSkillTemplateId.value = BLANK_SKILL_TEMPLATE_ID
   newSkillName.value = ''
   newSkillDescription.value = ''
+}
+
+function openNewSkillDialog() {
+  newSkillTemplateId.value = BLANK_SKILL_TEMPLATE_ID
+  newSkillName.value = ''
+  newSkillDescription.value = ''
+  activeDialog.value = 'new'
+}
+
+function selectSkillTemplate(value: string | number) {
+  newSkillTemplateId.value = String(value)
+  const template = selectedSkillTemplate.value
+  if (!template) return
+  newSkillName.value = template.defaultName
+  newSkillDescription.value = template.defaultDescription
 }
 
 async function toggleSkill(skill: SkillMetadata, enabled: boolean) {
@@ -253,6 +306,27 @@ async function toggleSkill(skill: SkillMetadata, enabled: boolean) {
 
 async function revealSkill(skill: SkillMetadata) {
   await window.kernel.revealInFinder(skill.dir)
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+async function revealCreatedSkillFolder(dir: string | undefined) {
+  if (!dir) {
+    toastStore.push({ kind: 'info', message: 'Skill created' })
+    return
+  }
+  try {
+    await window.kernel.revealInFinder(dir)
+    toastStore.push({ kind: 'info', message: 'Skill created, showing folder contents' })
+  } catch (err) {
+    toastStore.push({
+      kind: 'info',
+      message: 'Skill created',
+      detail: `Folder could not be opened: ${errorMessage(err)}`,
+    })
+  }
 }
 
 async function editSkill(skill: SkillMetadata) {
@@ -284,17 +358,32 @@ async function createSkill() {
   if (!name || !canCreate.value) return
   actionBusy.value = 'create'
   error.value = null
+  dialogError.value = null
   try {
-    const result = await window.kernel.call('skill.create', {
+    let createParams: Record<string, unknown> = {
       name,
       ...(newSkillDescription.value.trim() ? { description: newSkillDescription.value.trim() } : {}),
-    }) as { skill?: { dir?: string } }
+    }
+    if (newSkillTemplateId.value !== BLANK_SKILL_TEMPLATE_ID) {
+      const rendered = await window.kernel.call('skill.templateContent', {
+        templateId: newSkillTemplateId.value,
+        name,
+        ...(newSkillDescription.value.trim() ? { description: newSkillDescription.value.trim() } : {}),
+      }) as RenderedSkillTemplate
+      createParams = {
+        name: rendered.name,
+        description: rendered.description,
+        content: rendered.content,
+        ...(rendered.files ? { files: rendered.files } : {}),
+      }
+    }
+    const result = await window.kernel.call('skill.create', createParams) as { skill?: { dir?: string } }
     const dir = result.skill?.dir
     clearDialogState()
     await refresh()
-    if (dir) await window.kernel.revealInFinder(dir)
+    await revealCreatedSkillFolder(dir)
   } catch (err) {
-    error.value = (err as Error).message
+    dialogError.value = errorMessage(err)
   } finally {
     actionBusy.value = null
   }
@@ -477,8 +566,8 @@ onBeforeUnmount(() => {
           <MimMenuItem :button-attrs="{ 'data-testid': 'skill-import-open' }" @select="activeDialog = 'import'">
             Import skill from folder...
           </MimMenuItem>
-          <MimMenuItem :button-attrs="{ 'data-testid': 'skill-new-open' }" @select="activeDialog = 'new'">
-            New Personal skill...
+          <MimMenuItem :button-attrs="{ 'data-testid': 'skill-new-open' }" @select="openNewSkillDialog">
+            New Personal skill from template...
           </MimMenuItem>
         </MimMenu>
       </div>
@@ -611,19 +700,36 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <MimDialog :open="activeDialog === 'new'" title="New Personal skill" size="md" @close="clearDialogState">
+    <MimDialog :open="activeDialog === 'new'" title="Create Personal skill" size="md" @close="clearDialogState">
       <form class="flex flex-col gap-3 p-4" @submit.prevent="createSkill">
+        <p class="font-sans text-[11px] leading-4 text-ink-3">
+          Select a template, then Mim creates and reveals the skill folder.
+        </p>
         <label class="flex flex-col gap-1">
-          <span class="font-sans text-[11px] font-semibold text-ink-2">Name</span>
+          <span class="font-sans text-[11px] font-semibold text-ink-2">Select template</span>
+          <MimSelect
+            :model-value="newSkillTemplateId"
+            :options="skillTemplateOptions"
+            tone="chrome"
+            :trigger-attrs="{ 'data-testid': 'skill-new-template' }"
+            @update:model-value="selectSkillTemplate"
+          />
+          <span class="font-sans text-[11px] leading-4 text-ink-3">
+            {{ selectedSkillTemplate?.summary ?? BLANK_SKILL_TEMPLATE_SUMMARY }}
+          </span>
+        </label>
+        <label class="flex flex-col gap-1">
+          <span class="font-sans text-[11px] font-semibold text-ink-2">Skill folder name</span>
           <input
             v-model="newSkillName"
             data-testid="skill-new-name"
             class="h-8 rounded-[6px] border border-rule-light bg-chrome-mid px-2 font-mono text-[11px] text-ink outline-none focus:border-accent"
             placeholder="skill-name"
           />
+          <span class="font-sans text-[10.5px] leading-4 text-ink-4">Lowercase letters, numbers, and hyphens.</span>
         </label>
         <label class="flex flex-col gap-1">
-          <span class="font-sans text-[11px] font-semibold text-ink-2">Description</span>
+          <span class="font-sans text-[11px] font-semibold text-ink-2">Activation description</span>
           <input
             v-model="newSkillDescription"
             data-testid="skill-new-description"
@@ -631,6 +737,9 @@ onBeforeUnmount(() => {
             placeholder="Use when..."
           />
         </label>
+        <div v-if="dialogError && activeDialog === 'new'" data-testid="skill-new-error" class="rounded-[6px] border border-rem/30 px-3 py-2 font-sans text-[12px] text-rem">
+          {{ dialogError }}
+        </div>
         <div class="flex justify-end gap-2 pt-1">
           <button type="button" class="h-8 rounded-[6px] px-3 font-sans text-[12px] text-ink-2 hover:bg-chrome-mid" @click="clearDialogState">
             Cancel
@@ -642,7 +751,7 @@ onBeforeUnmount(() => {
             :disabled="!canCreate || actionBusy === 'create'"
           >
             <IconPlus :size="14" :stroke-width="2" />
-            <span>Create</span>
+            <span>Create skill</span>
           </button>
         </div>
       </form>

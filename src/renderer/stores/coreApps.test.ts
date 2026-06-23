@@ -101,7 +101,7 @@ describe('apps store (resolved state)', () => {
     expect(store.apps['my-pkg']?.shadowed).toBe(true)
   })
 
-  it('enable() calls app.enable with id + layer and refreshes', async () => {
+  it('enable() calls app.enable with the app id and refreshes', async () => {
     let enabled = false
     const call = vi.fn(async (tool: string, params?: Record<string, unknown>) => {
       if (tool === 'app.status') {

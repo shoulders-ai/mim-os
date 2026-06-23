@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { IconPlus } from '@tabler/icons-vue'
 import { useAppsStore } from '../../stores/coreApps.js'
+import { useToastStore } from '../../stores/toasts.js'
 import type { ResolvedApp } from '../../stores/coreApps.js'
 import type {
   PackageCapabilities,
@@ -20,6 +22,7 @@ import type { RegistryEntry, RegistryInfo } from '../apps/appsSurfaceLogic.js'
 import { permissionLines } from '../packages/permissionSummary.js'
 import PermissionConfirmDialog from '../apps/PermissionConfirmDialog.vue'
 import MimDialog from '../ui/MimDialog.vue'
+import MimSelect from '../ui/MimSelect.vue'
 import MimToggle from '../ui/MimToggle.vue'
 
 const emit = defineEmits<{
@@ -28,6 +31,7 @@ const emit = defineEmits<{
 }>()
 
 const appsStore = useAppsStore()
+const toastStore = useToastStore()
 
 const smallButtonClass = 'inline-flex h-[22px] items-center justify-center whitespace-nowrap rounded-[5px] border border-rule bg-chrome-high px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:opacity-50'
 const primaryButtonClass = 'inline-flex h-[22px] items-center justify-center whitespace-nowrap rounded-[5px] border border-accent bg-accent px-2 text-[10.5px] font-semibold text-accent-ink hover:bg-accent-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:opacity-50'
@@ -52,6 +56,7 @@ const registries = ref<RegistryInfo[]>([])
 const registryBusy = ref<string | null>(null)
 const registryError = ref<string | null>(null)
 const confirmAddId = ref<string | null>(null)
+const confirmShareId = ref<string | null>(null)
 
 
 // ---- Add source dialog state ----
@@ -64,6 +69,34 @@ const sourceBusy = ref<string | null>(null)
 const sourceReview = ref<{ id: string; name?: string; location: string; appCount: number; apps: Array<{ id: string; name: string; description?: string; version: string }>; diagnostics: string[]; status: string } | null>(null)
 const confirmingSourceRemove = ref<string | null>(null)
 
+// ---- Template app dialog state ----
+interface AppTemplateSummary {
+  id: string
+  label: string
+  summary: string
+  defaultId: string
+  defaultName: string
+}
+
+interface PackageValidationResult {
+  valid: boolean
+  errors?: Array<{ path?: string; message: string }>
+  warnings?: Array<{ path?: string; message: string }>
+}
+
+interface PackageCreateResult {
+  created?: string
+  path?: string
+  files?: string[]
+}
+
+const appTemplates = ref<AppTemplateSummary[]>([])
+const templateDialogOpen = ref(false)
+const templateDialogError = ref<string | null>(null)
+const newAppTemplateId = ref('')
+const newAppId = ref('')
+const newAppName = ref('')
+
 // ---- Permission confirmation state ----
 const pendingEnableRow = ref<WorkspaceRow | null>(null)
 
@@ -72,7 +105,9 @@ interface WorkspaceRow {
   label: string
   description: string
   enabled: boolean
+  installed: boolean
   source: string
+  version?: string
   needsTrust: boolean
   needsInstall: boolean
   shadowed: boolean
@@ -98,7 +133,9 @@ const inWorkspaceRows = computed<WorkspaceRow[]>(() => {
       label: pkg?.name ?? app.id,
       description: pkg?.description ?? '',
       enabled: app.enabled,
+      installed: app.installed,
       source: app.source ?? 'unknown',
+      version: app.version,
       needsTrust: app.needsTrust,
       needsInstall: app.needsInstall,
       shadowed: app.shadowed,
@@ -116,6 +153,7 @@ const inWorkspaceRows = computed<WorkspaceRow[]>(() => {
       label: pkg.name,
       description: pkg.description ?? '',
       enabled: pkg.enabled,
+      installed: true,
       source: pkg.source,
       needsTrust: false,
       needsInstall: false,
@@ -132,6 +170,34 @@ const filteredInWorkspace = computed(() =>
   filterByText(inWorkspaceRows.value, filterText.value),
 )
 
+const mySidebarRows = computed(() =>
+  filteredInWorkspace.value.filter(row => row.enabled && row.installed),
+)
+
+const workspaceRows = computed(() =>
+  filteredInWorkspace.value.filter(row =>
+    (row.app?.layer === 'workspace' || row.needsTrust || row.needsInstall)
+    && !(row.enabled && row.installed),
+  ),
+)
+
+const appSections = computed(() => [
+  {
+    id: 'sidebar',
+    label: 'My Sidebar',
+    count: mySidebarRows.value.length,
+    rows: mySidebarRows.value,
+    empty: filterText.value ? 'No matches' : 'No apps in your sidebar',
+  },
+  {
+    id: 'workspace',
+    label: 'Workspace Apps',
+    count: workspaceRows.value.length,
+    rows: workspaceRows.value,
+    empty: filterText.value ? 'No matches' : 'No shared apps in this workspace',
+  },
+])
+
 const inWorkspaceIds = computed(() =>
   new Set(inWorkspaceRows.value.map(r => r.id)),
 )
@@ -146,6 +212,9 @@ const machineSources = computed(() => registries.value.filter(r => r.origin === 
 const confirmingAddEntry = computed(() =>
   availableRegistryEntries.value.find(entry => entry.id === confirmAddId.value) ?? null,
 )
+const confirmingShareEntry = computed(() =>
+  availableRegistryEntries.value.find(entry => entry.id === confirmShareId.value) ?? null,
+)
 const pendingEnableName = computed(() => pendingEnableRow.value?.label ?? '')
 const pendingEnablePermissions = computed(() => pendingEnableRow.value?.pkg?.permissions ?? {})
 const pendingEnableTestId = computed(() =>
@@ -153,6 +222,22 @@ const pendingEnableTestId = computed(() =>
 )
 const pendingEnableConfirmTestId = computed(() =>
   pendingEnableRow.value ? `apps-enable-confirm-${pendingEnableRow.value.id}` : undefined,
+)
+const appTemplateOptions = computed(() =>
+  appTemplates.value.map(template => ({
+    value: template.id,
+    label: template.label,
+    title: template.summary,
+    testId: `app-template-option-${template.id}`,
+  })),
+)
+const selectedAppTemplate = computed(() =>
+  appTemplates.value.find(template => template.id === newAppTemplateId.value) ?? null,
+)
+const canCreateTemplateApp = computed(() =>
+  /^[a-z0-9][a-z0-9_-]*$/.test(newAppId.value.trim()) &&
+  newAppName.value.trim().length > 0 &&
+  Boolean(selectedAppTemplate.value),
 )
 
 // ---- Expand / collapse ----
@@ -211,7 +296,9 @@ function rowSubtitle(row: WorkspaceRow): string {
   if (row.description.trim()) return row.description
   if (row.needsInstall) return 'Install needed'
   if (row.needsTrust) return 'Review access to enable'
-  return row.enabled ? 'Enabled' : 'Disabled'
+  if (row.enabled) return row.app?.layer === 'workspace' ? 'In my sidebar, shared with workspace' : 'In my sidebar'
+  if (row.app?.layer === 'workspace') return 'Shared with workspace'
+  return 'Available'
 }
 
 // ---- Actions ----
@@ -293,15 +380,103 @@ async function updateApp(row: WorkspaceRow) {
   }
 }
 
-async function installFromSource(id: string, source: string, path?: string) {
-  actionBusy.value = `install-source:${id}`
+async function installWorkspaceApp(row: WorkspaceRow) {
+  actionBusy.value = `install-source:${row.id}`
   actionError.value = null
   try {
-    await window.kernel.call('package.install', { repo: source, ...(path ? { path } : {}) })
+    await window.kernel.call('package.install', {
+      id: row.id,
+      ...(row.version ? { version: row.version } : {}),
+    })
     await refreshAll()
     await appsStore.refresh()
   } catch (err) {
     actionError.value = (err as Error).message
+  } finally {
+    actionBusy.value = null
+  }
+}
+
+// ---- Template app dialog actions ----
+
+function selectAppTemplate(value: string | number) {
+  newAppTemplateId.value = String(value)
+  const template = selectedAppTemplate.value
+  if (!template) return
+  newAppId.value = template.defaultId
+  newAppName.value = template.defaultName
+}
+
+function ensureDefaultAppTemplate() {
+  if (selectedAppTemplate.value) return
+  const first = appTemplates.value[0]
+  if (first) selectAppTemplate(first.id)
+}
+
+function openTemplateDialog() {
+  templateDialogError.value = null
+  ensureDefaultAppTemplate()
+  templateDialogOpen.value = true
+}
+
+function clearTemplateDialog() {
+  templateDialogOpen.value = false
+  templateDialogError.value = null
+  newAppTemplateId.value = ''
+  newAppId.value = ''
+  newAppName.value = ''
+}
+
+function validationMessage(result: PackageValidationResult): string {
+  const errors = result.errors ?? []
+  if (!errors.length) return 'App validation failed'
+  return errors.map(error => error.path ? `${error.message} (${error.path})` : error.message).join('; ')
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}
+
+async function revealCreatedAppFolder(path: string | undefined) {
+  if (!path) {
+    toastStore.push({ kind: 'info', message: 'App created' })
+    return
+  }
+  try {
+    await window.kernel.revealInFinder(path)
+    toastStore.push({ kind: 'info', message: 'App created, showing folder contents' })
+  } catch (err) {
+    toastStore.push({
+      kind: 'info',
+      message: 'App created',
+      detail: `Folder could not be opened: ${errorMessage(err)}`,
+    })
+  }
+}
+
+async function createTemplateApp() {
+  if (!canCreateTemplateApp.value) return
+  const id = newAppId.value.trim()
+  const name = newAppName.value.trim()
+  actionBusy.value = 'create-template-app'
+  templateDialogError.value = null
+  try {
+    const params = await window.kernel.call('app.templateContent', {
+      templateId: newAppTemplateId.value,
+      id,
+      name,
+    }) as Record<string, unknown>
+    const createdId = typeof params.id === 'string' ? params.id : id
+    const created = await window.kernel.call('package.create', params) as PackageCreateResult
+    const validation = await window.kernel.call('package.validate', { id: createdId }) as PackageValidationResult
+    if (!validation.valid) throw new Error(validationMessage(validation))
+    await window.kernel.call('package.reload', { id: createdId })
+    clearTemplateDialog()
+    expandedId.value = createdId
+    await refreshAll()
+    await revealCreatedAppFolder(created.path)
+  } catch (err) {
+    templateDialogError.value = errorMessage(err)
   } finally {
     actionBusy.value = null
   }
@@ -420,12 +595,37 @@ function onAddDialogOpenChange(open: boolean) {
   if (!open) confirmAddId.value = null
 }
 
-async function addToWorkspace(entry: RegistryEntry) {
+function toggleShareConfirm(entry: RegistryEntry) {
+  confirmShareId.value = entry.id
+  registryError.value = null
+}
+
+function onShareDialogOpenChange(open: boolean) {
+  if (!open) confirmShareId.value = null
+}
+
+async function addToSidebar(entry: RegistryEntry) {
   registryBusy.value = `add:${entry.id}`
   registryError.value = null
   try {
     await window.kernel.call('app.add', { id: entry.id, version: entry.version })
     confirmAddId.value = null
+    await refreshAll()
+    await appsStore.refresh()
+    await refreshRegistry()
+  } catch (err) {
+    registryError.value = (err as Error).message
+  } finally {
+    registryBusy.value = null
+  }
+}
+
+async function shareWithWorkspace(entry: RegistryEntry) {
+  registryBusy.value = `share:${entry.id}`
+  registryError.value = null
+  try {
+    await window.kernel.call('app.share', { id: entry.id, version: entry.version })
+    confirmShareId.value = null
     await refreshAll()
     await appsStore.refresh()
     await refreshRegistry()
@@ -456,16 +656,19 @@ async function refreshAll() {
   loading.value = true
   error.value = null
   try {
-    const [pkgResult, capResult] = await Promise.all([
+    const [pkgResult, capResult, templateResult] = await Promise.all([
       window.kernel.call('package.list'),
       window.kernel.call('package.capabilities.list'),
+      window.kernel.call('app.templateList', {}),
       appsStore.refresh(),
       appsStore.fetchUpdates(),
     ])
     const pkgList = pkgResult as { packages: PackageSummary[]; diagnostics: PackageDiagnostic[] }
+    const templateList = templateResult as { templates?: AppTemplateSummary[] }
     packages.value = pkgList.packages ?? []
     diagnostics.value = pkgList.diagnostics ?? []
     capabilities.value = (capResult as { packages: PackageCapabilities[] }).packages ?? []
+    appTemplates.value = templateList.templates ?? []
     refreshRegistry().catch(() => {})
   } catch (err) {
     error.value = (err as Error).message
@@ -478,11 +681,13 @@ async function refreshAll() {
 
 function onAppsChanged() { appsStore.refresh() }
 function onPackagesChanged() { refreshAll() }
+function onAccountChanged() { refreshAll() }
 function onWorkspaceChanged() {
   expandedId.value = null
   developerOpenIds.value = {}
   pendingEnableRow.value = null
   confirmAddId.value = null
+  confirmShareId.value = null
   refreshAll()
 }
 function onAppsUpdates(payload: unknown) {
@@ -500,6 +705,7 @@ onMounted(() => {
   refreshAll()
   window.kernel.on('apps:changed', onAppsChanged)
   window.kernel.on('packages:changed', onPackagesChanged)
+  window.kernel.on('account:changed', onAccountChanged)
   window.kernel.on('workspace:changed', onWorkspaceChanged)
   window.kernel.on('apps:updates', onAppsUpdates)
 })
@@ -507,6 +713,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.kernel.off('apps:changed', onAppsChanged)
   window.kernel.off('packages:changed', onPackagesChanged)
+  window.kernel.off('account:changed', onAccountChanged)
   window.kernel.off('workspace:changed', onWorkspaceChanged)
   window.kernel.off('apps:updates', onAppsUpdates)
 })
@@ -538,10 +745,21 @@ watch(inWorkspaceRows, (rows) => {
           class="w-[120px] min-w-0 border-0 bg-transparent text-[11px] text-ink outline-none placeholder:text-ink-4"
         />
       </label>
-      <span class="font-mono text-[9px] text-ink-3">{{ filteredInWorkspace.length }} installed</span>
+      <span class="font-mono text-[9px] text-ink-3">{{ mySidebarRows.length }} in sidebar</span>
       <button
         type="button"
-        class="ml-auto flex h-[22px] w-[22px] items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-50"
+        data-testid="app-new-template-open"
+        class="ml-auto flex h-[22px] items-center gap-1 rounded-[5px] border border-rule bg-chrome-high px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-50"
+        :disabled="!appTemplates.length"
+        title="Create workspace app"
+        @click="openTemplateDialog"
+      >
+        <IconPlus :size="12" :stroke-width="2" />
+        <span>New app</span>
+      </button>
+      <button
+        type="button"
+        class="flex h-[22px] w-[22px] items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-50"
         :disabled="loading"
         title="Refresh"
         @click="refreshAll"
@@ -560,12 +778,15 @@ watch(inWorkspaceRows, (rows) => {
     <div v-if="registryError" class="mb-2 rounded-[6px] border border-rem/30 px-2.5 py-2 text-[11.5px] text-rem">{{ registryError }}</div>
 
     <div class="flex-1 overflow-y-auto pr-1">
-      <section class="mb-4">
-        <h2 :class="sectionTitleClass">Installed</h2>
+      <section v-for="section in appSections" :key="section.id" class="mb-4">
+        <div class="mb-1.5 flex items-center justify-between">
+          <h2 class="text-[9px] font-semibold uppercase tracking-[1.8px] text-ink-3">{{ section.label }}</h2>
+          <span class="font-mono text-[9px] text-ink-4">{{ section.count }}</span>
+        </div>
         <div class="overflow-hidden rounded-[8px] border border-rule-light bg-surface">
           <div
-            v-for="row in filteredInWorkspace"
-            :key="row.id"
+            v-for="row in section.rows"
+            :key="`${section.id}-${row.id}`"
             class="apps-row-wrapper border-b border-rule-light last:border-b-0"
             :class="isExpanded(row.id) ? 'bg-chrome-high' : ''"
           >
@@ -603,7 +824,7 @@ watch(inWorkspaceRows, (rows) => {
                 <MimToggle
                   :data-testid="`apps-toggle-${row.id}`"
                   :model-value="row.enabled"
-                  :disabled="actionBusy === `toggle:${row.id}`"
+                  :disabled="actionBusy === `toggle:${row.id}` || row.needsInstall"
                   :aria-label="`${row.label} ${row.enabled ? 'enabled' : 'disabled'}`"
                   @update:model-value="toggleEnabled(row)"
                 />
@@ -611,13 +832,13 @@ watch(inWorkspaceRows, (rows) => {
             </div>
 
             <div v-if="isExpanded(row.id)" class="apps-detail flex flex-col gap-2 px-3 pb-3 pt-1">
-              <div v-if="row.needsInstall && row.app?.source" class="flex items-center justify-between gap-2 rounded-[6px] bg-chrome-mid px-2.5 py-1.5 text-[11px] text-ink-2" :data-testid="`install-from-source-${row.id}`">
-                <span>Install from declared source</span>
+              <div v-if="row.needsInstall" class="flex items-center justify-between gap-2 rounded-[6px] bg-chrome-mid px-2.5 py-1.5 text-[11px] text-ink-2" :data-testid="`install-from-source-${row.id}`">
+                <span>Install before adding to your sidebar</span>
                 <button
                   type="button"
                   :class="primaryButtonClass"
                   :disabled="actionBusy === `install-source:${row.id}`"
-                  @click="installFromSource(row.id, row.app!.source!, row.app?.path)"
+                  @click="installWorkspaceApp(row)"
                 >
                   Install
                 </button>
@@ -712,7 +933,7 @@ watch(inWorkspaceRows, (rows) => {
               </div>
 
               <div class="flex flex-col gap-1">
-                <div v-if="confirmRemoveId === row.id" class="flex items-center justify-between gap-2 rounded-[6px] bg-rem/5 px-2.5 py-1.5 text-[11px] text-ink-2">
+                <div v-if="row.app?.layer === 'workspace' && confirmRemoveId === row.id" class="flex items-center justify-between gap-2 rounded-[6px] bg-rem/5 px-2.5 py-1.5 text-[11px] text-ink-2">
                   <span>Remove {{ row.label }} from this workspace?</span>
                   <div class="flex gap-1">
                     <button type="button" :class="smallButtonClass" @click="confirmRemoveId = null">Cancel</button>
@@ -728,7 +949,7 @@ watch(inWorkspaceRows, (rows) => {
                   </div>
                 </div>
                 <button
-                  v-else
+                  v-else-if="row.app?.layer === 'workspace'"
                   type="button"
                   :class="dangerButtonClass"
                   :data-testid="`app-remove-${row.id}`"
@@ -736,12 +957,22 @@ watch(inWorkspaceRows, (rows) => {
                 >
                   Remove from workspace
                 </button>
+                <button
+                  v-else-if="row.enabled"
+                  type="button"
+                  :class="dangerButtonClass"
+                  :data-testid="`app-remove-sidebar-${row.id}`"
+                  :disabled="actionBusy === `toggle:${row.id}`"
+                  @click="toggleEnabled(row)"
+                >
+                  Remove from sidebar
+                </button>
               </div>
             </div>
           </div>
 
-          <div v-if="!filteredInWorkspace.length" class="px-3 py-4 text-center text-[10.5px] text-ink-4">
-            {{ filterText ? 'No matches' : 'No installed apps' }}
+          <div v-if="!section.rows.length" class="px-3 py-4 text-center text-[10.5px] text-ink-4">
+            {{ section.empty }}
           </div>
         </div>
       </section>
@@ -840,7 +1071,17 @@ watch(inWorkspaceRows, (rows) => {
                   :disabled="registryBusy === `add:${entry.id}`"
                   @click="toggleAddConfirm(entry)"
                 >
-                  Add
+                  Add to sidebar
+                </button>
+                <button
+                  v-if="registryEntryAction(entry) === 'add'"
+                  type="button"
+                  :data-testid="`registry-share-${entry.id}`"
+                  :class="smallButtonClass"
+                  :disabled="registryBusy === `share:${entry.id}`"
+                  @click="toggleShareConfirm(entry)"
+                >
+                  Share
                 </button>
                 <button
                   v-else-if="registryEntryAction(entry) === 'update'"
@@ -857,7 +1098,7 @@ watch(inWorkspaceRows, (rows) => {
                   :data-testid="`registry-added-${entry.id}`"
                   class="text-[10px] font-medium text-add"
                 >
-                  In workspace
+                  In sidebar
                 </span>
               </div>
             </div>
@@ -883,13 +1124,82 @@ watch(inWorkspaceRows, (rows) => {
       :open="confirmingAddEntry !== null"
       :app-name="confirmingAddEntry?.name ?? ''"
       :permissions="confirmingAddEntry?.permissions ?? {}"
-      confirm-label="Add"
+      confirm-label="Add to sidebar"
       :test-id="confirmingAddEntry ? `registry-add-card-${confirmingAddEntry.id}` : undefined"
       :confirm-test-id="confirmingAddEntry ? `registry-add-confirm-${confirmingAddEntry.id}` : undefined"
-      @confirm="confirmingAddEntry && addToWorkspace(confirmingAddEntry)"
+      @confirm="confirmingAddEntry && addToSidebar(confirmingAddEntry)"
       @cancel="confirmAddId = null"
       @update:open="onAddDialogOpenChange"
     />
+
+    <PermissionConfirmDialog
+      :open="confirmingShareEntry !== null"
+      :app-name="confirmingShareEntry?.name ?? ''"
+      :permissions="confirmingShareEntry?.permissions ?? {}"
+      confirm-label="Share with workspace"
+      :test-id="confirmingShareEntry ? `registry-share-card-${confirmingShareEntry.id}` : undefined"
+      :confirm-test-id="confirmingShareEntry ? `registry-share-confirm-${confirmingShareEntry.id}` : undefined"
+      @confirm="confirmingShareEntry && shareWithWorkspace(confirmingShareEntry)"
+      @cancel="confirmShareId = null"
+      @update:open="onShareDialogOpenChange"
+    />
+
+    <MimDialog :open="templateDialogOpen" title="Create workspace app" size="md" @close="clearTemplateDialog">
+      <form class="flex flex-col gap-3 p-4" @submit.prevent="createTemplateApp">
+        <p class="font-sans text-[11px] leading-4 text-ink-3">
+          Choose a template, then Mim creates and validates a new app folder in this workspace.
+        </p>
+        <label class="flex flex-col gap-1">
+          <span class="font-sans text-[11px] font-semibold text-ink-2">Select template</span>
+          <MimSelect
+            :model-value="newAppTemplateId"
+            :options="appTemplateOptions"
+            tone="chrome"
+            :trigger-attrs="{ 'data-testid': 'app-new-template' }"
+            @update:model-value="selectAppTemplate"
+          />
+          <span v-if="selectedAppTemplate" class="font-sans text-[11px] leading-4 text-ink-3">
+            {{ selectedAppTemplate.summary }}
+          </span>
+        </label>
+        <label class="flex flex-col gap-1">
+          <span class="font-sans text-[11px] font-semibold text-ink-2">App folder ID</span>
+          <input
+            v-model="newAppId"
+            data-testid="app-new-id"
+            class="h-8 rounded-[6px] border border-rule-light bg-chrome-mid px-2 font-mono text-[11px] text-ink outline-none focus:border-accent"
+            placeholder="app-id"
+          />
+          <span class="font-sans text-[10.5px] leading-4 text-ink-4">Lowercase letters, numbers, hyphens, and underscores.</span>
+        </label>
+        <label class="flex flex-col gap-1">
+          <span class="font-sans text-[11px] font-semibold text-ink-2">Display name</span>
+          <input
+            v-model="newAppName"
+            data-testid="app-new-name"
+            class="h-8 rounded-[6px] border border-rule-light bg-chrome-mid px-2 font-sans text-[12px] text-ink outline-none focus:border-accent"
+            placeholder="App name"
+          />
+        </label>
+        <div v-if="templateDialogError" data-testid="app-template-error" class="rounded-[6px] border border-rem/30 px-3 py-2 font-sans text-[12px] text-rem">
+          {{ templateDialogError }}
+        </div>
+        <div class="flex justify-end gap-2 pt-1">
+          <button type="button" class="h-8 rounded-[6px] px-3 font-sans text-[12px] text-ink-2 hover:bg-chrome-mid" @click="clearTemplateDialog">
+            Cancel
+          </button>
+          <button
+            type="submit"
+            data-testid="app-template-create"
+            class="flex h-8 items-center gap-1.5 rounded-[6px] bg-accent px-3 font-sans text-[12px] font-semibold text-accent-ink hover:bg-accent-2 disabled:opacity-50"
+            :disabled="!canCreateTemplateApp || actionBusy === 'create-template-app'"
+          >
+            <IconPlus :size="14" :stroke-width="2" />
+            <span>Create app</span>
+          </button>
+        </div>
+      </form>
+    </MimDialog>
 
     <MimDialog :open="sourceDialogOpen" title="Add app source" size="md" @close="clearSourceDialog">
       <div class="flex flex-col gap-3 p-4">

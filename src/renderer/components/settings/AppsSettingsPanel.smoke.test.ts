@@ -5,6 +5,7 @@ import { createApp, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import AppsSettingsPanel from './AppsSettingsPanel.vue'
 import { useAppsStore } from '../../stores/coreApps.js'
+import { useToastStore } from '../../stores/toasts.js'
 
 async function flushUi() {
   await Promise.resolve()
@@ -19,6 +20,8 @@ describe('AppsSettingsPanel smoke — remove, updates, included apps', () => {
   let call: ReturnType<typeof vi.fn>
   let appsState: Array<Record<string, unknown>>
   let updatesData: Array<Record<string, unknown>>
+  let createdPackages: Array<Record<string, unknown>>
+  let revealInFinder: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     root = document.createElement('div')
@@ -30,9 +33,43 @@ describe('AppsSettingsPanel smoke — remove, updates, included apps', () => {
       { id: 'slides', enabled: true, layer: 'workspace', installed: true, installedVersions: ['1.0.0'], source: 'workspace', shadowed: false, needsTrust: false, needsInstall: false, folderPresent: false },
     ]
     updatesData = []
+    createdPackages = []
+    revealInFinder = vi.fn(async () => undefined)
 
     call = vi.fn(async (tool: string, params?: Record<string, unknown>) => {
       if (tool === 'app.status') return { apps: appsState }
+      if (tool === 'app.templateList') {
+        return {
+          templates: [
+            { id: 'word-count', label: 'Word Count', summary: 'Headless named tool.', defaultId: 'word-count', defaultName: 'Word Count' },
+            { id: 'summarize', label: 'Summarize', summary: 'AI job UI.', defaultId: 'summarize', defaultName: 'Summarize' },
+          ],
+        }
+      }
+      if (tool === 'app.templateContent') {
+        return {
+          id: params?.id,
+          name: params?.name,
+          description: 'Count words from chat.',
+          backend: 'export const tools = {}',
+          skills: [{ name: params?.id, content: '---\nname: word-count\n---\n' }],
+          readme: '# Word Count\n',
+        }
+      }
+      if (tool === 'package.create') {
+        createdPackages.push({
+          id: params?.id,
+          name: params?.name,
+          enabled: true,
+          source: 'workspace',
+          views: [],
+          permissions: {},
+        })
+        appsState.push({ id: params?.id, enabled: true, layer: 'workspace', installed: true, installedVersions: ['0.1.0'], source: 'workspace', shadowed: false, needsTrust: false, needsInstall: false, folderPresent: true })
+        return { created: params?.id, path: `/workspace/packages/${params?.id}` }
+      }
+      if (tool === 'package.validate') return { id: params?.id, valid: true, errors: [], warnings: [] }
+      if (tool === 'package.reload') return { reloaded: params?.id, packages: [] }
       if (tool === 'app.enable') return { ok: true, id: params?.id }
       if (tool === 'app.disable') return { ok: true, id: params?.id }
       if (tool === 'app.trust') return { ok: true }
@@ -43,6 +80,7 @@ describe('AppsSettingsPanel smoke — remove, updates, included apps', () => {
           packages: [
             { id: 'board', name: 'Board', enabled: true, source: 'global', views: [], permissions: {} },
             { id: 'slides', name: 'Slides', enabled: true, source: 'workspace', views: [{ id: 'main', label: 'Slides', src: './ui/index.html', role: 'work' }], permissions: { workspace: { read: true } } },
+            ...createdPackages,
           ],
           diagnostics: [],
         }
@@ -55,7 +93,7 @@ describe('AppsSettingsPanel smoke — remove, updates, included apps', () => {
     })
     Object.defineProperty(window, 'kernel', {
       configurable: true,
-      value: { call, on: vi.fn(), off: vi.fn(), clearTimeout: vi.fn() },
+      value: { call, revealInFinder, on: vi.fn(), off: vi.fn(), clearTimeout: vi.fn() },
     })
     app = null
   })
@@ -108,7 +146,7 @@ describe('AppsSettingsPanel smoke — remove, updates, included apps', () => {
 
   // ---- Included apps ----
 
-  it('renders current built-in rows with remove action', async () => {
+  it('renders current built-in rows with remove-from-sidebar action', async () => {
     mount()
     await flushUi()
 
@@ -116,7 +154,7 @@ describe('AppsSettingsPanel smoke — remove, updates, included apps', () => {
     root.querySelector<HTMLButtonElement>('[data-testid="apps-row-board"]')!.click()
     await flushUi()
 
-    expect(root.querySelector('[data-testid="app-remove-board"]')).toBeTruthy()
+    expect(root.querySelector('[data-testid="app-remove-sidebar-board"]')).toBeTruthy()
     expect(root.textContent).not.toContain('Built in')
   })
 
@@ -141,6 +179,44 @@ describe('AppsSettingsPanel smoke — remove, updates, included apps', () => {
 
     expect(root.querySelector('[data-testid="app-update-slides"]')).toBeNull()
     expect(root.querySelector('[data-testid="app-update-board"]')).toBeNull()
+  })
+
+  it('creates a starter app, validates it, then reloads packages', async () => {
+    mount()
+    await flushUi()
+
+    const openButton = root.querySelector<HTMLButtonElement>('[data-testid="app-new-template-open"]')
+    expect(openButton).toBeTruthy()
+    openButton!.click()
+    await flushUi()
+
+    expect(document.body.querySelector<HTMLInputElement>('[data-testid="app-new-id"]')?.value).toBe('word-count')
+    expect(document.body.querySelector<HTMLInputElement>('[data-testid="app-new-name"]')?.value).toBe('Word Count')
+
+    document.body.querySelector<HTMLButtonElement>('[data-testid="app-template-create"]')!.click()
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('app.templateContent', {
+      templateId: 'word-count',
+      id: 'word-count',
+      name: 'Word Count',
+    })
+    expect(call).toHaveBeenCalledWith('package.create', expect.objectContaining({
+      id: 'word-count',
+      name: 'Word Count',
+      backend: expect.stringContaining('tools'),
+    }))
+    expect(call).toHaveBeenCalledWith('package.validate', { id: 'word-count' })
+    expect(call).toHaveBeenCalledWith('package.reload', { id: 'word-count' })
+    expect(revealInFinder).toHaveBeenCalledWith('/workspace/packages/word-count')
+    const tools = call.mock.calls.map(callArgs => callArgs[0])
+    expect(tools.indexOf('package.validate')).toBeLessThan(tools.indexOf('package.reload'))
+    const toasts = useToastStore()
+    expect(toasts.list.at(-1)).toMatchObject({
+      kind: 'info',
+      message: 'App created, showing folder contents',
+    })
+    expect(root.querySelector('[data-testid="apps-row-word-count"]')).toBeTruthy()
   })
 
   // ---- Store remove() ----

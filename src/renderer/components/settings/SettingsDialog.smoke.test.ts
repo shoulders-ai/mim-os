@@ -164,7 +164,7 @@ describe('SettingsDialog model defaults', () => {
     await flushUi()
 
     expect(document.body.querySelector('[data-testid="settings-dialog-layout"]')).toBeTruthy()
-    expect(document.body.textContent).toContain('Installed')
+    expect(document.body.textContent).toContain('My Sidebar')
   })
 
   it('renders the Agents panel inline when the agents section is active', async () => {

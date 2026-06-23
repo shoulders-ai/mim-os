@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useAppsStore } from '../stores/coreApps.js'
 
-// Committed-but-missing apps (mim.yaml names them, this machine lacks them)
+// Shared-but-missing apps (mim.yaml names them, this machine lacks them)
 // surface as one workspace-level moment instead of rows buried in settings.
 // Dismissible per session; App.vue re-mounts on workspace change.
 const appsStore = useAppsStore()
@@ -22,8 +22,8 @@ async function addAll() {
   try {
     for (const app of missingApps.value) {
       await window.kernel.call('package.install', {
-        repo: app.source,
-        ...(app.path ? { path: app.path } : {}),
+        id: app.id,
+        ...(app.version ? { version: app.version } : {}),
       })
     }
     await appsStore.refresh()
@@ -46,7 +46,7 @@ async function addAll() {
         This workspace uses {{ appNames }}{{ missingApps.length === 1 ? ', which is' : ', which are' }} not installed on this machine.
       </p>
       <p class="mt-0.5 text-ink-3">
-        Adding installs {{ missingApps.length === 1 ? 'it' : 'them' }} from the source declared in mim.yaml.
+        Installing uses the app registry or source pinned for this workspace.
       </p>
       <p v-if="error" class="mt-0.5 text-rem">{{ error }}</p>
     </div>

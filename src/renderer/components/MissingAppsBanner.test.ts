@@ -61,6 +61,7 @@ describe('MissingAppsBanner', () => {
       installed: false,
       installedVersions: [],
       source,
+      version: '1.2.0',
       ...(path ? { path } : {}),
       shadowed: false,
       needsTrust: false,
@@ -90,7 +91,7 @@ describe('MissingAppsBanner', () => {
     expect(banner!.textContent).toContain('This workspace uses github-monitor, slides')
   })
 
-  it('installs every missing app from its declared source on Add all', async () => {
+  it('installs every missing app by id and version on Add all', async () => {
     appsState = [
       missingApp('github-monitor', 'https://github.com/shoulders-ai/mim-apps', 'packages/github-monitor'),
       missingApp('slides', 'https://github.com/shoulders-ai/mim-apps', 'packages/slides'),
@@ -100,8 +101,8 @@ describe('MissingAppsBanner', () => {
     root.querySelector<HTMLButtonElement>('[data-testid="missing-apps-add-all"]')!.click()
     await flushUi()
 
-    expect(call).toHaveBeenCalledWith('package.install', { repo: 'https://github.com/shoulders-ai/mim-apps', path: 'packages/github-monitor' })
-    expect(call).toHaveBeenCalledWith('package.install', { repo: 'https://github.com/shoulders-ai/mim-apps', path: 'packages/slides' })
+    expect(call).toHaveBeenCalledWith('package.install', { id: 'github-monitor', version: '1.2.0' })
+    expect(call).toHaveBeenCalledWith('package.install', { id: 'slides', version: '1.2.0' })
   })
 
   it('skips apps without a declared source', async () => {

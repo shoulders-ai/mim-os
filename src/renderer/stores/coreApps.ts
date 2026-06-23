@@ -21,6 +21,7 @@ export interface ResolvedApp {
   installed: boolean
   source?: string
   path?: string
+  version?: string
   shadowed: boolean
   needsTrust: boolean
   needsInstall: boolean
@@ -37,6 +38,7 @@ interface AppStatusEntry {
   installedVersions: string[]
   source?: string
   path?: string
+  version?: string
   shadowed: boolean
   needsTrust: boolean
   needsInstall: boolean
@@ -51,12 +53,13 @@ function toResolved(entry: AppStatusEntry): ResolvedApp {
     installed: entry.installed,
     source: entry.source,
     path: entry.path,
+    version: entry.version,
     shadowed: entry.shadowed,
     needsTrust: entry.needsTrust,
     needsInstall: entry.needsInstall,
     // Visibility for launchers: enabled apps are visible; disabled are
     // hidden. (The launcher filters on this flag, settings panels show all.)
-    visible: entry.enabled,
+    visible: entry.enabled && entry.installed && !entry.needsTrust && !entry.needsInstall,
     folderPresent: entry.folderPresent,
   }
 }
