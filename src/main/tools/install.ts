@@ -165,7 +165,7 @@ export function registerInstallTools(
         mkdirSync(extractDir, { recursive: true })
         execFileSync('tar', ['xzf', tmpFile, '-C', extractDir])
 
-        packageRoot = extractDir
+        packageRoot = resolveArchivePackageRoot(extractDir)
         resolvedCommit = undefined
         provenanceSource = archiveUrl
         provenancePath = null
@@ -352,12 +352,33 @@ export function registerInstallTools(
 
   // ---- app.add ----
 
-  // The one-action add flow: install if needed, write the committed mim.yaml
-  // pin, enable through the standard app.enable path. The UI shows the
-  // permission summary and gets a single confirm before calling this.
+  async function ensureInstalled(id: string, entry: LookupResult): Promise<void> {
+    const installDir = join(deps.globalDir, id, entry.version)
+    const expectedSource = entry.repo ?? entry.archive
+    const provenanceCheck = expectedSource
+      ? provenanceSourceChanged(installDir, expectedSource)
+      : false
+    if (!existsSync(join(installDir, 'package.json')) || provenanceCheck) {
+      await tools.call('package.install', { id, version: entry.version }, { actor: 'system' })
+    } else {
+      await deps.packages.rescan()
+    }
+    if (!deps.packages.get(id)) {
+      throw new Error(`Installed app "${id}" was not loaded after install`)
+    }
+  }
+
+  function restoreLocalOverride(id: string, previous: boolean | null): void {
+    if (previous === null) deps.enablement.clearOverride(id)
+    else deps.enablement.setEnabled(id, previous)
+  }
+
+  // The personal add flow: install if needed, then add the app to this user's
+  // sidebar in the current workspace. Sharing with teammates is the separate
+  // app.share action below.
   tools.register({
     name: 'app.add',
-    description: 'Add a registry app to this workspace: install if needed, write the committed mim.yaml source pin, and enable it.',
+    description: 'Add a registry app to my sidebar in this workspace: install if needed, then enable locally.',
     execute: async (params) => {
       const id = typeof params.id === 'string' ? params.id : undefined
       const version = typeof params.version === 'string' ? params.version : undefined
@@ -370,37 +391,51 @@ export function registerInstallTools(
       const workspacePath = tools.getWorkspacePath()
       if (!workspacePath) throw new Error('No workspace open')
 
-      // Install when this exact version is not present, or when the
-      // installed copy's provenance source doesn't match the registry
-      // (e.g. after a repo rename).
-      const installDir = join(deps.globalDir, id, entry.version)
-      const provenanceCheck = entry.repo
-        ? provenanceSourceChanged(installDir, entry.repo)
-        : entry.archive
-          ? provenanceSourceChanged(installDir, entry.archive)
-          : false
-      if (!existsSync(join(installDir, 'package.json')) || provenanceCheck) {
-        await tools.call('package.install', { id, version: entry.version }, { actor: 'system' })
-      }
-
-      const isLocal = entry.registryKind === 'local'
-      const isArchiveEntry = !!entry.archive && !!entry.hash
-      if (isLocal || isArchiveEntry) {
-        // Local and archive entries: enable on the local layer only —
-        // file:// pins and auth-gated archive tokens don't travel to teammates.
+      const previousOverride = deps.enablement.localOverride(id)
+      await ensureInstalled(id, entry)
+      try {
         await tools.call('app.enable', { id, layer: 'local' }, { actor: 'system' })
-        return { added: id, version: entry.version, local: true }
+      } catch (err) {
+        restoreLocalOverride(id, previousOverride)
+        throw err
       }
 
-      if (!entry.repo) throw new Error(`Git registry entry for app "${id}" is missing repo`)
+      return { added: id, version: entry.version, local: true }
+    },
+  })
+
+  // ---- app.share ----
+
+  tools.register({
+    name: 'app.share',
+    description: "Share a registry app with this workspace without enabling it in anyone's sidebar.",
+    execute: async (params) => {
+      const id = typeof params.id === 'string' ? params.id : undefined
+      const version = typeof params.version === 'string' ? params.version : undefined
+      if (!id) throw new Error('Missing required parameter: id')
+      if (!PACKAGE_ID_PATTERN.test(id)) throw new Error(`Invalid app id: ${id}`)
+
+      const entry = await deps.lookupRegistryEntry(id, version)
+      if (!entry) throw new Error(`App "${id}" not found in registry`)
+      if (entry.registryKind === 'local') {
+        throw new Error(`Local app sources cannot be shared with the workspace`)
+      }
+
+      const workspacePath = tools.getWorkspacePath()
+      if (!workspacePath) throw new Error('No workspace open')
+
+      await ensureInstalled(id, entry)
+
+      const sharedSource = entry.repo ?? entry.registryLocation
+      if (!sharedSource) throw new Error(`Registry entry for app "${id}" has no shareable source`)
       writeAppPin(workspacePath, id, {
-        source: entry.repo,
+        source: sharedSource,
         path: entry.path,
         version: entry.version,
       })
-      await tools.call('app.enable', { id, layer: 'workspace' }, { actor: 'system' })
+      await deps.packages.rescan()
 
-      return { added: id, version: entry.version }
+      return { shared: id, version: entry.version }
     },
   })
 
@@ -560,6 +595,23 @@ function provenanceSourceChanged(installDir: string, expectedSource: string): bo
   } catch {
     return false
   }
+}
+
+function resolveArchivePackageRoot(extractDir: string): string {
+  if (existsSync(join(extractDir, 'package.json'))) return extractDir
+
+  const childDirs = readdirSync(extractDir, { withFileTypes: true })
+    .filter(entry => entry.isDirectory())
+    .map(entry => join(extractDir, entry.name))
+
+  const packageDirs = childDirs.filter(dir => existsSync(join(dir, 'package.json')))
+  if (packageDirs.length === 1) return packageDirs[0]
+
+  throw new Error(
+    packageDirs.length === 0
+      ? 'Archive does not contain a package.json at its root or inside one top-level folder'
+      : 'Archive contains multiple top-level package.json files',
+  )
 }
 
 /**

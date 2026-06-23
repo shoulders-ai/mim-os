@@ -616,7 +616,7 @@ async function boot(): Promise<void> {
         for (const id of Object.keys(config.apps ?? {})) {
           if (apps.has(id)) continue
           const committed = readCommittedApp(ws, id)
-          if (committed) apps.set(id, { id, enabled: committed.enabled })
+          if (committed) apps.set(id, { id, enabled: false })
         }
       } catch { /* best-effort */ }
     }

@@ -258,10 +258,10 @@ describe('gatherAgentContext', () => {
     expect(data.workspace.initialized).toBe(false)
   })
 
-  it('records board and knowledge enablement without scraping app-owned data folders', () => {
+  it('records shared board and knowledge entries without treating them as enabled or scraping app-owned data folders', () => {
     writeFileSync(join(dir, 'mim.yaml'), 'name: X\napps:\n  board: true\n  knowledge: false\n')
     const data = gatherAgentContext(dir, { now: () => NOW_MS, readRecentChanges: () => [] })
-    expect(data.apps.find(a => a.id === 'board')?.enabled).toBe(true)
+    expect(data.apps.find(a => a.id === 'board')?.enabled).toBe(false)
     expect(data.apps.find(a => a.id === 'knowledge')?.enabled).toBe(false)
     expect('issues' in data).toBe(false)
     expect('knowledge' in data).toBe(false)
@@ -368,10 +368,10 @@ describe('gatherAgentContext', () => {
     expect('knowledge' in data).toBe(false)
   })
 
-  it('falls back to committed mim.yaml apps when resolveApps is not injected', () => {
+  it('falls back to committed mim.yaml apps as shared but not enabled when resolveApps is not injected', () => {
     writeFileSync(join(dir, 'mim.yaml'), 'name: X\napps:\n  board: true\n  knowledge: false\n')
     const data = gatherAgentContext(dir, { now: () => NOW_MS, readRecentChanges: () => [] })
-    expect(data.apps.find(a => a.id === 'board')?.enabled).toBe(true)
+    expect(data.apps.find(a => a.id === 'board')?.enabled).toBe(false)
     expect(data.apps.find(a => a.id === 'knowledge')?.enabled).toBe(false)
   })
 })

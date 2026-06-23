@@ -99,52 +99,31 @@ describe('app enablement', () => {
     })
   })
 
-  describe('committed layer (mim.yaml)', () => {
-    it('a committed entry is authoritative for benign workspace apps — false beats local enabled', () => {
+  describe('shared workspace declarations (mim.yaml)', () => {
+    it('do not disable a personal sidebar enablement', () => {
       const store = makeStore()
       store.setEnabled('hello', true)
       writeMimYaml({ hello: false })
-      expect(store.isEnabled(pkg('hello', 'workspace'))).toBe(false)
+      expect(store.isEnabled(pkg('hello', 'workspace'))).toBe(true)
     })
 
-    it('a committed entry is authoritative for benign workspace apps — true beats local disabled', () => {
+    it('do not enable an app in anyone sidebar by themselves', () => {
+      const store = makeStore()
+      writeMimYaml({ board: true })
+      expect(store.isEnabled(pkg('board', 'workspace'))).toBe(false)
+    })
+
+    it('leave local disablement disabled', () => {
       const store = makeStore()
       store.setEnabled('board', false)
       writeMimYaml({ board: true })
-      expect(store.isEnabled(pkg('board', 'workspace'))).toBe(true)
+      expect(store.isEnabled(pkg('board', 'workspace'))).toBe(false)
     })
 
-    it('a committed entry is authoritative for provenance-verified global apps', () => {
-      const dir = join(pkgRoot, 'global-pkg')
-      mkdirSync(dir, { recursive: true })
-      writeFileSync(join(dir, '.mim-install.json'), JSON.stringify({
-        source: 'https://github.com/example-org/test.git',
-        ref: 'v1.0.0',
-        commit: 'a'.repeat(40),
-        installedAt: 1718000000000,
-      }))
-      const store = makeStore()
-      store.setEnabled('global-pkg', false)
-      writeMimYaml({ 'global-pkg': true })
-      expect(store.isEnabled(pkg('global-pkg', 'global', { dir }))).toBe(true)
-
-      writeMimYaml({ 'global-pkg': false })
-      store.setEnabled('global-pkg', true)
-      expect(store.isEnabled(pkg('global-pkg', 'global', { dir }))).toBe(false)
-    })
-
-    it('reads mim.yaml fresh on every check', () => {
-      const store = makeStore()
-      const hello = pkg('hello', 'workspace')
-      writeMimYaml({ hello: false })
-      expect(store.isEnabled(hello)).toBe(false)
-      writeMimYaml({ hello: true })
-      expect(store.isEnabled(hello)).toBe(true)
-    })
-
-    it('committed entries activate workspace apps with no backend and no permissions', () => {
+    it('allow a benign shared workspace app to be added locally', () => {
       const store = makeStore()
       writeMimYaml({ vendored: true })
+      store.setEnabled('vendored', true)
       expect(store.isEnabled(pkg('vendored', 'workspace'))).toBe(true)
     })
   })
@@ -171,6 +150,7 @@ describe('app enablement', () => {
     it('empty permission shapes do not require trust', () => {
       const store = makeStore()
       writeMimYaml({ benign: true })
+      store.setEnabled('benign', true)
       const p = pkg('benign', 'workspace', {
         permissions: { workspace: { read: false, write: false }, http: [], secrets: [] },
       })
@@ -197,7 +177,7 @@ describe('app enablement', () => {
       expect(store.isEnabled(p)).toBe(true)
     })
 
-    it('ackTrust activates the committed entry and clears needsTrust', () => {
+    it('ackTrust clears needsTrust but does not add the app to the sidebar', () => {
       const dir = scaffoldPackageDir('vendored')
       const store = makeStore()
       writeMimYaml({ vendored: true })
@@ -207,7 +187,7 @@ describe('app enablement', () => {
 
       expect(store.isTrusted(p)).toBe(true)
       expect(store.needsTrust(p)).toBe(false)
-      expect(store.isEnabled(p)).toBe(true)
+      expect(store.isEnabled(p)).toBe(false)
     })
 
     it('an ack survives app tree changes', () => {
@@ -215,6 +195,7 @@ describe('app enablement', () => {
       const store = makeStore()
       writeMimYaml({ vendored: true })
       const p = pkg('vendored', 'workspace', { backend: './backend/index.mjs', dir })
+      store.setEnabled('vendored', true)
       store.ackTrust(p)
       expect(store.isEnabled(p)).toBe(true)
 
@@ -367,7 +348,7 @@ describe('app enablement', () => {
     })
   })
 
-  describe('provenance-verified global packages', () => {
+  describe('global package enablement', () => {
     function scaffoldGlobalPackage(id: string, version = '1.2.0'): string {
       const dir = join(pkgRoot, id, version)
       mkdirSync(dir, { recursive: true })
@@ -385,18 +366,18 @@ describe('app enablement', () => {
       writeFileSync(join(dir, '.mim-install.json'), JSON.stringify(provenance))
     }
 
-    it('committed entry is authoritative for a global package WITH valid provenance', () => {
+    it('is personal even when a committed shared pin exists', () => {
       const dir = scaffoldGlobalPackage('global-prov')
       writeProvenance(dir)
       const store = makeStore()
       writeMimYaml({ 'global-prov': true })
-      expect(store.isEnabled(pkg('global-prov', 'global', { dir }))).toBe(true)
-
-      writeMimYaml({ 'global-prov': false })
       expect(store.isEnabled(pkg('global-prov', 'global', { dir }))).toBe(false)
+
+      store.setEnabled('global-prov', true)
+      expect(store.isEnabled(pkg('global-prov', 'global', { dir }))).toBe(true)
     })
 
-    it('committed entry falls through to local for a global package WITHOUT provenance', () => {
+    it('does not depend on install provenance metadata', () => {
       const dir = scaffoldGlobalPackage('global-no-prov')
       const store = makeStore()
       writeMimYaml({ 'global-no-prov': true })
@@ -406,9 +387,9 @@ describe('app enablement', () => {
       expect(store.isEnabled(pkg('global-no-prov', 'global', { dir }))).toBe(true)
     })
 
-    it('committed entry with source/version checks provenance consistency', () => {
+    it('ignores committed source and version pins for personal enablement', () => {
       const dir = scaffoldGlobalPackage('global-pin')
-      writeProvenance(dir, { source: 'https://github.com/shoulders-ai/mim-test.git' })
+      writeProvenance(dir, { source: 'https://github.com/other/repo.git' })
       const store = makeStore()
       const yaml = [
         'name: test',
@@ -418,36 +399,10 @@ describe('app enablement', () => {
         '    version: "1.2.0"',
       ].join('\n') + '\n'
       writeFileSync(join(workspace, 'mim.yaml'), yaml)
+      expect(store.isEnabled(pkg('global-pin', 'global', { dir }))).toBe(false)
+
+      store.setEnabled('global-pin', true)
       expect(store.isEnabled(pkg('global-pin', 'global', { dir }))).toBe(true)
-    })
-
-    it('committed entry with mismatched source falls through to local layer', () => {
-      const dir = scaffoldGlobalPackage('global-mismatch')
-      writeProvenance(dir, { source: 'https://github.com/other/repo.git' })
-      const store = makeStore()
-      const yaml = [
-        'name: test',
-        'apps:',
-        '  global-mismatch:',
-        '    source: https://github.com/shoulders-ai/mim-test.git',
-        '    version: "1.2.0"',
-      ].join('\n') + '\n'
-      writeFileSync(join(workspace, 'mim.yaml'), yaml)
-      expect(store.isEnabled(pkg('global-mismatch', 'global', { dir }))).toBe(false)
-    })
-
-    it('committed entry is authoritative for benign workspace packages regardless of provenance', () => {
-      const store = makeStore()
-      writeMimYaml({ hello: true })
-      expect(store.isEnabled(pkg('hello', 'workspace'))).toBe(true)
-    })
-
-    it('provenance with malformed JSON is treated as absent', () => {
-      const dir = scaffoldGlobalPackage('global-bad-prov')
-      writeFileSync(join(dir, '.mim-install.json'), '{not valid json')
-      const store = makeStore()
-      writeMimYaml({ 'global-bad-prov': true })
-      expect(store.isEnabled(pkg('global-bad-prov', 'global', { dir }))).toBe(false)
     })
   })
 

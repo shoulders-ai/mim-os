@@ -1,7 +1,6 @@
 import { createHash } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
-import { readCommittedApp, type CommittedApp } from '@main/workspace/workspaceContract.js'
 import type { LoadedPackage } from '@main/packages/packages.js'
 import { atomicWriteJson } from '@main/atomicJson.js'
 
@@ -91,11 +90,6 @@ export function createPackageEnablementStore(options: PackageEnablementOptions):
     cachedState = clean
   }
 
-  function readCommitted(id: string) {
-    const workspace = options.getWorkspacePath()
-    return workspace ? readCommittedApp(workspace, id) : null
-  }
-
   function requiresTrust(pkg: EnablementPackage): boolean {
     if (pkg.source !== 'workspace') return false
     return pkg.manifest.backend !== undefined || hasEffectivePermissions(pkg)
@@ -107,23 +101,13 @@ export function createPackageEnablementStore(options: PackageEnablementOptions):
     return trusted.includes(`${id}@*`)
   }
 
-  function isCommittedAuthoritative(pkg: EnablementPackage, committed: CommittedApp): boolean {
-    if (pkg.source === 'global') return isProvenanceVerified(pkg.dir, committed)
-    return true
-  }
-
   return {
     isEnabled(pkg) {
       const id = pkg.manifest.id
       const trusted = !requiresTrust(pkg) || isTrusted(pkg)
-      const committed = readCommitted(id)
-      if (committed && trusted) {
-        const authoritative = isCommittedAuthoritative(pkg, committed)
-        if (authoritative) return committed.enabled
-      }
       const state = load()
-      if (state.disabled.includes(id)) return false
       if (state.enabled.includes(id)) return trusted
+      if (state.disabled.includes(id)) return false
       return false
     },
 
@@ -229,17 +213,4 @@ function isTrustEntryLike(value: unknown): value is string {
 function isRegistryTrustEntryLike(value: unknown): value is string {
   return typeof value === 'string'
     && /^[a-z0-9][a-z0-9_-]{0,59}@[0-9a-f]{12}$/.test(value)
-}
-
-function isProvenanceVerified(dir: string, committed: CommittedApp): boolean {
-  const provenancePath = join(dir, '.mim-install.json')
-  if (!existsSync(provenancePath)) return false
-  try {
-    const raw = JSON.parse(readFileSync(provenancePath, 'utf-8')) as Record<string, unknown>
-    if (typeof raw.source !== 'string') return false
-    if (committed.source && committed.source !== raw.source) return false
-    return true
-  } catch {
-    return false
-  }
 }

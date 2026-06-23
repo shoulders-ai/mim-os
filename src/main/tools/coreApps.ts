@@ -3,7 +3,7 @@ import { join } from 'path'
 import type { PackageEnablementStore } from '@main/packages/packageEnablement.js'
 import type { LoadedPackage, PackageLoader } from '@main/packages/packages.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
-import { parseMimYaml, readCommittedApp, removeApp, setAppEnabled } from '@main/workspace/workspaceContract.js'
+import { parseMimYaml, readCommittedApp, removeApp } from '@main/workspace/workspaceContract.js'
 
 export type AppLayer = 'workspace' | 'local' | 'default'
 
@@ -16,6 +16,8 @@ export interface AppStatus {
   source?: string
   /** For committed-but-missing apps: repo subdirectory of the declared source. */
   path?: string
+  /** For committed-but-missing apps: declared version from mim.yaml. */
+  version?: string
   shadowed: boolean
   needsTrust: boolean
   needsInstall: boolean
@@ -45,10 +47,12 @@ function requireId(params: Record<string, unknown>): string {
   return id
 }
 
-function resolveWriteLayer(params: Record<string, unknown>, ws: string, id: string): 'workspace' | 'local' {
+function resolveWriteLayer(params: Record<string, unknown>): 'local' {
   const layer = params.layer
-  if (layer === undefined) return readCommittedApp(ws, id) ? 'workspace' : 'local'
-  if (layer === 'workspace' || layer === 'local') return layer
+  if (layer === undefined || layer === 'local') return 'local'
+  if (layer === 'workspace') {
+    throw new Error('Sidebar enablement is personal; use app.share to share an app with the workspace')
+  }
   throw new Error(`Invalid layer: ${String(layer)} (expected 'workspace' or 'local')`)
 }
 
@@ -70,7 +74,8 @@ function committedAppIds(ws: string): string[] {
 function loadedStatus(ws: string, pkg: LoadedPackage, deps: CoreAppToolsDeps): AppStatus {
   const id = pkg.manifest.id
   const needsTrust = deps.enablement.needsTrust(pkg)
-  const layer: AppLayer = readCommittedApp(ws, id) && !needsTrust
+  const committed = readCommittedApp(ws, id)
+  const layer: AppLayer = committed
     ? 'workspace'
     : deps.enablement.localOverride(id) !== null ? 'local' : 'default'
   return {
@@ -90,20 +95,22 @@ function loadedStatus(ws: string, pkg: LoadedPackage, deps: CoreAppToolsDeps): A
 function missingStatus(ws: string, id: string, deps: CoreAppToolsDeps): AppStatus | null {
   const committed = readCommittedApp(ws, id)
   if (!committed) return null
-  return {
+  const status: AppStatus = {
     id,
-    enabled: committed.enabled,
+    enabled: false,
     layer: 'workspace',
     installed: false,
     installedVersions: [],
-    source: committed.source,
-    path: committed.path,
     shadowed: false,
     needsTrust: false,
     needsInstall: true,
     // An uninstalled app has no manifest, so its data folder is unknowable here.
     folderPresent: folderPresent(ws, id, deps),
   }
+  if (committed.source !== undefined) status.source = committed.source
+  if (committed.path !== undefined) status.path = committed.path
+  if (committed.version !== undefined) status.version = committed.version
+  return status
 }
 
 export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDeps): void {
@@ -114,7 +121,7 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
 
   tools.register({
     name: 'app.status',
-    description: 'Resolved enablement state for every known app: enabled, deciding layer (workspace/local/default), install and trust state, and folderPresent for apps with a data folder.',
+    description: 'Resolved app state for every known app: personal enablement, workspace sharing layer, install and trust state, and folderPresent for apps with a data folder.',
     inputSchema: objectSchema({}),
     execute: async () => {
       const d = requireDeps()
@@ -134,7 +141,7 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
 
   tools.register({
     name: 'app.enable',
-    description: 'Enable an app by id. layer "workspace" writes the committed mim.yaml entry, "local" the personal overlay; defaults to workspace when a committed entry exists, else local. Creates the app data folder if one is registered.',
+    description: 'Add an installed app to the current user sidebar/capability set. Enablement is personal/local; layer "workspace" is rejected. Creates the app data folder if one is registered.',
     inputSchema: objectSchema({
       id: { type: 'string' },
       layer: { type: 'string', enum: ['workspace', 'local'] },
@@ -143,16 +150,15 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
       const { packages, enablement, invalidate, emit } = requireDeps()
       const ws = workspace(tools)
       const id = requireId(params)
-      const layer = resolveWriteLayer(params, ws, id)
+      const layer = resolveWriteLayer(params)
       const pkg = packages.get(id)
+      if (!pkg) throw new Error(`App is not installed: ${id}`)
       if (pkg && enablement.needsTrust(pkg)) {
         throw new Error(`"${pkg.manifest.name}" needs trust before it can be enabled — review its access and trust it first`)
       }
-      if (layer === 'workspace') setAppEnabled(ws, id, true)
-      else enablement.setEnabled(id, true)
-      // The resolved state can still read disabled (e.g. an unverified global
-      // install behind a committed entry) — fail loudly rather than letting
-      // the toggle silently snap back.
+      enablement.setEnabled(id, true)
+      // The trust gate or malformed local state can still keep the resolved
+      // state disabled. Fail loudly rather than letting the toggle snap back.
       if (pkg && !enablement.isEnabled(pkg)) {
         throw new Error(`Enabling "${id}" did not take effect — check the app's diagnostics`)
       }
@@ -166,7 +172,7 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
 
   tools.register({
     name: 'app.disable',
-    description: 'Disable an app by id (same layer semantics as app.enable). Never touches data folders or files.',
+    description: 'Remove an app from the current user sidebar/capability set. Never touches data folders, install dirs, or workspace sharing.',
     inputSchema: objectSchema({
       id: { type: 'string' },
       layer: { type: 'string', enum: ['workspace', 'local'] },
@@ -175,12 +181,11 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
       const { packages, enablement, invalidate, emit } = requireDeps()
       const ws = workspace(tools)
       const id = requireId(params)
-      const layer = resolveWriteLayer(params, ws, id)
-      if (layer === 'workspace') setAppEnabled(ws, id, false)
-      else enablement.setEnabled(id, false)
+      const layer = resolveWriteLayer(params)
+      enablement.clearOverride(id)
       const pkg = packages.get(id)
       if (pkg && enablement.isEnabled(pkg)) {
-        throw new Error(`Disabling "${id}" did not take effect — a local enable override may be shadowing the committed entry`)
+        throw new Error(`Disabling "${id}" did not take effect — check the app's local enablement state`)
       }
       invalidate?.(id)
       emit?.('apps:changed')
@@ -209,7 +214,7 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
 
   tools.register({
     name: 'app.remove',
-    description: 'Remove an app from this workspace: deletes the mim.yaml pin and clears any local enable/disable override so the app drops out of the Installed set (back to default/available). Never touches install dirs or data folders (issues/, knowledge/) — those survive removal.',
+    description: 'Remove an app from workspace sharing by deleting the committed mim.yaml pin. Keeps install dirs, data folders, and personal sidebar enablement.',
     inputSchema: objectSchema({
       id: { type: 'string' },
     }, ['id']),
@@ -220,21 +225,18 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
 
       const pkg = packages.get(id)
 
+      const committed = readCommittedApp(ws, id)
+
       // If there is no committed entry and no loaded app, nothing to remove.
-      if (!readCommittedApp(ws, id) && !pkg) {
+      if (!committed && !pkg) {
         throw new Error(`Unknown app: ${id}`)
+      }
+      if (!committed) {
+        throw new Error(`App is not shared with this workspace: ${id}`)
       }
 
       // 1. Delete the mim.yaml apps entry (no-op if absent).
       removeApp(ws, id)
-
-      // 2. Clear any local enable/disable override. A disabled override would
-      //    leave the app at the 'local' layer, which keeps it in the Installed
-      //    set (just disabled) — indistinguishable from an app the user chose
-      //    to disable but keep. Clearing drops it to the 'default' layer so it
-      //    leaves Installed entirely. The global install stays on disk; with no
-      //    committed entry and no override, isEnabled resolves to false.
-      enablement.clearOverride(id)
 
       invalidate?.(id)
       emit?.('apps:changed')

@@ -536,7 +536,7 @@ describe('app.add', () => {
     }
   }
 
-  it('installs, writes the committed pin, and enables in one action', async () => {
+  it('adds a registry app to my sidebar without sharing it with the workspace', async () => {
     const entry = validRegistryEntry({ repo: 'https://github.com/shoulders-ai/mim-apps', path: 'packages/github-monitor' })
     const deps = await makeAddDeps(entry)
     vi.mocked(cloneRepo).mockImplementation(async (_url, target) => {
@@ -556,14 +556,51 @@ describe('app.add', () => {
 
     expect(result.added).toBe('github-monitor')
     expect(result.version).toBe('1.2.0')
+    expect(result.local).toBe(true)
     expect(existsSync(join(globalDir, 'github-monitor', '1.2.0', 'package.json'))).toBe(true)
+
+    const config = parseMimYaml(readFileSync(join(dir, 'mim.yaml'), 'utf-8'))
+    expect(config.apps?.['github-monitor']).toBeUndefined()
+    expect(deps.enablement.localOverride('github-monitor')).toBe(true)
+    expect(deps.packages.get('github-monitor')?.manifest.views[0]?.role).toBe('work')
+    const status = await tools.call('app.status', {}, { actor: 'user' }) as { apps: Array<{ id: string; enabled: boolean; installed: boolean }> }
+    expect(status.apps.find(app => app.id === 'github-monitor')).toMatchObject({
+      enabled: true,
+      installed: true,
+    })
+  })
+
+  it('shares a registry app with the workspace without enabling it in my sidebar', async () => {
+    const entry = validRegistryEntry({ repo: 'https://github.com/shoulders-ai/mim-apps', path: 'packages/github-monitor' })
+    const deps = await makeAddDeps(entry)
+    vi.mocked(cloneRepo).mockImplementation(async (_url, target) => {
+      const pkgRoot = join(target, 'packages', 'github-monitor')
+      mkdirSync(join(pkgRoot, 'ui'), { recursive: true })
+      writeFileSync(join(target, 'package.json'), JSON.stringify({ name: 'mim-apps', private: true }))
+      writeFileSync(join(pkgRoot, 'package.json'), JSON.stringify(validPackageJson()))
+      writeFileSync(join(pkgRoot, 'ui', 'index.html'), '<h1>GM</h1>')
+      return { cloned: target }
+    })
+    vi.mocked(checkoutRef).mockResolvedValue(undefined)
+    vi.mocked(resolveHead).mockResolvedValue(COMMIT_SHA)
+
+    registerInstallTools(tools, deps)
+    const result = (await tools.call('app.share', { id: 'github-monitor' }, { actor: 'user' })) as Record<string, unknown>
+
+    expect(result.shared).toBe('github-monitor')
+    expect(result.version).toBe('1.2.0')
+    expect(deps.enablement.localOverride('github-monitor')).toBeNull()
 
     const config = parseMimYaml(readFileSync(join(dir, 'mim.yaml'), 'utf-8'))
     expect(config.apps?.['github-monitor']).toEqual({
       source: 'https://github.com/shoulders-ai/mim-apps',
       path: 'packages/github-monitor',
       version: '1.2.0',
-      enabled: true,
+    })
+    const status = await tools.call('app.status', {}, { actor: 'user' }) as { apps: Array<{ id: string; enabled: boolean; layer: string }> }
+    expect(status.apps.find(app => app.id === 'github-monitor')).toMatchObject({
+      enabled: false,
+      layer: 'workspace',
     })
   })
 
@@ -588,7 +625,8 @@ describe('app.add', () => {
 
     const config = parseMimYaml(readFileSync(join(dir, 'mim.yaml'), 'utf-8'))
     const pinned = config.apps?.['github-monitor']
-    expect(typeof pinned === 'object' && (pinned as Record<string, unknown>).version).toBe('1.2.0')
+    expect(pinned).toBeUndefined()
+    expect(deps.enablement.localOverride('github-monitor')).toBe(true)
   })
 
   it('reinstalls when provenance source does not match registry repo', async () => {
@@ -1174,6 +1212,32 @@ describe('archive installs', () => {
     const tmpExtract = join(tmpDir, 'github-monitor-1.2.0')
     expect(existsSync(tmpTarball)).toBe(false)
     expect(existsSync(tmpExtract)).toBe(false)
+  })
+
+  it('installs an archive whose package is inside one top-level folder', async () => {
+    const archiveRoot = join(dir, 'archive-root')
+    const contentDir = join(archiveRoot, 'github-monitor-1.2.0')
+    seedArchiveContent(contentDir)
+    const { buffer, hash } = buildTarball(archiveRoot)
+
+    const entry = archiveRegistryEntry({ hash: `sha256:${hash}` })
+    const lookup = asArchiveLookup(entry)
+
+    const mockFetch = vi.fn<InstallToolDeps['fetchUrl']>().mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
+    } as Response)
+
+    const deps = await makeDeps(
+      async (id) => id === 'github-monitor' ? lookup : undefined,
+      mockFetch,
+    )
+    const result = await callInstall(deps, { id: 'github-monitor' })
+
+    expect(result.installed).toBe('github-monitor')
+    expect(existsSync(join(globalDir, 'github-monitor', '1.2.0', 'package.json'))).toBe(true)
+    expect(deps.packages.get('github-monitor')?.manifest.id).toBe('github-monitor')
   })
 
   it('throws on hash mismatch', async () => {

@@ -101,7 +101,7 @@ Today is {{DATE_TODAY}}.
 ## Workspace
 
 The workspace is a directory on the user's machine. Committed layout:
-- mim.yaml — workspace config (name, enabled core apps)
+- mim.yaml — workspace config (name, shared app pins, resources, sync)
 - AGENTS.md — the durable contract for any agent working here
 - CLAUDE.md — contract pointer (usually references AGENTS.md)
 - issues/ — issue records, one markdown file each (present when the issues app is enabled)

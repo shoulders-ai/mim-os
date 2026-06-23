@@ -158,7 +158,7 @@ describe('headless app.enable', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('enables a workspace app and persists the enablement via app.status', async () => {
+  it('enables a workspace app personally and persists the enablement via app.status', async () => {
     writeWorkspacePackage(root, 'board')
     const kernel = createHeadlessKernel()
     await kernel.openWorkspace(root)
@@ -169,14 +169,14 @@ describe('headless app.enable', () => {
       expect(boardBefore.enabled).toBe(false)
     }
 
-    const result = await kernel.tools.call('app.enable', { id: 'board', layer: 'workspace' }, ctx)
-    expect(result).toMatchObject({ ok: true, id: 'board', layer: 'workspace' })
+    const result = await kernel.tools.call('app.enable', { id: 'board' }, ctx)
+    expect(result).toMatchObject({ ok: true, id: 'board', layer: 'local' })
 
     const after = await kernel.tools.call('app.status', {}, ctx) as { apps: AppStatus[] }
     const boardAfter = after.apps.find(a => a.id === 'board')
     expect(boardAfter).toBeDefined()
     expect(boardAfter!.enabled).toBe(true)
-    expect(boardAfter!.layer).toBe('workspace')
+    expect(boardAfter!.layer).toBe('local')
   })
 
   it('enables at the local layer and resolves through app.status', async () => {
@@ -195,11 +195,12 @@ describe('headless app.enable', () => {
   })
 
   it('emit is no-op in headless (does not throw)', async () => {
+    writeWorkspacePackage(root, 'board')
     const kernel = createHeadlessKernel()
     await kernel.openWorkspace(root)
 
     await expect(
-      kernel.tools.call('app.enable', { id: 'board', layer: 'workspace' }, ctx),
+      kernel.tools.call('app.enable', { id: 'board' }, ctx),
     ).resolves.toMatchObject({ ok: true })
   })
 })

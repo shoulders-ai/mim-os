@@ -91,7 +91,7 @@ describe('app tools (status / enable / disable / trust)', () => {
 
   it('declares inputSchema (not parameters) on every app tool', () => {
     register([])
-    for (const name of ['app.status', 'app.enable', 'app.disable', 'app.trust']) {
+    for (const name of ['app.status', 'app.enable', 'app.disable', 'app.trust', 'app.remove']) {
       const def = tools.get(name)
       expect(def, name).toBeDefined()
       expect(def!.inputSchema, name).toBeDefined()
@@ -129,10 +129,10 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(await statusOf('hello')).toMatchObject({ source: 'workspace', shadowed: true })
     })
 
-    it('reports layer workspace when a committed entry decides enablement', async () => {
+    it('reports layer workspace for a shared app but keeps sidebar enablement personal', async () => {
       writeMimYaml('name: test-ws\napps:\n  board: true\n')
       register([makePackage('board', 'workspace')])
-      expect(await statusOf('board')).toMatchObject({ enabled: true, layer: 'workspace' })
+      expect(await statusOf('board')).toMatchObject({ enabled: false, layer: 'workspace' })
     })
 
     it('reports layer local when enabled.json decides enablement', async () => {
@@ -141,10 +141,10 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(await statusOf('hello')).toMatchObject({ enabled: true, layer: 'local' })
     })
 
-    it('committed entry beats a local override for workspace apps', async () => {
+    it('local enablement controls a shared workspace app', async () => {
       writeMimYaml('name: test-ws\napps:\n  board: true\n')
       register([makePackage('board', 'workspace')])
-      enablement.setEnabled('board', false)
+      enablement.setEnabled('board', true)
       expect(await statusOf('board')).toMatchObject({ enabled: true, layer: 'workspace' })
     })
 
@@ -166,11 +166,12 @@ describe('app tools (status / enable / disable / trust)', () => {
       register([makePackage('hello', 'global')])
       expect(await statusOf('github-monitor')).toEqual({
         id: 'github-monitor',
-        enabled: true,
+        enabled: false,
         layer: 'workspace',
         installed: false,
         installedVersions: [],
         source: 'https://github.com/shoulders-ai/mim-github-monitor',
+        version: '1.2.0',
         shadowed: false,
         needsTrust: false,
         needsInstall: true,
@@ -196,14 +197,14 @@ describe('app tools (status / enable / disable / trust)', () => {
 
       expect(await statusOf('vendored')).toMatchObject({
         enabled: false,
-        layer: 'default',
+        layer: 'workspace',
         needsTrust: true,
         needsInstall: false,
       })
 
       await tools.call('app.trust', { id: 'vendored' }, ctx)
       expect(await statusOf('vendored')).toMatchObject({
-        enabled: true,
+        enabled: false,
         layer: 'workspace',
         needsTrust: false,
       })
@@ -222,24 +223,23 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(parseMimYaml(readFileSync(join(root, 'mim.yaml'), 'utf-8')).apps).toBeUndefined()
     })
 
-    it('defaults to the workspace layer when a committed entry exists', async () => {
+    it('defaults to the local layer even when a shared workspace entry exists', async () => {
       writeMimYaml('name: test-ws\napps:\n  board: false\n')
       register([makePackage('board', 'workspace')])
 
       await expect(tools.call('app.enable', { id: 'board' }, ctx))
-        .resolves.toEqual({ ok: true, id: 'board', layer: 'workspace' })
+        .resolves.toEqual({ ok: true, id: 'board', layer: 'local' })
 
       const config = parseMimYaml(readFileSync(join(root, 'mim.yaml'), 'utf-8'))
-      expect(config.apps?.board).toBe(true)
-      expect(enablement.localOverride('board')).toBeNull()
+      expect(config.apps?.board).toBe(false)
+      expect(enablement.localOverride('board')).toBe(true)
     })
 
-    it('honors an explicit layer and rejects an invalid one', async () => {
+    it('rejects workspace enablement because sidebar membership is personal', async () => {
       register([makePackage('board', 'workspace')])
 
-      await tools.call('app.enable', { id: 'board', layer: 'workspace' }, ctx)
-      const config = parseMimYaml(readFileSync(join(root, 'mim.yaml'), 'utf-8'))
-      expect(config.apps?.board).toBe(true)
+      await expect(tools.call('app.enable', { id: 'board', layer: 'workspace' }, ctx))
+        .rejects.toThrow(/personal/)
 
       await expect(tools.call('app.enable', { id: 'board', layer: 'global' }, ctx))
         .rejects.toThrow('Invalid layer')
@@ -264,24 +264,25 @@ describe('app tools (status / enable / disable / trust)', () => {
 
     it('app.disable is non-destructive: the folder and its files stay', async () => {
       writeMimYaml('name: test-ws\napps:\n  knowledge: true\n')
+      enablement.setEnabled('knowledge', true)
       register([makePackage('knowledge', 'workspace')])
       mkdirSync(join(root, 'knowledge'), { recursive: true })
       writeFileSync(join(root, 'knowledge', 'kept.md'), '# do not delete\n')
 
       await expect(tools.call('app.disable', { id: 'knowledge' }, ctx))
-        .resolves.toEqual({ ok: true, id: 'knowledge', layer: 'workspace' })
+        .resolves.toEqual({ ok: true, id: 'knowledge', layer: 'local' })
 
       const config = parseMimYaml(readFileSync(join(root, 'mim.yaml'), 'utf-8'))
-      expect(config.apps?.knowledge).toBe(false)
+      expect(config.apps?.knowledge).toBe(true)
+      expect(enablement.localOverride('knowledge')).toBeNull()
       expect(readFileSync(join(root, 'knowledge', 'kept.md'), 'utf-8')).toBe('# do not delete\n')
     })
 
-    it('toggles a committed-but-not-installed app without refusing', async () => {
+    it('refuses to enable a shared app until it is installed', async () => {
       writeMimYaml('name: test-ws\napps:\n  github-monitor: true\n')
       register([])
-      await tools.call('app.disable', { id: 'github-monitor' }, ctx)
-      const config = parseMimYaml(readFileSync(join(root, 'mim.yaml'), 'utf-8'))
-      expect(config.apps?.['github-monitor']).toBe(false)
+      await expect(tools.call('app.enable', { id: 'github-monitor' }, ctx))
+        .rejects.toThrow(/not installed/)
     })
 
     it('app.enable refuses an untrusted vendored app with a clear error and writes nothing', async () => {
@@ -308,16 +309,6 @@ describe('app tools (status / enable / disable / trust)', () => {
         .resolves.toEqual({ ok: true, id: 'vendored', layer: 'local' })
 
       expect(await statusOf('vendored')).toMatchObject({ enabled: true, needsTrust: false })
-    })
-
-    it('app.enable throws instead of silently not taking effect (unverified global with committed entry)', async () => {
-      const dir = join(root, 'fake-install', 'gpkg')
-      mkdirSync(dir, { recursive: true })
-      writeMimYaml('name: test-ws\napps:\n  gpkg: false\n')
-      register([makePackage('gpkg', 'global', { dir })])
-
-      await expect(tools.call('app.enable', { id: 'gpkg' }, ctx))
-        .rejects.toThrow(/did not take effect/)
     })
 
     it('invalidates the app runtime and emits apps:changed on every write', async () => {
@@ -366,28 +357,26 @@ describe('app tools (status / enable / disable / trust)', () => {
   })
 
   describe('app.remove', () => {
-    it('removes the mim.yaml pin and clears any local override', async () => {
+    it('removes the mim.yaml pin but keeps personal sidebar enablement', async () => {
       writeMimYaml('name: test-ws\napps:\n  github-monitor:\n    source: https://x.example/r.git\n    version: 1.2.0\n')
       register([makePackage('github-monitor', 'global')])
+      enablement.setEnabled('github-monitor', true)
 
       await expect(tools.call('app.remove', { id: 'github-monitor' }, ctx))
         .resolves.toEqual({ ok: true, id: 'github-monitor' })
 
       const config = parseMimYaml(readFileSync(join(root, 'mim.yaml'), 'utf-8'))
       expect(config.apps?.['github-monitor']).toBeUndefined()
-      expect(enablement.localOverride('github-monitor')).toBeNull()
+      expect(enablement.localOverride('github-monitor')).toBe(true)
     })
 
-    it('drops the app out of the Installed set: app.status reports default layer, disabled', async () => {
-      // A locally-enabled global package that the user then removes must leave
-      // the manageable/Installed set entirely — not linger as a disabled row.
+    it('app.disable drops a personal-only app out of the sidebar set', async () => {
       register([makePackage('board', 'global')])
       enablement.setEnabled('board', true)
       expect(await statusOf('board')).toMatchObject({ enabled: true, layer: 'local' })
 
-      await tools.call('app.remove', { id: 'board' }, ctx)
+      await tools.call('app.disable', { id: 'board' }, ctx)
 
-      // layer 'default' (not 'local') is what isManageableApp uses to exclude it.
       expect(await statusOf('board')).toMatchObject({ enabled: false, layer: 'default' })
     })
 
@@ -407,16 +396,12 @@ describe('app tools (status / enable / disable / trust)', () => {
       expect(existsSync(join(root, 'issues', 'issue-1.md'))).toBe(true)
     })
 
-    it('removes a loaded global app, clearing its local override', async () => {
+    it('refuses to remove a personal app that is not shared with the workspace', async () => {
       register([makePackage('board', 'global')])
       enablement.setEnabled('board', false)
 
       await expect(tools.call('app.remove', { id: 'board' }, ctx))
-        .resolves.toEqual({ ok: true, id: 'board' })
-
-      expect(enablement.localOverride('board')).toBeNull()
-      expect(invalidate).toHaveBeenCalledWith('board')
-      expect(emit).toHaveBeenCalledWith('apps:changed')
+        .rejects.toThrow(/not shared/)
     })
 
     it('errors for an unknown id (not committed and not loaded)', async () => {

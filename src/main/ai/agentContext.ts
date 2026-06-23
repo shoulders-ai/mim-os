@@ -185,10 +185,10 @@ function resolveAppsFromCommitted(workspacePath: string): AgentContextApp[] {
   try {
     const config = parseMimYaml(readFileSync(mimYamlPath, 'utf-8'))
     if (!config.apps) return []
-    return Object.entries(config.apps)
-      .map(([id, value]) => ({
+    return Object.keys(config.apps)
+      .map((id) => ({
         id,
-        enabled: typeof value === 'boolean' ? value : value.enabled !== false,
+        enabled: false,
       }))
       .sort((a, b) => a.id.localeCompare(b.id))
   } catch {

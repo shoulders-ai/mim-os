@@ -71,7 +71,7 @@ Registry and install:
 - package_uninstall(id, version) — remove an installed version from the global dir.
 
 Enablement:
-- Apps are enabled per workspace via the committed mim.yaml apps map (keyed by package id) or the local .mim/packages/enabled.json layer. Global (registry-installed) packages in ~/.mim/packages/ are shared across workspaces; enablement is per workspace.`
+- The committed mim.yaml apps map shares/pins workspace apps for collaborators, but does not enable anyone's sidebar. Local .mim/packages/enabled.json controls the current user's sidebar/capability enablement for this workspace. Use app.add to install/add personally, and app.share to share a registry app with the workspace.`
 
 export const PACKAGES_SECTION = `Apps are UI extensions that run in sandboxed iframes. Each app lives in packages/{id}/ and contains:
 - package.json — manifest with id, name, description, icon, ui path
@@ -120,7 +120,7 @@ Today is ${weekday}, ${date}.
 # WORKSPACE
 
 The workspace is a directory on the user's machine. Committed layout:
-- mim.yaml — workspace config (name, enabled core apps)
+- mim.yaml — workspace config (name, shared app pins, resources, sync)
 - AGENTS.md — the durable contract for any agent working here
 - CLAUDE.md — contract pointer (usually references AGENTS.md)
 - issues/ — issue records, one markdown file each (present when the issues app is enabled)

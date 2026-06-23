@@ -42,6 +42,7 @@ import { registerHistoryTools } from '@main/tools/history.js'
 import { readTraceCaptureContent, readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
 import { registerSlackTools } from '@main/tools/slack.js'
 import { registerGoogleTools } from '@main/tools/google.js'
+import { readAccountToken, registerAccountTools } from '@main/tools/account.js'
 import { registerWorkspaceTools } from '@main/tools/workspace.js'
 import { registerSessionTools } from '@main/sessions.js'
 import { resolveTelemetryConfig } from '@main/telemetry/config.js'
@@ -150,6 +151,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   registerLogbookTools(tools)
   registerSlackTools(tools)
   registerGoogleTools(tools)
+  registerAccountTools(tools, () => {})
   registerTelemetryTools(tools, telemetry)
   registerCoreAppTools(tools)
   telemetry.track('app_open', {
@@ -192,7 +194,14 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       const cacheRoot = DEFAULT_CACHE_ROOT
       const globalDir = join(HOME, '.mim', 'packages')
 
-      registerRegistryTools(tools, { packages, enablement, cacheRoot, globalDir, getWorkspacePath: () => tools.getWorkspacePath() })
+      registerRegistryTools(tools, {
+        packages,
+        enablement,
+        cacheRoot,
+        globalDir,
+        getWorkspacePath: () => tools.getWorkspacePath(),
+        getAccountToken: () => readAccountToken(),
+      })
 
       registerInstallTools(tools, {
         packages,
@@ -205,7 +214,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
           cacheRoot,
           version,
           isSourceTrusted: (s) => enablement.isRegistryTrusted(s),
-        }),
+        }, { getAccountToken: () => readAccountToken() }),
       })
     },
     async shutdown() {
