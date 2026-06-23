@@ -361,9 +361,11 @@ export async function createServer(
         }
 
         // All other methods route through the tool registry.
+        // MCP calls use actor 'user' — the MCP allowlist is the security
+        // boundary, and CLI agents have their own permission gates.
         const ctx: ToolContext = connectionType === 'mcp'
           ? {
-              actor: 'ai',
+              actor: 'user',
               sessionId: mcpSessionId,
             }
           : {

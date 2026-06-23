@@ -54,6 +54,13 @@ export function registerFileTools(tools: ToolRegistry, options: FileToolOptions 
   tools.register({
     name: 'fs.read',
     description: 'Read a file from the workspace. Returns line and truncation metadata.',
+    inputSchema: objectSchema({
+      path: { type: 'string' },
+      full: { type: 'boolean' },
+      max_chars: { type: 'number' },
+      start_line: { type: 'number' },
+      limit: { type: 'number' },
+    }, ['path']),
     execute: async (params) => {
       const path = resolveWorkspacePath(tools, requireString(params, 'path'))
       const content = readFileSync(path, 'utf-8')

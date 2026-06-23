@@ -30,6 +30,11 @@ export function registerSearchTools(tools: ToolRegistry): void {
   tools.register({
     name: 'search.files',
     description: 'Search workspace file contents for a query string',
+    inputSchema: objectSchema({
+      query: { type: 'string' },
+      pattern: { type: 'string' },
+      max_results: { type: 'number' },
+    }, ['query']),
     execute: async (params) => {
       const workspacePath = tools.getWorkspacePath()
       if (!workspacePath) throw new Error('No workspace open')

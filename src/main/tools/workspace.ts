@@ -86,6 +86,7 @@ export function registerWorkspaceTools(tools: ToolRegistry): void {
   tools.register({
     name: 'workspace.info',
     description: 'Get info about the current workspace',
+    inputSchema: objectSchema({}),
     execute: async () => {
       const path = tools.getWorkspacePath()
       if (!path) return { open: false }

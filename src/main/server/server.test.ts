@@ -355,7 +355,7 @@ describe('app server', () => {
     expect(denied).toEqual({ id: 'write-1', error: 'Tool is not exposed over MCP: fs.write' })
     expect(call).toHaveBeenCalledTimes(1)
     expect(call).toHaveBeenCalledWith('editor.open', { path: 'README.md' }, {
-      actor: 'ai',
+      actor: 'user',
       sessionId: 'agent-session-2',
     })
   })
@@ -410,7 +410,7 @@ describe('app server', () => {
     })
     expect(result).toEqual({ id: 'issues-1', result: { rows: [] } })
     expect(call).toHaveBeenCalledWith('issues.list', { status: 'open' }, {
-      actor: 'ai',
+      actor: 'user',
       sessionId: 'named-test',
     })
   })
