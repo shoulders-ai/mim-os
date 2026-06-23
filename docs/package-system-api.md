@@ -22,17 +22,19 @@ Apps can contribute:
 - Skills: filesystem `skills/<name>/SKILL.md` instruction bundles under the app's own namespace (see [skills.md](skills.md)).
 - Data: app-scoped JSON KV and collection storage.
 
-The app system has four states:
+The app system has five separate states:
 
 | State | Meaning |
 |---|---|
 | Installed | The app exists on disk and has a valid `package.json` `mim` block. |
-| Enabled | The current workspace allows the app to contribute capabilities. |
+| Shared | The workspace declares the app in committed `mim.yaml` so collaborators can install the same app/version. |
+| Enabled | The current user has added the app to this workspace's sidebar/capability set in local `.mim/packages/enabled.json`. |
 | Loaded | The backend module has been imported and descriptors are available. |
 | Active | A view, job, or tool call is currently using the runtime. |
 
-Installed does not imply enabled. Enabled does not imply visible UI. Headless
-apps are first-class.
+Installed does not imply shared or enabled. Shared does not enable an app for
+any collaborator. Enabled does not imply visible UI. Headless apps are
+first-class.
 
 ## System Map
 
@@ -42,15 +44,15 @@ The core runtime is made of small, explicit pieces.
 |---|---|---|
 | App manifest | `src/main/packages/packageManifest.ts` | Validates `package.json.mim`, paths, ids, permissions. |
 | App loader | `src/main/packages/packages.ts` | Discovers global and workspace apps; precedence workspace > global; two-level global layout; pinned-version selection. |
-| Enablement store | `src/main/packages/packageEnablement.ts` | Resolution layers (committed mim.yaml > local enabled.json > defaults), wildcard trust ledger for vendored workspace apps, provenance-verified-global rule. |
+| Enablement store | `src/main/packages/packageEnablement.ts` | Personal enablement in local `.mim/packages/enabled.json`, wildcard trust ledger for vendored workspace apps, registry trust ledger. |
 | Semver | `src/main/packages/semver.ts` | Minimal strict-semver validate + compare, no new dependency. |
 | Registry index | `src/main/packages/registryIndex.ts` | Registry `index.json` parser/validator (manifestVersion 1, HTTPS-only repo URLs, optional repo-relative `path`, local `dir` entries behind `allowLocalDirs`). |
-| Registry sources | `src/main/packages/registrySources.ts` | Multi-source resolution: ordered source list (workspace > machine > user > default), `readSourceIndex`, `lookupRegistryEntry` with ownership/anti-dependency-confusion rule. |
+| Registry sources | `src/main/packages/registrySources.ts` | Multi-source resolution: ordered source list (workspace > machine > account > user > default), `readSourceIndex`, `lookupRegistryEntry` with ownership/anti-dependency-confusion rule. |
 | Cache layout | `src/main/packages/cacheLayout.ts` | Mirror dirs under `~/.mim/cache/` (not Electron userData) for CLI parity. |
 | User config | `src/main/userConfig.ts` | `registry.url` override for private registries. |
-| App tools | `src/main/tools/coreApps.ts` | `app.status/enable/disable/trust` — the one write path for enablement. |
+| App tools | `src/main/tools/coreApps.ts` | `app.status/enable/disable/remove/trust` — local sidebar enablement, workspace sharing removal, trust acknowledgement. |
 | Registry tools | `src/main/tools/registryTools.ts` | `registry.list` — walk all configured sources, per-source status/stale fallback, enrich entries with install state and shadowing. `registry.trust` — ack trust for workspace-declared registries. |
-| Install tools | `src/main/tools/install.ts` | `package.install/update/uninstall`, `app.add` — global layout, provenance, security checks, one-action add, local-dir installs with `file://` provenance. |
+| Install tools | `src/main/tools/install.ts` | `package.install/update/uninstall`, `app.add`, `app.share` — global layout, provenance, security checks, personal add, workspace share, local-dir installs with `file://` provenance. |
 | App runtime | `src/main/packages/packageRuntime.ts` | Imports backend modules and builds app-scoped `ctx`. |
 | Job runner | `src/main/packages/packageJobs.ts` | Starts, cancels, tracks, emits, and persists app job runs. |
 | App data | `src/main/packages/packageData.ts` | Provides app-scoped JSON KV and collections. |
@@ -119,10 +121,11 @@ because all of those can carry tokens.
 Apps cannot directly use:
 
 - registry tools (`registry.list`, `registry.trust`).
-- install tools (`package.install`, `package.update`, `package.uninstall`, `app.add`).
+- install and sharing tools (`package.install`, `package.update`, `package.uninstall`, `app.add`, `app.share`).
 - trust acknowledgement (`app.trust`, `registry.trust`).
 - enablement of other apps (`app.enable`/`app.disable` are scoped to the calling app's own id).
-- app installation or scaffolding tools (`package.create`/`package.edit`/`package.delete`).
+- app installation or scaffolding tools (`app.templateList`/`app.templateContent`/`package.create`/`package.edit`/`package.delete`).
+- account token tools (`account.status`, `account.validate`, `account.setToken`, `account.clearToken`).
 - workspace settings tools.
 - provider key tools.
 - terminal/system tools.
@@ -218,6 +221,8 @@ file at `~/.mim/packages/<id>/<version>/.mim-install.json`:
 ```
 
 No tokens in provenance. Install rejects source URLs carrying credentials.
+Installs are side-by-side: updating to a newer version leaves older version
+directories on disk until `package.uninstall` removes them.
 
 ### Multi-app repos (`path`)
 
@@ -239,73 +244,77 @@ the headless CLI shares them:
 
 ## Enablement Model
 
-Enablement is per workspace. There are two writable layers and no implicit
-source default:
+The app system separates installation, workspace sharing, and personal sidebar
+enablement.
 
-### Committed layer (mim.yaml)
+### Shared workspace apps (mim.yaml)
 
-The `mim.yaml` `apps:` map is keyed by **app id** (not app name — the old
-`issues`/`knowledge` keys are dropped by the parser and resolve to nothing).
-Entry values:
+The committed `mim.yaml` `apps:` map is keyed by **app id** (not app name —
+the old `issues`/`knowledge` keys are dropped by the parser and resolve to
+nothing). It declares apps that belong to the workspace and optionally pins how
+to install them:
 
 ```yaml
 apps:
-  board: true                       # app enabled in this workspace
-  github-monitor:                   # installed app: committed expectation + pin
+  board: true                       # shared with the workspace, no install pin
+  github-monitor:                   # shared app with install pin
     source: https://github.com/shoulders-ai/mim-apps
     path: packages/github-monitor
     version: 1.2.0
-  docx-review: false
 ```
 
-`boolean | { source?, path?, version?, enabled? }` — `enabled` defaults true in
-object form; `path` is the repo-relative app subdirectory when the source
-repo hosts many apps. Object form is a committed expectation: the
-workspace commits intent (and optionally a source + path + version pin), each
-machine satisfies it. When `mim.yaml` names apps that are not installed on
-this machine, `MissingAppsBanner.vue` offers "Add all", installing each from
-its declared source + path.
+`mim.yaml` does **not** enable sidebar entries or app capabilities for every
+collaborator. It is a shared availability/pinning layer: "this workspace uses
+this app; install this version/source when needed."
 
-### Local overlay (enabled.json)
+Entry values are `boolean | { source?, path?, version?, enabled? }`. The
+legacy `enabled` field is accepted for parser tolerance but is not an
+activation switch. `path` is the repo-relative app subdirectory when the
+source repo hosts many apps. When `mim.yaml` names apps that are not installed
+on this machine, `MissingAppsBanner.vue` offers "Add all", installing by app
+id/version through the registry/source lookup.
 
-Gitignored `.mim/packages/enabled.json` is the personal layer and the trust
-ledger:
+### Personal sidebar enablement (enabled.json)
+
+Gitignored `.mim/packages/enabled.json` is the personal layer and trust ledger:
 
 ```json
 { "enabled": ["some-addon"], "disabled": ["docx-review"], "trusted": ["my-pkg@*"] }
 ```
 
-### Resolution: "is app X enabled here"
+`enabled` means "this user added the app to this workspace's sidebar/capability
+set." `disabled` is a local negative override used by lower-level APIs. The
+normal app-management flow removes a personal sidebar entry by clearing the
+local override, so shared workspace apps remain visible in Settings without
+being active.
 
-1. **Committed mim.yaml entry** — authoritative for workspace apps and
-   provenance-verified global (registry-installed) apps. A global app
-   is provenance-verified when a valid `.mim-install.json` exists and (when the
-   committed entry declares a source) its source is consistent with the
-   provenance. For workspace (vendored) apps with a backend or effective
-   permissions, the committed entry only activates with a per-machine trust
-   ack; otherwise resolution falls through.
-2. **Local enabled.json** enabled/disabled lists. For workspace apps, the
-   same trust gate applies: a local enable does not activate untrusted
+### Resolution: "is app X active for this user"
+
+1. Local `enabled.json` `enabled` list activates the app for the current user.
+2. For workspace-source apps with a backend or effective permissions, the
+   trust gate must also pass; a local enable does not execute untrusted
    vendored code.
-3. **Default**: disabled. No app source and no manifest field can implicitly
-   enable an app.
+3. Local `disabled` and the default state are inactive.
+
+Committed `mim.yaml` entries never activate app code by themselves. A
+committed-but-missing app is reported as `needsInstall` and `enabled: false`.
 
 ### Trust boundary
 
-A committed or local enable must never execute cloned code without local
+Local enablement must never execute cloned workspace code without local
 consent. Workspace-source apps that declare a backend or any effective
 permissions require a per-machine trust ack recorded in `enabled.json`:
 `"id@*"`. Trust is binary and persists until the ledger entry is removed.
-`app.trust` records the ack — it is hard-denied to `ai` and `package` actors
-(same gate flavor as the readonly-resource write denial). The renderer calls it
-from the same plain-language permission confirmation dialog used by registry
-Add.
+`app.trust` records the ack; it is hard-denied to `ai` and `package` actors.
+The renderer calls it from the same plain-language permission confirmation
+dialog used by registry Add.
 
 ### Freshness
 
-Resolution reads `mim.yaml` fresh on every check. The file watcher
-additionally triggers enablement invalidation + `packages.rescan()` on
-`mim.yaml` change, so a pin change takes effect without workspace reopen.
+The file watcher triggers package rescan on `mim.yaml` change, so shared app
+pins and missing-install prompts update without workspace reopen. Local
+enablement is read from `.mim/packages/enabled.json` and emitted through
+`apps:changed` whenever app tools mutate it.
 
 ## Resolved App State
 
@@ -316,9 +325,10 @@ plus committed-but-not-installed entries):
 interface AppStatus {
   id: string
   enabled: boolean
-  layer: 'workspace' | 'local' | 'default'
+  layer: 'workspace' | 'local' | 'default' // workspace = shared in mim.yaml; local = personal-only
   installed: boolean
   installedVersions: string[]
+  version?: string
   source?: string          // loader source or committed entry's declared source
   shadowed: boolean        // true when this loaded copy shadows duplicates of the same id from lower-ranked sources
   needsTrust: boolean      // vendored workspace app awaiting trust ack
@@ -991,14 +1001,16 @@ and installation. Gate categories and actor restrictions are enforced in
 | Tool | Gate category | Actor restrictions | Behavior |
 |---|---|---|---|
 | `app.status` | `read` | none | Resolved state for every known app |
-| `app.enable` | `settings` | app: own id only | Enable an app; `layer` selects committed or local; mkdirs registered folder |
-| `app.disable` | `settings` | app: own id only | Disable an app; same layer semantics; never touches data. Leaves the app in the Installed set as a disabled-but-kept row (local override stays) |
-| `app.remove` | `settings` | app: own id only | Remove an app from the workspace: delete the `mim.yaml` pin **and** clear any local `enabled.json` override so the app drops to the `default` layer and leaves the Installed set (back to Available). Never touches install dirs or data folders. Clearing (not writing a disabled override) is what distinguishes remove from disable |
+| `app.enable` | `settings` | app: own id only | Add an installed app to the current user's sidebar/capability set by writing local `.mim/packages/enabled.json`; explicit `layer: "workspace"` is rejected. Creates the registered data folder when needed |
+| `app.disable` | `settings` | app: own id only | Remove an app from the current user's sidebar/capability set by clearing the local override; never touches data, install dirs, or workspace sharing |
+| `app.remove` | `settings` | app: own id only | Remove workspace sharing by deleting the committed `mim.yaml` app pin. It keeps the local install, data folder, and any personal sidebar enablement |
 | `app.trust` | `settings` (high) | **user-only** (hard-denied to ai and app) | Record trust ack for vendored workspace app |
-| `registry.list` | `network` (external) | denied to app actors | Walk all configured registry sources (workspace, machine, user, default), return `{ registries: [...per-source status], entries: [...enriched with registryId, shadowed, install state] }`. Per-source try/catch with stale-mirror fallback. Workspace sources gated on trust ack |
+| `app.templateList` / `app.templateContent` | `read` | denied to app actors | List and render workspace app starter templates as `package.create` params |
+| `registry.list` | `network` (external) | denied to app actors | Walk all configured registry sources (workspace, machine, account, user, default), return `{ registries: [...per-source status], entries: [...enriched with registryId, shadowed, install state] }`. Per-source try/catch with stale-mirror fallback. Workspace sources gated on trust ack |
 | `registry.trust` | `settings` (high) | **user-only** (hard-denied to ai and app) | Acknowledge trust for a workspace-declared registry source by id |
-| `package.install` | `network` (external) | denied to app actors | Install by registry id or direct repo URL; commit/engines/id/permission verification; symlink/submodule/credential refusal; copies only the entry's `path` subdirectory when declared; provenance write. For local-dir registry entries: skips git work and commit verification, provenance `source: file://...` |
-| `app.add` | `network` (medium) | denied to app actors | One-action add: install from the registry if needed, write the committed `mim.yaml` pin (`source`, `path`, `version`), enable on the workspace layer. For local registry entries: enables on the **local layer only** (no mim.yaml pin — a `file://` pin would break on other machines). The registry browse UI's "Add to workspace" action calls this after a plain-language permission confirm (`src/renderer/components/packages/permissionSummary.ts`) |
+| `package.install` | `network` (external) | denied to app actors | Install by registry id or direct repo URL; commit/engines/id/permission verification; symlink/submodule/credential refusal; copies only the entry's `path` subdirectory when declared; archive entries verify `sha256:` hashes and authenticated account downloads pass `Bearer` auth; provenance write. For local-dir registry entries: skips git work and commit verification, provenance `source: file://...` |
+| `app.add` | `network` (medium) | denied to app actors | Personal add: install from the registry if needed, then enable locally for the current user's sidebar. It does not write `mim.yaml` |
+| `app.share` | `network` (medium) | denied to app actors | Workspace share: install/verify from the registry if needed, then write a committed `mim.yaml` pin (`source`, `path`, `version`). It does not enable anyone's sidebar and rejects local-dir sources |
 | `package.update` | `network` (external) | denied to app actors | Install latest registry version side-by-side, repoint workspace pin if one exists |
 | `package.uninstall` | `settings` | denied to app actors | Remove `~/.mim/packages/<id>/<version>/`; fix-forward (no refusal when enabled) |
 
@@ -1018,13 +1030,13 @@ enriched entries:
     kind: 'git' | 'local' | 'url',
     location: string,     // git HTTPS URL, absolute directory path, or index.json URL
     name?: string,
-    origin: 'default' | 'user' | 'workspace' | 'machine',
+    origin: 'default' | 'user' | 'workspace' | 'machine' | 'account',
     status: 'ok' | 'stale' | 'error' | 'needs-trust',
     error?: string,
     diagnostics: string[]
   }],
   entries: [{
-    ...RegistryEntry,     // id, name, description, repo?, path?, dir?, version, ref?, commit?, permissions, engines?
+    ...RegistryEntry,     // id, name, description, repo?, archive?, hash?, path?, dir?, version, ref?, commit?, permissions, engines?
     registryId: string,   // which source this entry came from
     installedVersions: string[],
     enabledHere: boolean,
@@ -1038,6 +1050,9 @@ enriched entries:
 A failing git or url source serves its stale cache (`status: 'stale'`) or
 reports `'error'` without breaking the others. Workspace sources that have not been
 trusted report `status: 'needs-trust'` and contribute no entries.
+Registries may contain multiple versions for the same app id; Settings > Apps
+Browse collapses those to one row for the newest semver while keeping
+`installedVersions` for update state.
 
 ### `registry.trust`
 
@@ -1052,8 +1067,9 @@ registry-relative app directory) instead of `repo`/`ref`/`commit`. `dir`
 entries are only accepted from sources where `allowLocalDirs` applies (local
 and path sources; git registries reject them). Install runs the same content
 checks but skips commit verification; provenance records
-`source: file://<registry-location>`. `app.add` from a local source enables
-on the local layer only (no `mim.yaml` pin).
+`source: file://<registry-location>`. `app.add` from a local source installs
+and enables locally. `app.share` rejects local sources because a committed
+`file://` workspace pin would break on other machines.
 
 ### `lookupRegistryEntry`
 
@@ -1110,7 +1126,11 @@ For the user-facing "teach Mim a capability" workflow, start with
 contract path.
 
 Agents should treat app authoring as teaching Mim a capability. Prefer
-`package.create` for the first scaffold, then run the dev loop:
+`app.templateList` and `app.templateContent` when a starter template fits.
+`app.templateContent` returns `package.create` parameters with coupled package
+ids, named-tool grants, backend code, bundled skills, and README text already
+rewritten from the requested app id/name. For custom scaffolds, call
+`package.create` directly, then run the dev loop:
 
 ```text
 package.validate -> package.reload -> app.status/app.enable -> package.capabilities.list -> package.tools.execute or package.jobs.start

@@ -68,6 +68,6 @@ Keys can be set from the app via the `ai.setKey` tool and removed via `ai.clearK
 
 ## Apps
 
-User-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulders-ai/mim-apps), one per `packages/<id>/`. This repo is the core runtime — no built-in apps. Install apps via `app.add` in Settings > Apps or `package.install`; they land in `~/.mim/packages/<id>/<version>/`. To develop, clone mim-apps and open it as a Mim workspace — edits show on reload. See the [mim-apps README](https://github.com/shoulders-ai/mim-apps) for publishing. App-root `README.md` files are auto-discovered as read-only documentation tabs.
+User-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulders-ai/mim-apps), one per `packages/<id>/`. This repo is the core runtime — no built-in apps. Add apps to your sidebar with `app.add` in Settings > Apps; use `app.share` to commit a workspace app pin for collaborators. `package.install` is the lower-level cache/install tool, and installs land in `~/.mim/packages/<id>/<version>/`. Settings > Apps can also create workspace starter apps from templates, validating them before reload, then revealing the created folder. To develop, clone mim-apps and open it as a Mim workspace — edits show on reload. See the [mim-apps README](https://github.com/shoulders-ai/mim-apps) for publishing. App-root `README.md` files are auto-discovered as read-only documentation tabs.
 
 For building workspace-specific capabilities, see [docs/custom-apps.md](docs/custom-apps.md).

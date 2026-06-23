@@ -373,7 +373,7 @@ the fixed core-surface cluster (Chat, Files, Terminal, Monitor), flat on the
 chrome like every other row, grouped by proximity and ended by one
 full-bleed `--rule-light` hairline where the scroll list begins (it darkens
 to `--rule` while the list is scrolled) — then
-collapsible **Apps** and **Activity** sections. Apps contains enabled core apps and package
+collapsible **Apps** and **Activity** sections. Apps contains enabled app
 launchers; the Apps header gear opens Settings > Apps. Activity contains
 active chats, agent runs, and package jobs; its header carries right-aligned
 History and New chat icon actions. Settings is the only footer row. Navigator

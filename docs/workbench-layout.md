@@ -155,7 +155,7 @@ Keep new layout state in the store, not in new standalone `App.vue` refs.
   monogram, core tokens, and Apps marker at identical y across the ⌘B
   toggle — see the header-cluster comment in `ShellSidebar.vue` before
   changing any of them.
-- Apps: enabled core apps, package launchers, and detected CLI agent
+- Apps: enabled app launchers and detected CLI agent
   launchers (IconRobot rows after the package launchers; shown iff the agent
   binary is installed). Agent rows are pure launchers — every click spawns a
   new agent session and opens its Work surface; they are never "active".

@@ -39,6 +39,18 @@ When a user wants to build their own app, point them to Chat first:
 4. Review any trust or secret setup in Settings > Apps.
 5. Test the final user prompt in chat.
 
+Settings includes starter paths for small manual builds:
+
+- Settings > Skills > Add > New Personal skill from template opens a template
+  selector with Blank skill, Review Checklist, and House Style. Template
+  creation writes a full skill folder, including bundled reference files when
+  the template has them, then reveals the folder and shows a confirmation
+  toast.
+- Settings > Apps > New app creates a workspace app from the selected template.
+  The UI renders the template in the main process, calls `package.create`,
+  runs `package.validate`, only reloads packages when validation passes, then
+  reveals the new app folder and shows a confirmation toast.
+
 Good self-build prompts:
 
 ```text
@@ -71,6 +83,9 @@ surface.
 ## Authoring Loop
 
 The agent-facing loop is:
+
+For starter scaffolds, use `app.templateList`/`app.templateContent` when one
+fits. For custom scaffolds, create the package directly.
 
 ```text
 package_create

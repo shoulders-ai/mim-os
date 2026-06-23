@@ -131,11 +131,19 @@ The global packages directory uses a two-level layout: `~/.mim/packages/<id>/<ve
 
 ## Legacy apps map key `issues` breaks loudly
 
-The `mim.yaml` `apps:` map is keyed by package id (`board`, `knowledge`), not by app name. The legacy `issues` key is skipped by the parser (`workspaceContract.ts` `LEGACY_APP_KEYS`) and the loader surfaces a diagnostic naming the replacement (`mim.yaml apps: legacy key "issues" is ignored — use "board"`). There is no shim or migration — a workspace that still has `apps: { issues: true }` will not enable the board package; change it to `apps: { board: true }`.
+The `mim.yaml` `apps:` map is keyed by package id (`board`, `knowledge`), not by app name. The legacy `issues` key is skipped by the parser (`workspaceContract.ts` `LEGACY_APP_KEYS`) and the loader surfaces a diagnostic naming the replacement (`mim.yaml apps: legacy key "issues" is ignored — use "board"`). There is no shim or migration — a workspace that still has `apps: { issues: true }` will not share or pin the board package; change it to `apps: { board: true }`.
 
-## Committed entry not authoritative for unprovenanced global packages
+## Committed app pins do not activate code
 
-A committed `mim.yaml` entry is only authoritative (overriding the local layer) for global packages that have provenance — a valid `.mim-install.json` with a `source` field, consistent with the committed entry's declared source when present. A manually-dropped global package directory without provenance falls through to the local enabled.json layer for its enablement decision. This prevents a committed entry from silently activating code whose origin cannot be verified.
+A committed `mim.yaml` app entry means "this workspace uses this app" and may pin `source`, `path`, and `version` for collaborators. It never adds the app to anyone's sidebar or activates backend/tools by itself. Personal activation lives in gitignored `.mim/packages/enabled.json`, and vendored workspace apps with backend code or effective permissions still require a local trust ack before they run.
+
+## Enabled headless apps do not get sidebar launchers
+
+`enabled` means the app can contribute its backend jobs/tools/skills for this user. The Navigator only renders launchers for enabled, installed apps that expose a view. A package with `mim.views: []` can be correctly enabled and still have no sidebar entry; adding a view in a later installed version makes the launcher appear once the loader selects that version.
+
+## Multiple installed app versions are normal
+
+Global installs are side-by-side under `~/.mim/packages/<id>/<version>/`. Updating an app does not delete older versions. The loader chooses the workspace-pinned version when `mim.yaml` pins one, otherwise the highest installed semver. Settings > Apps Browse collapses multiple registry entries with the same app id to one row for the newest registry version.
 
 ## Shared resources: readonly writes are hard-denied for every actor
 

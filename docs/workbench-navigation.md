@@ -260,8 +260,8 @@ Navigator should contain:
   draggable. Chat opens a sessionless draft composer and creates the real
   chat row only on first send; from an open session, New chat is the Work
   pane header action plus Cmd+N.
-- Apps: enabled core apps such as Board or Knowledge, user app launchers,
-  and detected CLI agent launchers (Claude Code, Codex, Gemini CLI — visible
+- Apps: enabled app launchers and detected CLI agent launchers (Claude Code,
+  Codex, Gemini CLI — visible
   iff installed on this machine; clicking one launches a new agent session).
   Rows are manually reorderable per workspace. The Apps header gear opens
   the Apps surface.

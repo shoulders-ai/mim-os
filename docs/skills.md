@@ -124,6 +124,13 @@ Authored chips use bare names; app-bundled chips use app-qualified ids.
   the skill body.
 - `skill.setDisabled` writes global `skills.disabled`.
 - `skill.create` creates a Personal skill in `~/.mim/skills/<name>/`.
+  It accepts generated `content` and bundled relative `files` for starter
+  templates, validates that `SKILL.md` frontmatter matches the requested name,
+  and rejects traversal, absolute paths, symlinks, `.git`, and replacement
+  `SKILL.md` entries before writing.
+- `skill.templateList` lists built-in Personal skill starters.
+- `skill.templateContent` renders a starter as `content` plus optional bundled
+  files. It does not write to disk.
 - `skill.inspectImport` inspects one `SKILL.md` folder before import.
 - `skill.import` copies an inspected folder into Personal after
   `confirmed: true`.
@@ -166,9 +173,12 @@ Row actions:
 - Toggle: all authored skills, writing global `skills.disabled`.
 
 The Add menu is ordered by common intake jobs: Add a source, Import skill from
-folder, New Personal skill. Import and source add both show inspection results
-before the operation becomes active. Creating a Personal skill reveals the
-folder; it does not auto-open an editor.
+folder, New Personal skill from template. Import and source add both show
+inspection results before the operation becomes active. New Personal skill from
+template opens a Select template selector; choosing a template pre-fills the
+name and description and writes any bundled reference files. Creating a
+Personal skill reveals the folder and shows a confirmation toast; it does not
+auto-open an editor.
 
 ## App capability display
 

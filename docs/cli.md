@@ -106,18 +106,18 @@ mim tool package.uninstall '{"id":"github-monitor","version":"1.0.0"}' --yes
 # View resolved enablement state for all packages
 mim tool app.status '{}' --json
 
-# Enable a package (workspace layer writes committed mim.yaml)
-mim tool app.enable '{"id":"github-monitor","layer":"workspace"}' --yes
+# Add an installed package to my sidebar/capability set
+mim tool app.enable '{"id":"github-monitor"}' --yes
 
-# Enable in local overlay only (gitignored enabled.json)
-mim tool app.enable '{"id":"some-addon","layer":"local"}' --yes
+# Share a registry app with collaborators by writing a committed mim.yaml pin
+mim tool app.share '{"id":"github-monitor"}' --yes
 
-# Disable
+# Remove from my sidebar/capability set
 mim tool app.disable '{"id":"some-addon"}' --yes
 ```
 
 Registry and install tools (`registry.list`, `package.install`,
-`package.update`) are `network`-category (external effect), so they require
+`package.update`, `app.share`) are `network`-category (external effect), so they require
 `--yes` or TTY confirmation. `package.uninstall`, `app.enable`/`app.disable`
 are `settings`-category (mutate effect), same rule.
 
@@ -126,22 +126,22 @@ actor. They are not available through `mim tool` (which runs as `ai`). Trust
 acknowledgement for vendored workspace packages and workspace-declared
 registries is an interactive-only action.
 
-### Enablement layers
+### Sharing and enablement
 
-Enablement has two writable layers:
+Apps have separate sharing and personal-enable states:
 
-- **workspace** — the committed `mim.yaml` `apps:` entry, keyed by package id.
-  Travels through git; every collaborator sees the same setting.
-- **local** — the gitignored `.mim/packages/enabled.json` overlay. Per-machine,
-  personal add-ons.
+- **shared** — the committed `mim.yaml` `apps:` entry, keyed by package id.
+  It travels through git and tells collaborators which app/source/version the
+  workspace uses. It does not enable the app for anyone.
+- **enabled** — the gitignored `.mim/packages/enabled.json` entry for this
+  workspace. It controls the current user's sidebar/capability set.
 
-The default layer for `app.enable`/`app.disable` is `workspace` when a
-committed entry already exists for the id, else `local`. Pass `layer`
-explicitly to override.
+`app.enable` and `app.disable` are always personal/local. Explicit
+`layer:"workspace"` is rejected; use `app.share` for workspace sharing and
+`app.remove` to remove a workspace share.
 
-Resolution order: committed entry (authoritative for workspace packages, subject
-to trust when needed, and provenance-verified global packages) > local
-enabled/disabled > disabled default. No package source is implicitly enabled.
+Activation order: local enabled entry plus the vendored-app trust gate, else
+disabled. A committed `mim.yaml` app pin never activates app code by itself.
 
 ## Source
 
