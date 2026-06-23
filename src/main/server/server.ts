@@ -100,7 +100,7 @@ export async function createServer(
     return getNamedMcpTools().some(s => s.mimName === method)
   }
 
-  const sdkDir = join(import.meta.dirname, '../../sdk')
+  const sdkDir = resolveSdkDir()
   // Populated after port assignment; checked at request time.
   const allowedOrigins = new Set<string>()
 
@@ -563,6 +563,31 @@ export function resolvePackageUiPath(packageDir: string, requestPath: string): s
 
   if (rel.startsWith('..') || isAbsolute(rel)) return null
   return fullPath
+}
+
+export function resolveSdkDir(): string {
+  const roots = Array.from(new Set([
+    process.cwd(),
+    resolve(import.meta.dirname, '../..'),
+    resolve(import.meta.dirname, '../../..'),
+    typeof process.resourcesPath === 'string' ? process.resourcesPath : '',
+    typeof process.resourcesPath === 'string' ? resolve(process.resourcesPath, '..') : '',
+  ].filter(Boolean)))
+
+  return resolveSdkDirFromRoots(roots)
+}
+
+export function resolveSdkDirFromRoots(roots: string[]): string {
+  const candidates = roots.flatMap(root => [
+    join(root, 'sdk'),
+    join(root, 'app.asar', 'sdk'),
+  ])
+  const found = candidates.find(candidate =>
+    existsSync(join(candidate, 'mim.js')) && existsSync(join(candidate, 'tokens.css')),
+  )
+  if (found) return found
+
+  throw new Error(`App SDK assets not found. Checked: ${candidates.slice(0, 8).join(', ')}`)
 }
 
 function resolveLaunchToken(tokens: Map<string, LaunchToken>, token: string): LaunchToken | null {

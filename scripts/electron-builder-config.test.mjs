@@ -17,6 +17,11 @@ describe('electron-builder updater configuration', () => {
     expect(config.deb.publish).toBeNull()
   })
 
+  it('packages app iframe SDK assets', () => {
+    expect(config.files).toContain('sdk/**/*')
+    expect(config.files).toContain('!sdk/**/*.test.*')
+  })
+
   it('keeps CI manual-publish only while uploading builder metadata', async () => {
     const workflow = await readFile('.github/workflows/release.yml', 'utf8')
 

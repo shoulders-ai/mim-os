@@ -30,6 +30,8 @@ export default {
     'out/**/*',
     'skills/**/*',
     'resources/**/*',
+    'sdk/**/*',
+    '!sdk/**/*.test.*',
     '!resources/docx-worker/**/*',
   ],
   extraResources: [

@@ -50,6 +50,12 @@ Any path sent to the renderer, agent transcript, search result, or tool result a
 
 Do not resolve bundled resources from a single `import.meta.dirname` path. Electron-vite can place shared main code in `out/main/chunks/`, so `../../resources` from that file points at `out/resources`, not the repo or packaged app resources. Use a multi-root resolver like `resolveRegistryPath()` in `src/main/ai/ai.ts`, and smoke-test built output when changing resource lookup.
 
+The app iframe SDK has the same constraint. `/sdk/mim.js` and
+`/sdk/tokens.css` are served by the local app server from `sdk/`, and they must
+be included in `electron-builder.config.mjs` `files`. If they are missing from
+the packaged app, every app iframe loads HTML 404 pages for the SDK assets:
+`mim.js` 404s and `tokens.css` is rejected for `text/html` MIME type.
+
 ## Package server port is dynamic
 
 `src/main/server/server.ts` binds to port 0 (OS-assigned random port). The renderer gets the port via `window.kernel.getPort()`. Package iframes discover it from their own URL. Never hardcode a port number.

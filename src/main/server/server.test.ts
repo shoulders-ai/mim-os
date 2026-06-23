@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { WebSocket } from 'ws'
-import { createServer, MCP_TOOL_SPECS, resolvePackageUiPath } from '@main/server/server.js'
+import { createServer, MCP_TOOL_SPECS, resolvePackageUiPath, resolveSdkDirFromRoots } from '@main/server/server.js'
 import type { LoadedPackage, PackageLoader } from '@main/packages/packages.js'
 import type { ToolContext, ToolDef, ToolRegistry } from '@main/tools/registry.js'
 
@@ -141,6 +141,30 @@ describe('app server', () => {
     const response = await fetch(`http://127.0.0.1:${server.port}/packages/dotpkg/index.html`)
     expect(response.status).toBe(200)
     expect(await response.text()).toContain('Dot UI')
+  })
+
+  it('serves browser SDK assets with real MIME types', async () => {
+    server = await createServer(makeTools(), makePackages([addPackage()]))
+
+    const js = await fetch(`http://127.0.0.1:${server.port}/sdk/mim.js`)
+    expect(js.status).toBe(200)
+    expect(js.headers.get('content-type')).toMatch(/javascript/)
+    expect(await js.text()).toContain('export const runtime')
+
+    const css = await fetch(`http://127.0.0.1:${server.port}/sdk/tokens.css`)
+    expect(css.status).toBe(200)
+    expect(css.headers.get('content-type')).toContain('text/css')
+    expect(await css.text()).toContain('--color-ink')
+  })
+
+  it('resolves SDK assets from the packaged app.asar layout', () => {
+    const root = join(dir, 'resources')
+    const sdkDir = join(root, 'app.asar', 'sdk')
+    mkdirSync(sdkDir, { recursive: true })
+    writeFileSync(join(sdkDir, 'mim.js'), 'export const runtime = {}')
+    writeFileSync(join(sdkDir, 'tokens.css'), ':root { --color-ink: #111; }')
+
+    expect(resolveSdkDirFromRoots([root])).toBe(sdkDir)
   })
 
   it('serves workspace files for artifact viewers, scoped to the workspace', async () => {
