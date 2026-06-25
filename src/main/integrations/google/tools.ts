@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
-import { GoogleIntegration } from '@main/integrations/google.js'
 import { fetchHttpClient, type HttpClient } from '@main/integrations/http.js'
 import { createKeytarSecretStore, type SecretStore } from '@main/integrations/secrets.js'
 import { loadUserConfig } from '@main/userConfig.js'
 import { parseMimYaml } from '@main/workspace/workspaceContract.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
+import { GoogleIntegration } from './client.js'
 
 export interface GoogleToolDeps {
   secrets?: SecretStore

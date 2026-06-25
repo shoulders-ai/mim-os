@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { GoogleIntegration, googleClientAccount, googleTokenAccount } from '@main/integrations/google.js'
 import { createMemorySecretStore, MIM_KEYCHAIN_SERVICE } from '@main/integrations/secrets.js'
 import type { HttpClient } from '@main/integrations/http.js'
+import { GoogleIntegration, googleClientAccount, googleTokenAccount } from './client.js'
 
 function fakeHttp(responses: unknown[], calls: Array<Record<string, unknown>> = []): HttpClient {
   return {

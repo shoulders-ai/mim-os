@@ -4,10 +4,10 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { createTraceLog } from '@main/trace/trace.js'
 import { createMemorySecretStore, MIM_KEYCHAIN_SERVICE } from '@main/integrations/secrets.js'
-import { googleClientAccount, googleTokenAccount } from '@main/integrations/google.js'
 import type { HttpClient } from '@main/integrations/http.js'
 import { createToolRegistry } from '@main/tools/registry.js'
-import { registerGoogleTools } from '@main/tools/google.js'
+import { googleClientAccount, googleTokenAccount } from './client.js'
+import { registerGoogleTools } from './tools.js'
 
 function fakeHttp(responses: unknown[], calls: Array<Record<string, unknown>> = []): HttpClient {
   return {
