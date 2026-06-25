@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
 import { describe, expect, it, vi } from 'vitest'
 import {
   aiToolKey,
@@ -31,16 +34,26 @@ vi.mock('@main/ai/ai.js', () => ({
   resolveKey: vi.fn(() => ({ key: 'sk-test', source: 'env' })),
 }))
 
-function mockRegistry() {
+function mockRegistry(workspacePath: string | null = null) {
   const calls: Array<{ name: string; params: Record<string, unknown>; ctx: Record<string, unknown> }> = []
   const tools = {
     call: vi.fn(async (name: string, params: Record<string, unknown>, ctx: Record<string, unknown>) => {
       calls.push({ name, params, ctx })
       return { ok: true, name, params }
     }),
+    getWorkspacePath: () => workspacePath,
   } as unknown as ToolRegistry
 
   return { tools, calls }
+}
+
+function withSlackPolicy(policy: Record<string, unknown>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mim-ai-test-'))
+  mkdirSync(join(dir, '.mim'), { recursive: true })
+  writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
+    connectors: { slack: policy },
+  }))
+  return dir
 }
 
 describe('central AI runtime tools', () => {
@@ -400,6 +413,43 @@ describe('central AI runtime tools', () => {
     ])
   })
 
+  it('exposes web readers with PDF and automatic browser fallback guidance', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+
+    expect(aiTools.web_read.description).toContain('PDF')
+    expect(aiTools.web_read_auto.description).toContain('Research Browser')
+    expect(aiTools.web_read_auto.description).toContain('cache')
+    expect(aiTools.web_search.description).toContain('web_read_auto')
+    expect(aiTools.web_research_status.description).toContain('source')
+    expect(aiTools.web_read_auto.inputSchema).toBeDefined()
+    expect(aiTools.web_research_status.inputSchema).toBeDefined()
+
+    await aiTools.web_read_auto.execute?.({
+      url: 'https://example.com/app',
+      max_chars: 10_000,
+      prefer_research: true,
+    }, {})
+
+    expect(calls.at(-1)).toEqual({
+      name: 'web.readAuto',
+      params: {
+        url: 'https://example.com/app',
+        max_chars: 10_000,
+        prefer_research: true,
+      },
+      ctx: { actor: 'ai', sessionId: 's1' },
+    })
+
+    await aiTools.web_research_status.execute?.({}, {})
+
+    expect(calls.at(-1)).toEqual({
+      name: 'web.research.status',
+      params: {},
+      ctx: { actor: 'ai', sessionId: 's1' },
+    })
+  })
+
   it('converts enabled package tools into dynamic AI SDK tools with sanitized keys', async () => {
     const { tools, calls } = mockRegistry()
     const aiTools = createAiSdkTools({
@@ -651,31 +701,63 @@ describe('central AI runtime tools', () => {
     ])
   })
 
-  it('exposes Slack read tools to chat', async () => {
-    const { tools, calls } = mockRegistry()
+  it('hides Slack tools when aiEnabled is false (default)', () => {
+    const { tools } = mockRegistry()
     const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    expect(aiTools.slack_search).toBeUndefined()
+    expect(aiTools.slack_history).toBeUndefined()
+    expect(aiTools.slack_channels).toBeUndefined()
+    expect(aiTools.slack_replies).toBeUndefined()
+    expect(aiTools.slack_send).toBeUndefined()
+  })
 
-    await aiTools.slack_search.execute?.({ query: 'from:rob budget', count: 5 }, {})
-    await aiTools.slack_history.execute?.({ channel: 'C123', limit: 10 }, {})
-    await aiTools.slack_channels.execute?.({ limit: 20 }, {})
+  it('exposes Slack read tools when aiEnabled is true', async () => {
+    const dir = withSlackPolicy({ aiEnabled: true })
+    try {
+      const { tools, calls } = mockRegistry(dir)
+      const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
-    expect(calls).toEqual([
-      {
-        name: 'slack.search',
-        params: { query: 'from:rob budget', count: 5 },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-      {
-        name: 'slack.history',
-        params: { channel: 'C123', limit: 10 },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-      {
-        name: 'slack.channels',
-        params: { limit: 20 },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-    ])
+      expect(aiTools.slack_search).toBeDefined()
+      expect(aiTools.slack_history).toBeDefined()
+      expect(aiTools.slack_channels).toBeDefined()
+      expect(aiTools.slack_replies).toBeDefined()
+      expect(aiTools.slack_send).toBeUndefined()
+
+      await aiTools.slack_search.execute?.({ query: 'from:rob budget', count: 5 }, {})
+      await aiTools.slack_history.execute?.({ channel: 'C123', limit: 10 }, {})
+      await aiTools.slack_channels.execute?.({ limit: 20 }, {})
+
+      expect(calls).toEqual([
+        {
+          name: 'slack.search',
+          params: { query: 'from:rob budget', count: 5 },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+        {
+          name: 'slack.history',
+          params: { channel: 'C123', limit: 10 },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+        {
+          name: 'slack.channels',
+          params: { limit: 20 },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('exposes slack_send only when sendEnabled is true', () => {
+    const dir = withSlackPolicy({ aiEnabled: true, sendEnabled: true })
+    try {
+      const { tools } = mockRegistry(dir)
+      const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+      expect(aiTools.slack_send).toBeDefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('exposes Gmail and Calendar read tools to chat', async () => {

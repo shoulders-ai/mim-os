@@ -55,8 +55,16 @@ Advanced git:
 - git_commit(message), git_pull(), git_push() — mutate the real repository through the permission gate. Do not use these for ordinary recovery; prefer local history.
 
 Web:
-- web_search(query, max_results?) — search the web via Exa and return results with title, URL, and snippet. Requires an Exa API key in Settings → Models → Integrations. Use web_read to fetch full content of interesting results.
-- web_read(url, max_chars?, timeout_ms?) — fetch a URL and return cleaned, readable markdown content. Extracts the article via Mozilla Readability and strips navigation, ads, and boilerplate. Returns title, content, excerpt, byline, siteName. Only http/https URLs.
+- web_search(query, max_results?) — search the web via Exa and return results with title, URL, and snippet. Requires an Exa API key in Settings → Models → Integrations. Use web_read_auto for full content of ordinary web results, or web_read for direct HTML/plain-text/PDF fetches.
+- web_read(url, max_chars?, timeout_ms?) — fetch an HTML/plain-text page or selectable PDF URL and return cleaned, readable content. HTML uses Mozilla Readability; PDFs use local text extraction and include page metadata. Returns title, content, excerpt, byline, siteName. Only http/https URLs.
+- web_read_auto(url, max_chars?, start_from_char?, extract_links?, extract_images?, timeout_ms?, prefer_research?) — read a URL through the best available browser reader. It renders the page first, then falls back to the persistent Research Browser profile for configured sources when the stateless page is blocked or empty; if a recent full read exists, it can return source="cache" with cache.cached_at after a live blocker. Returns content plus source, status, attention_required, attempts, and capture evidence. Use this as the default for dynamic websites. You may set timeout_ms higher for slow SPAs.
+- web_read_rendered(url, max_chars?, start_from_char?, extract_links?, extract_images?, timeout_ms?) — render a URL in Chromium, wait adaptively for hydrated DOM/content stability, include visible shadow DOM and same-origin iframe content, and return cleaned markdown with continuation offsets and capture evidence. Use when web_read misses app-rendered content. Only http/https URLs.
+- web_read_research(url, max_chars?, start_from_char?, extract_links?, extract_images?, timeout_ms?) — read through the persistent Research Browser profile with saved cookies/session state and one-time domain grants. Use for sources that need login, consent, or normal browser state. Returns status and attention_required if the page is still blocked. Only http/https URLs.
+- web_research_status() — inspect Research Browser source grants and source health, including ready/needs_attention/not_configured state, last read status, reasons, and desktop profile availability.
+
+When web_read_auto returns status="partial", treat the content as usable but possibly incomplete browser evidence. Inspect content and capture signals, and retry with a larger timeout_ms if that is likely to resolve hydration. Do not interrupt the user just because deterministic readiness was uncertain.
+
+When web_read_auto returns attention_required, source_not_configured, needs_attention, source_domain, or setup_url, treat that as the Research Browser setup/recovery path. Tell the user which source needs setup or attention. Do not ask the user to copy/paste, screenshot, or export the page unless Research Browser setup is unavailable or the user explicitly chooses that path.
 
 App management:
 - package_create(id, name, description, html, js?) — create a new app

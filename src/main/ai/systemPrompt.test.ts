@@ -67,6 +67,17 @@ describe('getSystemPrompt', () => {
     expect(out).toContain('package_uninstall')
   })
 
+  it('advertises PDF web reads and automatic browser fallback', () => {
+    const out = getSystemPrompt()
+    expect(out).toContain('web_read_auto')
+    expect(out).toContain('web_research_status')
+    expect(out).toContain('selectable PDF')
+    expect(out).toContain('Research Browser profile')
+    expect(out).toContain('cache.cached_at')
+    expect(out).toContain('status="partial"')
+    expect(out).toContain('Do not ask the user to copy/paste')
+  })
+
   it('describes the enablement model briefly', () => {
     const out = getSystemPrompt()
     expect(out).toContain('mim.yaml')

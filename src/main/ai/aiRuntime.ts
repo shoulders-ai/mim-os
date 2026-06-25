@@ -14,6 +14,9 @@ import {
 } from 'ai'
 import { z } from 'zod'
 import { loadRegistry, resolveKey } from '@main/ai/ai.js'
+import { buildGoogleAiTools } from '@main/integrations/google/aiTools.js'
+import { buildSlackAiTools } from '@main/integrations/slack/aiTools.js'
+import { readSlackPolicy } from '@main/integrations/slack/policy.js'
 import { buildProviderOptions, type ModelConfig } from '@main/ai/providerOptions.js'
 import { formatSkillCatalogSection, getSystemPrompt } from '@main/ai/systemPrompt.js'
 import type { SkillLoader } from '@main/skills.js'
@@ -204,111 +207,8 @@ export function createAiSdkTools({
       execute: async (params) => call('search', params),
     }),
 
-    slack_search: tool({
-      description: 'Search Slack messages for the configured workspace Slack account.',
-      inputSchema: z.object({
-        query: z.string(),
-        count: z.number().int().positive().optional(),
-      }),
-      execute: async (params) => call('slack.search', params),
-    }),
-
-    slack_history: tool({
-      description: 'Read recent Slack messages from a channel id.',
-      inputSchema: z.object({
-        channel: z.string(),
-        limit: z.number().int().positive().optional(),
-      }),
-      execute: async (params) => call('slack.history', params),
-    }),
-
-    slack_channels: tool({
-      description: 'List Slack channels for the configured workspace Slack account.',
-      inputSchema: z.object({
-        limit: z.number().int().positive().optional(),
-      }),
-      execute: async (params) => call('slack.channels', params),
-    }),
-
-    gmail_inbox: tool({
-      description: 'Read recent Gmail inbox message summaries for the configured workspace Google account.',
-      inputSchema: z.object({
-        limit: z.number().int().positive().optional(),
-      }),
-      execute: async (params) => call('gmail.inbox', params),
-    }),
-
-    gmail_search: tool({
-      description: 'Search Gmail using Gmail search syntax for the configured workspace Google account.',
-      inputSchema: z.object({
-        query: z.string(),
-        limit: z.number().int().positive().optional(),
-      }),
-      execute: async (params) => call('gmail.search', params),
-    }),
-
-    gmail_send: tool({
-      description: 'Send a plain-text Gmail message. This is high risk and requires user approval.',
-      inputSchema: z.object({
-        to: z.string(),
-        cc: z.string().optional(),
-        bcc: z.string().optional(),
-        subject: z.string(),
-        body: z.string(),
-      }),
-      execute: async (params) => call('gmail.send', params),
-    }),
-
-    calendar_events: tool({
-      description: 'Read Google Calendar events in an ISO time range.',
-      inputSchema: z.object({
-        from: z.string(),
-        to: z.string(),
-        calendarId: z.string().optional(),
-        limit: z.number().int().positive().optional(),
-      }),
-      execute: async (params) => call('calendar.events', params),
-    }),
-
-    calendar_create: tool({
-      description: 'Create a Google Calendar event. This is high risk and requires user approval.',
-      inputSchema: z.object({
-        summary: z.string(),
-        start: z.string(),
-        end: z.string(),
-        calendarId: z.string().optional(),
-        attendees: z.array(z.string()).optional(),
-        description: z.string().optional(),
-      }),
-      execute: async (params) => call('calendar.create', params),
-    }),
-
-    drive_search: tool({
-      description: 'Search Google Drive files by name for the configured workspace Google account.',
-      inputSchema: z.object({
-        query: z.string().optional(),
-        limit: z.number().int().positive().optional(),
-      }),
-      execute: async (params) => call('drive.search', params),
-    }),
-
-    docs_read: tool({
-      description: 'Export a Google Doc as plain text by file id.',
-      inputSchema: z.object({ fileId: z.string() }),
-      execute: async (params) => call('docs.read', params),
-    }),
-
-    sheets_read: tool({
-      description: 'Read values from a Google Sheet range.',
-      inputSchema: z.object({
-        spreadsheetId: z.string(),
-        range: z.string(),
-      }),
-      execute: async (params) => call('sheets.read', params),
-    }),
-
     web_read: tool({
-      description: 'Fetch a URL and return cleaned, readable markdown content. Uses Mozilla Readability to extract the article and strip navigation, ads, and boilerplate. Returns title, markdown content, excerpt, byline, and siteName.',
+      description: 'Fetch an HTML/plain-text page or selectable PDF URL and return cleaned, readable text content. HTML pages use Mozilla Readability; PDFs use local text extraction. Returns title, markdown/text content, excerpt, byline, siteName, and PDF page metadata when applicable.',
       inputSchema: z.object({
         url: z.string().url(),
         max_chars: z.number().int().positive().optional().describe('Maximum characters to return (default 80000)'),
@@ -317,8 +217,54 @@ export function createAiSdkTools({
       execute: async (params) => call('web.read', params),
     }),
 
+    web_read_auto: tool({
+      description: 'Read a URL through the best available browser reader. Uses rendered Chromium first, then quietly falls back to the persistent Research Browser profile for configured sources when stateless rendering hits consent, login, captcha, security verification, empty capture, or render failure. If readiness is uncertain it returns status="partial" with content and capture signals; retry with a higher timeout_ms for slow SPAs. If a recent complete read exists, it can return source="cache" with cache.cached_at after a live blocker. Returns content plus source/status/attention_required/attempts.',
+      inputSchema: z.object({
+        url: z.string().url(),
+        max_chars: z.number().int().positive().optional().describe('Target maximum characters for the returned chunk (default 100000)'),
+        start_from_char: z.number().int().nonnegative().optional().describe('Continue reading from this character offset when a prior result was truncated'),
+        extract_links: z.boolean().optional().describe('Preserve link URLs in Markdown'),
+        extract_images: z.boolean().optional().describe('Preserve image URLs in Markdown'),
+        timeout_ms: z.number().int().positive().optional().describe('Render timeout in milliseconds (default 30000)'),
+        prefer_research: z.boolean().optional().describe('Use the Research Browser profile first when the domain is configured'),
+      }),
+      execute: async (params) => call('web.readAuto', params),
+    }),
+
+    web_read_rendered: tool({
+      description: 'Render a URL in Chromium and return cleaned markdown from the hydrated page with capture confidence/signals. Use for JavaScript-rendered sites or when web_read misses content. Supports chunk continuation with start_from_char and longer timeout_ms for slow SPAs.',
+      inputSchema: z.object({
+        url: z.string().url(),
+        max_chars: z.number().int().positive().optional().describe('Target maximum characters for the returned chunk (default 100000)'),
+        start_from_char: z.number().int().nonnegative().optional().describe('Continue reading from this character offset when a prior result was truncated'),
+        extract_links: z.boolean().optional().describe('Preserve link URLs in Markdown'),
+        extract_images: z.boolean().optional().describe('Preserve image URLs in Markdown'),
+        timeout_ms: z.number().int().positive().optional().describe('Render timeout in milliseconds (default 30000)'),
+      }),
+      execute: async (params) => call('web.readRendered', params),
+    }),
+
+    web_read_research: tool({
+      description: 'Read a URL through the persistent Research Browser profile, using previously granted domain access and saved cookies/session state. Use for sources that need login, consent, or normal browser state. Returns cleaned markdown plus status/attention_required when the page is still blocked.',
+      inputSchema: z.object({
+        url: z.string().url(),
+        max_chars: z.number().int().positive().optional().describe('Target maximum characters for the returned chunk (default 100000)'),
+        start_from_char: z.number().int().nonnegative().optional().describe('Continue reading from this character offset when a prior result was truncated'),
+        extract_links: z.boolean().optional().describe('Preserve link URLs in Markdown'),
+        extract_images: z.boolean().optional().describe('Preserve image URLs in Markdown'),
+        timeout_ms: z.number().int().positive().optional().describe('Render timeout in milliseconds (default 30000)'),
+      }),
+      execute: async (params) => call('web.readResearch', params),
+    }),
+
+    web_research_status: tool({
+      description: 'Return Research Browser source status: enabled state, granted domains, source readiness/attention state, last read status, reasons, and desktop profile availability.',
+      inputSchema: z.object({}),
+      execute: async () => call('web.research.status', {}),
+    }),
+
     web_search: tool({
-      description: 'Search the web via Exa and return results with title, URL, and snippet. Requires an Exa API key (Settings → Models → Integrations). Use web_read to fetch full content of interesting results.',
+      description: 'Search the web via Exa and return results with title, URL, and snippet. Requires an Exa API key (Settings → Models → Integrations). Use web_read_auto to fetch full content of interesting website results; use web_read for direct HTML/plain-text/PDF URLs.',
       inputSchema: z.object({
         query: z.string().min(1),
         max_results: z.number().int().positive().max(20).optional().describe('Maximum results (default 10)'),
@@ -327,9 +273,12 @@ export function createAiSdkTools({
     }),
   }
 
+  const googleTools = buildGoogleAiTools(call)
+
   if (profile === 'inline') {
     return {
       ...readTools,
+      ...googleTools,
       suggest_edit: tool({
         description: 'Suggest replacement text for the selected text.',
         inputSchema: z.object({
@@ -371,8 +320,13 @@ export function createAiSdkTools({
 
   // Security property: static tools win over dynamic package tools. A package cannot
   // shadow a core SDK tool (e.g. fs_write) by registering a tool with the same sanitized key.
+  const slackPolicy = readSlackPolicy(tools.getWorkspacePath())
+  const slackTools = buildSlackAiTools(call, slackPolicy)
+
   const staticTools = {
     ...readTools,
+    ...googleTools,
+    ...slackTools,
     ...skillTools,
 
     trace_query: tool({
