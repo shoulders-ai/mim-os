@@ -94,6 +94,30 @@ describe('userConfig — loadUserConfig', () => {
     expect(serialized).not.toContain('sk-also-leaks')
     expect((config.defaults as Record<string, unknown>).apiKey).toBeUndefined()
   })
+
+  it('parses connectors.slack from config.yaml', () => {
+    writeConfig(home, [
+      'connectors:',
+      '  slack:',
+      '    aiEnabled: true',
+      '    sendEnabled: false',
+      '    privateChannels: false',
+      '    directMessages: true',
+    ].join('\n'))
+    const config = loadUserConfig(home)
+    expect(config.connectors.slack).toEqual({
+      aiEnabled: true,
+      sendEnabled: false,
+      privateChannels: false,
+      directMessages: true,
+    })
+  })
+
+  it('returns empty connectors when none configured', () => {
+    writeConfig(home, 'user:\n  name: Paul\n')
+    const config = loadUserConfig(home)
+    expect(config.connectors).toEqual({})
+  })
 })
 
 describe('userConfig — resolveModelDefault', () => {

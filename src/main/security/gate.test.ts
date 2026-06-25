@@ -80,6 +80,7 @@ describe('tool policy metadata', () => {
     expect(getToolPolicy('drive.search')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'query' })
     expect(getToolPolicy('docs.read')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'fileId' })
     expect(getToolPolicy('sheets.read')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'spreadsheetId' })
+    expect(getToolPolicy('web.readAuto')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'url' })
     expect(getToolPolicy('google.exchangeCode')).toMatchObject({ category: 'secrets', risk: 'high', targetParam: 'account' })
     expect(getToolPolicy('documents.importMarkdown')).toMatchObject({ category: 'write', risk: 'medium', pathParam: 'output_path' })
     expect(getToolPolicy('documents.importMarkdown.formats')).toMatchObject({ category: 'read', risk: 'low' })

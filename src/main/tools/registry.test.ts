@@ -212,6 +212,20 @@ describe('ToolRegistry', () => {
     for (const result of results) expect(result.payloadRef).toBeUndefined()
   })
 
+  it('skips result capture when tool sets captureResult false', async () => {
+    tools.register({
+      name: 'slack.history',
+      description: 'Slack history',
+      captureResult: false,
+      execute: async () => ({ messages: [{ text: 'private content' }] }),
+    })
+
+    await tools.call('slack.history', { channel: 'C1' }, { actor: 'ai' })
+
+    const result = readTraceLines(dir).find(l => l.kind === 'tool.result' && l.tool === 'slack.history')!
+    expect(result.payloadRef).toBeUndefined()
+  })
+
   it('skips result blobs for payloads over the size cap', async () => {
     tools.register({
       name: 'fs.read',

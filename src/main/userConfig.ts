@@ -21,6 +21,9 @@ export interface UserConfig {
     slack?: string
     models: { chat?: string; ghost?: string }
   }
+  connectors: {
+    slack?: Record<string, unknown>
+  }
   registry: { url?: string }
   skillSources: Record<string, SkillSourceConfig>
   skills: { disabled: string[] }
@@ -34,7 +37,7 @@ export const USER_SKILL_SOURCE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 let cache: UserConfig | null = null
 
 function emptyConfig(): UserConfig {
-  return { user: {}, defaults: { models: {} }, registry: {}, skillSources: {}, skills: { disabled: [] } }
+  return { user: {}, defaults: { models: {} }, connectors: {}, registry: {}, skillSources: {}, skills: { disabled: [] } }
 }
 
 function str(value: unknown): string | undefined {
@@ -71,6 +74,13 @@ export function loadUserConfig(home?: string): UserConfig {
         const registry = (r.registry && typeof r.registry === 'object') ? r.registry as Record<string, unknown> : {}
         config.registry.url = str(registry.url)
 
+        const connectors = (r.connectors && typeof r.connectors === 'object' && !Array.isArray(r.connectors))
+          ? r.connectors as Record<string, unknown>
+          : {}
+        if (connectors.slack && typeof connectors.slack === 'object' && !Array.isArray(connectors.slack)) {
+          config.connectors.slack = connectors.slack as Record<string, unknown>
+        }
+
         config.skillSources = parseSkillSources(r.skillSources)
         config.skills.disabled = parseDisabledSkillNames(r.skills)
       }
@@ -97,6 +107,9 @@ export function loadUserConfig(home?: string): UserConfig {
     defaults: Object.freeze({
       ...config.defaults,
       models: Object.freeze(config.defaults.models),
+    }),
+    connectors: Object.freeze({
+      ...(config.connectors.slack ? { slack: Object.freeze({ ...config.connectors.slack }) } : {}),
     }),
     registry: Object.freeze(config.registry),
     skillSources: Object.freeze(Object.fromEntries(

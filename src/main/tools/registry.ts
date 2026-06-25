@@ -9,6 +9,10 @@ export interface ToolDef {
   name: string
   description: string
   inputSchema?: Record<string, unknown>
+  // When false, the registry skips result payload capture for this tool even
+  // when workspace content capture is enabled. Use for third-party content
+  // (Slack messages, emails) that should not persist in trace blobs.
+  captureResult?: boolean
   execute: (params: Record<string, unknown>, ctx: ToolContext) => Promise<unknown>
 }
 
@@ -62,7 +66,8 @@ export function isSecretBearingTool(name: string): boolean {
     name === 'ai.setKey' ||
     name === 'ai.clearKey' ||
     name === 'google.setOAuthClient' ||
-    name === 'google.exchangeCode'
+    name === 'google.exchangeCode' ||
+    name === 'slack.connect'
   ) {
     return true
   }
@@ -125,7 +130,7 @@ export function createToolRegistry(
         const beforeMutation = mutationPath ? snapshotWorkspaceFile(workspacePath, mutationPath) : null
         const historyPending = safeBeforeHistory(options.history, workspacePath, name, params, spanCtx)
         const result = await tool.execute(params, spanCtx)
-        const resultRef = captureContent() && !isSecretBearingTool(name)
+        const resultRef = captureContent() && !isSecretBearingTool(name) && tool.captureResult !== false
           ? trace.writePayload(traceId, spanId, 'result', result, RESULT_CAPTURE_MAX_BYTES)
           : null
         trace.append({

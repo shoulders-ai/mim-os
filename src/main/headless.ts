@@ -40,8 +40,9 @@ import { registerTraceTools } from '@main/tools/trace.js'
 import { createHistoryStore } from '@main/history/history.js'
 import { registerHistoryTools } from '@main/tools/history.js'
 import { readTraceCaptureContent, readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
-import { registerSlackTools } from '@main/tools/slack.js'
-import { registerGoogleTools } from '@main/tools/google.js'
+import { registerSlackTools } from '@main/integrations/slack/tools.js'
+import { registerGoogleTools } from '@main/integrations/google/tools.js'
+import { registerWebTools } from '@main/tools/web.js'
 import { readAccountToken, registerAccountTools } from '@main/tools/account.js'
 import { registerWorkspaceTools } from '@main/tools/workspace.js'
 import { registerSessionTools } from '@main/sessions.js'
@@ -149,6 +150,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
         .filter(p => existsSync(p.dir)),
   })
   registerLogbookTools(tools)
+  registerWebTools(tools)
   registerSlackTools(tools)
   registerGoogleTools(tools)
   registerAccountTools(tools, () => {})

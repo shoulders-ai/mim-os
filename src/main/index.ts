@@ -58,9 +58,15 @@ import { registerCoreAppTools } from '@main/tools/coreApps.js'
 import { checkForUpdates } from '@main/packages/updateCheck.js'
 import { registerLogbookTools } from '@main/tools/logbook.js'
 import { registerWebTools } from '@main/tools/web.js'
+import { renderUrlInHiddenWindow } from '@main/web/renderedBrowser.js'
+import {
+  clearResearchBrowserProfile,
+  openResearchBrowserWindow,
+  renderUrlInResearchSession,
+} from '@main/web/researchBrowser.js'
 import { registerAccountTools, readAccountToken, setAccountDev } from '@main/tools/account.js'
-import { registerSlackTools } from '@main/tools/slack.js'
-import { registerGoogleTools } from '@main/tools/google.js'
+import { registerSlackTools } from '@main/integrations/slack/tools.js'
+import { registerGoogleTools } from '@main/integrations/google/tools.js'
 import { registerTelemetryTools } from '@main/tools/telemetry.js'
 import { createKeytarSecretStore } from '@main/integrations/secrets.js'
 import { registerResourceTools } from '@main/tools/resources.js'
@@ -400,7 +406,12 @@ async function boot(): Promise<void> {
     },
   })
   registerLogbookTools(tools)
-  registerWebTools(tools)
+  registerWebTools(tools, {
+    renderRenderedPage: renderUrlInHiddenWindow,
+    renderResearchPage: renderUrlInResearchSession,
+    openResearchBrowser: openResearchBrowserWindow,
+    clearResearchBrowserProfile,
+  })
   registerSlackTools(tools)
   registerGoogleTools(tools)
   registerTelemetryTools(tools, telemetry)

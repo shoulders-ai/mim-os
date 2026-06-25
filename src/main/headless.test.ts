@@ -24,14 +24,16 @@ describe('createHeadlessKernel', () => {
     for (const expected of [
       'fs.read', 'fs.write', 'fs.list',
       'workspace.open', 'workspace.info', 'workspace.init',
-	      'settings.get', 'settings.set',
-	      'session.create', 'session.list',
-	      'search', 'search.files', 'search.sessions',
-	      'trace.query', 'trace.stats',
-	      'telemetry.track', 'telemetry.status', 'telemetry.setEnabled',
-	      'skill.list',
-	      'log.append', 'log.read',
-	      'ai.registry',
+      'settings.get', 'settings.set',
+      'session.create', 'session.list',
+      'search', 'search.files', 'search.sessions',
+      'trace.query', 'trace.stats',
+      'telemetry.track', 'telemetry.status', 'telemetry.setEnabled',
+      'skill.list',
+      'log.append', 'log.read',
+      'web.read', 'web.readAuto', 'web.readRendered', 'web.readResearch', 'web.search',
+      'web.research.status', 'web.research.allowDomain',
+      'ai.registry',
       'documents.docx.read',
       'slack.status',
       'google.status',
@@ -39,6 +41,13 @@ describe('createHeadlessKernel', () => {
     ]) {
       expect(names.has(expected), `missing tool: ${expected}`).toBe(true)
     }
+  })
+
+  it('reports rendered web reads as unavailable without the Electron renderer', async () => {
+    const kernel = createHeadlessKernel()
+
+    await expect(kernel.tools.call('web.readRendered', { url: 'https://example.com' }, { actor: 'user' }))
+      .rejects.toThrow('web.readRendered is only available in the Electron desktop runtime')
   })
 
   it('openWorkspace opens a tmp dir and scaffolds .mim/workspace.json', async () => {
