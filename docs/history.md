@@ -118,7 +118,7 @@ the folding model. Callers that need every raw recovery point can pass
 `history.prune` applies the same visibility policy physically. The business
 goal is not archival completeness; it is keeping recovery useful when a
 workspace has hundreds or thousands of saves. The default rail stays compact,
-and destructive thinning is explicit from Settings > Storage.
+and destructive thinning is explicit from Settings > Workspace.
 
 ## Go Back Surface
 
@@ -143,7 +143,7 @@ This is not the Navigator conversation History surface, and it is not a git UI.
 
 ## Manage Surface
 
-Settings > Storage exposes local recovery health and maintenance:
+Settings > Workspace exposes local recovery health and maintenance:
 
 - storage bytes and version counts from `history.stats`;
 - Thin old versions, which calls `history.prune`;

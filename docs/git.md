@@ -73,5 +73,5 @@ upstream or matching remote branch exists, and pushes. First pushes set the
 upstream branch. It stops on conflicts, missing remotes, non-fast-forward pulls,
 or git errors. Mim does not auto-resolve conflicts.
 
-Settings > Storage is the human manage surface for sync mode, remote, status,
+Settings > Workspace is the human manage surface for sync mode, remote, status,
 and Sync now.

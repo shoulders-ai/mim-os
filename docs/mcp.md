@@ -32,7 +32,7 @@ The file is auth material. It is written atomically with owner-only permissions
 where the filesystem supports chmod. On app quit, Mim deletes it best-effort.
 That discovery token is valid for the desktop process lifetime.
 
-Agent sessions launched from Settings > Agents receive per-session `MIM_PORT`
+Agent sessions launched from Settings > Apps receive per-session `MIM_PORT`
 and `MIM_TOKEN` environment variables. Running `mim mcp` outside Mim falls back
 to `~/.mim/server.json`. Per-agent tokens are revoked when the live agent
 session exits, is killed, or fails during launch after token creation.
@@ -93,7 +93,7 @@ silently excluded from the MCP catalog.
 
 ## Client Config
 
-Settings > Agents shows a **Connect** button next to each installed CLI agent.
+Settings > Apps shows a **Connect** button next to each installed CLI agent.
 Clicking it runs the agent's native `mcp add` command behind the scenes:
 
 | Agent | Command |

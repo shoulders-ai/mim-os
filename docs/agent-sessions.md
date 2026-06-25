@@ -84,8 +84,9 @@ Status transitions:
 - `stop` on a stale `running` record with no live pty → `stopped` directly.
 - `reconcileStaleSessions()` at boot: any `running` record without a live pty
   becomes `interrupted` (ptys die with the app).
-- `delete` throws while the session is running; it removes record +
-  scrollback.
+- `delete` throws while the session is running; for ended sessions it removes
+  record + scrollback, and repeat deletes of an already-missing record are
+  treated as already done.
 
 Corrupt record files are quarantined, never poison list/get: renamed to
 `<file>.corrupt` with a `console.error` (same convention as `sessions.ts`).
@@ -151,10 +152,12 @@ server) carries `{ type, session }` where `session` is the full
 | `session.started` | launch |
 | `session.status` | runtime status or titleHint change |
 | `session.exited` | pty exit (and stale-stop transition) |
-| `session.changed` | rename, archive/restore, delete (delete carries the removed record so listeners prune by id) |
+| `session.changed` | rename, archive/restore |
+| `session.deleted` | delete; carries the removed record so listeners prune by id |
 
-All types reduce to the same store upsert in the renderer — every event
-carries the full record.
+The renderer upserts lifecycle/change events and prunes on `session.deleted`.
+Do not treat delete as a generic change event, or a deleted record can be
+reinserted into Activity with no backing `.json`/scrollback file.
 
 ### Tools
 
@@ -167,7 +170,7 @@ carries the full record.
 | `agent.sessions.get` | read | One record; `scrollback: true` includes the captured text |
 | `agent.sessions.rename` | mutate (ui/low) | Trimmed non-empty title |
 | `agent.sessions.archive` | mutate (ui/low) | `archived: false` restores |
-| `agent.sessions.delete` | mutate (ui/medium) | Removes record + scrollback; fails while running |
+| `agent.sessions.delete` | mutate (ui/medium) | Removes record + scrollback; fails while running; repeat delete of an already-missing ended session is idempotent |
 
 The **whole `agent.*` surface is denied to app actors** — agent sessions
 run with the user's full shell authority. Policies live in `TOOL_POLICIES`
@@ -182,8 +185,8 @@ and the hard-deny branches in `src/main/security/gate.ts`; see
 | `src/renderer/stores/runs.ts` | `agentSessions` state + `agent-session` `NavigatorRun` kind. Status mapping: `running` + runtime overlay → `working`/`needs-input`/`idle`; `interrupted` maps to `error` (mirrors app jobs boot reconciliation); rename via `agent.sessions.rename` |
 | `src/renderer/services/workbench/entries.ts` | `agentSessionWorkEntry(agentId, sessionId, title)` → id `work:agent-session:<sessionId>` (identity is the session id alone; agentId rides along for the view) |
 | `src/renderer/services/workbench/hosts.ts` | `agent-session` Work host kind |
-| `src/renderer/components/terminal/TerminalSurface.vue` | One xterm instance bound to one pty (live) **or** replaying a static scrollback string (replay). Extracted from `TerminalPanel.vue`, which keeps tabs, spawn ownership, and restart semantics for scratch terminals |
-| `src/renderer/components/agents/AgentSessionView.vue` | The `agent-session` Work surface: header with title/status/subtitle, Stop while running (confirm-free; relaunch recovers), live `TerminalSurface` bound to `ptyId`, ended banner (Exited / Failed (exit N) / Stopped / Interrupted) + Relaunch (spawns a fresh session and navigates to it), scrollback replay fetched once per ended session, missing-record recovery state |
+| `src/renderer/components/terminal/TerminalSurface.vue` | One xterm instance bound to one pty (live) **or** replaying a static scrollback string (replay). Extracted from `TerminalPanel.vue`, which keeps tabs, spawn ownership, and restart semantics for scratch terminals. Uses the profile-aware keybinding fallbacks in `terminalKeybindings.ts`. |
+| `src/renderer/components/agents/AgentSessionView.vue` | The `agent-session` Work surface: header with title/status/subtitle, Stop while running (confirm-free; relaunch recovers), live `TerminalSurface` bound to `ptyId` with the agent id as keybinding profile, ended banner (Exited / Failed (exit N) / Stopped / Interrupted) + Relaunch (spawns a fresh session and navigates to it), scrollback replay fetched once per ended session, missing-record recovery state |
 | `src/renderer/components/workbench/WorkHost.vue` | Mounts `AgentSessionView` for `agent-session` Work |
 | `src/renderer/components/sidebar/ShellSidebar.vue` | Apps section: launcher rows for enabled agents (IconRobot) after app launchers, participating in `navigatorAppOrder` (plain ids; catalogs cannot collide). Launcher rows are pure launchers — every click spawns a new session, never "active". Activity: agent-session rows with status; context menu (`RunContextMenu.vue`) offers Stop only on live sessions and Delete only on ended ones; batch archive includes agent sessions, batch delete skips live ones |
 | `src/renderer/App.vue` | Adapter: hydrates `agentsStore` + `runsStore.agentSessions` at boot and on workspace switch (`agent.list` + `agent.sessions.list`), subscribes `agent:session-event`, launch/open/stop/archive/delete handlers; archive and delete prune the matching Work history entry and fall back to Files Work when the pruned entry was active |
@@ -204,9 +207,9 @@ and the hard-deny branches in `src/main/security/gate.ts`; see
   (`working`, `needs-input`, `idle`, `done`, `stopped`, error for both `error`
   and `interrupted`); click opens `work:agent-session:<id>`; inline rename;
   Stop (live only), Archive, Delete (ended only).
-- **AgentSessionView**: live terminal while running; ended banner + Relaunch
-  + scrollback replay after; "Session not found" recovery if the record is
-  gone.
+- **AgentSessionView**: live terminal while running with agent-specific
+  keybinding profile; ended banner + Relaunch + scrollback replay after;
+  "Session not found" recovery if the record is gone.
 - **History**: agent sessions appear next to chats and app runs,
   archived previews come from `archive.list` (`titleHint` as preview).
 - **Close guard**: running sessions add "N running agent sessions" to the
@@ -224,6 +227,8 @@ and the hard-deny branches in `src/main/security/gate.ts`; see
 - `src/renderer/stores/runs.test.ts`
 - `src/renderer/components/agents/AgentSessionView.test.ts`
 - `src/renderer/components/terminal/TerminalSurface.test.ts`
+- `src/renderer/components/terminal/terminalKeybindings.test.ts`
+- `src/renderer/components/terminal/xtermKeyboardEncoding.test.ts`
 - `src/renderer/components/sidebar/ShellSidebar.smoke.test.ts`
 - `src/renderer/components/archive/ArchiveBrowser.smoke.test.ts`
 - `src/renderer/components/settings/AgentsSettingsPanel.test.ts` (Coding agents settings)

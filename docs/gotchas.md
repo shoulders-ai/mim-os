@@ -4,7 +4,7 @@ Non-obvious constraints. Add to this whenever a fix depends on a subtle rule.
 
 ## AI SDK: inputSchema, not parameters
 
-When defining tools with the Vercel AI SDK `tool()` function, always use `inputSchema`, never `parameters`. Using `parameters` silently breaks Anthropic (400 error: `input_schema.type: Field required`). Tests in `src/main/ai/aiRuntime.test.ts` enforce this for the central AI runtime.
+When defining tools with the Vercel AI SDK `tool()` function, always use `inputSchema`, never `parameters`. Using `parameters` silently breaks Anthropic (400 error: `input_schema.type: Field required`). `src/main/ai/aiSdkToolContract.test.ts` enforces this for production `src/main` files that import `tool` from `ai`.
 
 ## @ai-sdk/vue Chat state is reactive — never poll it
 
@@ -28,7 +28,11 @@ xterm.js deliberately drops arrow keys with `metaKey` on macOS, so Cmd+Left/Righ
 
 On Windows and Linux the same shim is Ctrl+Left/Right, not Super/Meta+Arrow. Keep the platform branch in `terminalKeybindings.ts`; otherwise Linux users cannot trigger the documented line-boundary shortcut.
 
-For terminal multiline input, Shift+Enter should send `\x16\n` (`quoted-insert` plus LF), not a raw CR/LF. In Bash/Zsh this inserts a literal line feed into the current shell buffer; a raw CR/LF accepts the command instead.
+Terminal Shift+Enter and Option-arrow behavior are profile-specific. In scratch shell terminals, Shift+Enter falls back to `\x16\n` (`quoted-insert` plus LF) so Bash/Zsh insert a literal line feed into the current shell buffer instead of accepting the command. macOS Option+Left/Right falls back to `Esc+b`/`Esc+f` for shell word movement because zsh and Bash do not reliably bind xterm's native `CSI 1;3D/C` modified cursor sequences. Do not apply these shell fallbacks to agent sessions: Claude Code, Codex, and Gemini CLI treat `Ctrl+V` and Alt-letter commands as editor input.
+
+Agent terminal surfaces use their agent id as the `TerminalSurface` keybinding profile. Agent Shift+Enter falls back to `\x1b\r` (Alt+Enter), matching the terminal setup guidance used by modern agent CLIs. Agent Cmd+Left/Right sends Home/End (`\x1b[H`/`\x1b[F`) instead of shell readline bytes. For agent profiles, do not rewrite macOS Option+Left/Right to readline `Esc+b`/`Esc+f`; xterm already emits standard modified cursor sequences for Alt/Option arrows, while raw-mode agent editors may parse Alt-letter commands as destructive editor actions.
+
+Mim does not currently advertise Kitty/CSI-u keyboard protocol support. Do not respond to `CSI ? u` or enter enhanced keyboard mode unless the terminal layer encodes the whole key family it advertises; half-implementing only Shift+Enter leaves Option/Cmd arrows and deletion in an inconsistent parser mode.
 
 ## xterm startup needs a visible, measurable parent
 
@@ -197,6 +201,16 @@ on disk is therefore a lie at the next boot. `reconcileStaleSessions()`
 `running` record without a live pty as `interrupted` and stamps `endedAt`.
 Mirrors the package-jobs boot reconciliation; the renderer maps `interrupted`
 to an error-state row.
+
+## Agent session delete events must prune, not upsert
+
+`agent.sessions.delete` removes the `.mim/agent-sessions/<id>.json` record and
+its `.scrollback` file, then emits `agent:session-event` with
+`type: 'session.deleted'`. Renderer consumers must remove that session id from
+their aggregate stores. If delete is modeled as a normal `session.changed`
+upsert, the UI re-adds a record that no longer exists on disk; reopening it then
+fails with `Agent session not found` while the Activity/History row appears
+stuck.
 
 ## Agent scrollback is byte-capped; xterm replay tolerates the cut
 

@@ -35,7 +35,7 @@ Telemetry is disabled when:
 - `NODE_ENV=test`, unless a test explicitly opts in
 - `~/.mim/telemetry.json` has `enabled: false`
 
-Settings > Storage exposes the machine-global toggle through the
+Settings > Workspace exposes the machine-global toggle through the
 `telemetry.status` and `telemetry.setEnabled` tools.
 
 ## Privacy Contract
