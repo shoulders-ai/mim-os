@@ -49,7 +49,7 @@ export interface AgentSessionRuntime extends AgentSessionRecord {
 }
 
 export interface AgentSessionEvent {
-  type: 'session.started' | 'session.status' | 'session.exited' | 'session.changed'
+  type: 'session.started' | 'session.status' | 'session.exited' | 'session.changed' | 'session.deleted'
   session: AgentSessionRuntime
 }
 
@@ -359,12 +359,17 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
 
   function deleteSession(sessionId: string): { deleted: string } {
     if (active.has(sessionId)) throw new Error(`Cannot delete running agent session: ${sessionId}`)
-    const record = requireRecord(sessionId)
+    const record = readRecord(sessionId)
+    if (!record) {
+      const scrollback = scrollbackPath(sessionId)
+      if (existsSync(scrollback)) unlinkSync(scrollback)
+      return { deleted: sessionId }
+    }
     unlinkSync(recordPath(sessionId))
     const scrollback = scrollbackPath(sessionId)
     if (existsSync(scrollback)) unlinkSync(scrollback)
     // The session field carries the deleted record so listeners prune by id.
-    emitEvent('session.changed', { ...record })
+    emitEvent('session.deleted', { ...record })
     return { deleted: sessionId }
   }
 

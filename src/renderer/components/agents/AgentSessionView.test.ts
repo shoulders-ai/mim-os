@@ -12,7 +12,7 @@ vi.mock('../terminal/TerminalSurface.vue', async () => {
   return {
     default: defineComponent({
       name: 'TerminalSurfaceStub',
-      props: ['ptyId', 'replay'],
+      props: ['ptyId', 'replay', 'keybindingProfile'],
       emits: ['exited', 'input'],
       setup(props) {
         return () => h('div', {
@@ -20,6 +20,7 @@ vi.mock('../terminal/TerminalSurface.vue', async () => {
           'data-pty-id': props.ptyId != null ? String(props.ptyId) : '',
           'data-replay': props.replay ?? '',
           'data-mode': props.replay != null ? 'replay' : 'live',
+          'data-keybinding-profile': props.keybindingProfile ?? '',
         })
       },
     }),
@@ -71,6 +72,13 @@ describe('AgentSessionView', () => {
       args: [],
       installed: true,
       binPath: '/usr/local/bin/claude',
+    }, {
+      id: 'gemini-cli',
+      name: 'Gemini CLI',
+      bin: 'gemini',
+      args: [],
+      installed: true,
+      binPath: '/usr/local/bin/gemini',
     }]
   })
 
@@ -116,8 +124,21 @@ describe('AgentSessionView', () => {
     const surface = surfaceEl()
     expect(surface?.dataset.mode).toBe('live')
     expect(surface?.dataset.ptyId).toBe('11')
+    expect(surface?.dataset.keybindingProfile).toBe('claude-code')
     expect(root.textContent).toContain('Claude Code')
     expect(call).not.toHaveBeenCalledWith('agent.sessions.get', expect.anything())
+  })
+
+  it('uses the persisted session agent id for live keybindings when the Work entry prop is stale', async () => {
+    useRunsStore().setAgentSessions([makeSession({
+      agentId: 'gemini-cli',
+      title: 'Gemini CLI',
+    })])
+    mountView({ agentId: 'claude-code' })
+    await flushUi()
+
+    expect(surfaceEl()?.dataset.keybindingProfile).toBe('gemini-cli')
+    expect(root.textContent).toContain('Gemini CLI')
   })
 
   it('stops a running session without confirmation', async () => {
@@ -201,27 +222,29 @@ describe('AgentSessionView', () => {
 
   it('relaunches the agent, applies the new session to the store, and emits openAgentSession', async () => {
     useRunsStore().setAgentSessions([makeSession({
+      agentId: 'gemini-cli',
+      title: 'Gemini CLI',
       status: 'stopped',
       endedAt: '2026-06-12T10:05:00.000Z',
       ptyId: undefined,
       runtimeStatus: undefined,
     })])
-    const newSession = makeSession({ sessionId: 's2', status: 'running', ptyId: 12 })
+    const newSession = makeSession({ sessionId: 's2', agentId: 'gemini-cli', status: 'running', ptyId: 12 })
     call.mockImplementation(async (tool: string) => {
       if (tool === 'agent.sessions.get') return { session: makeSession({ status: 'stopped', scrollback: '' }) }
       if (tool === 'agent.launch') return { session: newSession, ptyId: 12 }
       return {}
     })
     const onOpenAgentSession = vi.fn()
-    mountView({}, { onOpenAgentSession })
+    mountView({ agentId: 'claude-code' }, { onOpenAgentSession })
     await flushUi()
 
     buttonByText('Relaunch')?.click()
     await flushUi()
 
-    expect(call).toHaveBeenCalledWith('agent.launch', { agentId: 'claude-code' })
+    expect(call).toHaveBeenCalledWith('agent.launch', { agentId: 'gemini-cli' })
     expect(useRunsStore().agentSessions.some(item => item.sessionId === 's2')).toBe(true)
-    expect(onOpenAgentSession).toHaveBeenCalledWith('claude-code', 's2')
+    expect(onOpenAgentSession).toHaveBeenCalledWith('gemini-cli', 's2')
   })
 
   it('shows a plain-language recovery state when the session record is missing', async () => {
@@ -233,5 +256,26 @@ describe('AgentSessionView', () => {
     expect(root.textContent?.toLowerCase()).toContain('session')
     expect(root.textContent?.toLowerCase()).toContain('not')
     expect(call).not.toHaveBeenCalled()
+  })
+
+  it('prunes a stale ended session when scrollback fetch reports the record is missing', async () => {
+    useRunsStore().setAgentSessions([makeSession({
+      sessionId: 'ghost',
+      status: 'done',
+      endedAt: '2026-06-12T10:05:00.000Z',
+      ptyId: undefined,
+      runtimeStatus: undefined,
+    })])
+    call.mockImplementation(async (tool: string) => {
+      if (tool === 'agent.sessions.get') throw new Error('Agent session not found: ghost')
+      return {}
+    })
+    mountView({ sessionId: 'ghost' })
+    await flushUi()
+    await flushUi()
+
+    expect(useRunsStore().agentSessions.some(item => item.sessionId === 'ghost')).toBe(false)
+    expect(surfaceEl()).toBeNull()
+    expect(root.textContent).toContain('Session not found')
   })
 })

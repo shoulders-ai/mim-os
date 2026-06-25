@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
@@ -475,7 +475,7 @@ describe('agent sessions', () => {
     expect(sessions.list()).toHaveLength(1)
   })
 
-  it('deletes the record and the scrollback file together', () => {
+  it('deletes the record and the scrollback file together, then treats repeat deletes as done', () => {
     const { sessions, ptys } = makeHarness()
     const { record } = sessions.launch(claude)
     ptys[0].data('output')
@@ -487,7 +487,32 @@ describe('agent sessions', () => {
     expect(sessions.get(record.sessionId)).toBeNull()
     expect(existsSync(join(sessionsDir(), `${record.sessionId}.json`))).toBe(false)
     expect(existsSync(join(sessionsDir(), `${record.sessionId}.scrollback`))).toBe(false)
-    expect(() => sessions.delete(record.sessionId)).toThrow(`Agent session not found: ${record.sessionId}`)
+    expect(sessions.delete(record.sessionId)).toEqual({ deleted: record.sessionId })
+  })
+
+  it('emits a deleted event so renderers remove the stale aggregate row', () => {
+    const { sessions, events, ptys } = makeHarness()
+    const { record } = sessions.launch(claude)
+    ptys[0].exit(0)
+    events.length = 0
+
+    sessions.delete(record.sessionId)
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'session.deleted',
+      session: { sessionId: record.sessionId },
+    })
+  })
+
+  it('removes orphan scrollback when deleting an already-missing record', () => {
+    const { sessions } = makeHarness()
+    const sessionId = 'orphan-session'
+    mkdirSync(sessionsDir(), { recursive: true })
+    writeFileSync(join(sessionsDir(), `${sessionId}.scrollback`), 'orphan output')
+
+    expect(sessions.delete(sessionId)).toEqual({ deleted: sessionId })
+
+    expect(existsSync(join(sessionsDir(), `${sessionId}.scrollback`))).toBe(false)
   })
 
   it('lists sessions newest first', () => {

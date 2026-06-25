@@ -6,6 +6,7 @@
 import { IconAlertTriangle, IconPlayerStop, IconRefresh } from '@tabler/icons-vue'
 import { computed, ref, watch } from 'vue'
 import TerminalSurface from '../terminal/TerminalSurface.vue'
+import type { TerminalKeybindingProfile } from '../terminal/terminalKeybindings.js'
 import { useAgentsStore } from '../../stores/agents.js'
 import { useRunsStore, type AgentSessionRuntime } from '../../stores/runs.js'
 
@@ -24,9 +25,17 @@ const agentsStore = useAgentsStore()
 const session = computed<AgentSessionRuntime | null>(() =>
   runsStore.agentSessions.find(item => item.sessionId === props.sessionId) ?? null
 )
+const effectiveAgentId = computed(() => session.value?.agentId ?? props.agentId)
 const agentName = computed(() =>
-  agentsStore.agents.find(agent => agent.id === props.agentId)?.name ?? props.agentId
+  agentsStore.agents.find(agent => agent.id === effectiveAgentId.value)?.name ?? effectiveAgentId.value
 )
+const keybindingProfile = computed<TerminalKeybindingProfile>(() => {
+  const agentId = effectiveAgentId.value
+  if (agentId === 'claude-code' || agentId === 'gemini-cli' || agentId === 'codex') {
+    return agentId
+  }
+  return 'terminal'
+})
 const running = computed(() => session.value?.status === 'running')
 const ended = computed(() => !!session.value && session.value.status !== 'running')
 
@@ -90,10 +99,21 @@ watch([() => props.sessionId, ended], async () => {
     }) as { session?: AgentSessionRuntime }
     replayText.value = result.session?.scrollback ?? ''
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    if (isMissingSessionError(message, props.sessionId)) {
+      replayText.value = null
+      replayError.value = null
+      runsStore.removeAgentSession(props.sessionId)
+      return
+    }
     fetchedFor = null
-    replayError.value = err instanceof Error ? err.message : String(err)
+    replayError.value = message
   }
 }, { immediate: true })
+
+function isMissingSessionError(message: string, sessionId: string): boolean {
+  return message.includes('Agent session not found') && message.includes(sessionId)
+}
 
 /* ── Actions ── */
 const actionBusy = ref<'stop' | 'relaunch' | null>(null)
@@ -117,14 +137,15 @@ async function relaunch() {
   actionBusy.value = 'relaunch'
   actionError.value = null
   try {
-    const extraArgs = agentsStore.getExtraArgs(props.agentId)
-    const result = await window.kernel.call('agent.launch', { agentId: props.agentId, ...(extraArgs.length ? { extraArgs } : {}) }) as {
+    const agentId = effectiveAgentId.value
+    const extraArgs = agentsStore.getExtraArgs(agentId)
+    const result = await window.kernel.call('agent.launch', { agentId, ...(extraArgs.length ? { extraArgs } : {}) }) as {
       session?: AgentSessionRuntime
       ptyId?: number
     }
     if (!result.session) throw new Error('Launch did not return a session')
     runsStore.applyAgentSessionEvent({ type: 'session.started', session: result.session })
-    emit('openAgentSession', props.agentId, result.session.sessionId)
+    emit('openAgentSession', agentId, result.session.sessionId)
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -184,7 +205,7 @@ async function relaunch() {
     <!-- Live session: terminal bound to the running pty. -->
     <div v-else-if="running" class="relative min-h-0 flex-1 overflow-hidden bg-surface">
       <div class="absolute inset-y-1 left-2 right-2 overflow-hidden">
-        <TerminalSurface :pty-id="session.ptyId ?? null" />
+        <TerminalSurface :pty-id="session.ptyId ?? null" :keybinding-profile="keybindingProfile" />
       </div>
     </div>
 
