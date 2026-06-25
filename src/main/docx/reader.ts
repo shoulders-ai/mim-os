@@ -1,4 +1,5 @@
 import { readFileSync } from 'fs'
+import { htmlToMarkdown } from '@main/html/markdown.js'
 
 export interface DocxReadOptions {
   maxChars?: number
@@ -133,13 +134,6 @@ export async function extractDocxForReview(filePath: string, options: DocxReadOp
     convertToHtml?: Function
     images?: { imgElement: Function }
   }
-  const TurndownService = (await import('turndown') as unknown as {
-    default?: new (options?: Record<string, unknown>) => {
-      turndown(html: string): string
-      use(plugin: unknown): void
-    }
-  }).default
-  if (!TurndownService) throw new Error('turndown is not available')
   const convertToHtml = mammoth.default?.convertToHtml ?? mammoth.convertToHtml
   const imagesApi = mammoth.default?.images ?? mammoth.images
   if (typeof convertToHtml !== 'function') throw new Error('mammoth.convertToHtml is not available')
@@ -175,10 +169,7 @@ export async function extractDocxForReview(filePath: string, options: DocxReadOp
     )
   }
 
-  const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' })
-  const gfm = await loadTurndownGfm()
-  if (gfm) turndown.use(gfm)
-  const markdown = await htmlToMarkdownWithTables(result.value, turndown)
+  const markdown = (await htmlToMarkdown(result.value, { extractLinks: true, extractImages: true })).markdown
   const maxChars = clampMaxChars(options.maxChars)
   const truncated = markdown.length > maxChars
   const text = truncated ? markdown.slice(0, maxChars) : markdown
@@ -190,164 +181,6 @@ export async function extractDocxForReview(filePath: string, options: DocxReadOp
     images,
     totalChars: markdown.length,
     truncated,
-  }
-}
-
-async function loadTurndownGfm(): Promise<unknown | null> {
-  try {
-    const mod = await import('turndown-plugin-gfm') as unknown as {
-      gfm?: unknown
-      default?: { gfm?: unknown } | unknown
-    }
-    if (typeof mod.gfm === 'function') return mod.gfm
-    if (mod.default && typeof mod.default === 'object' && typeof (mod.default as { gfm?: unknown }).gfm === 'function') {
-      return (mod.default as { gfm: unknown }).gfm
-    }
-    if (typeof mod.default === 'function') return mod.default
-    return null
-  } catch {
-    return null
-  }
-}
-
-// Minimal DOM surface we rely on from @mixmark-io/domino (no bundled types).
-interface DomNode {
-  tagName: string
-  children: ArrayLike<DomNode>
-  textContent: string
-  parentNode: { replaceChild(insert: DomNode, remove: DomNode): void } | null
-  ownerDocument: { createTextNode(text: string): DomNode }
-  querySelectorAll(selector: string): ArrayLike<DomNode>
-  getAttribute(name: string): string | null
-  closest(selector: string): DomNode | null
-}
-interface DomDocument {
-  body: { innerHTML: string }
-  querySelectorAll(selector: string): ArrayLike<DomNode>
-  createElement(tag: string): DomNode & { textContent: string }
-}
-
-async function loadDomino(): Promise<{ createDocument(html: string): DomDocument } | null> {
-  try {
-    const mod = await import('@mixmark-io/domino') as unknown as {
-      createDocument?: (html: string) => DomDocument
-      default?: { createDocument?: (html: string) => DomDocument }
-    }
-    if (typeof mod.createDocument === 'function') return mod as { createDocument(html: string): DomDocument }
-    if (mod.default && typeof mod.default.createDocument === 'function') {
-      return mod.default as { createDocument(html: string): DomDocument }
-    }
-    return null
-  } catch {
-    return null
-  }
-}
-
-// A Word table cell holds whole paragraphs; flatten them to one line, collapse
-// whitespace, and escape pipes so the cell can sit inside a markdown table row.
-function tableCellText(cell: DomNode): string {
-  const blocks = Array.from(cell.querySelectorAll('p, li'))
-  const parts = blocks.length ? blocks.map(block => block.textContent) : [cell.textContent]
-  const text = parts.join(' ').replace(/\s+/g, ' ').trim()
-  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|')
-}
-
-// Convert one HTML table to a GFM pipe table. Expands colspan (repeat the value)
-// and rowspan (carry the value into the rows below) so EVERY row has the same
-// column count — the round-trip through turndown's GFM rule mangles exactly this.
-// Leading all-<th> rows are merged into a single descriptive header per column.
-function tableToMarkdown(table: DomNode): string {
-  for (const br of Array.from(table.querySelectorAll('br'))) {
-    br.parentNode?.replaceChild(table.ownerDocument.createTextNode(' '), br)
-  }
-  const rows = Array.from(table.querySelectorAll('tr')).filter(tr => tr.closest('table') === table)
-  if (!rows.length) return ''
-
-  const grid: string[][] = []
-  const headerFlags: boolean[] = []
-  const carries: Array<{ text: string; remaining: number } | undefined> = []
-  let columnCount = 0
-
-  rows.forEach((tr, r) => {
-    grid[r] = grid[r] || []
-    const cells = Array.from(tr.children).filter(el => /^(td|th)$/i.test(el.tagName))
-    headerFlags[r] = cells.length > 0 && cells.every(cell => cell.tagName.toLowerCase() === 'th')
-    let c = 0
-    const drainCarries = () => {
-      while (carries[c] && carries[c]!.remaining > 0) {
-        grid[r][c] = carries[c]!.text
-        carries[c]!.remaining--
-        c++
-      }
-    }
-    for (const cell of cells) {
-      drainCarries()
-      const colspan = Math.max(1, parseInt(cell.getAttribute('colspan') || '1', 10) || 1)
-      const rowspan = Math.max(1, parseInt(cell.getAttribute('rowspan') || '1', 10) || 1)
-      const text = tableCellText(cell)
-      for (let k = 0; k < colspan; k++) {
-        grid[r][c] = text
-        if (rowspan > 1) carries[c] = { text, remaining: rowspan - 1 }
-        c++
-      }
-    }
-    drainCarries()
-    columnCount = Math.max(columnCount, c)
-  })
-  if (!columnCount) return ''
-  for (let r = 0; r < grid.length; r++) {
-    for (let c = 0; c < columnCount; c++) if (grid[r][c] == null) grid[r][c] = ''
-  }
-
-  let headerCount = 0
-  while (headerCount < headerFlags.length && headerFlags[headerCount]) headerCount++
-  if (headerCount === 0) headerCount = 1
-
-  const header: string[] = []
-  for (let c = 0; c < columnCount; c++) {
-    const stacked: string[] = []
-    for (let r = 0; r < headerCount; r++) {
-      const value = grid[r][c]
-      if (value && value !== stacked[stacked.length - 1]) stacked.push(value)
-    }
-    header[c] = stacked.join(' ') || ' '
-  }
-
-  const lines = [
-    `| ${header.join(' | ')} |`,
-    `| ${Array(columnCount).fill('---').join(' | ')} |`,
-  ]
-  for (let r = headerCount; r < grid.length; r++) {
-    lines.push(`| ${grid[r].slice(0, columnCount).join(' | ')} |`)
-  }
-  return lines.join('\n')
-}
-
-// Render tables ourselves (faithful grid), let turndown handle everything else.
-// Each top-level table is swapped for a placeholder paragraph, turndown runs on
-// the rest, then the clean table markdown is spliced back in. Falls back to plain
-// turndown if the DOM parser is unavailable or anything throws.
-async function htmlToMarkdownWithTables(
-  html: string,
-  turndown: { turndown(html: string): string },
-): Promise<string> {
-  const domino = await loadDomino()
-  if (!domino) return turndown.turndown(html)
-  try {
-    const doc = domino.createDocument(`<body>${html}</body>`)
-    const tables = Array.from(doc.querySelectorAll('table')).filter(table => table.closest('table') === table)
-    if (!tables.length) return turndown.turndown(html)
-    const tableMarkdown: string[] = []
-    tables.forEach((table, i) => {
-      tableMarkdown[i] = tableToMarkdown(table)
-      const placeholder = doc.createElement('p')
-      placeholder.textContent = `@@MIMTABLE${i}@@`
-      table.parentNode?.replaceChild(placeholder, table)
-    })
-    const markdown = turndown.turndown(doc.body.innerHTML)
-    return markdown.replace(/@@MIMTABLE(\d+)@@/g, (_match, index) => `\n${tableMarkdown[Number(index)] || ''}\n`)
-  } catch {
-    return turndown.turndown(html)
   }
 }
 

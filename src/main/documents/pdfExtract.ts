@@ -16,8 +16,16 @@ const DEFAULT_MAX_CHARS = 200_000
 const HARD_MAX_CHARS = 1_000_000
 
 export async function extractPdfText(path: string, options: PdfExtractOptions = {}): Promise<PdfExtractResult> {
-  const maxChars = normalizeMaxChars(options.maxChars)
   const buffer = readFileSync(path)
+  return extractPdfTextFromBuffer(buffer, options)
+}
+
+export async function extractPdfTextFromBuffer(
+  buffer: Buffer | Uint8Array | ArrayBuffer,
+  options: PdfExtractOptions = {},
+): Promise<PdfExtractResult> {
+  const maxChars = normalizeMaxChars(options.maxChars)
+  const bytes = toUint8Array(buffer)
   ensurePdfGeometryGlobals()
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs') as unknown as {
     getDocument(input: Record<string, unknown>): { promise: Promise<PdfDocumentProxy> }
@@ -26,7 +34,7 @@ export async function extractPdfText(path: string, options: PdfExtractOptions = 
   let pdf: PdfDocumentProxy
   try {
     pdf = await pdfjs.getDocument({
-      data: new Uint8Array(buffer),
+      data: bytes,
       disableFontFace: true,
       useSystemFonts: true,
       isEvalSupported: false,
@@ -65,7 +73,7 @@ export async function extractPdfText(path: string, options: PdfExtractOptions = 
       pages: pdf.numPages,
       info: {
         ...sanitizePdfInfo(metadata?.info),
-        ...readCustomPdfInfo(buffer),
+        ...readCustomPdfInfo(Buffer.from(bytes)),
       },
       totalChars,
       truncated: totalChars > emittedChars,
@@ -73,6 +81,11 @@ export async function extractPdfText(path: string, options: PdfExtractOptions = 
   } finally {
     await pdf.destroy?.()
   }
+}
+
+function toUint8Array(buffer: Buffer | Uint8Array | ArrayBuffer): Uint8Array {
+  if (buffer instanceof ArrayBuffer) return new Uint8Array(buffer)
+  return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
 }
 
 interface PdfDocumentProxy {
