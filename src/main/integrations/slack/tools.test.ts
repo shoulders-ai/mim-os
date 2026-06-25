@@ -1,0 +1,298 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { createTraceLog } from '@main/trace/trace.js'
+import { createMemorySecretStore, MIM_KEYCHAIN_SERVICE } from '@main/integrations/secrets.js'
+import { createToolRegistry } from '@main/tools/registry.js'
+import type { HttpClient } from '@main/integrations/http.js'
+import { slackSecretAccount } from './client.js'
+import { registerSlackTools } from './tools.js'
+
+function fakeHttp(response: unknown, calls: Array<Record<string, unknown>> = []): HttpClient {
+  return {
+    async request(input) {
+      calls.push(input)
+      return {
+        ok: true,
+        status: 200,
+        async json() { return response },
+        async text() { return JSON.stringify(response) },
+      }
+    },
+  }
+}
+
+describe('Slack tools', () => {
+  let dir: string
+  let tools: ReturnType<typeof createToolRegistry>
+  const ctx = { actor: 'user' as const }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mim-slack-tools-'))
+    tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('declares inputSchema on every Slack tool', () => {
+    registerSlackTools(tools, { secrets: createMemorySecretStore(), http: fakeHttp({ ok: true }) })
+    for (const name of [
+      'slack.setToken',
+      'slack.deleteToken',
+      'slack.status',
+      'slack.channels',
+      'slack.users',
+      'slack.dms',
+      'slack.history',
+      'slack.search',
+      'slack.send',
+      'slack.connect',
+      'slack.disconnect',
+      'slack.replies',
+    ]) {
+      expect(tools.get(name)?.inputSchema, name).toBeDefined()
+    }
+  })
+
+  it('stores Slack tokens without returning the secret', async () => {
+    const secrets = createMemorySecretStore()
+    registerSlackTools(tools, { secrets, http: fakeHttp({ ok: true }) })
+
+    const result = await tools.call('slack.setToken', {
+      account: 'dark-peak',
+      token: 'xoxb-secret',
+    }, ctx)
+
+    expect(result).toEqual({ account: 'dark-peak', configured: true })
+    expect(secrets.dump()).toEqual({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('dark-peak')}`]: 'xoxb-secret',
+    })
+  })
+
+  it('uses the workspace mim.yaml slack account by default', async () => {
+    writeFileSync(join(dir, 'mim.yaml'), 'name: demo\nslack: dark-peak\n')
+    const calls: Array<Record<string, unknown>> = []
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('dark-peak')}`]: 'xoxb-secret',
+    })
+    registerSlackTools(tools, { secrets, http: fakeHttp({ ok: true, messages: { matches: [] } }, calls) })
+
+    await tools.call('slack.search', { query: 'budget' }, ctx)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].headers).toEqual({ Authorization: 'Bearer xoxb-secret' })
+  })
+
+  it('status returns configured false without calling Slack when no token exists', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    registerSlackTools(tools, { secrets: createMemorySecretStore(), http: fakeHttp({ ok: true }, calls) })
+
+    const result = await tools.call('slack.status', {}, ctx)
+
+    expect(result).toEqual({ account: 'default', configured: false })
+    expect(calls).toEqual([])
+  })
+
+  it('connect stores token and returns auth metadata', async () => {
+    const secrets = createMemorySecretStore()
+    const calls: Array<Record<string, unknown>> = []
+    registerSlackTools(tools, {
+      secrets,
+      http: fakeHttp({ ok: true, team: 'Acme', user: 'paul', user_id: 'U1', team_id: 'T1' }, calls),
+    })
+
+    const result = await tools.call('slack.connect', {
+      account: 'test',
+      token: 'xoxb-connect-test',
+    }, ctx) as Record<string, unknown>
+
+    expect(result.account).toBe('test')
+    expect(result.configured).toBe(true)
+    expect(result.auth).toBeDefined()
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toContain('auth.test')
+  })
+
+  it('connect rolls back token on verification failure', async () => {
+    const secrets = createMemorySecretStore()
+    registerSlackTools(tools, {
+      secrets,
+      http: {
+        async request() {
+          return {
+            ok: true,
+            status: 200,
+            async json() { return { ok: false, error: 'invalid_auth' } },
+            async text() { return '{"ok":false,"error":"invalid_auth"}' },
+          }
+        },
+      },
+    })
+
+    await expect(tools.call('slack.connect', {
+      account: 'bad',
+      token: 'xoxb-bad',
+    }, ctx)).rejects.toThrow('Slack token verification failed')
+
+    expect(secrets.dump()).toEqual({})
+  })
+
+  it('disconnect removes token from keychain', async () => {
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('test')}`]: 'xoxb-secret',
+    })
+    registerSlackTools(tools, { secrets, http: fakeHttp({ ok: true }) })
+
+    const result = await tools.call('slack.disconnect', { account: 'test' }, ctx) as Record<string, unknown>
+
+    expect(result.disconnected).toBe(true)
+    expect(secrets.dump()).toEqual({})
+  })
+
+  it('replies reads threaded messages', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]: 'xoxb-secret',
+    })
+    registerSlackTools(tools, {
+      secrets,
+      http: fakeHttp({ ok: true, messages: [] }, calls),
+    })
+
+    await tools.call('slack.replies', { channel: 'C1', ts: '1234.5678' }, ctx)
+
+    expect(calls[0].url).toContain('conversations.replies')
+    expect(calls[0].url).toContain('channel=C1')
+    expect(calls[0].url).toContain('ts=1234.5678')
+  })
+
+  it('sends Slack messages through chat.postMessage', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]: 'xoxb-secret',
+    })
+    registerSlackTools(tools, { secrets, http: fakeHttp({ ok: true, ts: '1.2' }, calls) })
+
+    await tools.call('slack.send', { channel: 'C1', text: 'Hello' }, ctx)
+
+    expect(calls[0]).toMatchObject({
+      url: 'https://slack.com/api/chat.postMessage',
+      method: 'POST',
+      body: JSON.stringify({ channel: 'C1', text: 'Hello' }),
+    })
+  })
+})
+
+describe('Slack connector policy enforcement', () => {
+  let dir: string
+  let tools: ReturnType<typeof createToolRegistry>
+  const aiCtx = { actor: 'ai' as const }
+  const userCtx = { actor: 'user' as const }
+
+  function setupWithToken() {
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]: 'xoxb-secret',
+    })
+    const calls: Array<Record<string, unknown>> = []
+    registerSlackTools(tools, {
+      secrets,
+      http: fakeHttp({ ok: true, channels: [], messages: { matches: [] } }, calls),
+    })
+    return calls
+  }
+
+  function writePolicy(policy: Record<string, unknown>) {
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
+      connectors: { slack: policy },
+    }))
+  }
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mim-slack-policy-'))
+    tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('blocks AI actor when aiEnabled is false (default)', async () => {
+    setupWithToken()
+    await expect(tools.call('slack.channels', {}, aiCtx))
+      .rejects.toThrow('Slack AI access is disabled')
+  })
+
+  it('allows AI actor when aiEnabled is true', async () => {
+    writePolicy({ aiEnabled: true })
+    setupWithToken()
+    await expect(tools.call('slack.channels', {}, aiCtx)).resolves.toBeDefined()
+  })
+
+  it('allows user actor regardless of policy', async () => {
+    // Default policy has everything disabled, but user actor bypasses
+    setupWithToken()
+    await expect(tools.call('slack.channels', {}, userCtx)).resolves.toBeDefined()
+  })
+
+  it('blocks AI send when sendEnabled is false', async () => {
+    writePolicy({ aiEnabled: true, sendEnabled: false })
+    setupWithToken()
+    await expect(tools.call('slack.send', { channel: 'C1', text: 'hi' }, aiCtx))
+      .rejects.toThrow('Slack send is disabled')
+  })
+
+  it('allows AI send when sendEnabled is true', async () => {
+    writePolicy({ aiEnabled: true, sendEnabled: true })
+    setupWithToken()
+    await expect(tools.call('slack.send', { channel: 'C1', text: 'hi' }, aiCtx))
+      .resolves.toBeDefined()
+  })
+
+  it('blocks AI DM access when directMessages is false', async () => {
+    writePolicy({ aiEnabled: true, directMessages: false })
+    setupWithToken()
+    await expect(tools.call('slack.dms', {}, aiCtx))
+      .rejects.toThrow('Slack DM access is disabled')
+  })
+
+  it('allows AI DM access when directMessages is true', async () => {
+    writePolicy({ aiEnabled: true, directMessages: true })
+    setupWithToken()
+    await expect(tools.call('slack.dms', {}, aiCtx)).resolves.toBeDefined()
+  })
+
+  it('filters channel types for AI based on privateChannels policy', async () => {
+    writePolicy({ aiEnabled: true, privateChannels: false })
+    const calls = setupWithToken()
+    await tools.call('slack.channels', {}, aiCtx)
+    const url = calls[0]?.url as string
+    expect(url).toContain('types=public_channel')
+    expect(url).not.toContain('private_channel')
+  })
+
+  it('includes private channels when policy allows', async () => {
+    writePolicy({ aiEnabled: true, privateChannels: true })
+    const calls = setupWithToken()
+    await tools.call('slack.channels', {}, aiCtx)
+    const url = calls[0]?.url as string
+    expect(url).toContain('private_channel')
+  })
+
+  it('blocks AI search when aiEnabled is false', async () => {
+    setupWithToken()
+    await expect(tools.call('slack.search', { query: 'test' }, aiCtx))
+      .rejects.toThrow('Slack AI access is disabled')
+  })
+
+  it('blocks AI history when aiEnabled is false', async () => {
+    setupWithToken()
+    await expect(tools.call('slack.history', { channel: 'C1' }, aiCtx))
+      .rejects.toThrow('Slack AI access is disabled')
+  })
+})

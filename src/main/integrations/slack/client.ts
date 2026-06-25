@@ -37,9 +37,9 @@ export class SlackIntegration {
     return this.get(input.account, 'auth.test', {})
   }
 
-  async channels(input: SlackRequest & { limit?: number; cursor?: string }): Promise<unknown> {
+  async channels(input: SlackRequest & { limit?: number; cursor?: string; types?: string }): Promise<unknown> {
     return this.get(input.account, 'conversations.list', {
-      types: 'public_channel,private_channel',
+      types: input.types || 'public_channel,private_channel',
       exclude_archived: 'true',
       limit: String(clampLimit(input.limit, 100)),
       ...(input.cursor ? { cursor: input.cursor } : {}),
@@ -70,6 +70,17 @@ export class SlackIntegration {
     })
   }
 
+  async replies(input: SlackRequest & { channel: string; ts: string; limit?: number; cursor?: string }): Promise<unknown> {
+    if (!input.channel) throw new Error('Slack channel is required')
+    if (!input.ts) throw new Error('Slack message ts is required')
+    return this.get(input.account, 'conversations.replies', {
+      channel: input.channel,
+      ts: input.ts,
+      limit: String(clampLimit(input.limit, 50)),
+      ...(input.cursor ? { cursor: input.cursor } : {}),
+    })
+  }
+
   async search(input: SlackRequest & { query: string; count?: number }): Promise<unknown> {
     if (!input.query.trim()) throw new Error('Slack search query is required')
     return this.get(input.account, 'search.messages', {
@@ -91,16 +102,17 @@ export class SlackIntegration {
     const token = await this.requireToken(account)
     const url = new URL(`https://slack.com/api/${method}`)
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
-    const res = await this.http.request({
+    const doRequest = () => this.http.request({
       url: url.toString(),
       headers: { Authorization: `Bearer ${token}` },
     })
+    const res = await retryOnRateLimit(method, doRequest)
     return parseSlackResponse(method, res)
   }
 
   private async post(account: string, method: string, body: Record<string, unknown>): Promise<unknown> {
     const token = await this.requireToken(account)
-    const res = await this.http.request({
+    const doRequest = () => this.http.request({
       url: `https://slack.com/api/${method}`,
       method: 'POST',
       headers: {
@@ -109,6 +121,7 @@ export class SlackIntegration {
       },
       body: JSON.stringify(body),
     })
+    const res = await retryOnRateLimit(method, doRequest)
     return parseSlackResponse(method, res)
   }
 
@@ -126,6 +139,32 @@ export function slackSecretAccount(account: string): string {
 function clampLimit(value: number | undefined, fallback: number): number {
   if (!Number.isFinite(value) || value === undefined) return fallback
   return Math.min(Math.max(Math.floor(value), 1), 200)
+}
+
+const MAX_RETRY_AFTER_SECONDS = 5
+
+async function retryOnRateLimit(method: string, doRequest: () => Promise<HttpResponse>): Promise<HttpResponse> {
+  const res = await doRequest()
+  if (res.status !== 429) return res
+  const retryAfter = parseRetryAfter(res)
+  if (retryAfter > MAX_RETRY_AFTER_SECONDS) {
+    throw new Error(`Slack ${method} rate limited. Retry after ${retryAfter} seconds.`)
+  }
+  await sleep(retryAfter * 1000)
+  return doRequest()
+}
+
+function parseRetryAfter(res: HttpResponse): number {
+  const header = res.headers?.get('retry-after')
+  if (header) {
+    const seconds = Number(header)
+    if (Number.isFinite(seconds) && seconds > 0) return seconds
+  }
+  return 1
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 async function parseSlackResponse(method: string, res: HttpResponse): Promise<unknown> {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { SlackIntegration, slackSecretAccount } from '@main/integrations/slack.js'
 import { createMemorySecretStore, MIM_KEYCHAIN_SERVICE } from '@main/integrations/secrets.js'
 import type { HttpClient } from '@main/integrations/http.js'
+import { SlackIntegration, slackSecretAccount } from './client.js'
 
 function fakeHttp(response: unknown, calls: Array<Record<string, unknown>> = []): HttpClient {
   return {
@@ -77,6 +77,61 @@ describe('SlackIntegration', () => {
     const slack = new SlackIntegration({ secrets, http: fakeHttp({ ok: false, error: 'invalid_auth' }) })
 
     await expect(slack.authTest({ account: 'default' })).rejects.toThrow('invalid_auth')
+  })
+
+  it('retries once on 429 with short Retry-After', async () => {
+    let callCount = 0
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]: 'xoxb-secret',
+    })
+    const slack = new SlackIntegration({
+      secrets,
+      http: {
+        async request() {
+          callCount++
+          if (callCount === 1) {
+            return {
+              ok: false,
+              status: 429,
+              headers: { get: (name: string) => name === 'retry-after' ? '1' : null },
+              async json() { return { ok: false, error: 'ratelimited' } },
+              async text() { return '{"ok":false,"error":"ratelimited"}' },
+            }
+          }
+          return {
+            ok: true,
+            status: 200,
+            async json() { return { ok: true, channels: [] } },
+            async text() { return '{"ok":true,"channels":[]}' },
+          }
+        },
+      },
+    })
+
+    await slack.channels({ account: 'default' })
+    expect(callCount).toBe(2)
+  })
+
+  it('throws on 429 when Retry-After exceeds threshold', async () => {
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]: 'xoxb-secret',
+    })
+    const slack = new SlackIntegration({
+      secrets,
+      http: {
+        async request() {
+          return {
+            ok: false,
+            status: 429,
+            headers: { get: (name: string) => name === 'retry-after' ? '30' : null },
+            async json() { return { ok: false, error: 'ratelimited' } },
+            async text() { return '{"ok":false,"error":"ratelimited"}' },
+          }
+        },
+      },
+    })
+
+    await expect(slack.channels({ account: 'default' })).rejects.toThrow('rate limited')
   })
 
   it('preserves non-JSON HTTP error bodies', async () => {
