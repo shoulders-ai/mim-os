@@ -34,6 +34,7 @@ function makeDeps(overrides: Partial<WorkbenchActionsDeps> = {}) {
     }),
     forwardInStore: vi.fn(async () => ({ opened: true })),
     removePaneHistoryEntry: vi.fn(async () => ({ opened: true })),
+    removeFailedWorkBackingEntry: vi.fn(async () => false),
     setPaneState: vi.fn(),
     setPaneVisibility: vi.fn(),
     setNavigationError: vi.fn(),
@@ -131,6 +132,27 @@ describe('app shell workbench actions', () => {
 
     expect(deps.removePaneHistoryEntry).toHaveBeenNthCalledWith(1, 'artifact', file.id)
     expect(deps.removePaneHistoryEntry).toHaveBeenNthCalledWith(2, 'artifact', file.id, { confirmReplace: true })
+  })
+
+  it('lets a backing Work cleanup handle failed entries before generic history removal', async () => {
+    const work: WorkEntry = {
+      id: 'work:agent-session:sess-1',
+      kind: 'agent-session',
+      agentId: 'codex',
+      sessionId: 'sess-1',
+      title: 'Codex session',
+    }
+    const { deps, setActiveWork } = makeDeps({
+      removeFailedWorkBackingEntry: vi.fn(async () => true),
+    })
+    setActiveWork(work)
+    const actions = createWorkbenchActions(deps)
+
+    await actions.removeFailedWorkEntry()
+
+    expect(deps.removeFailedWorkBackingEntry).toHaveBeenCalledWith(work)
+    expect(deps.removePaneHistoryEntry).not.toHaveBeenCalled()
+    expect(deps.openWorkInStore).not.toHaveBeenCalled()
   })
 
   it('navigates pane history and activates the resulting pane entry', async () => {

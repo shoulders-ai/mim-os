@@ -131,10 +131,11 @@ describe('livePreview', () => {
       expect(decos.filter(d => d.className === 'cm-lp-strike')).toHaveLength(1)
     })
 
-    it('hides inline code backticks', () => {
+    it('hides inline code backticks and styles content', () => {
       const doc = '`code`\n\nother'
       const decos = getDecos(doc, doc.indexOf('other'))
       expect(decos.filter(d => d.replace && !d.className)).toHaveLength(2)
+      expect(decos.filter(d => d.className === 'cm-lp-inline-code')).toHaveLength(1)
     })
 
     it('hides link syntax and styles link text', () => {
@@ -144,13 +145,13 @@ describe('livePreview', () => {
       expect(decos.filter(d => d.className === 'cm-lp-link')).toHaveLength(1)
     })
 
-    it('dims heading marks when cursor is away', () => {
+    it('hides heading marks when cursor is away', () => {
       const doc = '# Heading\n\nother'
       const decos = getDecos(doc, doc.indexOf('other'))
-      expect(decos.filter(d => d.className === 'cm-lp-heading-mark')).toHaveLength(1)
+      expect(decos.filter(d => d.replace && !d.className)).toHaveLength(1)
     })
 
-    it('does not dim heading marks when cursor is on heading line', () => {
+    it('does not hide heading marks when cursor is on heading line', () => {
       expect(getDecos('# Heading', 3)).toHaveLength(0)
     })
 
@@ -160,10 +161,22 @@ describe('livePreview', () => {
       expect(decos.filter(d => d.widget === 'HrWidget')).toHaveLength(1)
     })
 
-    it('does not process inside fenced code blocks', () => {
+    it('does not process markup inside fenced code blocks but adds block styling', () => {
       const doc = '```\n**bold**\n```\n\nother'
       const decos = getDecos(doc, doc.indexOf('other'))
       expect(decos.filter(d => d.className === 'cm-lp-bold')).toHaveLength(0)
+      expect(decos.filter(d => d.className === 'cm-lp-code-block-line').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('dims fence lines when cursor is away, reveals when cursor is on them', () => {
+      const doc = '```js\nconst x = 1\n```\n\nother'
+      const awayDecos = getDecos(doc, doc.indexOf('other'))
+      expect(awayDecos.filter(d => d.className === 'cm-lp-fence-line')).toHaveLength(2)
+      expect(awayDecos.filter(d => d.className === 'cm-lp-code-block-line')).toHaveLength(3)
+
+      const onFenceDecos = getDecos(doc, 0)
+      expect(onFenceDecos.filter(d => d.className === 'cm-lp-fence-line')).toHaveLength(1)
+      expect(onFenceDecos.filter(d => d.className === 'cm-lp-code-block-line')).toHaveLength(3)
     })
 
     it('does not crash on a blockquote (replace mark + line deco at the same from)', () => {

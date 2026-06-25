@@ -24,7 +24,7 @@ export function useEditorSettingsEffects(options: UseEditorSettingsEffectsOption
   }
 
   watch(
-    () => [options.settingsStore.editorWordWrap, options.settingsStore.editorSpellCheck, options.settingsStore.editorLineNumbers],
+    () => [options.settingsStore.editorWordWrap, options.settingsStore.editorSpellCheck, options.settingsStore.editorLineNumbers, options.settingsStore.editorLivePreview],
     applyEditorSettings,
   )
 

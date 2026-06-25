@@ -80,7 +80,7 @@ export interface AgentSessionRuntime {
 }
 
 export interface AgentSessionEvent {
-  type: 'session.started' | 'session.status' | 'session.exited' | 'session.changed'
+  type: 'session.started' | 'session.status' | 'session.exited' | 'session.changed' | 'session.deleted'
   session: AgentSessionRuntime
 }
 
@@ -155,9 +155,11 @@ export const useRunsStore = defineStore('runs', () => {
     else agentSessions.value.unshift(copy)
   }
 
-  // Every agent:session-event carries the full session record, so all event
-  // types reduce to the same upsert.
   function applyAgentSessionEvent(event: AgentSessionEvent) {
+    if (event.type === 'session.deleted') {
+      removeAgentSession(event.session.sessionId)
+      return
+    }
     upsertAgentSession(event.session)
   }
 

@@ -70,8 +70,22 @@ describe('app shell payload guards', () => {
       },
     })).toBe(true)
     expect(isAgentSessionEventPayload({
+      type: 'session.deleted',
+      session: {
+        sessionId: 'sess-1',
+        agentId: 'codex',
+      },
+    })).toBe(true)
+    expect(isAgentSessionEventPayload({
       type: 'session.started',
       session: { sessionId: 'sess-1' },
+    })).toBe(false)
+    expect(isAgentSessionEventPayload({
+      type: 'session.nope',
+      session: {
+        sessionId: 'sess-1',
+        agentId: 'codex',
+      },
     })).toBe(false)
     expect(isAgentSessionEventPayload([])).toBe(false)
   })

@@ -181,6 +181,32 @@ describe('app shell run actions', () => {
     expect(deps.incrementArchiveRefresh).toHaveBeenCalledOnce()
   })
 
+  it('deletes active agent sessions, prunes Work history, falls back, and refreshes archive state', async () => {
+    const { deps, agentSessions, setActiveWork } = makeDeps({
+      callKernel: vi.fn(async tool => {
+        if (tool === 'agent.sessions.delete') return { deleted: 'sess-1' }
+        throw new Error(`unexpected ${tool}`)
+      }),
+    })
+    agentSessions.push(makeAgentSession())
+    setActiveWork({
+      id: 'work:agent-session:sess-1',
+      kind: 'agent-session',
+      agentId: 'codex',
+      sessionId: 'sess-1',
+      title: 'Codex session',
+    })
+    const actions = createRunActions(deps)
+
+    await actions.deleteAgentSession('sess-1')
+
+    expect(deps.callKernel).toHaveBeenCalledWith('agent.sessions.delete', { sessionId: 'sess-1' })
+    expect(deps.removeAgentSession).toHaveBeenCalledWith('sess-1')
+    expect(deps.removeWorkHistoryEntry).toHaveBeenCalledWith('work:agent-session:sess-1')
+    expect(deps.openFilesWorkPreservingArtifact).toHaveBeenCalledOnce()
+    expect(deps.incrementArchiveRefresh).toHaveBeenCalledOnce()
+  })
+
   it('archives and deletes active chat sessions through the chat store then falls back', async () => {
     const { deps, setActiveWork } = makeDeps()
     setActiveWork({

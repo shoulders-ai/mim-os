@@ -386,6 +386,19 @@ describe('runs store agent sessions', () => {
     expect(runs.allRuns).toEqual([])
   })
 
+  it('removes agent sessions when a deleted event arrives', () => {
+    const runs = useRunsStore()
+    runs.setAgentSessions([agentSession({ sessionId: 'a1' })])
+
+    runs.applyAgentSessionEvent({
+      type: 'session.deleted',
+      session: agentSession({ sessionId: 'a1' }),
+    })
+
+    expect(runs.agentSessions).toEqual([])
+    expect(runs.allRuns).toEqual([])
+  })
+
   it('renames through the kernel and upserts the persisted session', async () => {
     const call = vi.fn(async (tool: string, params?: Record<string, unknown>) => {
       if (tool === 'agent.sessions.rename') {

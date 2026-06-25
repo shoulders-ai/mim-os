@@ -123,6 +123,12 @@ function sortIndicator(key: SortKey): string {
   if (props.sortKey !== key) return ''
   return props.sortDirection === 'asc' ? '↑' : '↓'
 }
+
+const levelPaddingClasses = ['', 'pl-4', 'pl-8', 'pl-12', 'pl-16', 'pl-20', 'pl-24', 'pl-28', 'pl-32'] as const
+
+function levelPaddingClass(level: number): string {
+  return levelPaddingClasses[Math.min(Math.max(0, level), levelPaddingClasses.length - 1)]
+}
 </script>
 
 <template>
@@ -178,7 +184,7 @@ function sortIndicator(key: SortKey): string {
         @dragover="onRowDragover(row, $event)"
         @drop="onRowDrop(row, $event)"
       >
-        <span class="flex min-w-0 items-center gap-1.5" :class="row.level > 0 ? 'pl-4' : ''">
+        <span class="flex min-w-0 items-center gap-1.5" :class="levelPaddingClass(row.level)">
           <IconChevronDown
             v-if="row.type === 'directory' && expandedPaths.has(row.path)"
             :size="12"

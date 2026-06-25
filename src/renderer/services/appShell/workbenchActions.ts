@@ -28,6 +28,7 @@ export interface WorkbenchActionsDeps {
     entryId: string,
     options?: { confirmReplace?: boolean },
   ): Promise<NavigationResult>
+  removeFailedWorkBackingEntry?(entry: WorkEntry): Promise<boolean | void> | boolean | void
   setPaneState(pane: PaneId, state: PaneState): void
   setPaneVisibility(pane: PaneId, visible: boolean): void
   setNavigationError(pane: 'work' | 'artifact', error: unknown | null): void
@@ -154,8 +155,13 @@ export function createWorkbenchActions(deps: WorkbenchActionsDeps) {
   }
 
   async function removeFailedWorkEntry() {
-    const entryId = deps.activeWork()?.id
+    const entry = deps.activeWork()
+    const entryId = entry?.id
     clearNavigationError('work')
+    if (entry) {
+      const handled = await deps.removeFailedWorkBackingEntry?.(entry)
+      if (handled === true) return
+    }
     if (entryId) {
       await deps.removePaneHistoryEntry('work', entryId)
     }

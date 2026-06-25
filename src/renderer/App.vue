@@ -460,6 +460,11 @@ const workbenchActions = createWorkbenchActions({
   backInStore: (pane, options) => workbenchStore.back(pane, options),
   forwardInStore: (pane, options) => workbenchStore.forward(pane, options),
   removePaneHistoryEntry: (pane, entryId, options) => workbenchStore.removePaneHistoryEntry(pane, entryId, options),
+  removeFailedWorkBackingEntry: async entry => {
+    if (entry.kind !== 'agent-session') return false
+    await runActions.deleteAgentSession(entry.sessionId)
+    return true
+  },
   setPaneState: (pane, state) => workbenchStore.setPaneState(pane, state),
   setPaneVisibility: (pane, visible) => workbenchStore.setPaneVisibility(pane, visible),
   setNavigationError: (pane, error) => workbenchStore.setNavigationError(pane, error),
@@ -857,8 +862,8 @@ async function refreshAgentSessions() {
   }
 }
 
-// Every agent:session-event carries the full session record; the store upsert
-// covers started/status/exited/changed alike.
+// Agent session events carry the session identity; delete events prune rows,
+// while lifecycle/change events upsert the latest record.
 function onAgentSessionEvent(payload: unknown) {
   if (!isAgentSessionEventPayload(payload)) return
   runsStore.applyAgentSessionEvent(payload)

@@ -27,7 +27,7 @@ export function isPackageRunBridgePayload(
 export function isAgentSessionEventPayload(payload: unknown): payload is AgentSessionEvent {
   if (!isRecord(payload)) return false
   const session = payload.session
-  return typeof payload.type === 'string'
+  return isAgentSessionEventType(payload.type)
     && isRecord(session)
     && typeof session.sessionId === 'string'
     && typeof session.agentId === 'string'
@@ -45,4 +45,12 @@ export function isPackageJobEventPayload(payload: unknown): payload is PackageRu
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isAgentSessionEventType(value: unknown): value is AgentSessionEvent['type'] {
+  return value === 'session.started'
+    || value === 'session.status'
+    || value === 'session.exited'
+    || value === 'session.changed'
+    || value === 'session.deleted'
 }

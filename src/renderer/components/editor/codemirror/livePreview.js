@@ -225,7 +225,21 @@ export function buildDecorations(view, isEnabled, getFilePath) {
       const nFrom = node.from
       const nTo = node.to
 
-      if (name === 'FencedCode' || name === 'CodeBlock') return false
+      if (name === 'FencedCode') {
+        const startLine = state.doc.lineAt(nFrom)
+        const endLine = state.doc.lineAt(nTo > nFrom ? nTo - 1 : nTo)
+        for (let l = startLine.number; l <= endLine.number; l++) {
+          decos.push(Decoration.line({ class: 'cm-lp-code-block-line' }).range(state.doc.line(l).from))
+        }
+        if (!cursorLines.has(startLine.number)) {
+          decos.push(Decoration.line({ class: 'cm-lp-fence-line' }).range(startLine.from))
+        }
+        if (endLine.number !== startLine.number && !cursorLines.has(endLine.number)) {
+          decos.push(Decoration.line({ class: 'cm-lp-fence-line' }).range(endLine.from))
+        }
+        return false
+      }
+      if (name === 'CodeBlock') return false
 
       const nodeLine = state.doc.lineAt(nFrom).number
       const onCursorLine = cursorLines.has(nodeLine)
@@ -301,6 +315,7 @@ export function buildDecorations(view, isEnabled, getFilePath) {
         if (marks.length >= 2) {
           decos.push(Decoration.replace({}).range(marks[0].from, marks[0].to))
           decos.push(Decoration.replace({}).range(marks[marks.length - 1].from, marks[marks.length - 1].to))
+          decos.push(Decoration.mark({ class: 'cm-lp-inline-code' }).range(marks[0].to, marks[marks.length - 1].from))
         }
         return false
       }
@@ -349,7 +364,8 @@ export function buildDecorations(view, isEnabled, getFilePath) {
           from: nFrom, to: nTo,
           enter(child) {
             if (child.type.name === 'HeaderMark') {
-              decos.push(Decoration.mark({ class: 'cm-lp-heading-mark' }).range(child.from, child.to))
+              const hideEnd = Math.min(child.to + 1, nTo)
+              decos.push(Decoration.replace({}).range(child.from, hideEnd))
             }
           },
         })
@@ -501,14 +517,21 @@ const livePreviewTheme = EditorView.baseTheme({
     textDecoration: 'underline',
     textUnderlineOffset: '2px',
   },
-  '.cm-lp-heading-mark': {
-    opacity: '0.25',
-    fontSize: '0.7em',
+  '.cm-lp-inline-code': {
+    backgroundColor: 'var(--color-chrome-mid)',
+    borderRadius: '3px',
+    padding: '1px 4px',
   },
   '.cm-lp-blockquote-line': {
-    borderLeft: '3px solid var(--color-accent)',
-    paddingLeft: '8px',
-    opacity: '0.9',
+    borderLeft: '2px solid var(--color-rule)',
+    paddingLeft: '14px',
+  },
+  '.cm-lp-code-block-line': {
+    backgroundColor: 'var(--color-chrome-mid)',
+  },
+  '.cm-lp-fence-line': {
+    opacity: '0.35',
+    fontSize: '0.8em',
   },
   '.cm-lp-hr': {
     border: 'none',
