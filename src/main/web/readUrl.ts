@@ -1,3 +1,7 @@
+import { extractPdfTextFromBuffer } from '@main/documents/pdfExtract.js'
+import { htmlToMarkdown } from '@main/html/markdown.js'
+import { parseAllowedHttpUrl, USER_AGENT } from '@main/web/urlPolicy.js'
+
 export interface ReadUrlParams {
   url: string
   max_chars?: number
@@ -6,6 +10,7 @@ export interface ReadUrlParams {
 
 export interface ReadUrlResult {
   url: string
+  format?: 'html' | 'pdf'
   title: string
   content: string
   excerpt: string
@@ -13,6 +18,8 @@ export interface ReadUrlResult {
   siteName: string
   truncated: boolean
   length: number
+  pages?: number
+  metadata?: Record<string, unknown>
 }
 
 interface FetchLike {
@@ -22,43 +29,8 @@ interface FetchLike {
     statusText?: string
     headers: { get(name: string): string | null }
     text(): Promise<string>
+    arrayBuffer?: () => Promise<ArrayBuffer>
   }>
-}
-
-const BLOCKED_HOSTS = new Set(['localhost', '0.0.0.0', '[::1]'])
-
-const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
-
-function isPrivateIpv4(a: number, b: number, c: number, d: number): boolean {
-  if (a === 127) return true
-  if (a === 10) return true
-  if (a === 192 && b === 168) return true
-  if (a === 172 && b >= 16 && b <= 31) return true
-  if (a === 169 && b === 254 && c === 169 && d === 254) return true
-  if (a === 0 && b === 0 && c === 0 && d === 0) return true
-  return false
-}
-
-function parseIpv4MappedHex(host: string): [number, number, number, number] | null {
-  const match = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i)
-  if (!match) return null
-  const hi = parseInt(match[1], 16)
-  const lo = parseInt(match[2], 16)
-  return [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff]
-}
-
-function isBlockedUrl(url: URL): boolean {
-  if (BLOCKED_HOSTS.has(url.hostname)) return true
-  const host = url.hostname.replace(/^\[/, '').replace(/\]$/, '')
-  if (host === '::1') return true
-  const mapped = parseIpv4MappedHex(host)
-  if (mapped && isPrivateIpv4(...mapped)) return true
-  const parts = host.split('.')
-  if (parts.length === 4) {
-    const nums = parts.map(p => parseInt(p, 10))
-    if (nums.every(n => !isNaN(n)) && isPrivateIpv4(nums[0], nums[1], nums[2], nums[3])) return true
-  }
-  return false
 }
 
 let _dominoPatched = false
@@ -105,28 +77,6 @@ async function loadReadability(): Promise<typeof import('@mozilla/readability').
   return mod.Readability
 }
 
-async function htmlToMarkdown(html: string): Promise<string> {
-  const mod = await import('turndown') as unknown as {
-    default?: new (opts?: Record<string, unknown>) => {
-      turndown(html: string): string
-      use(plugin: unknown): void
-    }
-  }
-  const Ctor = mod.default
-  if (!Ctor) throw new Error('turndown not available')
-  const instance = new Ctor({ headingStyle: 'atx', codeBlockStyle: 'fenced' })
-  try {
-    const gfm = await import('turndown-plugin-gfm') as unknown as {
-      default?: { gfm?: unknown } | ((...args: unknown[]) => void)
-      gfm?: unknown
-    }
-    const gfmDefault = gfm.default
-    const plugin = (typeof gfmDefault === 'function' ? gfmDefault : gfmDefault?.gfm) ?? gfm.gfm
-    if (plugin) instance.use(plugin)
-  } catch { /* gfm plugin optional */ }
-  return instance.turndown(html)
-}
-
 export async function extractReadableContent(
   html: string,
   url: string,
@@ -158,12 +108,38 @@ export async function extractReadableContent(
     title = doc.title ?? ''
   }
 
-  let content = await htmlToMarkdown(articleHtml)
+  let content = (await htmlToMarkdown(articleHtml, { extractLinks: true, extractImages: true })).markdown
 
   const truncated = maxChars != null && content.length > maxChars
   if (truncated) content = content.slice(0, maxChars)
 
-  return { url, title, content, excerpt, byline, siteName, truncated, length: content.length }
+  return { url, format: 'html', title, content, excerpt, byline, siteName, truncated, length: content.length }
+}
+
+export async function extractReadablePdfContent(
+  pdf: Buffer | Uint8Array | ArrayBuffer,
+  url: string,
+  maxChars?: number,
+): Promise<ReadUrlResult> {
+  const extracted = await extractPdfTextFromBuffer(pdf, { maxChars })
+  const title = metadataString(extracted.info, ['Title', 'title']) || pdfTitleFromUrl(url)
+  const byline = metadataString(extracted.info, ['Author', 'author']) || ''
+  const content = extracted.text.trim()
+  const excerpt = content.replace(/\s+/g, ' ').slice(0, 300)
+  const siteName = new URL(url).hostname
+  return {
+    url,
+    format: 'pdf',
+    title,
+    content,
+    excerpt,
+    byline,
+    siteName,
+    truncated: extracted.truncated,
+    length: content.length,
+    pages: extracted.pages,
+    metadata: extracted.info,
+  }
 }
 
 export async function readUrl(
@@ -173,18 +149,7 @@ export async function readUrl(
   const { url, max_chars, timeout_ms = 15_000 } = params
   const fetchFn = deps.fetch ?? (globalThis.fetch as unknown as FetchLike)
 
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    throw new Error(`Invalid URL: ${url}`)
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error(`Only http/https URLs are supported, got ${parsed.protocol}`)
-  }
-  if (isBlockedUrl(parsed)) {
-    throw new Error(`Blocked URL: ${url} (private/loopback addresses are not allowed)`)
-  }
+  parseAllowedHttpUrl(url)
 
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout_ms)
@@ -199,8 +164,15 @@ export async function readUrl(
     }
 
     const contentType = response.headers.get('content-type') ?? ''
-    if (!contentType.includes('html') && !contentType.includes('text/plain')) {
-      throw new Error(`Expected HTML response, got ${contentType}`)
+    const normalizedType = contentType.toLowerCase()
+    if (isPdfResponse(normalizedType, url)) {
+      if (!response.arrayBuffer) throw new Error('PDF response cannot be read because this fetch implementation does not expose arrayBuffer().')
+      const buffer = await response.arrayBuffer()
+      return extractReadablePdfContent(buffer, url, max_chars)
+    }
+
+    if (!normalizedType.includes('html') && !normalizedType.includes('text/plain')) {
+      throw new Error(`Expected HTML or PDF response, got ${contentType}`)
     }
 
     const html = await response.text()
@@ -212,5 +184,32 @@ export async function readUrl(
     throw err
   } finally {
     clearTimeout(timer)
+  }
+}
+
+function isPdfResponse(contentType: string, rawUrl: string): boolean {
+  if (contentType.includes('application/pdf') || contentType.includes('application/x-pdf')) return true
+  try {
+    return new URL(rawUrl).pathname.toLowerCase().endsWith('.pdf')
+  } catch {
+    return false
+  }
+}
+
+function metadataString(info: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = info[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function pdfTitleFromUrl(rawUrl: string): string {
+  try {
+    const path = new URL(rawUrl).pathname
+    const last = path.split('/').filter(Boolean).at(-1) ?? 'PDF document'
+    return decodeURIComponent(last).replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ').trim() || 'PDF document'
+  } catch {
+    return 'PDF document'
   }
 }

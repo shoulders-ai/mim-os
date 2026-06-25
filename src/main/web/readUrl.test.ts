@@ -144,11 +144,56 @@ describe('readUrl', () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       status: 200,
-      headers: new Headers({ 'content-type': 'application/pdf' }),
+      headers: new Headers({ 'content-type': 'application/json' }),
       text: () => Promise.resolve('binary junk'),
     })
 
-    await expect(readUrl({ url: 'https://example.com/file.pdf' }, { fetch: mockFetch })).rejects.toThrow('HTML')
+    await expect(readUrl({ url: 'https://example.com/file.json' }, { fetch: mockFetch }))
+      .rejects.toThrow('HTML or PDF')
+  })
+
+  it('fetches selectable PDF responses and returns readable text', async () => {
+    const pdf = makeTextPdf({
+      title: 'Regeltafel 688',
+      author: 'DB Regio',
+      text: 'RB24 Ostkreuz Eberswalde Ersatzverkehr vom 12. Juli bis 18. Juli',
+    })
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/pdf' }),
+      arrayBuffer: () => Promise.resolve(bufferToArrayBuffer(pdf)),
+      text: () => Promise.resolve(''),
+    })
+
+    const result = await readUrl({
+      url: 'https://www.bahnhof.de/downloads/schedule/Regeltafel_688.pdf',
+      max_chars: 10_000,
+    }, { fetch: mockFetch })
+
+    expect(result.format).toBe('pdf')
+    expect(result.title).toBe('Regeltafel 688')
+    expect(result.byline).toBe('DB Regio')
+    expect(result.siteName).toBe('www.bahnhof.de')
+    expect(result.pages).toBe(1)
+    expect(result.content).toContain('RB24 Ostkreuz Eberswalde')
+    expect(result.truncated).toBe(false)
+  })
+
+  it('treats .pdf downloads as PDFs even when the server sends a generic content type', async () => {
+    const pdf = makeTextPdf({ text: 'Generic download PDF text' })
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/octet-stream' }),
+      arrayBuffer: () => Promise.resolve(bufferToArrayBuffer(pdf)),
+      text: () => Promise.resolve(''),
+    })
+
+    const result = await readUrl({ url: 'https://example.com/download/file.pdf' }, { fetch: mockFetch })
+
+    expect(result.format).toBe('pdf')
+    expect(result.content).toContain('Generic download PDF text')
   })
 
   it('handles fetch errors', async () => {
@@ -173,3 +218,37 @@ describe('readUrl', () => {
       .rejects.toThrow(/Timeout.*100ms/)
   })
 })
+
+function makeTextPdf(options: { text: string; title?: string; author?: string }): Buffer {
+  const stream = `BT /F1 12 Tf 72 720 Td ${pdfLiteral(options.text)} Tj ET`
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
+    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
+    `5 0 obj\n<< /Length ${Buffer.byteLength(stream, 'latin1')} >>\nstream\n${stream}\nendstream\nendobj\n`,
+    `6 0 obj\n<< /Title ${pdfLiteral(options.title ?? 'Test PDF')} /Author ${pdfLiteral(options.author ?? 'Test Author')} >>\nendobj\n`,
+  ]
+  let pdf = '%PDF-1.4\n'
+  const offsets = [0]
+  for (const object of objects) {
+    offsets.push(Buffer.byteLength(pdf, 'latin1'))
+    pdf += object
+  }
+  const xrefOffset = Buffer.byteLength(pdf, 'latin1')
+  pdf += `xref\n0 ${objects.length + 1}\n`
+  pdf += '0000000000 65535 f \n'
+  for (const offset of offsets.slice(1)) {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`
+  return Buffer.from(pdf, 'latin1')
+}
+
+function pdfLiteral(value: string): string {
+  return `(${value.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)')})`
+}
+
+function bufferToArrayBuffer(buffer: Buffer): ArrayBuffer {
+  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+}
