@@ -69,7 +69,7 @@ async function refresh() {
 
 async function loadHistory() {
   try {
-    history.value = await window.kernel.call('history.stats') as HistoryStats
+    history.value = normalizeHistoryStats(await window.kernel.call('history.stats'))
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }
@@ -77,7 +77,7 @@ async function loadHistory() {
 
 async function loadSync() {
   try {
-    sync.value = await window.kernel.call('sync.status') as SyncStatus
+    sync.value = normalizeSyncStatus(await window.kernel.call('sync.status'))
     if (sync.value.remote) remote.value = sync.value.remote
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
@@ -145,6 +145,48 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
+}
+
+function normalizeHistoryStats(raw: unknown): HistoryStats {
+  const value = objectRecord(raw)
+  return {
+    bytes: numberOrZero(value.bytes),
+    blobBytes: numberOrZero(value.blobBytes),
+    fileCount: numberOrZero(value.fileCount),
+    versionCount: numberOrZero(value.versionCount),
+    prunedVersionCount: numberOrZero(value.prunedVersionCount),
+  }
+}
+
+function normalizeSyncStatus(raw: unknown): SyncStatus {
+  const value = objectRecord(raw)
+  const mode = value.mode === 'managed' ? 'managed' : 'manual'
+  const state = typeof value.state === 'string' && ['manual', 'not-configured', 'synced', 'needs-sync', 'stopped'].includes(value.state)
+    ? value.state as SyncStatus['state']
+    : mode === 'managed' ? 'not-configured' : 'manual'
+  const remoteValue = typeof value.remote === 'string' && value.remote.trim() ? value.remote : null
+  const conflicts = Array.isArray(value.conflicts)
+    ? value.conflicts.filter((item): item is string => typeof item === 'string')
+    : []
+  return {
+    mode,
+    state,
+    git: value.git === true,
+    remote: remoteValue,
+    dirty: value.dirty === true,
+    ahead: value.ahead === true,
+    behind: value.behind === true,
+    conflicts,
+    message: typeof value.message === 'string' && value.message.trim() ? value.message : 'Manual sync',
+  }
+}
+
+function objectRecord(raw: unknown): Record<string, unknown> {
+  return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {}
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 </script>
 

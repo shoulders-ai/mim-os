@@ -2,16 +2,13 @@
 import { ref, watch } from 'vue'
 import { IconX } from '@tabler/icons-vue'
 import MimDialog from '../ui/MimDialog.vue'
-import AccountSettingsPanel from './AccountSettingsPanel.vue'
 import AiSettingsPanel from './AiSettingsPanel.vue'
 import AppsSettingsPanel from './AppsSettingsPanel.vue'
-import AgentsSettingsPanel from './AgentsSettingsPanel.vue'
-import SkillsSettingsPanel from './SkillsSettingsPanel.vue'
-import ResourcesSettingsPanel from './ResourcesSettingsPanel.vue'
-import StorageSettingsPanel from './StorageSettingsPanel.vue'
 import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue'
-import EditorSettingsPanel from './EditorSettingsPanel.vue'
+import ConnectionsSettingsPanel from './ConnectionsSettingsPanel.vue'
+import SkillsSettingsPanel from './SkillsSettingsPanel.vue'
 import InstructionsSettingsPanel from './InstructionsSettingsPanel.vue'
+import WorkspaceSettingsPanel from './WorkspaceSettingsPanel.vue'
 import AboutSettingsPanel from './AboutSettingsPanel.vue'
 import {
   SETTINGS_NAV_GROUPS,
@@ -118,22 +115,19 @@ function onNavKeydown(e: KeyboardEvent) {
 
         <div
           class="flex-1"
-          :class="activeSection === 'apps' || activeSection === 'agents' ? 'overflow-hidden' : activeSection === 'instructions' ? 'flex flex-col px-8 py-6' : 'overflow-y-auto px-8 py-6'"
+          :class="activeSection === 'apps' ? 'overflow-hidden' : activeSection === 'instructions' ? 'flex flex-col px-8 py-6' : 'overflow-y-auto px-8 py-6'"
         >
-          <AccountSettingsPanel v-if="activeSection === 'account'" />
+          <AppearanceSettingsPanel v-if="activeSection === 'appearance'" />
           <AiSettingsPanel v-else-if="activeSection === 'ai'" />
           <InstructionsSettingsPanel v-else-if="activeSection === 'instructions'" />
+          <ConnectionsSettingsPanel v-else-if="activeSection === 'connections'" />
           <AppsSettingsPanel
             v-else-if="activeSection === 'apps'"
             @open-package="emit('openPackage', $event)"
             @open-package-docs="emit('openPackageDocs', $event)"
           />
-          <AgentsSettingsPanel v-else-if="activeSection === 'agents'" />
           <SkillsSettingsPanel v-else-if="activeSection === 'skills'" />
-          <ResourcesSettingsPanel v-else-if="activeSection === 'resources'" />
-          <StorageSettingsPanel v-else-if="activeSection === 'storage'" />
-          <AppearanceSettingsPanel v-else-if="activeSection === 'appearance'" />
-          <EditorSettingsPanel v-else-if="activeSection === 'editor'" />
+          <WorkspaceSettingsPanel v-else-if="activeSection === 'workspace'" />
           <AboutSettingsPanel v-else-if="activeSection === 'about'" />
         </div>
       </div>

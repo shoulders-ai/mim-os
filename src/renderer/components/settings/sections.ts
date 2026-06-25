@@ -4,33 +4,40 @@
 // (openSettings('apps')), ShellSidebar's Apps-header gear, and the settings
 // test suites all pass them around as plain strings. Labels, order, and
 // grouping are free to change; ids must stay stable. 'ai' keeps its historic
-// id even though the label is now "AI" (it was "Models").
+// id even though the label is now "AI & Models" (it was "Models", then "AI").
 
-export type SettingsSection = 'account' | 'appearance' | 'editor' | 'ai' | 'instructions' | 'apps' | 'agents' | 'skills' | 'resources' | 'storage' | 'about'
+export type SettingsSection =
+  | 'appearance'
+  | 'ai'
+  | 'instructions'
+  | 'connections'
+  | 'apps'
+  | 'skills'
+  | 'workspace'
+  | 'about'
 
 export interface SettingsNavItem {
   id: SettingsSection
   label: string
 }
 
-// Nav order: personal preferences first, workspace/domain concerns second,
-// About last. Rendered with a divider between groups.
+// Nav order: look-and-feel, then AI/services, then extensibility/workspace,
+// then meta. Rendered with a divider between groups.
 export const SETTINGS_NAV_GROUPS: SettingsNavItem[][] = [
   [
     { id: 'appearance', label: 'Appearance' },
-    { id: 'editor', label: 'Editor' },
   ],
   [
-    { id: 'ai', label: 'AI' },
+    { id: 'ai', label: 'AI & Models' },
     { id: 'instructions', label: 'Instructions' },
-    { id: 'storage', label: 'Storage' },
-    { id: 'resources', label: 'Resources' },
+    { id: 'connections', label: 'Connections' },
+  ],
+  [
     { id: 'apps', label: 'Apps' },
     { id: 'skills', label: 'Skills' },
-    { id: 'agents', label: 'CLI tools' },
+    { id: 'workspace', label: 'Workspace' },
   ],
   [
-    { id: 'account', label: 'Account' },
     { id: 'about', label: 'About' },
   ],
 ]

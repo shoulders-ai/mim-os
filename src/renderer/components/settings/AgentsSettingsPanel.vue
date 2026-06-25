@@ -105,7 +105,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col px-5 pt-4 font-sans" aria-label="Agents settings">
+  <section class="flex flex-col font-sans" aria-label="CLI tools">
     <div v-if="error" class="mb-2 rounded-[6px] border border-rem/30 px-2.5 py-2 text-[11.5px] text-rem">
       {{ error }}
     </div>
@@ -230,5 +230,5 @@ onBeforeUnmount(() => {
         Enabled agents appear as launchers in the Navigator. Each launch starts a new agent session.
       </p>
     </section>
-  </div>
+  </section>
 </template>

@@ -18,6 +18,7 @@ const DEFAULTS = {
   editorWordWrap: true,
   editorLineNumbers: false,
   editorSpellCheck: false,
+  editorLivePreview: true,
   lastChatModel: '',
   lastInlineModel: '',
   lastGhostModel: '',
@@ -84,6 +85,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const editorWordWrap = ref(DEFAULTS.editorWordWrap)
   const editorLineNumbers = ref(DEFAULTS.editorLineNumbers)
   const editorSpellCheck = ref(DEFAULTS.editorSpellCheck)
+  const editorLivePreview = ref(DEFAULTS.editorLivePreview)
   const lastChatModel = ref(DEFAULTS.lastChatModel)
   const lastInlineModel = ref(DEFAULTS.lastInlineModel)
   const lastGhostModel = ref(DEFAULTS.lastGhostModel)
@@ -123,7 +125,7 @@ export const useSettingsStore = defineStore('settings', () => {
 
   const refs: Record<string, { value: unknown }> = {
     theme, editorFontFamily, editorFontSize,
-    editorWordWrap, editorLineNumbers, editorSpellCheck,
+    editorWordWrap, editorLineNumbers, editorSpellCheck, editorLivePreview,
     lastChatModel, lastInlineModel, lastGhostModel, sidebarWidth, rightPanelWidth, terminalHeight,
     automationApprovalMode, traceRetentionDays, recentFiles, navigatorAppOrder, navigatorActivityOrder, enabledAgents, agentFlags,
     'references.bibPath': referencesBibPath,
@@ -285,6 +287,7 @@ export const useSettingsStore = defineStore('settings', () => {
     editorWordWrap,
     editorLineNumbers,
     editorSpellCheck,
+    editorLivePreview,
     lastChatModel,
     lastInlineModel,
     lastGhostModel,

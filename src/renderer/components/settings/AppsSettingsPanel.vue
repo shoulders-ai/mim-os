@@ -20,6 +20,7 @@ import {
 } from '../apps/appsSurfaceLogic.js'
 import type { RegistryEntry, RegistryInfo } from '../apps/appsSurfaceLogic.js'
 import { permissionLines } from '../packages/permissionSummary.js'
+import AgentsSettingsPanel from './AgentsSettingsPanel.vue'
 import PermissionConfirmDialog from '../apps/PermissionConfirmDialog.vue'
 import MimDialog from '../ui/MimDialog.vue'
 import MimSelect from '../ui/MimSelect.vue'
@@ -1111,6 +1112,8 @@ watch(inWorkspaceRows, (rows) => {
         </div>
 
       </section>
+
+      <AgentsSettingsPanel />
     </div>
 
     <PermissionConfirmDialog

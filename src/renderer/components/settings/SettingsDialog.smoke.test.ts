@@ -65,6 +65,21 @@ describe('SettingsDialog model defaults', () => {
       }
       if (tool === 'package.capabilities.list') return { packages: [] }
       if (tool === 'agent.list') return { agents: [] }
+      if (tool === 'web.research.status') return {
+        enabled: true,
+        allowedDomains: ['dbregio-berlin-brandenburg.de'],
+        profile_available: true,
+        sources: [
+          { domain: 'dbregio-berlin-brandenburg.de', allowed: true, status: 'ready', attentionRequired: false, consecutiveFailures: 0 },
+        ],
+      }
+      if (tool === 'slack.status') return { account: 'default', configured: false }
+      if (tool === 'settings.get') return { value: null }
+      if (tool === 'skill.list') return { skills: [], diagnostics: [] }
+      if (tool === 'skillSource.list') return { sources: [] }
+      if (tool === 'skill.templateList') return { templates: [] }
+      if (tool === 'history.stats') return { bytes: 0, blobBytes: 0, fileCount: 0, versionCount: 0 }
+      if (tool === 'sync.status') return { mode: 'manual', state: 'manual', git: false, remote: null, dirty: false, ahead: false, behind: false, conflicts: [], message: 'Manual' }
       return {}
     })
     Object.defineProperty(window, 'kernel', {
@@ -149,11 +164,11 @@ describe('SettingsDialog model defaults', () => {
       .sort()
     const sizeBefore = sizeClasses()
     expect(sizeBefore.length).toBe(2)
-    const resourcesBtn = document.body.querySelector<HTMLButtonElement>('.sd-nav [data-section="resources"]')
-    expect(resourcesBtn).toBeTruthy()
-    resourcesBtn!.click()
+    const workspaceBtn = document.body.querySelector<HTMLButtonElement>('.sd-nav [data-section="workspace"]')
+    expect(workspaceBtn).toBeTruthy()
+    workspaceBtn!.click()
     await flushUi()
-    expect(document.body.querySelector('[aria-label="Resources settings"]')).toBeTruthy()
+    expect(document.body.querySelector('[aria-label="Workspace settings"]')).toBeTruthy()
     expect(sizeClasses()).toEqual(sizeBefore)
   })
 
@@ -167,14 +182,33 @@ describe('SettingsDialog model defaults', () => {
     expect(document.body.textContent).toContain('My Sidebar')
   })
 
-  it('renders the Agents panel inline when the agents section is active', async () => {
-    app = createApp(SettingsDialog, { initialSection: 'agents' })
+  it('renders the Skills panel inline when the skills section is active', async () => {
+    app = createApp(SettingsDialog, { initialSection: 'skills' })
     app.mount(root)
     await flushUi()
     await flushUi()
 
     expect(document.body.querySelector('[data-testid="settings-dialog-layout"]')).toBeTruthy()
+    expect(document.body.querySelector('[aria-label="Skills settings"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-section="skills"]')).toBeTruthy()
+  })
+
+  it('renders CLI tools inside the Apps panel', async () => {
+    app = createApp(SettingsDialog, { initialSection: 'apps' })
+    app.mount(root)
+    await flushUi()
+    await flushUi()
+
     expect(document.body.textContent).toContain('Coding agents')
-    expect(document.body.querySelector('[data-section="agents"]')).toBeTruthy()
+  })
+
+  it('renders the Connections panel inline when the connections section is active', async () => {
+    app = createApp(SettingsDialog, { initialSection: 'connections' })
+    app.mount(root)
+    await flushUi()
+
+    expect(document.body.querySelector('[aria-label="Connections settings"]')).toBeTruthy()
+    expect(document.body.textContent).toContain('dbregio-berlin-brandenburg.de')
+    expect(document.body.querySelector('[data-section="connections"]')).toBeTruthy()
   })
 })
