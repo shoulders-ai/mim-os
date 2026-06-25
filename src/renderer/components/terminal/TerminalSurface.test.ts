@@ -132,6 +132,24 @@ describe('TerminalSurface', () => {
     return reactiveProps
   }
 
+  function keyEvent(overrides: Partial<KeyboardEvent>): KeyboardEvent {
+    return {
+      type: 'keydown',
+      key: '',
+      metaKey: false,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      ...overrides,
+    } as unknown as KeyboardEvent
+  }
+
+  function stubPlatform(platform: string) {
+    vi.stubGlobal('navigator', { platform })
+  }
+
   it('live mode subscribes to the pty channels, renders output, forwards input, and cleans up on unmount', async () => {
     mountSurface({ ptyId: 7 })
     await flushUi()
@@ -253,19 +271,95 @@ describe('TerminalSurface', () => {
     mountSurface({ ptyId: 7 })
     await flushUi()
 
-    const handled = lastTerminal().keyHandler?.({
-      type: 'keydown',
-      key: 'ArrowLeft',
-      metaKey: false,
-      ctrlKey: true,
-      altKey: false,
-      shiftKey: false,
-      preventDefault: () => {},
-      stopPropagation: () => {},
-    } as unknown as KeyboardEvent)
+    const handled = lastTerminal().keyHandler?.(keyEvent({ key: 'ArrowLeft', ctrlKey: true }))
 
     expect(handled).toBe(false)
     expect(window.kernel.ptyWrite).toHaveBeenCalledWith(7, '\x01')
+  })
+
+  it('keeps the shell Shift+Enter literal-newline fallback by default', async () => {
+    mountSurface({ ptyId: 7 })
+    await flushUi()
+
+    const event = keyEvent({ key: 'Enter', shiftKey: true })
+    const handled = lastTerminal().keyHandler?.(event)
+
+    expect(handled).toBe(false)
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(window.kernel.ptyWrite).toHaveBeenCalledWith(7, '\x16\n')
+  })
+
+  it('uses the agent Shift+Enter fallback for agent keybinding profiles', async () => {
+    mountSurface({ ptyId: 7, keybindingProfile: 'claude-code' })
+    await flushUi()
+
+    const event = keyEvent({ key: 'Enter', shiftKey: true })
+    const handled = lastTerminal().keyHandler?.(event)
+
+    expect(handled).toBe(false)
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(event.stopPropagation).toHaveBeenCalled()
+    expect(window.kernel.ptyWrite).toHaveBeenCalledWith(7, '\x1b\r')
+  })
+
+  it('uses agent Home/End fallbacks for macOS Cmd+Arrow before xterm writes legacy bytes', async () => {
+    stubPlatform('MacIntel')
+    mountSurface({ ptyId: 7, keybindingProfile: 'codex' })
+    await flushUi()
+
+    const left = keyEvent({ key: 'ArrowLeft', metaKey: true })
+    const right = keyEvent({ key: 'ArrowRight', metaKey: true })
+
+    expect(lastTerminal().keyHandler?.(left)).toBe(false)
+    expect(lastTerminal().keyHandler?.(right)).toBe(false)
+    expect(left.preventDefault).toHaveBeenCalled()
+    expect(left.stopPropagation).toHaveBeenCalled()
+    expect(right.preventDefault).toHaveBeenCalled()
+    expect(right.stopPropagation).toHaveBeenCalled()
+    expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(1, 7, '\x1b[H')
+    expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(2, 7, '\x1b[F')
+  })
+
+  it('uses shell word movement fallbacks for macOS Option+Arrow in terminal profiles', async () => {
+    stubPlatform('MacIntel')
+    mountSurface({ ptyId: 7 })
+    await flushUi()
+
+    const optionLeft = keyEvent({ key: 'ArrowLeft', altKey: true })
+    const optionRight = keyEvent({ key: 'ArrowRight', altKey: true })
+    expect(lastTerminal().keyHandler?.(optionLeft)).toBe(false)
+    expect(lastTerminal().keyHandler?.(optionRight)).toBe(false)
+    expect(optionLeft.preventDefault).toHaveBeenCalled()
+    expect(optionRight.preventDefault).toHaveBeenCalled()
+    expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(1, 7, '\x1bb')
+    expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(2, 7, '\x1bf')
+  })
+
+  it('leaves macOS Option+Arrow and Backspace/Delete to xterm for agent profiles', async () => {
+    stubPlatform('MacIntel')
+    mountSurface({ ptyId: 7, keybindingProfile: 'gemini-cli' })
+    await flushUi()
+
+    const optionLeft = keyEvent({ key: 'ArrowLeft', altKey: true })
+    const optionRight = keyEvent({ key: 'ArrowRight', altKey: true })
+    expect(lastTerminal().keyHandler?.(optionLeft)).toBe(true)
+    expect(lastTerminal().keyHandler?.(optionRight)).toBe(true)
+    expect(optionLeft.preventDefault).not.toHaveBeenCalled()
+    expect(optionLeft.stopPropagation).not.toHaveBeenCalled()
+    expect(optionRight.preventDefault).not.toHaveBeenCalled()
+    expect(optionRight.stopPropagation).not.toHaveBeenCalled()
+
+    expect(lastTerminal().keyHandler?.(keyEvent({ key: 'Backspace' }))).toBe(true)
+    expect(lastTerminal().keyHandler?.(keyEvent({ key: 'Delete' }))).toBe(true)
+    expect(window.kernel.ptyWrite).not.toHaveBeenCalled()
+  })
+
+  it('does not advertise incomplete Kitty keyboard protocol support', async () => {
+    mountSurface({ ptyId: 7, keybindingProfile: 'claude-code' })
+    await flushUi()
+
+    channelHandler('pty:output:7')('\x1b[?u')
+    expect(window.kernel.ptyWrite).not.toHaveBeenCalled()
   })
 
   it('replay mode writes the scrollback once and forwards nothing', async () => {

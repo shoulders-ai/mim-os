@@ -8,7 +8,10 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { useSettingsStore } from '../../stores/settings.js'
-import { terminalOsShortcutSequence } from './terminalKeybindings.js'
+import {
+  terminalOsShortcutSequence,
+  type TerminalKeybindingProfile,
+} from './terminalKeybindings.js'
 
 const props = withDefaults(defineProps<{
   // Live mode: pty to subscribe to. May arrive after mount (spawn needs the
@@ -18,8 +21,10 @@ const props = withDefaults(defineProps<{
   replay?: string
   // xterm must be opened only after its container is visible and measurable.
   active?: boolean
+  keybindingProfile?: TerminalKeybindingProfile
 }>(), {
   active: true,
+  keybindingProfile: 'terminal',
 })
 
 const emit = defineEmits<{
@@ -290,7 +295,9 @@ onMounted(() => {
 
   if (!isReplay.value) {
     terminal.attachCustomKeyEventHandler((event) => {
-      const sequence = terminalOsShortcutSequence(event)
+      const sequence = terminalOsShortcutSequence(event, {
+        profile: props.keybindingProfile,
+      })
       if (!sequence) return true
       event.preventDefault()
       event.stopPropagation()
