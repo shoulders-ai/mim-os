@@ -92,9 +92,17 @@ async function prepareChatDraft(payload: { text?: string; attachments?: unknown[
 }
 
 async function runTerminalCommand(command: string) {
+  if (!terminalMounted.value) {
+    terminalMounted.value = true
+  }
   await nextTick()
   const terminal = terminalRef.value as any
   if (!terminal) return
+
+  if (typeof terminal.runCommand === 'function') {
+    await terminal.runCommand(command)
+    return
+  }
 
   if (!terminal.tabs?.length) {
     await terminal.addTab?.()

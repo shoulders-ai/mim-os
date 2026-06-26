@@ -41,7 +41,7 @@ export interface AppKernelEventDeps {
   openSettings(): void
   openShortcuts(): void
   openWelcome(): void
-  dispatchTerminalRun(command: string): Promise<unknown> | unknown
+  dispatchTerminalRun(command: string, options?: { reveal?: boolean }): Promise<unknown> | unknown
   onPackageJobEvent(payload: unknown): void
   onAgentSessionEvent(payload: unknown): void
   pushToast(toast: AppShellToast): void
@@ -101,7 +101,8 @@ export function registerAppKernelEvents(
     ['menu:welcome', () => { deps.openWelcome() }],
     ['bridge:terminal:run', (data: unknown) => {
       const command = isRecord(data) ? data.command : undefined
-      if (typeof command === 'string') void deps.dispatchTerminalRun(command)
+      const reveal = isRecord(data) && typeof data.reveal === 'boolean' ? data.reveal : undefined
+      if (typeof command === 'string') void deps.dispatchTerminalRun(command, reveal === undefined ? undefined : { reveal })
     }],
     ['package:job:event', deps.onPackageJobEvent],
     ['agent:session-event', deps.onAgentSessionEvent],

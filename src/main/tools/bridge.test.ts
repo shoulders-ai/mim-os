@@ -64,7 +64,13 @@ describe('Bridge tools', () => {
   it('terminal.run emits bridge:terminal:run', async () => {
     const result = await tools.call('terminal.run', { command: 'ls -la' }, ctx) as { sent: boolean }
     expect(result.sent).toBe(true)
-    expect(mockSend).toHaveBeenCalledWith('bridge:terminal:run', { command: 'ls -la' })
+    expect(mockSend).toHaveBeenCalledWith('bridge:terminal:run', { command: 'ls -la', reveal: true })
+  })
+
+  it('terminal.run from AI keeps the current Work surface visible', async () => {
+    const result = await tools.call('terminal.run', { command: 'npm test' }, { actor: 'ai', sessionId: 's1' }) as { sent: boolean }
+    expect(result.sent).toBe(true)
+    expect(mockSend).toHaveBeenCalledWith('bridge:terminal:run', { command: 'npm test', reveal: false })
   })
 
   it('terminal.run rejects missing command', async () => {

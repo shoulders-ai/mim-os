@@ -990,7 +990,7 @@ onMounted(async () => {
     openSettings,
     openShortcuts: () => { shortcutsOpen.value = true },
     openWelcome: () => { welcomeOpen.value = true },
-    dispatchTerminalRun: command => dispatchWorkbenchCommand({ type: 'terminal.run', command }),
+    dispatchTerminalRun: (command, options) => dispatchWorkbenchCommand({ type: 'terminal.run', command, reveal: options?.reveal }),
     onPackageJobEvent,
     onAgentSessionEvent,
     pushToast: toast => { toastStore.push(toast) },

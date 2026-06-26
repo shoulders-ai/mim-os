@@ -29,6 +29,7 @@ let nextTabId = 1
 const tabs = ref<TermTab[]>([])
 const activeTabId = ref<number | null>(null)
 const panelEl = ref<HTMLElement | null>(null)
+let initialTabPromise: Promise<void> | null = null
 // Surface instances are looked up imperatively (focus/fit/clear/copy), so a
 // plain Map keyed by tab id is enough — no reactivity needed.
 const surfaces = new Map<number, SurfaceHandle>()
@@ -296,6 +297,33 @@ async function activate() {
   focusActive()
 }
 
+function ensureTerminalTab(): Promise<void> {
+  if (initialTabPromise) return initialTabPromise
+  if (tabs.value.length > 0) return Promise.resolve()
+  initialTabPromise = addTab().finally(() => {
+    initialTabPromise = null
+  })
+  return initialTabPromise
+}
+
+async function runCommand(command: string) {
+  await ensureTerminalTab()
+  await nextTick()
+
+  let tab = tabs.value.find(item => item.id === activeTabId.value)
+  if (!tab) return
+
+  if (tab.ptyId === null && !tab.exited) {
+    await spawnPty(tab.id)
+    await nextTick()
+    tab = tabs.value.find(item => item.id === activeTabId.value)
+  }
+
+  if (tab?.ptyId != null) {
+    await window.kernel.call('terminal.write', { id: tab.ptyId, data: command + '\n' })
+  }
+}
+
 /* ── Clear active terminal (Cmd+K) ── */
 function clearActiveTerminal() {
   surfaceFor(activeTabId.value)?.clear()
@@ -344,7 +372,7 @@ function onKeydown(e: KeyboardEvent) {
 /* ── Lifecycle ── */
 onMounted(async () => {
   document.addEventListener('keydown', onKeydown, true)
-  await addTab()
+  await ensureTerminalTab()
 })
 
 watch(() => props.active, (active) => {
@@ -360,7 +388,7 @@ onBeforeUnmount(() => {
   }
 })
 
-defineExpose({ addTab, closeActiveTab, clearActiveTerminal, activate, tabs, activeTabId })
+defineExpose({ addTab, closeActiveTab, clearActiveTerminal, activate, runCommand, tabs, activeTabId })
 </script>
 
 <template>

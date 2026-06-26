@@ -9,7 +9,7 @@ import {
 
 export type WorkbenchCommand =
   | { type: 'editor.open'; path: string }
-  | { type: 'terminal.run'; command: string }
+  | { type: 'terminal.run'; command: string; reveal?: boolean }
   | { type: 'chat.send'; sessionId: string; message: string }
 
 export interface WorkbenchCommandDeps {
@@ -34,6 +34,11 @@ export async function routeWorkbenchCommand(
   }
 
   if (command.type === 'terminal.run') {
+    if (command.reveal === false) {
+      await deps.runTerminal(command.command)
+      return
+    }
+
     const result = await deps.openWork(terminalWorkEntry())
     if (!navigationDidOpen(result)) return
     await deps.runTerminal(command.command)

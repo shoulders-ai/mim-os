@@ -546,7 +546,7 @@ export function createAiSdkTools({
     }),
 
     terminal_run: tool({
-      description: 'Run a shell command in the Terminal',
+      description: 'Run a shell command in the scratch Terminal without switching away from Chat. Returns when the command has been sent, not with stdout.',
       inputSchema: z.object({ command: z.string() }),
       execute: async ({ command }) => call('terminal.run', { command }),
     }),

@@ -10,6 +10,7 @@ const childCalls = vi.hoisted(() => ({
   sendExternalMessage: vi.fn(),
   addTab: vi.fn(),
   closeActiveTab: vi.fn(),
+  runCommand: vi.fn(),
 }))
 
 vi.mock('../chat/ChatView.vue', async () => {
@@ -45,14 +46,19 @@ vi.mock('../terminal/TerminalPanel.vue', async () => {
   return {
     default: defineComponent({
       name: 'TerminalPanelStub',
-      setup(_props, { expose }) {
+      props: ['active'],
+      setup(props, { expose }) {
         expose({
           tabs: [{ id: 'terminal-tab', ptyId: 42 }],
           activeTabId: 'terminal-tab',
           addTab: childCalls.addTab,
           closeActiveTab: childCalls.closeActiveTab,
+          runCommand: childCalls.runCommand,
         })
-        return () => h('div', { 'data-testid': 'terminal-panel' }, 'Terminal')
+        return () => h('div', {
+          'data-testid': 'terminal-panel',
+          'data-active': props.active ? 'true' : 'false',
+        }, 'Terminal')
       },
     }),
   }
@@ -240,10 +246,7 @@ describe('WorkHost', () => {
     await flushUi()
 
     await hostRef.value.runTerminalCommand('npm test')
-    expect(window.kernel.call).toHaveBeenCalledWith('terminal.write', {
-      id: 42,
-      data: 'npm test\n',
-    })
+    expect(childCalls.runCommand).toHaveBeenCalledWith('npm test')
 
     await hostRef.value.addTerminalTab()
     hostRef.value.closeTerminalTab()
@@ -255,6 +258,23 @@ describe('WorkHost', () => {
 
     root.querySelector<HTMLButtonElement>('[data-testid="chat-open-file"]')?.click()
     expect(onOpenFile).toHaveBeenCalledWith('chat-note.md')
+  })
+
+  it('mounts the terminal in the background before running a hidden command', async () => {
+    mountHost('chat', {
+      id: 'work:chat:s1',
+      kind: 'chat',
+      title: 'Chat',
+      sessionId: 's1',
+    })
+    await flushUi()
+    expect(root.querySelector('[data-testid="terminal-panel"]')).toBeNull()
+
+    await hostRef.value.runTerminalCommand('npm test')
+    await flushUi()
+
+    expect(root.querySelector('[data-testid="terminal-panel"]')?.getAttribute('data-active')).toBe('false')
+    expect(childCalls.runCommand).toHaveBeenCalledWith('npm test')
   })
 
   it('forwards archive requests from Chat to the app shell', async () => {

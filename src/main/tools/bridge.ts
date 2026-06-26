@@ -55,13 +55,15 @@ export function registerBridgeTools(tools: ToolRegistry): void {
     description: 'Run a command in the terminal surface',
     inputSchema: objectSchema({
       command: { type: 'string' },
+      reveal: { type: 'boolean' },
     }, ['command']),
-    execute: async (params) => {
+    execute: async (params, ctx) => {
       const command = params.command
       if (typeof command !== 'string' || command.length === 0) {
         throw new Error('Missing required parameter: command')
       }
-      sendToRenderer('bridge:terminal:run', { command })
+      const reveal = typeof params.reveal === 'boolean' ? params.reveal : ctx.actor !== 'ai'
+      sendToRenderer('bridge:terminal:run', { command, reveal })
       return { sent: true }
     }
   })

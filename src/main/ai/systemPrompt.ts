@@ -38,7 +38,7 @@ export const TOOL_CATALOG = `File operations:
 
 Cross-surface actions:
 - editor_open(path) — open a file in the Editor
-- terminal_run(command) — run a shell command in the Terminal
+- terminal_run(command) — run a shell command in the scratch Terminal without switching away from Chat; returns when sent, not with stdout
 
 Search:
 - search(query, scope?, file_pattern?, max_results?) — full-text search across workspace files and/or session message history. scope: "files", "sessions", or "all" (default). file_pattern: glob filter like "*.md".

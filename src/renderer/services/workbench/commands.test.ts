@@ -62,6 +62,21 @@ describe('workbench command router', () => {
     expect(deps.runTerminal).not.toHaveBeenCalled()
   })
 
+  it('runs terminal commands without Work navigation when reveal is false', async () => {
+    const deps = {
+      openWork: vi.fn(),
+      openArtifact: vi.fn(),
+      sendChat: vi.fn(),
+      runTerminal: vi.fn(),
+    }
+
+    await routeWorkbenchCommand({ type: 'terminal.run', command: 'npm test', reveal: false }, deps)
+
+    expect(deps.openWork).not.toHaveBeenCalled()
+    expect(deps.runTerminal).toHaveBeenCalledWith('npm test')
+    expect(deps.openArtifact).not.toHaveBeenCalled()
+  })
+
   it('routes chat.send through Work before sending the message', async () => {
     const deps = {
       openWork: vi.fn(async () => ({ opened: true as const })),
