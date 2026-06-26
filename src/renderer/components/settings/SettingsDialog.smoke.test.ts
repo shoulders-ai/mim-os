@@ -69,9 +69,6 @@ describe('SettingsDialog model defaults', () => {
         enabled: true,
         allowedDomains: ['dbregio-berlin-brandenburg.de'],
         profile_available: true,
-        sources: [
-          { domain: 'dbregio-berlin-brandenburg.de', allowed: true, status: 'ready', attentionRequired: false, consecutiveFailures: 0 },
-        ],
       }
       if (tool === 'slack.status') return { account: 'default', configured: false }
       if (tool === 'settings.get') return { value: null }

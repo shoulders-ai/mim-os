@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import {
-  IconAlertTriangle,
-  IconCircleCheck,
   IconExternalLink,
   IconPlus,
   IconRefresh,
@@ -135,27 +133,197 @@ async function disconnectSlack() {
   }
 }
 
-// ── Research Browser ──
+// ── Google ──
 
-interface ResearchSource {
-  domain: string
-  allowed: boolean
-  status: 'ready' | 'needs_attention' | 'not_configured'
-  attentionRequired: boolean
-  lastStatus?: string
-  lastSource?: string
-  lastUrl?: string
-  lastReadAt?: string
-  lastSuccessAt?: string
-  lastFailureAt?: string
-  consecutiveFailures?: number
-  reason?: string
+interface GoogleStatus {
+  account: string
+  configured: boolean
+  tokenConfigured?: boolean
+  clientConfigured?: boolean
+  auth?: {
+    email?: string
+    name?: string
+    picture?: string
+  }
+  grantedScopes: string[]
 }
+
+interface GooglePolicy {
+  aiEnabled: boolean
+  gmailEnabled: boolean
+  gmailSendEnabled: boolean
+  calendarEnabled: boolean
+  calendarWriteEnabled: boolean
+  driveEnabled: boolean
+  sheetsWriteEnabled: boolean
+}
+
+const DEFAULT_GOOGLE_POLICY: GooglePolicy = {
+  aiEnabled: false,
+  gmailEnabled: false,
+  gmailSendEnabled: false,
+  calendarEnabled: false,
+  calendarWriteEnabled: false,
+  driveEnabled: false,
+  sheetsWriteEnabled: false,
+}
+
+const GOOGLE_SCOPES = {
+  gmailRead: 'https://www.googleapis.com/auth/gmail.readonly',
+  gmailSend: 'https://www.googleapis.com/auth/gmail.send',
+  calendarRead: 'https://www.googleapis.com/auth/calendar.events.readonly',
+  calendarWrite: 'https://www.googleapis.com/auth/calendar.events',
+  driveRead: 'https://www.googleapis.com/auth/drive.readonly',
+  drive: 'https://www.googleapis.com/auth/drive',
+  sheetsRead: 'https://www.googleapis.com/auth/spreadsheets.readonly',
+  sheetsWrite: 'https://www.googleapis.com/auth/spreadsheets',
+}
+
+const googleStatus = ref<GoogleStatus | null>(null)
+const googlePolicy = ref<GooglePolicy>({ ...DEFAULT_GOOGLE_POLICY })
+const googleLoading = ref(false)
+const googleConnecting = ref(false)
+const googleConnectError = ref('')
+const showGoogleTokenInput = ref(false)
+const googleAccessToken = ref('')
+const googleRefreshToken = ref('')
+const googleScope = ref('')
+const googleExpiresAt = ref('')
+
+const isGoogleConnected = computed(() => googleStatus.value?.configured === true || googleStatus.value?.tokenConfigured === true)
+const googleEmail = computed(() => googleStatus.value?.auth?.email ?? googleStatus.value?.account ?? '')
+const googleName = computed(() => googleStatus.value?.auth?.name ?? '')
+const googleCapabilitySummary = computed(() => {
+  const labels: string[] = []
+  if (hasGoogleScope([GOOGLE_SCOPES.gmailRead])) labels.push('Gmail read')
+  if (hasGoogleScope([GOOGLE_SCOPES.gmailSend])) labels.push('Gmail send')
+  if (hasGoogleScope([GOOGLE_SCOPES.calendarRead, GOOGLE_SCOPES.calendarWrite])) labels.push('Calendar')
+  if (hasGoogleScope([GOOGLE_SCOPES.driveRead, GOOGLE_SCOPES.drive])) labels.push('Drive')
+  if (hasGoogleScope([GOOGLE_SCOPES.sheetsRead, GOOGLE_SCOPES.sheetsWrite, GOOGLE_SCOPES.driveRead, GOOGLE_SCOPES.drive])) labels.push('Sheets read')
+  if (hasGoogleScope([GOOGLE_SCOPES.sheetsWrite])) labels.push('Sheets write')
+  return labels.length ? labels.join(', ') : 'No scopes recorded'
+})
+
+async function loadGoogleStatus() {
+  googleLoading.value = true
+  try {
+    googleStatus.value = normalizeGoogleStatus(await window.kernel.call('google.status', {}) as Partial<GoogleStatus>)
+  } catch {
+    googleStatus.value = null
+  } finally {
+    googleLoading.value = false
+  }
+}
+
+async function loadGooglePolicy() {
+  try {
+    const result = await window.kernel.call('settings.get', { key: 'connectors' }) as { value: unknown }
+    const connectors = result.value
+    if (connectors && typeof connectors === 'object' && !Array.isArray(connectors)) {
+      const google = (connectors as Record<string, unknown>).google
+      if (google && typeof google === 'object' && !Array.isArray(google)) {
+        const raw = google as Record<string, unknown>
+        googlePolicy.value = {
+          aiEnabled: typeof raw.aiEnabled === 'boolean' ? raw.aiEnabled : false,
+          gmailEnabled: typeof raw.gmailEnabled === 'boolean' ? raw.gmailEnabled : false,
+          gmailSendEnabled: typeof raw.gmailSendEnabled === 'boolean' ? raw.gmailSendEnabled : false,
+          calendarEnabled: typeof raw.calendarEnabled === 'boolean' ? raw.calendarEnabled : false,
+          calendarWriteEnabled: typeof raw.calendarWriteEnabled === 'boolean' ? raw.calendarWriteEnabled : false,
+          driveEnabled: typeof raw.driveEnabled === 'boolean' ? raw.driveEnabled : false,
+          sheetsWriteEnabled: typeof raw.sheetsWriteEnabled === 'boolean' ? raw.sheetsWriteEnabled : false,
+        }
+        return
+      }
+    }
+    googlePolicy.value = { ...DEFAULT_GOOGLE_POLICY }
+  } catch {
+    googlePolicy.value = { ...DEFAULT_GOOGLE_POLICY }
+  }
+}
+
+async function saveGooglePolicy() {
+  try {
+    const result = await window.kernel.call('settings.get', { key: 'connectors' }) as { value: unknown }
+    const existing = (result.value && typeof result.value === 'object' && !Array.isArray(result.value))
+      ? result.value as Record<string, unknown>
+      : {}
+    await window.kernel.call('settings.set', {
+      key: 'connectors',
+      value: { ...existing, google: { ...googlePolicy.value } },
+    })
+  } catch {
+    // Policy save failed silently — toggles remain in the local state.
+  }
+}
+
+async function updateGooglePolicy(key: keyof GooglePolicy, value: boolean) {
+  googlePolicy.value[key] = value
+  await saveGooglePolicy()
+}
+
+async function connectGoogle() {
+  const accessToken = googleAccessToken.value.trim()
+  if (!accessToken) return
+  googleConnecting.value = true
+  googleConnectError.value = ''
+  try {
+    const payload: Record<string, unknown> = { access_token: accessToken }
+    if (googleRefreshToken.value.trim()) payload.refresh_token = googleRefreshToken.value.trim()
+    if (googleScope.value.trim()) payload.scope = googleScope.value.trim()
+    const expiresAt = Number(googleExpiresAt.value)
+    if (Number.isFinite(expiresAt) && expiresAt > 0) payload.expires_at = expiresAt
+    googleStatus.value = normalizeGoogleStatus(await window.kernel.call('google.connect', payload) as Partial<GoogleStatus>)
+    googleAccessToken.value = ''
+    googleRefreshToken.value = ''
+    googleScope.value = ''
+    googleExpiresAt.value = ''
+    showGoogleTokenInput.value = false
+  } catch (err) {
+    googleConnectError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    googleConnecting.value = false
+  }
+}
+
+async function disconnectGoogle() {
+  try {
+    await window.kernel.call('google.disconnect', {})
+    googleStatus.value = {
+      account: googleStatus.value?.account ?? 'default',
+      configured: false,
+      tokenConfigured: false,
+      grantedScopes: [],
+    }
+  } catch {
+    await loadGoogleStatus()
+  }
+}
+
+function normalizeGoogleStatus(raw: Partial<GoogleStatus>): GoogleStatus {
+  return {
+    account: typeof raw.account === 'string' ? raw.account : 'default',
+    configured: raw.configured === true,
+    tokenConfigured: raw.tokenConfigured === true,
+    clientConfigured: raw.clientConfigured === true,
+    auth: raw.auth && typeof raw.auth === 'object' ? raw.auth : undefined,
+    grantedScopes: Array.isArray(raw.grantedScopes) ? raw.grantedScopes.filter(isString) : [],
+  }
+}
+
+function hasGoogleScope(scopes: string[]): boolean {
+  const granted = new Set(googleStatus.value?.grantedScopes ?? [])
+  return scopes.some(scope => granted.has(scope))
+}
+
+function googleScopeHint(scopes: string[]): string {
+  return hasGoogleScope(scopes) ? '' : 'Reconnect required'
+}
+
+// ── Research Browser ──
 
 interface ResearchStatus {
   enabled: boolean
   allowedDomains: string[]
-  sources: ResearchSource[]
   profile_available: boolean
 }
 
@@ -166,12 +334,10 @@ const domainInput = ref('')
 const researchStatus = ref<ResearchStatus>({
   enabled: false,
   allowedDomains: [],
-  sources: [],
   profile_available: false,
 })
 
-const readyCount = computed(() => researchStatus.value.sources.filter(source => source.status === 'ready').length)
-const attentionCount = computed(() => researchStatus.value.sources.filter(source => source.attentionRequired).length)
+const grantedCount = computed(() => researchStatus.value.allowedDomains.length)
 
 async function loadResearchStatus() {
   researchLoading.value = true
@@ -197,12 +363,6 @@ async function addDomain() {
 async function removeDomain(domain: string) {
   await runResearchAction(`remove:${domain}`, async () => {
     researchStatus.value = normalizeStatus(await window.kernel.call('web.research.removeDomain', { domain }) as Partial<ResearchStatus>)
-  })
-}
-
-async function allowSource(domain: string) {
-  await runResearchAction(`allow:${domain}`, async () => {
-    researchStatus.value = normalizeStatus(await window.kernel.call('web.research.allowDomain', { domain }) as Partial<ResearchStatus>)
   })
 }
 
@@ -235,39 +395,17 @@ function normalizeStatus(raw: Partial<ResearchStatus>): ResearchStatus {
   return {
     enabled: raw.enabled === true,
     allowedDomains: Array.isArray(raw.allowedDomains) ? raw.allowedDomains.filter(isString) : [],
-    sources: Array.isArray(raw.sources) ? raw.sources.filter(isSource) : [],
     profile_available: raw.profile_available === true,
   }
-}
-
-function isSource(value: unknown): value is ResearchSource {
-  return Boolean(value && typeof value === 'object' && typeof (value as ResearchSource).domain === 'string')
 }
 
 function isString(value: unknown): value is string {
   return typeof value === 'string'
 }
 
-function statusLabel(source: ResearchSource): string {
-  if (source.status === 'ready') return 'Ready'
-  if (source.status === 'needs_attention') return 'Needs attention'
-  return 'Needs setup'
-}
-
-function statusClasses(source: ResearchSource): string {
-  if (source.status === 'ready') return 'border-add/30 bg-add/10 text-add'
-  if (source.status === 'needs_attention') return 'border-rem/30 bg-rem/10 text-rem'
-  return 'border-rule-light bg-chrome-mid text-ink-3'
-}
-
 function sourceSetupUrl(domain: string): string {
   const clean = domain.replace(/^\*\./, '')
   return `https://${clean}`
-}
-
-function formatDate(value?: string): string {
-  if (!value) return ''
-  return value.replace('T', ' ').slice(0, 16)
 }
 
 // ── Search keys ──
@@ -332,6 +470,8 @@ onMounted(async () => {
   await Promise.all([
     loadSlackStatus(),
     loadSlackPolicy(),
+    loadGoogleStatus(),
+    loadGooglePolicy(),
     loadResearchStatus(),
     settings.refreshKeyStatuses(),
   ])
@@ -375,7 +515,7 @@ onMounted(async () => {
               <button
                 v-if="!showTokenInput"
                 type="button"
-                class="h-6 rounded-[5px] bg-accent px-2.5 text-[10.5px] font-medium text-accent-ink hover:opacity-85"
+                class="h-6 rounded-[5px] bg-accent px-2.5 text-[10.5px] font-medium text-accent-ink hover:bg-accent/90"
                 @click="showTokenInput = true"
               >Connect</button>
               <span v-else class="text-[10px] italic text-ink-3">Not connected</span>
@@ -399,7 +539,7 @@ onMounted(async () => {
             />
             <button
               type="button"
-              class="h-7 shrink-0 rounded-[5px] bg-accent px-3 text-[11px] font-medium text-accent-ink hover:opacity-85 disabled:opacity-40"
+              class="h-7 shrink-0 rounded-[5px] bg-accent px-3 text-[11px] font-medium text-accent-ink hover:bg-accent/90 disabled:opacity-40"
               :disabled="!tokenInput.trim() || connecting"
               @click="connectSlack"
             >{{ connecting ? '...' : 'Save' }}</button>
@@ -455,6 +595,179 @@ onMounted(async () => {
       </p>
     </SettingsGroup>
 
+    <!-- Google -->
+    <SettingsGroup title="Google">
+      <div class="overflow-hidden rounded-[8px] border border-rule-light bg-surface">
+        <div class="flex items-center justify-between gap-3 px-3 py-2.5">
+          <div class="flex min-w-0 items-center gap-2">
+            <span
+              class="h-[7px] w-[7px] shrink-0 rounded-full"
+              :class="isGoogleConnected ? 'bg-add' : 'bg-ink-4'"
+            />
+            <span class="text-[12px] font-medium text-ink">Google</span>
+            <span v-if="isGoogleConnected && googleEmail" class="truncate text-[10px] text-ink-3">
+              {{ googleEmail }}<template v-if="googleName"> &middot; {{ googleName }}</template>
+            </span>
+            <span v-else class="truncate text-[10px] text-ink-3">
+              Not connected
+            </span>
+          </div>
+
+          <div class="flex shrink-0 items-center gap-2">
+            <template v-if="googleLoading">
+              <span class="text-[10px] italic text-ink-3">Checking...</span>
+            </template>
+            <template v-else-if="isGoogleConnected">
+              <button
+                type="button"
+                class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink"
+                data-testid="google-connect-toggle"
+                @click="showGoogleTokenInput = true"
+              >Reconnect</button>
+              <button
+                type="button"
+                class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:border-rem/40 hover:bg-rem/10 hover:text-rem"
+                data-testid="google-disconnect"
+                @click="disconnectGoogle"
+              >Disconnect</button>
+            </template>
+            <template v-else>
+              <button
+                v-if="!showGoogleTokenInput"
+                type="button"
+                class="h-6 rounded-[5px] bg-accent px-2.5 text-[10.5px] font-medium text-accent-ink hover:bg-accent/90"
+                data-testid="google-connect-toggle"
+                @click="showGoogleTokenInput = true"
+              >Connect</button>
+              <span v-else class="text-[10px] italic text-ink-3">Not connected</span>
+            </template>
+          </div>
+        </div>
+
+        <div v-if="isGoogleConnected" class="border-t border-rule-light px-3 py-2 text-[10px] text-ink-3">
+          {{ googleCapabilitySummary }}
+        </div>
+
+        <div v-if="showGoogleTokenInput" class="border-t border-rule-light px-3 py-2.5">
+          <div class="grid gap-2">
+            <input
+              v-model="googleAccessToken"
+              type="password"
+              class="h-7 min-w-0 rounded-[5px] border border-rule-light bg-chrome-high px-2.5 font-mono text-[11px] text-ink-2 outline-none transition-colors duration-100 focus:border-accent"
+              placeholder="Access token"
+              aria-label="Google access token"
+              data-testid="google-access-token"
+              @keydown.enter="connectGoogle"
+            />
+            <input
+              v-model="googleRefreshToken"
+              type="password"
+              class="h-7 min-w-0 rounded-[5px] border border-rule-light bg-chrome-high px-2.5 font-mono text-[11px] text-ink-2 outline-none transition-colors duration-100 focus:border-accent"
+              placeholder="Refresh token (optional)"
+              aria-label="Google refresh token"
+              @keydown.enter="connectGoogle"
+            />
+            <input
+              v-model="googleScope"
+              type="text"
+              class="h-7 min-w-0 rounded-[5px] border border-rule-light bg-chrome-high px-2.5 font-mono text-[11px] text-ink-2 outline-none transition-colors duration-100 focus:border-accent"
+              placeholder="Scopes"
+              aria-label="Google scopes"
+              data-testid="google-scope"
+              @keydown.enter="connectGoogle"
+            />
+            <input
+              v-model="googleExpiresAt"
+              type="number"
+              class="h-7 min-w-0 rounded-[5px] border border-rule-light bg-chrome-high px-2.5 font-mono text-[11px] text-ink-2 outline-none transition-colors duration-100 focus:border-accent"
+              placeholder="Expires at Unix ms (optional)"
+              aria-label="Google token expiration"
+              @keydown.enter="connectGoogle"
+            />
+          </div>
+          <div class="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              class="h-7 shrink-0 rounded-[5px] bg-accent px-3 text-[11px] font-medium text-accent-ink hover:bg-accent/90 disabled:opacity-40"
+              :disabled="!googleAccessToken.trim() || googleConnecting"
+              data-testid="google-save-token"
+              @click="connectGoogle"
+            >{{ googleConnecting ? '...' : 'Save' }}</button>
+            <button
+              type="button"
+              class="h-7 shrink-0 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink"
+              @click="showGoogleTokenInput = false; googleAccessToken = ''; googleRefreshToken = ''; googleScope = ''; googleExpiresAt = ''; googleConnectError = ''"
+            >Cancel</button>
+          </div>
+          <p v-if="googleConnectError" class="m-0 mt-1.5 text-[10px] text-rem">{{ googleConnectError }}</p>
+        </div>
+      </div>
+
+      <template v-if="isGoogleConnected">
+        <SettingRow label="Allow AI to use Google" desc="Expose configured Google read tools to the AI agent">
+          <MimToggle
+            :model-value="googlePolicy.aiEnabled"
+            aria-label="Allow AI to use Google"
+            @update:model-value="updateGooglePolicy('aiEnabled', $event)"
+          />
+        </SettingRow>
+
+        <SettingRow label="Allow Gmail" :desc="googleScopeHint([GOOGLE_SCOPES.gmailRead]) || 'Let AI search and read Gmail'">
+          <MimToggle
+            :model-value="googlePolicy.gmailEnabled"
+            :disabled="!googlePolicy.aiEnabled || !hasGoogleScope([GOOGLE_SCOPES.gmailRead])"
+            aria-label="Allow Gmail"
+            @update:model-value="updateGooglePolicy('gmailEnabled', $event)"
+          />
+        </SettingRow>
+
+        <SettingRow label="Allow AI to send Gmail" :desc="googleScopeHint([GOOGLE_SCOPES.gmailSend]) || 'High risk - AI can send email on your behalf'">
+          <MimToggle
+            :model-value="googlePolicy.gmailSendEnabled"
+            :disabled="!googlePolicy.aiEnabled || !googlePolicy.gmailEnabled || !hasGoogleScope([GOOGLE_SCOPES.gmailSend])"
+            aria-label="Allow AI to send Gmail"
+            @update:model-value="updateGooglePolicy('gmailSendEnabled', $event)"
+          />
+        </SettingRow>
+
+        <SettingRow label="Allow Calendar" :desc="googleScopeHint([GOOGLE_SCOPES.calendarRead, GOOGLE_SCOPES.calendarWrite]) || 'Let AI read calendar events'">
+          <MimToggle
+            :model-value="googlePolicy.calendarEnabled"
+            :disabled="!googlePolicy.aiEnabled || !hasGoogleScope([GOOGLE_SCOPES.calendarRead, GOOGLE_SCOPES.calendarWrite])"
+            aria-label="Allow Calendar"
+            @update:model-value="updateGooglePolicy('calendarEnabled', $event)"
+          />
+        </SettingRow>
+
+        <SettingRow label="Allow AI to create events" :desc="googleScopeHint([GOOGLE_SCOPES.calendarWrite]) || 'High risk - AI can create calendar events'">
+          <MimToggle
+            :model-value="googlePolicy.calendarWriteEnabled"
+            :disabled="!googlePolicy.aiEnabled || !googlePolicy.calendarEnabled || !hasGoogleScope([GOOGLE_SCOPES.calendarWrite])"
+            aria-label="Allow AI to create events"
+            @update:model-value="updateGooglePolicy('calendarWriteEnabled', $event)"
+          />
+        </SettingRow>
+
+        <SettingRow label="Allow Drive" :desc="googleScopeHint([GOOGLE_SCOPES.driveRead, GOOGLE_SCOPES.drive]) || 'Let AI search Drive and read supported files'">
+          <MimToggle
+            :model-value="googlePolicy.driveEnabled"
+            :disabled="!googlePolicy.aiEnabled || !hasGoogleScope([GOOGLE_SCOPES.driveRead, GOOGLE_SCOPES.drive])"
+            aria-label="Allow Drive"
+            @update:model-value="updateGooglePolicy('driveEnabled', $event)"
+          />
+        </SettingRow>
+
+        <SettingRow label="Allow AI to update Sheets" :desc="googleScopeHint([GOOGLE_SCOPES.sheetsWrite]) || 'High risk - AI can update spreadsheets'">
+          <MimToggle
+            :model-value="googlePolicy.sheetsWriteEnabled"
+            :disabled="!googlePolicy.aiEnabled || !googlePolicy.driveEnabled || !hasGoogleScope([GOOGLE_SCOPES.sheetsWrite])"
+            aria-label="Allow AI to update Sheets"
+            @update:model-value="updateGooglePolicy('sheetsWriteEnabled', $event)"
+          />
+        </SettingRow>
+      </template>
+    </SettingsGroup>
+
     <!-- Research Browser -->
     <SettingsGroup title="Research Browser">
       <div class="overflow-hidden rounded-[8px] border border-rule-light bg-surface">
@@ -470,9 +783,7 @@ onMounted(async () => {
             </span>
           </div>
           <div class="flex shrink-0 items-center gap-1.5 text-[10px] text-ink-3">
-            <span>{{ readyCount }} ready</span>
-            <span class="text-ink-4">/</span>
-            <span>{{ attentionCount }} attention</span>
+            <span>{{ grantedCount }} granted</span>
           </div>
         </div>
 
@@ -489,7 +800,7 @@ onMounted(async () => {
             />
             <button
               type="button"
-              class="flex h-7 shrink-0 items-center gap-1.5 rounded-[5px] bg-accent px-2.5 text-[11px] font-medium text-accent-ink hover:opacity-85 disabled:opacity-40"
+              class="flex h-7 shrink-0 items-center gap-1.5 rounded-[5px] bg-accent px-2.5 text-[11px] font-medium text-accent-ink hover:bg-accent/90 disabled:opacity-40"
               :disabled="!domainInput.trim() || researchBusy === 'add'"
               data-testid="research-add-domain"
               @click="addDomain"
@@ -501,7 +812,7 @@ onMounted(async () => {
               type="button"
               class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] border border-rule-light bg-surface text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
               :disabled="researchLoading"
-              aria-label="Refresh Research Browser sources"
+              aria-label="Refresh Research Browser domains"
               data-testid="research-refresh"
               @click="loadResearchStatus"
             >
@@ -513,83 +824,49 @@ onMounted(async () => {
       </div>
     </SettingsGroup>
 
-    <SettingsGroup title="Sources">
+    <SettingsGroup title="Domains">
       <div class="overflow-hidden rounded-[8px] border border-rule-light bg-surface">
-        <div v-if="researchLoading && !researchStatus.sources.length" class="px-3 py-6 text-center text-[11px] italic text-ink-3">
-          Loading sources...
+        <div v-if="researchLoading && !researchStatus.allowedDomains.length" class="px-3 py-6 text-center text-[11px] italic text-ink-3">
+          Loading domains...
         </div>
-        <div v-else-if="!researchStatus.sources.length" class="px-3 py-6 text-center text-[11px] text-ink-3">
-          No sources configured
+        <div v-else-if="!researchStatus.allowedDomains.length" class="px-3 py-6 text-center text-[11px] text-ink-3">
+          No domains granted
         </div>
         <div
-          v-for="source in researchStatus.sources"
-          :key="source.domain"
+          v-for="domain in researchStatus.allowedDomains"
+          :key="domain"
           class="border-b border-rule-light px-3 py-2.5 last:border-b-0"
         >
-          <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center justify-between gap-3">
             <div class="min-w-0 flex-1">
               <div class="flex min-w-0 items-center gap-2">
-                <IconCircleCheck
-                  v-if="source.status === 'ready'"
-                  class="shrink-0 text-add"
-                  :size="13"
-                  :stroke-width="2"
-                />
-                <IconAlertTriangle
-                  v-else
-                  class="shrink-0"
-                  :class="source.status === 'needs_attention' ? 'text-rem' : 'text-ink-3'"
-                  :size="13"
-                  :stroke-width="2"
-                />
-                <span class="truncate font-mono text-[12px] text-ink">{{ source.domain }}</span>
+                <span class="h-[7px] w-[7px] shrink-0 rounded-full bg-add" />
+                <span class="truncate font-mono text-[12px] text-ink">{{ domain }}</span>
                 <span
-                  class="shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] font-semibold"
-                  :class="statusClasses(source)"
+                  class="shrink-0 rounded-full border border-add/30 bg-add/10 px-1.5 py-0.5 text-[9px] font-semibold text-add"
                 >
-                  {{ statusLabel(source) }}
+                  Granted
                 </span>
               </div>
-              <div class="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-ink-3">
-                <span v-if="source.lastStatus">Last: {{ source.lastStatus }}</span>
-                <span v-if="source.lastReadAt">{{ formatDate(source.lastReadAt) }}</span>
-                <span v-if="source.consecutiveFailures">Failures: {{ source.consecutiveFailures }}</span>
-                <span v-if="source.lastUrl" class="max-w-full truncate font-mono">{{ source.lastUrl }}</span>
-              </div>
-              <p v-if="source.reason" class="m-0 mt-1 text-[10px] text-ink-2">
-                {{ source.reason }}
-              </p>
             </div>
             <div class="flex shrink-0 items-center gap-1">
               <button
-                v-if="!source.allowed"
-                type="button"
-                class="flex h-7 items-center gap-1.5 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
-                :aria-label="`Allow ${source.domain}`"
-                :data-testid="`research-allow-${source.domain}`"
-                :disabled="researchBusy === `allow:${source.domain}`"
-                @click="allowSource(source.domain)"
-              >
-                <IconPlus :size="12" :stroke-width="2" />
-                Allow
-              </button>
-              <button
                 type="button"
                 class="flex h-7 w-7 items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
-                :aria-label="`Open ${source.domain} in Research Browser`"
-                :data-testid="`research-open-${source.domain}`"
-                :disabled="researchBusy === `open:${source.domain}`"
-                @click="openSource(source.domain)"
+                :aria-label="`Open ${domain} in Research Browser`"
+                :data-testid="`research-open-${domain}`"
+                :disabled="researchBusy === `open:${domain}`"
+                @click="openSource(domain)"
               >
                 <IconExternalLink :size="13" :stroke-width="2" />
               </button>
               <button
                 type="button"
                 class="flex h-7 w-7 items-center justify-center rounded-[5px] text-ink-3 hover:bg-rem/10 hover:text-rem disabled:opacity-40"
-                :aria-label="`Remove ${source.domain}`"
-                :data-testid="`research-remove-${source.domain}`"
-                :disabled="researchBusy === `remove:${source.domain}`"
-                @click="removeDomain(source.domain)"
+                :aria-label="`Remove ${domain}`"
+                :data-testid="`research-remove-${domain}`"
+                :disabled="researchBusy === `remove:${domain}`"
+                @click="removeDomain(domain)"
               >
                 <IconTrash :size="13" :stroke-width="2" />
               </button>
@@ -603,7 +880,7 @@ onMounted(async () => {
       <div class="flex items-center justify-between gap-3 rounded-[8px] border border-rule-light bg-surface px-3 py-2.5">
         <div class="min-w-0">
           <div class="text-[12px] font-medium text-ink-2">Persistent browser profile</div>
-          <div class="text-[10px] text-ink-3">Cookies and site storage are shared by configured sources</div>
+          <div class="text-[10px] text-ink-3">Cookies and site storage are used only for granted domains</div>
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <button
@@ -678,7 +955,7 @@ onMounted(async () => {
             />
             <button
               type="button"
-              class="h-7 shrink-0 rounded-[5px] bg-accent px-3 text-[11px] font-medium text-accent-ink hover:opacity-85 disabled:opacity-40"
+              class="h-7 shrink-0 rounded-[5px] bg-accent px-3 text-[11px] font-medium text-accent-ink hover:bg-accent/90 disabled:opacity-40"
               :disabled="!keyInputs[prov.id]?.trim() || keySaving === prov.id"
               @click="saveKey(prov.id)"
             >{{ keySaving === prov.id ? '…' : 'Save' }}</button>

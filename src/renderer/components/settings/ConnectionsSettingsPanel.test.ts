@@ -16,38 +16,13 @@ const RESEARCH_STATUS = {
   enabled: true,
   allowedDomains: ['dbregio-berlin-brandenburg.de', 'stackoverflow.com'],
   profile_available: true,
-  sources: [
-    {
-      domain: 'dbregio-berlin-brandenburg.de',
-      allowed: true,
-      status: 'ready',
-      attentionRequired: false,
-      lastStatus: 'ok',
-      lastSource: 'research-profile',
-      lastUrl: 'https://dbregio-berlin-brandenburg.de/fahrplan',
-      lastReadAt: '2026-06-25T08:15:00.000Z',
-      lastSuccessAt: '2026-06-25T08:15:00.000Z',
-      consecutiveFailures: 0,
-    },
-    {
-      domain: 'stackoverflow.com',
-      allowed: true,
-      status: 'needs_attention',
-      attentionRequired: true,
-      lastStatus: 'security_verification',
-      lastSource: 'rendered',
-      lastUrl: 'https://stackoverflow.com/questions/1',
-      lastReadAt: '2026-06-25T08:20:00.000Z',
-      lastFailureAt: '2026-06-25T08:20:00.000Z',
-      consecutiveFailures: 2,
-      reason: 'The page is showing a security verification interstitial.',
-    },
-  ],
 }
 
 function makeCall(overrides?: {
   slackStatus?: Record<string, unknown>
   connectors?: Record<string, unknown>
+  googlePolicy?: Record<string, unknown>
+  googleStatus?: Record<string, unknown>
   keyStatuses?: Array<Record<string, unknown>>
   researchStatus?: typeof RESEARCH_STATUS
 }) {
@@ -59,16 +34,6 @@ function makeCall(overrides?: {
         ...researchStatus,
         enabled: true,
         allowedDomains: [...researchStatus.allowedDomains, params?.domain as string],
-        sources: [
-          ...researchStatus.sources,
-          {
-            domain: params?.domain as string,
-            allowed: true,
-            status: 'ready',
-            attentionRequired: false,
-            consecutiveFailures: 0,
-          },
-        ],
       }
       return researchStatus
     }
@@ -76,7 +41,6 @@ function makeCall(overrides?: {
       researchStatus = {
         ...researchStatus,
         allowedDomains: researchStatus.allowedDomains.filter(d => d !== params?.domain),
-        sources: researchStatus.sources.filter(s => s.domain !== params?.domain),
       }
       return researchStatus
     }
@@ -85,7 +49,24 @@ function makeCall(overrides?: {
     if (tool === 'slack.status') return overrides?.slackStatus ?? { account: 'default', configured: false }
     if (tool === 'slack.connect') return { account: 'default', configured: true, auth: { ok: true, team: 'TestTeam', user: 'bot' } }
     if (tool === 'slack.disconnect') return {}
-    if (tool === 'settings.get') return { value: overrides?.connectors ? { slack: overrides.connectors } : null }
+    if (tool === 'google.status') return overrides?.googleStatus ?? { account: 'default', configured: false, tokenConfigured: false, grantedScopes: [] }
+    if (tool === 'google.connect') return {
+      account: 'default',
+      configured: true,
+      tokenConfigured: true,
+      auth: { email: 'person@example.com', name: 'Person Example' },
+      grantedScopes: [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/drive.readonly',
+      ],
+    }
+    if (tool === 'google.disconnect') return {}
+    if (tool === 'settings.get') {
+      const connectors: Record<string, unknown> = {}
+      if (overrides?.connectors) connectors.slack = overrides.connectors
+      if (overrides?.googlePolicy) connectors.google = overrides.googlePolicy
+      return { value: Object.keys(connectors).length ? connectors : null }
+    }
     if (tool === 'settings.set') return {}
     if (tool === 'ai.keyStatus') return { statuses: overrides?.keyStatuses ?? [] }
     if (tool === 'ai.setKey') return {}
@@ -122,17 +103,16 @@ describe('ConnectionsSettingsPanel — Research Browser', () => {
     app.mount(root)
   }
 
-  it('lists Research Browser source health', async () => {
+  it('lists Research Browser domain grants', async () => {
     mount()
     await flushUi()
 
     expect(call).toHaveBeenCalledWith('web.research.status', {})
     expect(root.textContent).toContain('Research Browser')
     expect(root.textContent).toContain('dbregio-berlin-brandenburg.de')
-    expect(root.textContent).toContain('Ready')
     expect(root.textContent).toContain('stackoverflow.com')
-    expect(root.textContent).toContain('Needs attention')
-    expect(root.textContent).toContain('security verification')
+    expect(root.textContent).not.toContain('Needs attention')
+    expect(root.textContent).not.toContain('security verification')
   })
 
   it('adds a domain grant from the input', async () => {
@@ -148,42 +128,6 @@ describe('ConnectionsSettingsPanel — Research Browser', () => {
 
     expect(call).toHaveBeenCalledWith('web.research.allowDomain', { domain: 'maps.google.com' })
     expect(root.textContent).toContain('maps.google.com')
-  })
-
-  it('allows a queued source without retyping the domain', async () => {
-    call = makeCall({
-      researchStatus: {
-        enabled: false,
-        allowedDomains: [],
-        profile_available: true,
-        sources: [
-          {
-            domain: 'maps.google.com',
-            allowed: false,
-            status: 'not_configured',
-            attentionRequired: true,
-            lastStatus: 'source_not_configured',
-            lastUrl: 'https://maps.google.com/search/coffee',
-            consecutiveFailures: 1,
-            reason: 'Add maps.google.com to Research Browser sources.',
-          } as typeof RESEARCH_STATUS['sources'][number],
-        ],
-      },
-    })
-    Object.defineProperty(window, 'kernel', {
-      configurable: true,
-      value: { call, on: vi.fn(), off: vi.fn() },
-    })
-
-    mount()
-    await flushUi()
-
-    expect(root.textContent).toContain('Needs setup')
-    root.querySelector<HTMLButtonElement>('[data-testid="research-allow-maps.google.com"]')?.click()
-    await flushUi()
-
-    expect(call).toHaveBeenCalledWith('web.research.allowDomain', { domain: 'maps.google.com' })
-    expect(root.textContent).toContain('Ready')
   })
 
   it('opens a source setup window and removes a domain', async () => {
@@ -211,6 +155,113 @@ describe('ConnectionsSettingsPanel — Research Browser', () => {
     root.querySelector<HTMLButtonElement>('[data-testid="research-clear-profile"]')?.click()
     await flushUi()
     expect(call).toHaveBeenCalledWith('web.research.clearProfile', {})
+  })
+})
+
+describe('ConnectionsSettingsPanel — Google', () => {
+  let root: HTMLElement
+  let app: ReturnType<typeof createApp> | null
+
+  beforeEach(() => {
+    root = document.createElement('div')
+    document.body.appendChild(root)
+    setActivePinia(createPinia())
+    app = null
+  })
+
+  afterEach(() => {
+    app?.unmount()
+    root.remove()
+    vi.restoreAllMocks()
+  })
+
+  it('shows Connect button when Google is not configured', async () => {
+    const call = makeCall()
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call, on: vi.fn(), off: vi.fn() },
+    })
+
+    app = createApp(ConnectionsSettingsPanel)
+    app.mount(root)
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('google.status', {})
+    expect(root.textContent).toContain('Google')
+    expect(root.querySelector('[data-testid="google-connect-toggle"]')).toBeTruthy()
+    expect(root.textContent).not.toContain('Allow AI to use Google')
+  })
+
+  it('shows account metadata, scopes, and policy toggles when connected', async () => {
+    const call = makeCall({
+      googleStatus: {
+        account: 'default',
+        configured: true,
+        tokenConfigured: true,
+        auth: { email: 'person@example.com', name: 'Person Example' },
+        grantedScopes: [
+          'https://www.googleapis.com/auth/gmail.readonly',
+          'https://www.googleapis.com/auth/calendar.events',
+          'https://www.googleapis.com/auth/drive.readonly',
+          'https://www.googleapis.com/auth/spreadsheets',
+        ],
+      },
+      googlePolicy: {
+        aiEnabled: true,
+        gmailEnabled: true,
+        gmailSendEnabled: false,
+        calendarEnabled: true,
+        calendarWriteEnabled: true,
+        driveEnabled: true,
+        sheetsWriteEnabled: true,
+      },
+    })
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call, on: vi.fn(), off: vi.fn() },
+    })
+
+    app = createApp(ConnectionsSettingsPanel)
+    app.mount(root)
+    await flushUi()
+
+    expect(root.textContent).toContain('person@example.com')
+    expect(root.textContent).toContain('Gmail read')
+    expect(root.textContent).toContain('Sheets write')
+    expect(root.textContent).toContain('Allow AI to use Google')
+    expect(root.textContent).toContain('Allow Gmail')
+    expect(root.textContent).toContain('Allow AI to update Sheets')
+  })
+
+  it('connects Google using the raw token form', async () => {
+    const call = makeCall()
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call, on: vi.fn(), off: vi.fn() },
+    })
+
+    app = createApp(ConnectionsSettingsPanel)
+    app.mount(root)
+    await flushUi()
+
+    root.querySelector<HTMLButtonElement>('[data-testid="google-connect-toggle"]')?.click()
+    await flushUi()
+    const token = root.querySelector<HTMLInputElement>('[data-testid="google-access-token"]')!
+    token.value = 'access-token'
+    token.dispatchEvent(new Event('input'))
+    const scope = root.querySelector<HTMLInputElement>('[data-testid="google-scope"]')!
+    scope.value = 'https://www.googleapis.com/auth/gmail.readonly'
+    scope.dispatchEvent(new Event('input'))
+    await flushUi()
+
+    root.querySelector<HTMLButtonElement>('[data-testid="google-save-token"]')?.click()
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('google.connect', {
+      access_token: 'access-token',
+      scope: 'https://www.googleapis.com/auth/gmail.readonly',
+    })
+    expect(root.textContent).toContain('person@example.com')
   })
 })
 
