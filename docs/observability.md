@@ -7,6 +7,8 @@ Mim has two separate runtime records:
 
 Use the trace stream for accountability, debugging, cost analysis, agent self-review, and app/job health. Use the logbook for deliberate narrative notes the user or agent wants to keep.
 
+The resolved system prompt can include the current logbook tail through `{{PROJECT_LOG}}`; this is prompt context, not audit state.
+
 Anonymous hosted usage telemetry is a separate redacted projection of selected
 trace events plus lifecycle/UI events. See [telemetry.md](telemetry.md) before
 changing trace sinks or telemetry-related event fields.

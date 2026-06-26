@@ -17,7 +17,7 @@ The logbook is gitignored runtime state. It is never required for a valid Mim wo
 - Appends one normalized single-line entry to `.mim/log.md`.
 - Creates `.mim/` and `log.md` on first write.
 - Records actor identity from the tool context. App entries render as `[package {id}]`.
-- Exposed to chat as `log_append`.
+- Exposed to chat and MCP as `log_append`.
 - Gate policy: write, low risk.
 
 `log.read`
@@ -27,6 +27,12 @@ The logbook is gitignored runtime state. It is never required for a valid Mim wo
 - Returns `{ path, exists, content, truncated }`.
 - When truncated, returns the tail so recent entries are kept.
 - Gate policy: read, low risk.
+
+## Prompt Integration
+
+`AGENTS.md` can include `{{PROJECT_LOG}}`. At system-prompt build time Mim replaces it with a bounded tail of `.mim/log.md`, or `No project log yet.` when the file is absent.
+
+The default `AGENTS.md` template tells agents to use `log_append` only for durable activity notes that future work should see, such as decisions, handoffs, blockers, or commitments. Routine progress belongs in the conversation, not the logbook.
 
 ## Format
 

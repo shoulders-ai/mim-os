@@ -85,6 +85,8 @@ tool names.
 | `workspace_info` | `workspace.info` |
 | `system_prompt` | `system.prompt` |
 
+`log_append` is the MCP logbook surface; MCP does not expose `log.read`. The `system_prompt` tool resolves `{{PROJECT_LOG}}` for clients that request the full prompt.
+
 Each exposed Mim tool must have an `inputSchema`; missing schemas fail MCP
 metadata generation loudly for core tools. Named tools from enabled apps are
 exposed dynamically alongside the core set — the server queries the active named
