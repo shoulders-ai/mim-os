@@ -94,12 +94,12 @@ describe('AppsSettingsPanel sections', () => {
 
   // ---- App sections ----
 
-  it('renders personal sidebar and workspace sections', async () => {
+  it('renders Apps and Available sections', async () => {
     mount()
     await flushUi()
 
-    expect(root.textContent).toContain('My Sidebar')
-    expect(root.textContent).toContain('Workspace Apps')
+    expect(root.textContent).toContain('Apps')
+    expect(root.textContent).toContain('Available')
     expect(root.querySelector('[data-testid="apps-row-board"]')).toBeTruthy()
     expect(root.querySelector('[data-testid="apps-row-knowledge"]')).toBeTruthy()
     expect(root.querySelector('[data-testid="apps-row-runtime-demo"]')).toBeTruthy()
@@ -123,7 +123,7 @@ describe('AppsSettingsPanel sections', () => {
     expect(root.textContent).toContain('Runtime skill')
   })
 
-  it('includes needsTrust apps in the workspace section', async () => {
+  it('includes needsTrust apps in the Available section', async () => {
     appsState = [
       { id: 'vendor-pkg', enabled: false, layer: 'workspace', installed: true, installedVersions: ['1.0.0'], source: 'workspace', shadowed: false, needsTrust: true, needsInstall: false, folderPresent: false },
     ]
@@ -157,7 +157,7 @@ describe('AppsSettingsPanel sections', () => {
     expect(root.textContent).not.toContain('Needs trust')
   })
 
-  it('includes needsInstall apps in the workspace section with install action', async () => {
+  it('includes needsInstall apps in the Available section with install action', async () => {
     appsState = [
       { id: 'github-monitor', enabled: false, layer: 'workspace', installed: false, installedVersions: [], source: 'https://mim.shoulde.rs/api/v1/registry', version: '1.2.0', shadowed: false, needsTrust: false, needsInstall: true, folderPresent: false },
     ]
@@ -216,7 +216,7 @@ describe('AppsSettingsPanel sections', () => {
 
     const row = root.querySelector('[data-testid="apps-row-runtime-demo"]')
     expect(row).toBeTruthy()
-    expect(root.textContent).toContain('In workspace, not in my sidebar')
+    expect(root.textContent).toContain('Workspace app')
   })
 
   it('shows current built-in apps even when disabled', async () => {

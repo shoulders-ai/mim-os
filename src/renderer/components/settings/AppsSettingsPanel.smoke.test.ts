@@ -146,7 +146,7 @@ describe('AppsSettingsPanel smoke — remove, updates, included apps', () => {
 
   // ---- Included apps ----
 
-  it('renders current built-in rows with remove-from-sidebar action', async () => {
+  it('renders current built-in rows with remove action', async () => {
     mount()
     await flushUi()
 

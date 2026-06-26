@@ -76,7 +76,6 @@ describe('AppsSettingsPanel registry UI', () => {
       if (tool === 'package.install') return { installed: params?.id ?? 'pkg', version: params?.version ?? '1.0.0', dir: '/install' }
       if (tool === 'package.update') return { installed: params?.id ?? 'pkg', version: '2.0.0', dir: '/install' }
       if (tool === 'app.add') return { added: params?.id, version: params?.version }
-      if (tool === 'app.share') return { shared: params?.id, version: params?.version }
       return {}
     })
     Object.defineProperty(window, 'kernel', {
@@ -143,8 +142,7 @@ describe('AppsSettingsPanel registry UI', () => {
 
     const addBtn = root.querySelector<HTMLButtonElement>('[data-testid="registry-add-github-monitor"]')
     expect(addBtn).toBeTruthy()
-    expect(addBtn!.textContent).toContain('Add to sidebar')
-    expect(root.querySelector<HTMLButtonElement>('[data-testid="registry-share-github-monitor"]')).toBeTruthy()
+    expect(addBtn!.textContent).toContain('Add')
   })
 
   it('shows a plain-language permission confirm before adding', async () => {
@@ -177,19 +175,6 @@ describe('AppsSettingsPanel registry UI', () => {
     await flushUi()
 
     expect(call).toHaveBeenCalledWith('app.add', { id: 'github-monitor', version: '1.2.0' })
-  })
-
-  it('calls app.share once the share permission confirm is accepted', async () => {
-    registryEntries = [makeRegistryEntry({ installedVersions: [] })]
-    mount()
-    await flushUi()
-
-    root.querySelector<HTMLButtonElement>('[data-testid="registry-share-github-monitor"]')!.click()
-    await flushUi()
-    document.body.querySelector<HTMLButtonElement>('[data-testid="registry-share-confirm-github-monitor"]')!.click()
-    await flushUi()
-
-    expect(call).toHaveBeenCalledWith('app.share', { id: 'github-monitor', version: '1.2.0' })
   })
 
   it('shows Update button for registry entries with a newer version', async () => {

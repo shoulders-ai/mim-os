@@ -179,7 +179,7 @@ describe('SettingsDialog model defaults', () => {
     await flushUi()
 
     expect(document.body.querySelector('[data-testid="settings-dialog-layout"]')).toBeTruthy()
-    expect(document.body.textContent).toContain('My Sidebar')
+    expect(document.body.textContent).toContain('Apps')
   })
 
   it('renders the Skills panel inline when the skills section is active', async () => {

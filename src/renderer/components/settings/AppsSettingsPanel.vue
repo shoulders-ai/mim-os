@@ -57,7 +57,6 @@ const registries = ref<RegistryInfo[]>([])
 const registryBusy = ref<string | null>(null)
 const registryError = ref<string | null>(null)
 const confirmAddId = ref<string | null>(null)
-const confirmShareId = ref<string | null>(null)
 
 
 // ---- Add source dialog state ----
@@ -179,27 +178,24 @@ function isWorkspacePackageRow(row: WorkspaceRow): boolean {
   return row.source === 'workspace' || row.pkg?.source === 'workspace'
 }
 
-const workspaceRows = computed(() =>
-  filteredInWorkspace.value.filter(row =>
-    (row.app?.layer === 'workspace' || row.needsTrust || row.needsInstall || isWorkspacePackageRow(row))
-    && !(row.enabled && row.installed),
-  ),
+const availableRows = computed(() =>
+  filteredInWorkspace.value.filter(row => !(row.enabled && row.installed)),
 )
 
 const appSections = computed(() => [
   {
-    id: 'sidebar',
-    label: 'My Sidebar',
+    id: 'active',
+    label: 'Apps',
     count: mySidebarRows.value.length,
     rows: mySidebarRows.value,
-    empty: filterText.value ? 'No matches' : 'No apps in your sidebar',
+    empty: filterText.value ? 'No matches' : 'No apps active',
   },
   {
-    id: 'workspace',
-    label: 'Workspace Apps',
-    count: workspaceRows.value.length,
-    rows: workspaceRows.value,
-    empty: filterText.value ? 'No matches' : 'No shared apps in this workspace',
+    id: 'available',
+    label: 'Available',
+    count: availableRows.value.length,
+    rows: availableRows.value,
+    empty: filterText.value ? 'No matches' : 'No available apps',
   },
 ])
 
@@ -216,9 +212,6 @@ const nonOkRegistries = computed(() => getNonOkRegistries(registries.value))
 const machineSources = computed(() => registries.value.filter(r => r.origin === 'machine'))
 const confirmingAddEntry = computed(() =>
   availableRegistryEntries.value.find(entry => entry.id === confirmAddId.value) ?? null,
-)
-const confirmingShareEntry = computed(() =>
-  availableRegistryEntries.value.find(entry => entry.id === confirmShareId.value) ?? null,
 )
 const pendingEnableName = computed(() => pendingEnableRow.value?.label ?? '')
 const pendingEnablePermissions = computed(() => pendingEnableRow.value?.pkg?.permissions ?? {})
@@ -301,10 +294,9 @@ function rowSubtitle(row: WorkspaceRow): string {
   if (row.description.trim()) return row.description
   if (row.needsInstall) return 'Install needed'
   if (row.needsTrust) return 'Review access to enable'
-  if (row.enabled) return row.app?.layer === 'workspace' ? 'In my sidebar, shared with workspace' : 'In my sidebar'
   if (row.app?.layer === 'workspace') return 'Shared with workspace'
-  if (isWorkspacePackageRow(row)) return 'In workspace, not in my sidebar'
-  return 'Available'
+  if (isWorkspacePackageRow(row)) return 'Workspace app'
+  return ''
 }
 
 // ---- Actions ----
@@ -601,37 +593,12 @@ function onAddDialogOpenChange(open: boolean) {
   if (!open) confirmAddId.value = null
 }
 
-function toggleShareConfirm(entry: RegistryEntry) {
-  confirmShareId.value = entry.id
-  registryError.value = null
-}
-
-function onShareDialogOpenChange(open: boolean) {
-  if (!open) confirmShareId.value = null
-}
-
 async function addToSidebar(entry: RegistryEntry) {
   registryBusy.value = `add:${entry.id}`
   registryError.value = null
   try {
     await window.kernel.call('app.add', { id: entry.id, version: entry.version })
     confirmAddId.value = null
-    await refreshAll()
-    await appsStore.refresh()
-    await refreshRegistry()
-  } catch (err) {
-    registryError.value = (err as Error).message
-  } finally {
-    registryBusy.value = null
-  }
-}
-
-async function shareWithWorkspace(entry: RegistryEntry) {
-  registryBusy.value = `share:${entry.id}`
-  registryError.value = null
-  try {
-    await window.kernel.call('app.share', { id: entry.id, version: entry.version })
-    confirmShareId.value = null
     await refreshAll()
     await appsStore.refresh()
     await refreshRegistry()
@@ -693,7 +660,6 @@ function onWorkspaceChanged() {
   developerOpenIds.value = {}
   pendingEnableRow.value = null
   confirmAddId.value = null
-  confirmShareId.value = null
   refreshAll()
 }
 function onAppsUpdates(payload: unknown) {
@@ -751,7 +717,7 @@ watch(inWorkspaceRows, (rows) => {
           class="w-[120px] min-w-0 border-0 bg-transparent text-[11px] text-ink outline-none placeholder:text-ink-4"
         />
       </label>
-      <span class="font-mono text-[9px] text-ink-3">{{ mySidebarRows.length }} in sidebar</span>
+      <span class="font-mono text-[9px] text-ink-3">{{ mySidebarRows.length }} active</span>
       <button
         type="button"
         data-testid="app-new-template-open"
@@ -971,7 +937,7 @@ watch(inWorkspaceRows, (rows) => {
                   :disabled="actionBusy === `toggle:${row.id}`"
                   @click="toggleEnabled(row)"
                 >
-                  Remove from sidebar
+                  Remove
                 </button>
               </div>
             </div>
@@ -1077,17 +1043,7 @@ watch(inWorkspaceRows, (rows) => {
                   :disabled="registryBusy === `add:${entry.id}`"
                   @click="toggleAddConfirm(entry)"
                 >
-                  Add to sidebar
-                </button>
-                <button
-                  v-if="registryEntryAction(entry) === 'add'"
-                  type="button"
-                  :data-testid="`registry-share-${entry.id}`"
-                  :class="smallButtonClass"
-                  :disabled="registryBusy === `share:${entry.id}`"
-                  @click="toggleShareConfirm(entry)"
-                >
-                  Share
+                  Add
                 </button>
                 <button
                   v-else-if="registryEntryAction(entry) === 'update'"
@@ -1132,24 +1088,12 @@ watch(inWorkspaceRows, (rows) => {
       :open="confirmingAddEntry !== null"
       :app-name="confirmingAddEntry?.name ?? ''"
       :permissions="confirmingAddEntry?.permissions ?? {}"
-      confirm-label="Add to sidebar"
+      confirm-label="Add"
       :test-id="confirmingAddEntry ? `registry-add-card-${confirmingAddEntry.id}` : undefined"
       :confirm-test-id="confirmingAddEntry ? `registry-add-confirm-${confirmingAddEntry.id}` : undefined"
       @confirm="confirmingAddEntry && addToSidebar(confirmingAddEntry)"
       @cancel="confirmAddId = null"
       @update:open="onAddDialogOpenChange"
-    />
-
-    <PermissionConfirmDialog
-      :open="confirmingShareEntry !== null"
-      :app-name="confirmingShareEntry?.name ?? ''"
-      :permissions="confirmingShareEntry?.permissions ?? {}"
-      confirm-label="Share with workspace"
-      :test-id="confirmingShareEntry ? `registry-share-card-${confirmingShareEntry.id}` : undefined"
-      :confirm-test-id="confirmingShareEntry ? `registry-share-confirm-${confirmingShareEntry.id}` : undefined"
-      @confirm="confirmingShareEntry && shareWithWorkspace(confirmingShareEntry)"
-      @cancel="confirmShareId = null"
-      @update:open="onShareDialogOpenChange"
     />
 
     <MimDialog :open="templateDialogOpen" title="Create workspace app" size="md" @close="clearTemplateDialog">
