@@ -117,6 +117,7 @@ export async function readAutoUrl(
       const classification = classifyRenderedRead({
         title: renderedResult.title,
         content: renderedResult.content,
+        capture: renderedResult.capture,
       })
       renderedStatus = classification.status
       renderedReason = classification.reason
