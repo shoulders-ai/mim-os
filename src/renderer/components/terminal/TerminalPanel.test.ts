@@ -11,6 +11,7 @@ vi.mock('./TerminalSurface.vue', async () => {
       name: 'TerminalSurfaceStub',
       props: {
         active: Boolean,
+        keybindingProfile: { type: String, default: 'terminal' },
         ptyId: { type: Number, default: null },
       },
       setup(props, { expose }) {
@@ -26,6 +27,7 @@ vi.mock('./TerminalSurface.vue', async () => {
         return () => h('div', {
           'data-testid': 'terminal-surface',
           'data-active': props.active ? 'true' : 'false',
+          'data-keybinding-profile': props.keybindingProfile,
           'data-pty-id': props.ptyId == null ? '' : String(props.ptyId),
         })
       },
@@ -49,7 +51,7 @@ describe('TerminalPanel', () => {
     root = document.createElement('div')
     document.body.appendChild(root)
     call = vi.fn(async (tool: string) => {
-      if (tool === 'terminal.spawn') return { id: 123 }
+      if (tool === 'terminal.spawn') return { id: 123, shellIntegration: 'zsh' }
       return {}
     })
     Object.defineProperty(window, 'kernel', {
@@ -77,5 +79,6 @@ describe('TerminalPanel', () => {
     expect(call).toHaveBeenCalledWith('terminal.spawn', { cols: 80, rows: 24 })
     const surface = root.querySelector('[data-testid="terminal-surface"]')
     expect(surface?.getAttribute('data-pty-id')).toBe('123')
+    expect(surface?.getAttribute('data-keybinding-profile')).toBe('terminal-zsh')
   })
 })

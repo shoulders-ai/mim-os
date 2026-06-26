@@ -289,6 +289,19 @@ describe('TerminalSurface', () => {
     expect(window.kernel.ptyWrite).toHaveBeenCalledWith(7, '\x16\n')
   })
 
+  it('uses the zsh multiline widget sequence for zsh-integrated terminal profiles', async () => {
+    mountSurface({ ptyId: 7, keybindingProfile: 'terminal-zsh' })
+    await flushUi()
+
+    const event = keyEvent({ key: 'Enter', shiftKey: true })
+    const handled = lastTerminal().keyHandler?.(event)
+
+    expect(handled).toBe(false)
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(event.stopPropagation).toHaveBeenCalled()
+    expect(window.kernel.ptyWrite).toHaveBeenCalledWith(7, '\x1b[13;2u')
+  })
+
   it('uses the agent Shift+Enter fallback for agent keybinding profiles', async () => {
     mountSurface({ ptyId: 7, keybindingProfile: 'claude-code' })
     await flushUi()

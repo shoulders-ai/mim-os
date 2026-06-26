@@ -27,6 +27,7 @@ export interface PtySpawnOptions {
 
 export interface PtyHandle {
   ptyId: number
+  shellIntegration?: 'zsh'
   write(data: string): void
   resize(cols: number, rows: number): void
   kill(): void
@@ -77,6 +78,7 @@ export function spawnPtyProcess(options: PtySpawnOptions): PtyHandle {
 
   return {
     ptyId: id,
+    shellIntegration: prepared.shellIntegration,
     write: (data) => pty.write(data),
     resize: (cols, rows) => pty.resize(cols, rows),
     kill: () => pty.kill(),
@@ -96,7 +98,7 @@ export function registerPtyTools(tools: ToolRegistry): void {
 
       const handle = spawnPtyProcess({ file: shell, args: [], cwd, cols, rows, shellIntegration: true })
 
-      return { id: handle.ptyId }
+      return { id: handle.ptyId, shellIntegration: handle.shellIntegration }
     }
   })
 

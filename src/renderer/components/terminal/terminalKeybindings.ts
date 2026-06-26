@@ -1,6 +1,6 @@
 type TerminalKeyEvent = Pick<KeyboardEvent, 'type' | 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>
 
-export type TerminalKeybindingProfile = 'terminal' | 'claude-code' | 'gemini-cli' | 'codex'
+export type TerminalKeybindingProfile = 'terminal' | 'terminal-zsh' | 'claude-code' | 'gemini-cli' | 'codex'
 
 export interface TerminalShortcutOptions {
   platform?: string
@@ -24,10 +24,12 @@ export function terminalOsShortcutSequence(
   const platform = options.platform ?? currentShortcutPlatform()
   const profile = options.profile ?? 'terminal'
   const isMac = isMacShortcutPlatform(platform)
-  const isAgent = profile !== 'terminal'
+  const isShell = profile === 'terminal' || profile === 'terminal-zsh'
+  const isAgent = !isShell
 
   if (event.key === 'Enter' && event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) {
     if (isAgent) return '\x1b\r'
+    if (profile === 'terminal-zsh') return '\x1b[13;2u'
     return '\x16\n'
   }
 

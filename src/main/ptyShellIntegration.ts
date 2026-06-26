@@ -17,6 +17,7 @@ export interface PreparedPtyCommand {
   file: string
   args: string[]
   env: Record<string, string>
+  shellIntegration?: 'zsh'
 }
 
 const ZSHENV = [
@@ -54,7 +55,25 @@ const ZSHRC = [
   'fi',
   '',
   'if [[ -o interactive ]]; then',
+  '  mim-insert-newline() {',
+  '    LBUFFER+=$\'\\n\'',
+  '    zle redisplay',
+  '  }',
+  '  zle -N mim-insert-newline',
+  '',
   '  for keymap in emacs viins; do',
+  '    # Mim renderer Shift+Enter fallback for shell multiline input.',
+  '    bindkey -M "${keymap}" $\'\\e[13;2u\' mim-insert-newline 2>/dev/null',
+  '',
+  '    # Plain cursor/deletion keys must cross editable multiline buffers.',
+  '    bindkey -M "${keymap}" $\'\\e[D\' backward-char 2>/dev/null',
+  '    bindkey -M "${keymap}" $\'\\e[C\' forward-char 2>/dev/null',
+  '    bindkey -M "${keymap}" $\'\\eOD\' backward-char 2>/dev/null',
+  '    bindkey -M "${keymap}" $\'\\eOC\' forward-char 2>/dev/null',
+  '    bindkey -M "${keymap}" \'^?\' backward-delete-char 2>/dev/null',
+  '    bindkey -M "${keymap}" \'^H\' backward-delete-char 2>/dev/null',
+  '    bindkey -M "${keymap}" $\'\\e[3~\' delete-char 2>/dev/null',
+  '',
   '    # xterm modified Option/Alt arrows.',
   '    bindkey -M "${keymap}" $\'\\e[1;3D\' backward-word 2>/dev/null',
   '    bindkey -M "${keymap}" $\'\\e[1;3C\' forward-word 2>/dev/null',
@@ -110,6 +129,7 @@ export function preparePtyShellIntegration(options: PtyShellIntegrationOptions):
       MIM_ZSH_INTEGRATION_DIR: integrationDir,
       MIM_SHELL_INTEGRATION: 'zsh',
     },
+    shellIntegration: 'zsh',
   }
 }
 

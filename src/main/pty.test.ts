@@ -73,7 +73,7 @@ describe('pty shell integration wiring', () => {
       },
     } as never)
 
-    await handlers.get('terminal.spawn')?.({ shell: '/bin/zsh', cwd: '/workspace' })
+    const result = await handlers.get('terminal.spawn')?.({ shell: '/bin/zsh', cwd: '/workspace' })
 
     expect(ptyMock.spawn).toHaveBeenCalledWith('/bin/zsh', [], expect.objectContaining({
       env: expect.objectContaining({
@@ -81,5 +81,6 @@ describe('pty shell integration wiring', () => {
         MIM_SHELL_INTEGRATION: 'zsh',
       }),
     }))
+    expect(result).toMatchObject({ id: expect.any(Number), shellIntegration: 'zsh' })
   })
 })

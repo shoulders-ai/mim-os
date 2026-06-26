@@ -14,10 +14,16 @@ function event(overrides: Partial<KeyboardEvent>): KeyboardEvent {
 }
 
 describe('terminalOsShortcutSequence', () => {
-  it('maps Shift+Enter to a literal line feed for terminal shell multiline input', () => {
+  it('keeps the legacy Shift+Enter fallback for non-integrated terminal shell multiline input', () => {
     expect(terminalOsShortcutSequence(event({ key: 'Enter', shiftKey: true }), {
       profile: 'terminal',
     })).toBe('\x16\n')
+  })
+
+  it('maps integrated zsh terminal Shift+Enter to the zsh multiline widget sequence', () => {
+    expect(terminalOsShortcutSequence(event({ key: 'Enter', shiftKey: true }), {
+      profile: 'terminal-zsh',
+    })).toBe('\x1b[13;2u')
   })
 
   it('maps agent Shift+Enter to Alt+Enter when modern keyboard protocol is not active', () => {

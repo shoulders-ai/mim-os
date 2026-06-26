@@ -20,6 +20,7 @@ interface TermTab {
   label: string
   ptyId: number | null
   exited: boolean
+  keybindingProfile: 'terminal' | 'terminal-zsh'
 }
 
 type SurfaceHandle = InstanceType<typeof TerminalSurface>
@@ -203,12 +204,13 @@ async function spawnPty(tabId: number) {
     const result = await window.kernel.call('terminal.spawn', {
       cols: dims.cols,
       rows: dims.rows,
-    }) as { id: number }
+    }) as { id: number, shellIntegration?: 'zsh' }
 
     const liveTab = tabs.value.find(t => t.id === tab.id)
     if (!liveTab) return
     liveTab.ptyId = result.id
     liveTab.exited = false
+    liveTab.keybindingProfile = result.shellIntegration === 'zsh' ? 'terminal-zsh' : 'terminal'
   } catch (err) {
     surface?.write(`\x1b[31mFailed to spawn terminal: ${err}\x1b[0m\r\n`)
   }
@@ -232,7 +234,7 @@ function onSurfaceInput(tab: TermTab, data: string) {
 /* ── Tab management ── */
 async function addTab() {
   const id = nextTabId++
-  const tab: TermTab = { id, label: `Tab ${id}`, ptyId: null, exited: false }
+  const tab: TermTab = { id, label: `Tab ${id}`, ptyId: null, exited: false, keybindingProfile: 'terminal' }
   tabs.value.push(tab)
   activeTabId.value = id
 
@@ -454,6 +456,7 @@ defineExpose({ addTab, closeActiveTab, clearActiveTerminal, activate, runCommand
         <TerminalSurface
           :ref="el => setSurfaceRef(tab.id, el)"
           :active="props.active && activeTabId === tab.id"
+          :keybinding-profile="tab.keybindingProfile"
           :pty-id="tab.ptyId"
           @exited="onSurfaceExited(tab)"
           @input="data => onSurfaceInput(tab, data)"
