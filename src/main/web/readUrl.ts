@@ -22,15 +22,24 @@ export interface ReadUrlResult {
   metadata?: Record<string, unknown>
 }
 
-interface FetchLike {
-  (input: string, init?: { signal?: AbortSignal; headers?: Record<string, string> }): Promise<{
-    ok: boolean
-    status: number
-    statusText?: string
-    headers: { get(name: string): string | null }
-    text(): Promise<string>
-    arrayBuffer?: () => Promise<ArrayBuffer>
-  }>
+export interface FetchInitLike {
+  signal?: AbortSignal
+  headers?: Record<string, string>
+  method?: string
+  redirect?: 'follow' | 'manual' | 'error'
+}
+
+export interface FetchResponseLike {
+  ok: boolean
+  status: number
+  statusText?: string
+  headers: { get(name: string): string | null }
+  text(): Promise<string>
+  arrayBuffer?: () => Promise<ArrayBuffer>
+}
+
+export interface FetchLike {
+  (input: string, init?: FetchInitLike): Promise<FetchResponseLike>
 }
 
 let _dominoPatched = false
@@ -155,7 +164,7 @@ export async function readUrl(
   const timer = setTimeout(() => controller.abort(), timeout_ms)
 
   try {
-    const response = await fetchFn(url, {
+    const { response, finalUrl } = await fetchWithSafeRedirects(fetchFn, url, {
       signal: controller.signal,
       headers: { 'User-Agent': USER_AGENT },
     })
@@ -165,10 +174,10 @@ export async function readUrl(
 
     const contentType = response.headers.get('content-type') ?? ''
     const normalizedType = contentType.toLowerCase()
-    if (isPdfResponse(normalizedType, url)) {
+    if (isPdfResponse(normalizedType, finalUrl)) {
       if (!response.arrayBuffer) throw new Error('PDF response cannot be read because this fetch implementation does not expose arrayBuffer().')
       const buffer = await response.arrayBuffer()
-      return extractReadablePdfContent(buffer, url, max_chars)
+      return extractReadablePdfContent(buffer, finalUrl, max_chars)
     }
 
     if (!normalizedType.includes('html') && !normalizedType.includes('text/plain')) {
@@ -176,7 +185,7 @@ export async function readUrl(
     }
 
     const html = await response.text()
-    return extractReadableContent(html, url, max_chars)
+    return extractReadableContent(html, finalUrl, max_chars)
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
       throw new Error(`Timeout after ${timeout_ms}ms fetching ${url}`)
@@ -187,13 +196,41 @@ export async function readUrl(
   }
 }
 
-function isPdfResponse(contentType: string, rawUrl: string): boolean {
+export async function fetchWithSafeRedirects(
+  fetchFn: FetchLike,
+  rawUrl: string,
+  init: FetchInitLike = {},
+  options: { maxRedirects?: number } = {},
+): Promise<{ response: FetchResponseLike; finalUrl: string }> {
+  const maxRedirects = options.maxRedirects ?? 5
+  let current = parseAllowedHttpUrl(rawUrl).href
+  for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
+    const response = await fetchFn(current, {
+      ...init,
+      redirect: 'manual',
+    })
+    if (!isRedirectResponse(response.status)) {
+      return { response, finalUrl: current }
+    }
+    const location = response.headers.get('location')
+    if (!location) return { response, finalUrl: current }
+    const next = new URL(location, current).href
+    current = parseAllowedHttpUrl(next).href
+  }
+  throw new Error(`Too many redirects fetching ${rawUrl}`)
+}
+
+export function isPdfResponse(contentType: string, rawUrl: string): boolean {
   if (contentType.includes('application/pdf') || contentType.includes('application/x-pdf')) return true
   try {
     return new URL(rawUrl).pathname.toLowerCase().endsWith('.pdf')
   } catch {
     return false
   }
+}
+
+function isRedirectResponse(status: number): boolean {
+  return status >= 300 && status < 400
 }
 
 function metadataString(info: Record<string, unknown>, keys: string[]): string {

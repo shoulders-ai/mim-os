@@ -87,7 +87,7 @@ export async function readRenderedUrl(
 ): Promise<ReadRenderedUrlResult> {
   parseAllowedHttpUrl(params.url, deps)
   const render = deps.render
-  if (!render) throw new Error('web.readRendered is only available in the Electron desktop runtime')
+  if (!render) throw new Error('Rendered web reads are only available in the Electron desktop runtime')
 
   const timeoutMs = positiveInteger(params.timeout_ms, DEFAULT_TIMEOUT_MS, 120_000)
   const maxChars = positiveInteger(params.max_chars, DEFAULT_MAX_CHARS, HARD_MAX_CHARS)

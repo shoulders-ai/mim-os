@@ -207,19 +207,23 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'slack.replies': { category: 'network', risk: 'medium', targetParam: 'channel' },
   'google.setOAuthClient': { category: 'secrets', risk: 'high', targetParam: 'account' },
   'google.setTokenBundle': { category: 'secrets', risk: 'high', targetParam: 'account' },
+  'google.connect': { category: 'secrets', risk: 'high', targetParam: 'account' },
+  'google.disconnect': { category: 'secrets', risk: 'high', targetParam: 'account' },
   'google.status': { category: 'network', risk: 'low', targetParam: 'account' },
   'google.authUrl': { category: 'secrets', risk: 'medium', targetParam: 'account' },
   'google.exchangeCode': { category: 'secrets', risk: 'high', targetParam: 'account' },
-  'gmail.inbox': { category: 'network', risk: 'medium', targetParam: 'account' },
   'gmail.search': { category: 'network', risk: 'medium', targetParam: 'query' },
-  'gmail.thread': { category: 'network', risk: 'medium', targetParam: 'id' },
+  'gmail.read': { category: 'network', risk: 'medium', targetParam: 'messageId' },
   'gmail.send': { category: 'network', risk: 'high', targetParam: 'to' },
   'calendar.events': { category: 'network', risk: 'medium', targetParam: 'calendarId' },
   'calendar.create': { category: 'network', risk: 'high', targetParam: 'summary' },
   'drive.search': { category: 'network', risk: 'medium', targetParam: 'query' },
   'drive.meta': { category: 'network', risk: 'medium', targetParam: 'fileId' },
   'docs.read': { category: 'network', risk: 'medium', targetParam: 'fileId' },
+  'sheets.meta': { category: 'network', risk: 'medium', targetParam: 'spreadsheetId' },
   'sheets.read': { category: 'network', risk: 'medium', targetParam: 'spreadsheetId' },
+  'sheets.write': { category: 'network', risk: 'high', targetParam: 'spreadsheetId' },
+  'sheets.append': { category: 'network', risk: 'high', targetParam: 'spreadsheetId' },
   'settings.get': { category: 'settings', risk: 'low', targetParam: 'key' },
   'settings.set': { category: 'settings', risk: 'medium', targetParam: 'key' },
   'session.create': { category: 'ui', risk: 'low' },
@@ -273,9 +277,6 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'skill.import': { category: 'write', risk: 'medium', targetParam: 'folder' },
   'skill.delete': { category: 'write', risk: 'medium', targetParam: 'name' },
   'web.read': { category: 'network', risk: 'medium', targetParam: 'url' },
-  'web.readAuto': { category: 'network', risk: 'medium', targetParam: 'url' },
-  'web.readRendered': { category: 'network', risk: 'medium', targetParam: 'url' },
-  'web.readResearch': { category: 'network', risk: 'medium', targetParam: 'url' },
   'web.research.status': { category: 'read', risk: 'low' },
   'web.research.allowDomain': { category: 'settings', risk: 'medium', targetParam: 'domain' },
   'web.research.removeDomain': { category: 'settings', risk: 'medium', targetParam: 'domain' },
@@ -808,6 +809,10 @@ function packagePermissionViolation(
 
   if (toolName.startsWith('slack.')) {
     return `App ${ctx.package_id} cannot access personal Slack integrations in runtime v1`
+  }
+
+  if (toolName.startsWith('web.')) {
+    return `App ${ctx.package_id} cannot access web reader tools in runtime v1; use ctx.http with declared host permissions`
   }
 
   if (toolName.startsWith('google.') || toolName.startsWith('gmail.') || toolName.startsWith('calendar.') || toolName.startsWith('drive.') || toolName.startsWith('docs.') || toolName.startsWith('sheets.')) {

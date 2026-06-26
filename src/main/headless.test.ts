@@ -31,7 +31,7 @@ describe('createHeadlessKernel', () => {
       'telemetry.track', 'telemetry.status', 'telemetry.setEnabled',
       'skill.list',
       'log.append', 'log.read',
-      'web.read', 'web.readAuto', 'web.readRendered', 'web.readResearch', 'web.search',
+      'web.read', 'web.search',
       'web.research.status', 'web.research.allowDomain',
       'ai.registry',
       'documents.docx.read',
@@ -41,13 +41,6 @@ describe('createHeadlessKernel', () => {
     ]) {
       expect(names.has(expected), `missing tool: ${expected}`).toBe(true)
     }
-  })
-
-  it('reports rendered web reads as unavailable without the Electron renderer', async () => {
-    const kernel = createHeadlessKernel()
-
-    await expect(kernel.tools.call('web.readRendered', { url: 'https://example.com' }, { actor: 'user' }))
-      .rejects.toThrow('web.readRendered is only available in the Electron desktop runtime')
   })
 
   it('openWorkspace opens a tmp dir and scaffolds .mim/workspace.json', async () => {

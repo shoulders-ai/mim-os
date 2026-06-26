@@ -80,7 +80,7 @@ describe('tool policy metadata', () => {
     expect(getToolPolicy('drive.search')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'query' })
     expect(getToolPolicy('docs.read')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'fileId' })
     expect(getToolPolicy('sheets.read')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'spreadsheetId' })
-    expect(getToolPolicy('web.readAuto')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'url' })
+    expect(getToolPolicy('web.read')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'url' })
     expect(getToolPolicy('google.exchangeCode')).toMatchObject({ category: 'secrets', risk: 'high', targetParam: 'account' })
     expect(getToolPolicy('documents.importMarkdown')).toMatchObject({ category: 'write', risk: 'medium', pathParam: 'output_path' })
     expect(getToolPolicy('documents.importMarkdown.formats')).toMatchObject({ category: 'read', risk: 'low' })
@@ -278,12 +278,12 @@ describe('permission gate decisions', () => {
 
   it('normal mode asks before contacting an outside service', async () => {
     const { gate, requests } = makeGate({ mode: 'normal' })
-    const pending = gate.check(tool('gmail.inbox'), { account: 'default' }, { actor: 'ai', sessionId: 's1' })
+    const pending = gate.check(tool('gmail.search'), { account: 'default' }, { actor: 'ai', sessionId: 's1' })
 
     await Promise.resolve()
     expect(requests).toHaveLength(1)
     expect(requests[0]).toMatchObject({
-      toolName: 'gmail.inbox',
+      toolName: 'gmail.search',
       reason: 'This contacts an outside service',
     })
 
@@ -457,6 +457,20 @@ describe('permission gate decisions', () => {
     await expect(
       gate.check(tool('gmail.search'), { query: 'hello' }, { actor: 'package', package_id: 'stats-checker' }),
     ).rejects.toThrow('personal Google')
+  })
+
+  it('blocks app access to web reader and Research Browser tools', async () => {
+    const { gate } = makeGate({ packagePermissions: { workspace: { read: true }, http: ['example.com'] } })
+
+    await expect(
+      gate.check(tool('web.read'), { url: 'https://example.com', stateful: true }, { actor: 'package', package_id: 'stats-checker' }),
+    ).rejects.toThrow('cannot access web reader tools')
+    await expect(
+      gate.check(tool('web.search'), { query: 'example' }, { actor: 'package', package_id: 'stats-checker' }),
+    ).rejects.toThrow('cannot access web reader tools')
+    await expect(
+      gate.check(tool('web.research.open'), { url: 'https://example.com' }, { actor: 'package', package_id: 'stats-checker' }),
+    ).rejects.toThrow('cannot access web reader tools')
   })
 
   it('allows app secret tools only for declared secret names', async () => {

@@ -6,6 +6,13 @@ export interface UrlPolicyOptions {
   allowPrivateAddresses?: boolean
 }
 
+export class BlockedUrlError extends Error {
+  constructor(rawUrl: string) {
+    super(`Blocked URL: ${rawUrl} (private/loopback addresses are not allowed)`)
+    this.name = 'BlockedUrlError'
+  }
+}
+
 export function parseAllowedHttpUrl(rawUrl: string, options: UrlPolicyOptions = {}): URL {
   let parsed: URL
   try {
@@ -17,7 +24,7 @@ export function parseAllowedHttpUrl(rawUrl: string, options: UrlPolicyOptions = 
     throw new Error(`Only http/https URLs are supported, got ${parsed.protocol}`)
   }
   if (!options.allowPrivateAddresses && isBlockedUrl(parsed)) {
-    throw new Error(`Blocked URL: ${rawUrl} (private/loopback addresses are not allowed)`)
+    throw new BlockedUrlError(rawUrl)
   }
   return parsed
 }

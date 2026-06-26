@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { BrowserWindow } from 'electron'
 import type {
   RenderedCaptureInfo,
@@ -6,7 +7,7 @@ import type {
   RenderedPageSnapshot,
 } from '@main/web/readRenderedUrl.js'
 import { CAPTURE_RENDERED_HTML_SCRIPT } from '@main/web/renderedCapture.js'
-import { USER_AGENT } from '@main/web/urlPolicy.js'
+import { parseAllowedHttpUrl, USER_AGENT } from '@main/web/urlPolicy.js'
 
 const POLL_MS = 250
 const STABLE_MS = 900
@@ -21,6 +22,7 @@ export async function renderUrlInHiddenWindow(request: RenderedPageRenderRequest
       sandbox: true,
       nodeIntegration: false,
       contextIsolation: true,
+      partition: `mim-web-read-${randomUUID()}`,
     },
   })
   try {
@@ -35,27 +37,32 @@ export async function renderInWindow(
   request: RenderedPageRenderRequest,
 ): Promise<RenderedPageSnapshot> {
   const startedAt = Date.now()
+  const removeRequestBlocker = installUrlPolicyRequestBlocker(win)
   let loadTimedOut = false
   try {
-    await withTimeout(win.loadURL(request.url, { userAgent: USER_AGENT }), request.timeoutMs)
-  } catch (err) {
-    if (!isTimeoutError(err)) throw err
-    loadTimedOut = true
-  }
-  const remainingMs = Math.max(0, request.timeoutMs - (Date.now() - startedAt))
-  const readiness = loadTimedOut
-    ? timeoutReadiness('Navigation did not finish before the capture budget ended.')
-    : await waitForReadiness(win, remainingMs)
-  const capture = await captureCurrentDocument(win)
-  const elapsedMs = Date.now() - startedAt
-  const captureInfo = buildCaptureInfo(readiness, capture.signals, elapsedMs)
+    try {
+      await withTimeout(win.loadURL(request.url, { userAgent: USER_AGENT }), request.timeoutMs)
+    } catch (err) {
+      if (!isTimeoutError(err)) throw err
+      loadTimedOut = true
+    }
+    const remainingMs = Math.max(0, request.timeoutMs - (Date.now() - startedAt))
+    const readiness = loadTimedOut
+      ? timeoutReadiness('Navigation did not finish before the capture budget ended.')
+      : await waitForReadiness(win, remainingMs)
+    const capture = await captureCurrentDocument(win)
+    const elapsedMs = Date.now() - startedAt
+    const captureInfo = buildCaptureInfo(readiness, capture.signals, elapsedMs)
 
-  return {
-    requestedUrl: request.url,
-    finalUrl: win.webContents.getURL() || request.url,
-    title: capture.title ?? win.webContents.getTitle() ?? '',
-    html: capture.html ?? '<body></body>',
-    capture: captureInfo,
+    return {
+      requestedUrl: request.url,
+      finalUrl: win.webContents.getURL() || request.url,
+      title: capture.title ?? win.webContents.getTitle() ?? '',
+      html: capture.html ?? '<body></body>',
+      capture: captureInfo,
+    }
+  } finally {
+    removeRequestBlocker()
   }
 }
 
@@ -260,6 +267,21 @@ function timeoutReadiness(reason: string): ReadinessResult {
       dom_stable: false,
       network_idle: false,
     },
+  }
+}
+
+function installUrlPolicyRequestBlocker(win: BrowserWindow): () => void {
+  const filter = { urls: ['http://*/*', 'https://*/*'] }
+  win.webContents.session.webRequest.onBeforeRequest(filter, (details, callback) => {
+    try {
+      parseAllowedHttpUrl(details.url)
+      callback({ cancel: false })
+    } catch {
+      callback({ cancel: true })
+    }
+  })
+  return () => {
+    win.webContents.session.webRequest.onBeforeRequest(filter, null)
   }
 }
 

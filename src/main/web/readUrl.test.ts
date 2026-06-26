@@ -196,6 +196,46 @@ describe('readUrl', () => {
     expect(result.content).toContain('Generic download PDF text')
   })
 
+  it('follows redirects manually and rejects blocked redirect targets', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 302,
+      statusText: 'Found',
+      headers: new Headers({ location: 'http://127.0.0.1/private' }),
+      text: () => Promise.resolve(''),
+    })
+
+    await expect(readUrl({ url: 'https://example.com/redirect' }, { fetch: mockFetch }))
+      .rejects.toThrow('Blocked URL')
+    expect(mockFetch).toHaveBeenCalledWith('https://example.com/redirect', expect.objectContaining({
+      redirect: 'manual',
+    }))
+  })
+
+  it('follows safe redirects without losing PDF extraction', async () => {
+    const pdf = makeTextPdf({ text: 'Redirected PDF text' })
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 302,
+        headers: new Headers({ location: 'https://cdn.example.com/file.pdf' }),
+        text: () => Promise.resolve(''),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/octet-stream' }),
+        arrayBuffer: () => Promise.resolve(bufferToArrayBuffer(pdf)),
+        text: () => Promise.resolve(''),
+      })
+
+    const result = await readUrl({ url: 'https://example.com/download' }, { fetch: mockFetch })
+
+    expect(result.format).toBe('pdf')
+    expect(result.url).toBe('https://cdn.example.com/file.pdf')
+    expect(result.content).toContain('Redirected PDF text')
+  })
+
   it('handles fetch errors', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: false,

@@ -1,13 +1,12 @@
 import type { ToolRegistry } from '@main/tools/registry.js'
-import { readAutoUrl, type AutoPageRenderer } from '@main/web/readAutoUrl.js'
-import { readResearchUrl, type ResearchPageRenderer } from '@main/web/readResearchUrl.js'
-import { readRenderedUrl, type RenderedPageRenderer } from '@main/web/readRenderedUrl.js'
+import type { ResearchPageRenderer } from '@main/web/readResearchUrl.js'
+import { readWebUrl, type WebPageRenderer } from '@main/web/readWebUrl.js'
+import type { FetchLike } from '@main/web/readUrl.js'
 import {
   addResearchBrowserDomain,
   readResearchBrowserSettings,
   removeResearchBrowserDomain,
 } from '@main/web/researchSettings.js'
-import { readUrl } from '@main/web/readUrl.js'
 import { webSearch } from '@main/web/webSearch.js'
 
 function objectSchema(properties: Record<string, unknown>, required: string[] = []) {
@@ -15,7 +14,8 @@ function objectSchema(properties: Record<string, unknown>, required: string[] = 
 }
 
 export interface WebToolsDeps {
-  renderRenderedPage?: RenderedPageRenderer
+  fetch?: FetchLike
+  renderRenderedPage?: WebPageRenderer
   renderResearchPage?: ResearchPageRenderer
   openResearchBrowser?: (params: { url?: string }) => Promise<unknown> | unknown
   clearResearchBrowserProfile?: () => Promise<unknown> | unknown
@@ -24,102 +24,37 @@ export interface WebToolsDeps {
 export function registerWebTools(tools: ToolRegistry, deps: WebToolsDeps = {}): void {
   tools.register({
     name: 'web.read',
-    description: 'Fetch an HTML/plain-text page or selectable PDF URL and return cleaned markdown-formatted text content.',
-    inputSchema: objectSchema({
-      url: { type: 'string', description: 'The URL to fetch (http/https only)' },
-      max_chars: { type: 'number', description: 'Maximum characters to return (default 80000)' },
-      timeout_ms: { type: 'number', description: 'Fetch timeout in milliseconds (default 15000)' },
-    }, ['url']),
-    execute: async (params) => {
-      return readUrl({
-        url: params.url as string,
-        max_chars: typeof params.max_chars === 'number' ? params.max_chars : 80_000,
-        timeout_ms: typeof params.timeout_ms === 'number' ? params.timeout_ms : undefined,
-      })
-    },
-  })
-
-  tools.register({
-    name: 'web.readAuto',
-    description: 'Read a URL through the best available web reader: rendered Chromium first with adaptive readiness and partial capture evidence, then the persistent Research Browser profile for configured sources when stateless rendering is blocked, then a recent workspace cache entry when live reads need attention.',
+    description: 'Read a URL through the workhorse web reader: PDFs use local text extraction, ordinary pages render in stateless Chromium, and stateful=true uses the persistent Research Browser profile for granted domains.',
     inputSchema: objectSchema({
       url: { type: 'string', description: 'The URL to read (http/https only)' },
+      stateful: { type: 'boolean', description: 'Use the persistent Research Browser profile for granted domains (default false)' },
       max_chars: { type: 'number', description: 'Target maximum characters for the returned chunk (default 100000)' },
       start_from_char: { type: 'number', description: 'Continue reading from this character offset in the full Markdown output' },
       extract_links: { type: 'boolean', description: 'Preserve link URLs in Markdown (default false)' },
       extract_images: { type: 'boolean', description: 'Preserve image URLs in table/header contexts (default false)' },
-      timeout_ms: { type: 'number', description: 'Render timeout in milliseconds (default 30000)' },
-      prefer_research: { type: 'boolean', description: 'Use the Research Browser profile first when the domain is configured (default false)' },
+      timeout_ms: { type: 'number', description: 'Render/fetch timeout in milliseconds (default 30000)' },
     }, ['url']),
     execute: async (params) => {
-      return readAutoUrl({
+      return readWebUrl({
         url: params.url as string,
+        stateful: params.stateful === true,
         max_chars: typeof params.max_chars === 'number' ? params.max_chars : undefined,
         start_from_char: typeof params.start_from_char === 'number' ? params.start_from_char : undefined,
         extract_links: params.extract_links === true,
         extract_images: params.extract_images === true,
         timeout_ms: typeof params.timeout_ms === 'number' ? params.timeout_ms : undefined,
-        prefer_research: params.prefer_research === true,
       }, {
         workspacePath: tools.getWorkspacePath(),
-        renderRendered: deps.renderRenderedPage as AutoPageRenderer | undefined,
+        fetch: deps.fetch,
+        renderRendered: deps.renderRenderedPage,
         renderResearch: deps.renderResearchPage,
       })
     },
   })
 
   tools.register({
-    name: 'web.readRendered',
-    description: 'Render a URL in Chromium and return cleaned markdown content from the hydrated page, with adaptive readiness, partial capture evidence, and structure-aware chunk continuation.',
-    inputSchema: objectSchema({
-      url: { type: 'string', description: 'The URL to render (http/https only)' },
-      max_chars: { type: 'number', description: 'Target maximum characters for the returned chunk (default 100000)' },
-      start_from_char: { type: 'number', description: 'Continue reading from this character offset in the full Markdown output' },
-      extract_links: { type: 'boolean', description: 'Preserve link URLs in Markdown (default false)' },
-      extract_images: { type: 'boolean', description: 'Preserve image URLs in table/header contexts (default false)' },
-      timeout_ms: { type: 'number', description: 'Render timeout in milliseconds (default 30000)' },
-    }, ['url']),
-    execute: async (params) => {
-      return readRenderedUrl({
-        url: params.url as string,
-        max_chars: typeof params.max_chars === 'number' ? params.max_chars : undefined,
-        start_from_char: typeof params.start_from_char === 'number' ? params.start_from_char : undefined,
-        extract_links: params.extract_links === true,
-        extract_images: params.extract_images === true,
-        timeout_ms: typeof params.timeout_ms === 'number' ? params.timeout_ms : undefined,
-      }, { render: deps.renderRenderedPage })
-    },
-  })
-
-  tools.register({
-    name: 'web.readResearch',
-    description: 'Read a URL through the persistent Research Browser profile and return cleaned markdown plus blocked-page status.',
-    inputSchema: objectSchema({
-      url: { type: 'string', description: 'The URL to render through the Research Browser profile (http/https only)' },
-      max_chars: { type: 'number', description: 'Target maximum characters for the returned chunk (default 100000)' },
-      start_from_char: { type: 'number', description: 'Continue reading from this character offset in the full Markdown output' },
-      extract_links: { type: 'boolean', description: 'Preserve link URLs in Markdown (default false)' },
-      extract_images: { type: 'boolean', description: 'Preserve image URLs in table/header contexts (default false)' },
-      timeout_ms: { type: 'number', description: 'Render timeout in milliseconds (default 30000)' },
-    }, ['url']),
-    execute: async (params) => {
-      return readResearchUrl({
-        url: params.url as string,
-        max_chars: typeof params.max_chars === 'number' ? params.max_chars : undefined,
-        start_from_char: typeof params.start_from_char === 'number' ? params.start_from_char : undefined,
-        extract_links: params.extract_links === true,
-        extract_images: params.extract_images === true,
-        timeout_ms: typeof params.timeout_ms === 'number' ? params.timeout_ms : undefined,
-      }, {
-        workspacePath: workspacePath(tools),
-        render: deps.renderResearchPage,
-      })
-    },
-  })
-
-  tools.register({
     name: 'web.research.status',
-    description: 'Return Research Browser enablement, domain grants, source health, and runtime availability.',
+    description: 'Return Research Browser enablement, domain grants, and runtime availability.',
     inputSchema: objectSchema({}),
     execute: async () => ({
       ...readResearchBrowserSettings(tools.getWorkspacePath()),

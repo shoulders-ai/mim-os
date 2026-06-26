@@ -54,6 +54,7 @@ const ACTION_PHRASES: Record<string, string> = {
   'ai.setKey': 'save an API key',
   'app.enable': 'turn on an app',
   'app.disable': 'turn off an app',
+  'web.read': 'read a web page',
 }
 
 const CATEGORY_PHRASES: Record<string, string> = {

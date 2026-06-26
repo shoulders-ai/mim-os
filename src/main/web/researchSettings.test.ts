@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import {
@@ -7,7 +7,6 @@ import {
   isResearchBrowserAllowed,
   normalizeResearchDomainPattern,
   readResearchBrowserSettings,
-  recordResearchBrowserSourceRead,
   removeResearchBrowserDomain,
 } from './researchSettings.js'
 
@@ -37,128 +36,59 @@ describe('research browser settings', () => {
     expect(isResearchBrowserAllowed('https://stackoverflow.com.evil.test/page', allowedDomains).allowed).toBe(false)
   })
 
-  it('persists workspace research browser grants', () => {
+  it('persists workspace research browser grants without source health state', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mim-research-settings-'))
     try {
-      expect(readResearchBrowserSettings(dir)).toEqual({ enabled: false, allowedDomains: [], sources: [] })
+      expect(readResearchBrowserSettings(dir)).toEqual({ enabled: false, allowedDomains: [] })
 
       addResearchBrowserDomain(dir, 'https://DBRegio-Berlin-Brandenburg.de/foo')
       addResearchBrowserDomain(dir, '*.example.org')
       addResearchBrowserDomain(dir, 'dbregio-berlin-brandenburg.de')
 
-      expect(readResearchBrowserSettings(dir)).toMatchObject({
+      expect(readResearchBrowserSettings(dir)).toEqual({
         enabled: true,
         allowedDomains: ['dbregio-berlin-brandenburg.de', '*.example.org'],
-        sources: [
-          { domain: 'dbregio-berlin-brandenburg.de', allowed: true, status: 'ready', attentionRequired: false },
-          { domain: '*.example.org', allowed: true, status: 'ready', attentionRequired: false },
-        ],
       })
 
       removeResearchBrowserDomain(dir, '*.EXAMPLE.org')
       expect(readResearchBrowserSettings(dir)).toEqual({
         enabled: true,
         allowedDomains: ['dbregio-berlin-brandenburg.de'],
-        sources: [
-          { domain: 'dbregio-berlin-brandenburg.de', allowed: true, status: 'ready', attentionRequired: false, consecutiveFailures: 0 },
-        ],
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('records source readiness, attention state, and last read metadata', () => {
+  it('drops legacy sources on the next settings write', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mim-research-settings-'))
     try {
-      addResearchBrowserDomain(dir, 'example.com')
-
-      recordResearchBrowserSourceRead(dir, {
-        domain: 'example.com',
-        url: 'https://example.com/report',
-        status: 'ok',
-        attentionRequired: false,
-        source: 'rendered',
-        at: '2026-06-25T10:00:00.000Z',
-      })
-
-      expect(readResearchBrowserSettings(dir).sources).toEqual([
-        {
-          domain: 'example.com',
-          allowed: true,
-          status: 'ready',
-          attentionRequired: false,
-          lastStatus: 'ok',
-          lastSource: 'rendered',
-          lastUrl: 'https://example.com/report',
-          lastReadAt: '2026-06-25T10:00:00.000Z',
-          lastSuccessAt: '2026-06-25T10:00:00.000Z',
-          consecutiveFailures: 0,
+      mkdirSync(join(dir, '.mim'), { recursive: true })
+      writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
+        researchBrowser: {
+          enabled: true,
+          allowedDomains: ['example.com'],
+          sources: [
+            {
+              domain: 'example.com',
+              status: 'needs_attention',
+              attentionRequired: true,
+              reason: 'legacy classifier state',
+            },
+          ],
         },
-      ])
-
-      recordResearchBrowserSourceRead(dir, {
-        domain: 'example.com',
-        url: 'https://example.com/private',
-        status: 'login_required',
-        attentionRequired: true,
-        reason: 'The page is asking for an authenticated session.',
-        source: 'research-profile',
-        at: '2026-06-25T10:05:00.000Z',
-      })
-
-      expect(readResearchBrowserSettings(dir).sources).toEqual([
-        {
-          domain: 'example.com',
-          allowed: true,
-          status: 'needs_attention',
-          attentionRequired: true,
-          lastStatus: 'login_required',
-          lastSource: 'research-profile',
-          lastUrl: 'https://example.com/private',
-          lastReadAt: '2026-06-25T10:05:00.000Z',
-          lastSuccessAt: '2026-06-25T10:00:00.000Z',
-          lastFailureAt: '2026-06-25T10:05:00.000Z',
-          consecutiveFailures: 1,
-          reason: 'The page is asking for an authenticated session.',
-        },
-      ])
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('records unconfigured source attention without granting access', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'mim-research-settings-'))
-    try {
-      recordResearchBrowserSourceRead(dir, {
-        domain: 'stackoverflow.com',
-        url: 'https://stackoverflow.com/questions/1',
-        status: 'source_not_configured',
-        attentionRequired: true,
-        reason: 'Add stackoverflow.com to Research Browser sources.',
-        source: 'rendered',
-        at: '2026-06-25T11:00:00.000Z',
-      })
+      }))
 
       expect(readResearchBrowserSettings(dir)).toEqual({
-        enabled: false,
-        allowedDomains: [],
-        sources: [
-          {
-            domain: 'stackoverflow.com',
-            allowed: false,
-            status: 'not_configured',
-            attentionRequired: true,
-            lastStatus: 'source_not_configured',
-            lastSource: 'rendered',
-            lastUrl: 'https://stackoverflow.com/questions/1',
-            lastReadAt: '2026-06-25T11:00:00.000Z',
-            lastFailureAt: '2026-06-25T11:00:00.000Z',
-            consecutiveFailures: 1,
-            reason: 'Add stackoverflow.com to Research Browser sources.',
-          },
-        ],
+        enabled: true,
+        allowedDomains: ['example.com'],
+      })
+
+      addResearchBrowserDomain(dir, 'maps.google.com')
+      const raw = JSON.parse(readFileSync(join(dir, '.mim', 'settings.json'), 'utf-8')) as Record<string, any>
+      expect(raw.researchBrowser).toEqual({
+        enabled: true,
+        allowedDomains: ['example.com', 'maps.google.com'],
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })
