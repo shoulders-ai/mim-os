@@ -2,16 +2,26 @@ import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { fetchHttpClient, type HttpClient } from '@main/integrations/http.js'
 import { createKeytarSecretStore, type SecretStore } from '@main/integrations/secrets.js'
+import { PermissionDeniedError } from '@main/security/gate.js'
 import { loadUserConfig } from '@main/userConfig.js'
 import { parseMimYaml } from '@main/workspace/workspaceContract.js'
-import type { ToolRegistry } from '@main/tools/registry.js'
-import { GoogleIntegration } from './client.js'
+import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
+import {
+  GOOGLE_SCOPE,
+  GoogleIntegration,
+  hasAnyGoogleScope,
+  type GoogleCapability,
+} from './client.js'
+import { readGooglePolicy, type GoogleConnectorPolicy } from './policy.js'
 
 export interface GoogleToolDeps {
   secrets?: SecretStore
   http?: HttpClient
   now?: () => number
 }
+
+type GooglePolicyKey = keyof GoogleConnectorPolicy
+type GoogleDriveTypeParam = 'document' | 'spreadsheet' | 'presentation' | 'pdf' | 'folder' | 'image' | 'any' | 'all'
 
 function objectSchema(properties: Record<string, unknown>, required: string[] = []) {
   return { type: 'object', properties, required }
@@ -50,6 +60,7 @@ export function registerGoogleTools(tools: ToolRegistry, deps: GoogleToolDeps = 
       access_token: { type: 'string' },
       refresh_token: { type: 'string' },
       expires_at: { type: 'number' },
+      scope: { type: 'string' },
     }, ['access_token']),
     execute: async (params) => {
       const account = resolveGoogleAccount(tools, optionalString(params.account))
@@ -57,8 +68,38 @@ export function registerGoogleTools(tools: ToolRegistry, deps: GoogleToolDeps = 
         access_token: requireString(params, 'access_token'),
         refresh_token: optionalString(params.refresh_token),
         expires_at: optionalNumber(params.expires_at),
+        scope: optionalString(params.scope),
       })
       return { account, tokenConfigured: true }
+    },
+  })
+
+  tools.register({
+    name: 'google.connect',
+    description: 'Store a Google token bundle, verify it with userinfo, and return profile metadata.',
+    inputSchema: objectSchema({
+      account: { type: 'string' },
+      access_token: { type: 'string' },
+      refresh_token: { type: 'string' },
+      expires_at: { type: 'number' },
+      scope: { type: 'string' },
+    }, ['access_token']),
+    execute: async (params) => google.connect({
+      account: resolveGoogleAccount(tools, optionalString(params.account)),
+      access_token: requireString(params, 'access_token'),
+      refresh_token: optionalString(params.refresh_token),
+      expires_at: optionalNumber(params.expires_at),
+      scope: optionalString(params.scope),
+    }),
+  })
+
+  tools.register({
+    name: 'google.disconnect',
+    description: 'Remove a Google token bundle from the OS keychain.',
+    inputSchema: objectSchema({ account: { type: 'string' } }),
+    execute: async (params) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      return { account, disconnected: await google.disconnect(account) }
     },
   })
 
@@ -76,11 +117,13 @@ export function registerGoogleTools(tools: ToolRegistry, deps: GoogleToolDeps = 
       account: { type: 'string' },
       redirectUri: { type: 'string' },
       scopes: { type: 'array', items: { type: 'string' } },
+      capabilities: { type: 'array', items: { type: 'string' } },
     }),
     execute: async (params) => google.authUrl({
       account: resolveGoogleAccount(tools, optionalString(params.account)),
       redirectUri: optionalString(params.redirectUri),
-      scopes: Array.isArray(params.scopes) ? params.scopes.filter((s): s is string => typeof s === 'string') : undefined,
+      scopes: stringArray(params.scopes),
+      capabilities: capabilityArray(params.capabilities),
     }),
   })
 
@@ -100,39 +143,57 @@ export function registerGoogleTools(tools: ToolRegistry, deps: GoogleToolDeps = 
   })
 
   tools.register({
-    name: 'gmail.inbox',
-    description: 'Read recent Gmail inbox message summaries.',
-    inputSchema: objectSchema({ account: { type: 'string' }, limit: { type: 'number' } }),
-    execute: async (params) => google.gmailInbox({
-      account: resolveGoogleAccount(tools, optionalString(params.account)),
-      limit: optionalNumber(params.limit),
-    }),
-  })
-
-  tools.register({
     name: 'gmail.search',
-    description: 'Search Gmail messages using Gmail search syntax.',
-    inputSchema: objectSchema({ account: { type: 'string' }, query: { type: 'string' }, limit: { type: 'number' } }, ['query']),
-    execute: async (params) => google.gmailSearch({
-      account: resolveGoogleAccount(tools, optionalString(params.account)),
-      query: requireString(params, 'query'),
-      limit: optionalNumber(params.limit),
+    description: 'Search Gmail messages, or list recent messages when query is omitted.',
+    captureResult: false,
+    inputSchema: objectSchema({
+      account: { type: 'string' },
+      query: { type: 'string' },
+      limit: { type: 'number' },
+      pageToken: { type: 'string' },
     }),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [['gmailEnabled', 'Google Gmail access is disabled. Enable it in Settings > Connections.']],
+        scopes: [GOOGLE_SCOPE.gmailReadonly],
+      })
+      return google.gmailSearch({
+        account,
+        query: optionalString(params.query),
+        limit: optionalNumber(params.limit),
+        pageToken: optionalString(params.pageToken),
+      })
+    },
   })
 
   tools.register({
-    name: 'gmail.thread',
-    description: 'Read a Gmail thread by id.',
-    inputSchema: objectSchema({ account: { type: 'string' }, id: { type: 'string' } }, ['id']),
-    execute: async (params) => google.gmailThread({
-      account: resolveGoogleAccount(tools, optionalString(params.account)),
-      id: requireString(params, 'id'),
+    name: 'gmail.read',
+    description: 'Read a Gmail message or thread body by id.',
+    captureResult: false,
+    inputSchema: objectSchema({
+      account: { type: 'string' },
+      messageId: { type: 'string' },
+      threadId: { type: 'string' },
     }),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [['gmailEnabled', 'Google Gmail access is disabled. Enable it in Settings > Connections.']],
+        scopes: [GOOGLE_SCOPE.gmailReadonly],
+      })
+      return google.gmailRead({
+        account,
+        messageId: optionalString(params.messageId),
+        threadId: optionalString(params.threadId),
+      })
+    },
   })
 
   tools.register({
     name: 'gmail.send',
-    description: 'Send a plain-text Gmail message.',
+    description: 'Send a plain-text Gmail message, optionally as a threaded reply.',
+    captureResult: false,
     inputSchema: objectSchema({
       account: { type: 'string' },
       to: { type: 'string' },
@@ -140,34 +201,58 @@ export function registerGoogleTools(tools: ToolRegistry, deps: GoogleToolDeps = 
       bcc: { type: 'string' },
       subject: { type: 'string' },
       body: { type: 'string' },
-    }, ['to', 'subject', 'body']),
-    execute: async (params) => google.gmailSend({
-      account: resolveGoogleAccount(tools, optionalString(params.account)),
-      to: requireString(params, 'to'),
-      cc: optionalString(params.cc),
-      bcc: optionalString(params.bcc),
-      subject: requireString(params, 'subject'),
-      body: requireString(params, 'body'),
-    }),
+      threadId: { type: 'string' },
+      replyToMessageId: { type: 'string' },
+    }, ['to', 'body']),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [
+          ['gmailEnabled', 'Google Gmail access is disabled. Enable it in Settings > Connections.'],
+          ['gmailSendEnabled', 'Google Gmail send is disabled. Enable it in Settings > Connections.'],
+        ],
+        scopes: [GOOGLE_SCOPE.gmailSend],
+      })
+      return google.gmailSend({
+        account,
+        to: requireString(params, 'to'),
+        cc: optionalString(params.cc),
+        bcc: optionalString(params.bcc),
+        subject: optionalString(params.subject),
+        body: requireString(params, 'body'),
+        threadId: optionalString(params.threadId),
+        replyToMessageId: optionalString(params.replyToMessageId),
+      })
+    },
   })
 
   tools.register({
     name: 'calendar.events',
     description: 'Read Google Calendar events in a time range.',
+    captureResult: false,
     inputSchema: objectSchema({
       account: { type: 'string' },
       from: { type: 'string' },
       to: { type: 'string' },
       calendarId: { type: 'string' },
       limit: { type: 'number' },
+      pageToken: { type: 'string' },
     }, ['from', 'to']),
-    execute: async (params) => google.calendarEvents({
-      account: resolveGoogleAccount(tools, optionalString(params.account)),
-      from: requireString(params, 'from'),
-      to: requireString(params, 'to'),
-      calendarId: optionalString(params.calendarId),
-      limit: optionalNumber(params.limit),
-    }),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [['calendarEnabled', 'Google Calendar access is disabled. Enable it in Settings > Connections.']],
+        scopes: [GOOGLE_SCOPE.calendarEventsReadonly, GOOGLE_SCOPE.calendarEvents],
+      })
+      return google.calendarEvents({
+        account,
+        from: requireString(params, 'from'),
+        to: requireString(params, 'to'),
+        calendarId: optionalString(params.calendarId),
+        limit: optionalNumber(params.limit),
+        pageToken: optionalString(params.pageToken),
+      })
+    },
   })
 
   tools.register({
@@ -182,62 +267,223 @@ export function registerGoogleTools(tools: ToolRegistry, deps: GoogleToolDeps = 
       attendees: { type: 'array', items: { type: 'string' } },
       description: { type: 'string' },
     }, ['summary', 'start', 'end']),
-    execute: async (params) => google.calendarCreate({
-      account: resolveGoogleAccount(tools, optionalString(params.account)),
-      summary: requireString(params, 'summary'),
-      start: requireString(params, 'start'),
-      end: requireString(params, 'end'),
-      calendarId: optionalString(params.calendarId),
-      attendees: Array.isArray(params.attendees) ? params.attendees.filter((item): item is string => typeof item === 'string') : undefined,
-      description: optionalString(params.description),
-    }),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [
+          ['calendarEnabled', 'Google Calendar access is disabled. Enable it in Settings > Connections.'],
+          ['calendarWriteEnabled', 'Google Calendar write is disabled. Enable it in Settings > Connections.'],
+        ],
+        scopes: [GOOGLE_SCOPE.calendarEvents],
+      })
+      return google.calendarCreate({
+        account,
+        summary: requireString(params, 'summary'),
+        start: requireString(params, 'start'),
+        end: requireString(params, 'end'),
+        calendarId: optionalString(params.calendarId),
+        attendees: stringArray(params.attendees),
+        description: optionalString(params.description),
+      })
+    },
   })
 
   tools.register({
     name: 'drive.search',
-    description: 'Search Google Drive files by name.',
-    inputSchema: objectSchema({ account: { type: 'string' }, query: { type: 'string' }, limit: { type: 'number' } }),
-    execute: async (params) => google.driveSearch({
-      account: resolveGoogleAccount(tools, optionalString(params.account)),
-      query: optionalString(params.query),
-      limit: optionalNumber(params.limit),
+    description: 'Search Google Drive files.',
+    captureResult: false,
+    inputSchema: objectSchema({
+      account: { type: 'string' },
+      query: { type: 'string' },
+      type: { type: 'string' },
+      folderId: { type: 'string' },
+      pageToken: { type: 'string' },
+      limit: { type: 'number' },
     }),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [['driveEnabled', 'Google Drive access is disabled. Enable it in Settings > Connections.']],
+        scopes: [GOOGLE_SCOPE.driveReadonly, GOOGLE_SCOPE.drive],
+      })
+      return google.driveSearch({
+        account,
+        query: optionalString(params.query),
+        type: driveType(params.type),
+        folderId: optionalString(params.folderId),
+        pageToken: optionalString(params.pageToken),
+        limit: optionalNumber(params.limit),
+      })
+    },
   })
 
   tools.register({
     name: 'drive.meta',
     description: 'Read Google Drive file metadata.',
+    captureResult: false,
     inputSchema: objectSchema({ account: { type: 'string' }, fileId: { type: 'string' } }, ['fileId']),
-    execute: async (params) => google.driveMeta({
-      account: resolveGoogleAccount(tools, optionalString(params.account)),
-      fileId: requireString(params, 'fileId'),
-    }),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [['driveEnabled', 'Google Drive access is disabled. Enable it in Settings > Connections.']],
+        scopes: [GOOGLE_SCOPE.driveReadonly, GOOGLE_SCOPE.drive],
+      })
+      return google.driveMeta({
+        account,
+        fileId: requireString(params, 'fileId'),
+      })
+    },
   })
 
   tools.register({
     name: 'docs.read',
     description: 'Export a Google Doc as plain text.',
+    captureResult: false,
     inputSchema: objectSchema({ account: { type: 'string' }, fileId: { type: 'string' } }, ['fileId']),
-    execute: async (params) => google.docsRead({
-      account: resolveGoogleAccount(tools, optionalString(params.account)),
-      fileId: requireString(params, 'fileId'),
-    }),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [['driveEnabled', 'Google Drive access is disabled. Enable it in Settings > Connections.']],
+        scopes: [GOOGLE_SCOPE.driveReadonly, GOOGLE_SCOPE.drive],
+      })
+      return google.docsRead({
+        account,
+        fileId: requireString(params, 'fileId'),
+      })
+    },
+  })
+
+  tools.register({
+    name: 'sheets.meta',
+    description: 'Read Google Sheets spreadsheet metadata and tab names.',
+    captureResult: false,
+    inputSchema: objectSchema({
+      account: { type: 'string' },
+      spreadsheetId: { type: 'string' },
+    }, ['spreadsheetId']),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [['driveEnabled', 'Google Drive access is disabled. Enable it in Settings > Connections.']],
+        scopes: sheetsReadScopes(),
+      })
+      return google.sheetsMeta({
+        account,
+        spreadsheetId: requireString(params, 'spreadsheetId'),
+      })
+    },
   })
 
   tools.register({
     name: 'sheets.read',
     description: 'Read values from a Google Sheet range.',
+    captureResult: false,
     inputSchema: objectSchema({
       account: { type: 'string' },
       spreadsheetId: { type: 'string' },
       range: { type: 'string' },
     }, ['spreadsheetId', 'range']),
-    execute: async (params) => google.sheetsRead({
-      account: resolveGoogleAccount(tools, optionalString(params.account)),
-      spreadsheetId: requireString(params, 'spreadsheetId'),
-      range: requireString(params, 'range'),
-    }),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [['driveEnabled', 'Google Drive access is disabled. Enable it in Settings > Connections.']],
+        scopes: sheetsReadScopes(),
+      })
+      return google.sheetsRead({
+        account,
+        spreadsheetId: requireString(params, 'spreadsheetId'),
+        range: requireString(params, 'range'),
+      })
+    },
   })
+
+  tools.register({
+    name: 'sheets.write',
+    description: 'Write values into a Google Sheet range.',
+    captureResult: false,
+    inputSchema: objectSchema({
+      account: { type: 'string' },
+      spreadsheetId: { type: 'string' },
+      range: { type: 'string' },
+      values: { type: 'array' },
+      majorDimension: { type: 'string' },
+    }, ['spreadsheetId', 'range', 'values']),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [
+          ['driveEnabled', 'Google Drive access is disabled. Enable it in Settings > Connections.'],
+          ['sheetsWriteEnabled', 'Google Sheets write is disabled. Enable it in Settings > Connections.'],
+        ],
+        scopes: [GOOGLE_SCOPE.spreadsheets],
+      })
+      return google.sheetsWrite({
+        account,
+        spreadsheetId: requireString(params, 'spreadsheetId'),
+        range: requireString(params, 'range'),
+        values: valuesMatrix(params.values),
+        majorDimension: majorDimension(params.majorDimension),
+      })
+    },
+  })
+
+  tools.register({
+    name: 'sheets.append',
+    description: 'Append values to a Google Sheet range.',
+    captureResult: false,
+    inputSchema: objectSchema({
+      account: { type: 'string' },
+      spreadsheetId: { type: 'string' },
+      range: { type: 'string' },
+      values: { type: 'array' },
+      majorDimension: { type: 'string' },
+      insertDataOption: { type: 'string' },
+    }, ['spreadsheetId', 'range', 'values']),
+    execute: async (params, ctx) => {
+      const account = resolveGoogleAccount(tools, optionalString(params.account))
+      await requireGoogleAiAccess(tools, google, account, ctx, {
+        flags: [
+          ['driveEnabled', 'Google Drive access is disabled. Enable it in Settings > Connections.'],
+          ['sheetsWriteEnabled', 'Google Sheets write is disabled. Enable it in Settings > Connections.'],
+        ],
+        scopes: [GOOGLE_SCOPE.spreadsheets],
+      })
+      return google.sheetsAppend({
+        account,
+        spreadsheetId: requireString(params, 'spreadsheetId'),
+        range: requireString(params, 'range'),
+        values: valuesMatrix(params.values),
+        majorDimension: majorDimension(params.majorDimension),
+        insertDataOption: insertDataOption(params.insertDataOption),
+      })
+    },
+  })
+}
+
+async function requireGoogleAiAccess(
+  tools: ToolRegistry,
+  google: GoogleIntegration,
+  account: string,
+  ctx: ToolContext,
+  opts: {
+    flags?: Array<[GooglePolicyKey, string]>
+    scopes?: string[]
+  } = {},
+): Promise<void> {
+  if (ctx.actor !== 'ai') return
+  const policy = readGooglePolicy(tools.getWorkspacePath())
+  if (!policy.aiEnabled) {
+    throw new PermissionDeniedError('Google AI access is disabled. Enable it in Settings > Connections.')
+  }
+  for (const [key, message] of opts.flags ?? []) {
+    if (!policy[key]) throw new PermissionDeniedError(message)
+  }
+  const requiredScopes = opts.scopes ?? []
+  if (!requiredScopes.length) return
+  const status = await google.status(account)
+  if (status.grantedScopes.length && !hasAnyGoogleScope(status.grantedScopes, requiredScopes)) {
+    throw new PermissionDeniedError('Reconnect Google with the required capability scopes before the AI can use this tool.')
+  }
 }
 
 function resolveGoogleAccount(tools: ToolRegistry, explicit?: string): string {
@@ -269,4 +515,50 @@ function optionalString(value: unknown): string | undefined {
 
 function optionalNumber(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined
+}
+
+function stringArray(value: unknown): string[] | undefined {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim() !== '') : undefined
+}
+
+function capabilityArray(value: unknown): GoogleCapability[] | undefined {
+  const values = stringArray(value)?.filter((item): item is GoogleCapability => [
+    'profile',
+    'gmail.read',
+    'gmail.send',
+    'calendar.read',
+    'calendar.write',
+    'drive.read',
+    'sheets.read',
+    'sheets.write',
+  ].includes(item))
+  return values?.length ? values : undefined
+}
+
+function driveType(value: unknown): GoogleDriveTypeParam | undefined {
+  return typeof value === 'string' && ['document', 'spreadsheet', 'presentation', 'pdf', 'folder', 'image', 'any', 'all'].includes(value)
+    ? value as GoogleDriveTypeParam
+    : undefined
+}
+
+function valuesMatrix(value: unknown): unknown[][] {
+  if (!Array.isArray(value)) throw new Error('Missing required parameter: values')
+  return value.map(row => Array.isArray(row) ? row : [row])
+}
+
+function majorDimension(value: unknown): 'ROWS' | 'COLUMNS' | undefined {
+  return value === 'ROWS' || value === 'COLUMNS' ? value : undefined
+}
+
+function insertDataOption(value: unknown): 'OVERWRITE' | 'INSERT_ROWS' | undefined {
+  return value === 'OVERWRITE' || value === 'INSERT_ROWS' ? value : undefined
+}
+
+function sheetsReadScopes(): string[] {
+  return [
+    GOOGLE_SCOPE.spreadsheetsReadonly,
+    GOOGLE_SCOPE.spreadsheets,
+    GOOGLE_SCOPE.driveReadonly,
+    GOOGLE_SCOPE.drive,
+  ]
 }

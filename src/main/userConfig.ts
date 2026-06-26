@@ -22,6 +22,7 @@ export interface UserConfig {
     models: { chat?: string; ghost?: string }
   }
   connectors: {
+    google?: Record<string, unknown>
     slack?: Record<string, unknown>
   }
   registry: { url?: string }
@@ -80,6 +81,9 @@ export function loadUserConfig(home?: string): UserConfig {
         if (connectors.slack && typeof connectors.slack === 'object' && !Array.isArray(connectors.slack)) {
           config.connectors.slack = connectors.slack as Record<string, unknown>
         }
+        if (connectors.google && typeof connectors.google === 'object' && !Array.isArray(connectors.google)) {
+          config.connectors.google = connectors.google as Record<string, unknown>
+        }
 
         config.skillSources = parseSkillSources(r.skillSources)
         config.skills.disabled = parseDisabledSkillNames(r.skills)
@@ -109,6 +113,7 @@ export function loadUserConfig(home?: string): UserConfig {
       models: Object.freeze(config.defaults.models),
     }),
     connectors: Object.freeze({
+      ...(config.connectors.google ? { google: Object.freeze({ ...config.connectors.google }) } : {}),
       ...(config.connectors.slack ? { slack: Object.freeze({ ...config.connectors.slack }) } : {}),
     }),
     registry: Object.freeze(config.registry),

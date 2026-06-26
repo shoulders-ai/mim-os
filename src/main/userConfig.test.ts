@@ -95,7 +95,7 @@ describe('userConfig — loadUserConfig', () => {
     expect((config.defaults as Record<string, unknown>).apiKey).toBeUndefined()
   })
 
-  it('parses connectors.slack from config.yaml', () => {
+  it('parses connector policy from config.yaml', () => {
     writeConfig(home, [
       'connectors:',
       '  slack:',
@@ -103,6 +103,14 @@ describe('userConfig — loadUserConfig', () => {
       '    sendEnabled: false',
       '    privateChannels: false',
       '    directMessages: true',
+      '  google:',
+      '    aiEnabled: true',
+      '    gmailEnabled: true',
+      '    gmailSendEnabled: false',
+      '    calendarEnabled: true',
+      '    calendarWriteEnabled: false',
+      '    driveEnabled: true',
+      '    sheetsWriteEnabled: false',
     ].join('\n'))
     const config = loadUserConfig(home)
     expect(config.connectors.slack).toEqual({
@@ -110,6 +118,15 @@ describe('userConfig — loadUserConfig', () => {
       sendEnabled: false,
       privateChannels: false,
       directMessages: true,
+    })
+    expect(config.connectors.google).toEqual({
+      aiEnabled: true,
+      gmailEnabled: true,
+      gmailSendEnabled: false,
+      calendarEnabled: true,
+      calendarWriteEnabled: false,
+      driveEnabled: true,
+      sheetsWriteEnabled: false,
     })
   })
 

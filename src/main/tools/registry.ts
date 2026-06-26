@@ -67,6 +67,7 @@ export function isSecretBearingTool(name: string): boolean {
     name === 'ai.clearKey' ||
     name === 'google.setOAuthClient' ||
     name === 'google.exchangeCode' ||
+    name === 'google.connect' ||
     name === 'slack.connect'
   ) {
     return true

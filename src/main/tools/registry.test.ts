@@ -201,6 +201,7 @@ describe('ToolRegistry', () => {
       'slack.setToken',
       'google.setTokenBundle',
       'google.setOAuthClient',
+      'google.connect',
       'google.exchangeCode',
     ]) {
       tools.register({ name, description: 'Secret', execute: async () => ({ value: 'sk-secret' }) })
@@ -208,7 +209,7 @@ describe('ToolRegistry', () => {
     }
 
     const results = readTraceLines(dir).filter(l => l.kind === 'tool.result')
-    expect(results).toHaveLength(7)
+    expect(results).toHaveLength(8)
     for (const result of results) expect(result.payloadRef).toBeUndefined()
   })
 
