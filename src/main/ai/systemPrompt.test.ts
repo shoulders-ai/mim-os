@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { getSystemPrompt, resolveTemplateVars } from '@main/ai/systemPrompt.js'
+import { getSystemPrompt, PROJECT_LOG_MAX_CHARS, resolveTemplateVars } from '@main/ai/systemPrompt.js'
 
 describe('getSystemPrompt', () => {
   let dir: string
@@ -107,6 +107,28 @@ describe('getSystemPrompt', () => {
     const out = getSystemPrompt(dir)
     expect(out).toContain('Current sprint: fixing bugs')
     expect(out).not.toContain('{{AGENT_CONTEXT}}')
+  })
+
+  it('resolves {{PROJECT_LOG}} from .mim/log.md', () => {
+    writeFileSync(join(dir, 'AGENTS.md'), 'Log:\n{{PROJECT_LOG}}\nTools: {{TOOL_SET}}')
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    writeFileSync(join(dir, '.mim', 'log.md'), '# Log\n\n- 2026-06-26T10:00:00.000Z [user] Decided to ship the log prompt integration\n')
+    const out = getSystemPrompt(dir)
+    expect(out).toContain('Decided to ship the log prompt integration')
+    expect(out).not.toContain('{{PROJECT_LOG}}')
+  })
+
+  it('resolves {{PROJECT_LOG}} to a bounded tail', () => {
+    writeFileSync(join(dir, 'AGENTS.md'), 'Log:\n{{PROJECT_LOG}}\nTools: {{TOOL_SET}}')
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    writeFileSync(
+      join(dir, '.mim', 'log.md'),
+      `# Log\n\nOLD_MARKER ${'x'.repeat(PROJECT_LOG_MAX_CHARS + 50)} RECENT_MARKER`,
+    )
+    const out = getSystemPrompt(dir)
+    expect(out).toContain('RECENT_MARKER')
+    expect(out).not.toContain('OLD_MARKER')
+    expect(out).not.toContain('{{PROJECT_LOG}}')
   })
 
   it('leaves unknown template variables as-is', () => {

@@ -586,3 +586,11 @@ describe('workspaceContract — scaffoldWorkspace', () => {
     expect(gitignore.split('\n')).toContain('.mim/')
   })
 })
+
+describe('workspaceContract — default AGENTS.md', () => {
+  it('includes project log context and one concise logging instruction', () => {
+    expect(DEFAULT_AGENTS_MD).toContain('{{PROJECT_LOG}}')
+    expect(DEFAULT_AGENTS_MD).toContain('Use `log_append` only for durable activity notes')
+    expect(DEFAULT_AGENTS_MD).toContain('do not log routine progress or implementation chatter')
+  })
+})

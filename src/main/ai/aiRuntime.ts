@@ -511,7 +511,7 @@ export function createAiSdkTools({
     }),
 
     log_append: tool({
-      description: 'Append a short activity note to the optional workspace logbook at .mim/log.md.',
+      description: 'Append a short durable activity note to the optional workspace logbook at .mim/log.md.',
       inputSchema: z.object({ message: z.string().min(1) }),
       execute: async ({ message }) => call('log.append', { message }),
     }),

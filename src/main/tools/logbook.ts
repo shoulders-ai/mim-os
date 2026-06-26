@@ -8,7 +8,7 @@ function objectSchema(properties: Record<string, unknown>, required: string[] = 
 export function registerLogbookTools(tools: ToolRegistry, deps: LogbookDeps = {}): void {
   tools.register({
     name: 'log.append',
-    description: 'Append a human-readable activity entry to .mim/log.md.',
+    description: 'Append a short durable activity note to .mim/log.md.',
     inputSchema: objectSchema({ message: { type: 'string' } }, ['message']),
     execute: async (params, ctx) => {
       const path = tools.getWorkspacePath()

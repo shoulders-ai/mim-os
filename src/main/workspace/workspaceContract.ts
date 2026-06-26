@@ -162,6 +162,12 @@ When the user asks you to build a UI, create an app. Use plain HTML + JS with th
 
 {{AGENT_CONTEXT}}
 
+## Project log
+
+Use \`log_append\` only for durable activity notes that future work should see, such as decisions, handoffs, blockers, or commitments; do not log routine progress or implementation chatter.
+
+{{PROJECT_LOG}}
+
 ## Conventions
 
 - Make focused, reviewable changes.

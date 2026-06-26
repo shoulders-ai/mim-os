@@ -126,6 +126,7 @@ describe('InstructionsSettingsPanel', () => {
     expect(annotation).toBeTruthy()
     expect(annotation!.textContent).toContain('{{DATE_TODAY}}')
     expect(annotation!.textContent).toContain('{{TOOL_SET}}')
+    expect(annotation!.textContent).toContain('{{PROJECT_LOG}}')
   })
 
   it('shows default content and Save button when AGENTS.md does not exist', async () => {

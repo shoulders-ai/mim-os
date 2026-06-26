@@ -17,6 +17,7 @@ const TEMPLATE_VARS = [
   { name: '{{TOOL_SET}}', desc: 'available tools' },
   { name: '{{SKILL_CATALOG}}', desc: 'workspace skills' },
   { name: '{{AGENT_CONTEXT}}', desc: 'runtime workspace state' },
+  { name: '{{PROJECT_LOG}}', desc: 'workspace logbook tail' },
 ]
 
 async function load() {

@@ -70,7 +70,7 @@ export const MCP_TOOL_SPECS: McpToolSpec[] = [
   { name: 'search_files', mimName: 'search.files', description: 'Search for files by name or content' },
   { name: 'skill_list', mimName: 'skill.list', description: 'List available workspace skills' },
   { name: 'skill_get', mimName: 'skill.get', description: 'Get a skill definition' },
-  { name: 'log_append', mimName: 'log.append', description: 'Append an entry to the workspace log' },
+  { name: 'log_append', mimName: 'log.append', description: 'Append a durable activity note to the workspace log' },
   { name: 'workspace_info', mimName: 'workspace.info', description: 'Get workspace metadata' },
   { name: 'system_prompt', mimName: 'system.prompt', description: 'Get the resolved AI system prompt' },
 ]

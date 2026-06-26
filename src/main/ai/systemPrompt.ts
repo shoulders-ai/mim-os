@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
+import { readLogbook } from '@main/logbook.js'
 import { userHomeDir } from '@main/platform.js'
 import { createSkillLoader } from '@main/skills.js'
 import { loadUserConfig } from '@main/userConfig.js'
@@ -16,6 +17,8 @@ export interface PromptSkillMetadata {
   description: string
   tools?: string[]
 }
+
+export const PROJECT_LOG_MAX_CHARS = 6000
 
 function readFileSafe(path: string): string | null {
   try {
@@ -42,6 +45,9 @@ Cross-surface actions:
 
 Search:
 - search(query, scope?, file_pattern?, max_results?) — full-text search across workspace files and/or session message history. scope: "files", "sessions", or "all" (default). file_pattern: glob filter like "*.md".
+
+Project log:
+- log_append(message) — append a short durable activity note to .mim/log.md.
 
 Local recovery and sync:
 - history_list(path, include_folded?) — list local recovery versions for one file; folded by default so noisy save histories stay usable
@@ -177,6 +183,7 @@ export function getSystemPrompt(workspacePath?: string, options: SystemPromptOpt
       TOOL_SET: TOOL_CATALOG,
       SKILL_CATALOG: skillCatalogValue,
       AGENT_CONTEXT: agentContext,
+      PROJECT_LOG: projectLogContext(workspacePath),
     }
     return resolveTemplateVars(template, vars)
   }
@@ -203,6 +210,18 @@ export function getSystemPrompt(workspacePath?: string, options: SystemPromptOpt
   }
 
   return sections.join('\n\n\n')
+}
+
+function projectLogContext(workspacePath?: string): string {
+  if (!workspacePath) return 'No project log yet.'
+  try {
+    const log = readLogbook(workspacePath, { maxChars: PROJECT_LOG_MAX_CHARS })
+    const content = log.content.trim()
+    if (!log.exists || !content) return 'No project log yet.'
+    return log.truncated ? `[Most recent entries from .mim/log.md]\n${content}` : content
+  } catch {
+    return 'No project log yet.'
+  }
 }
 
 function skillCatalogSection(workspacePath?: string): string | null {
