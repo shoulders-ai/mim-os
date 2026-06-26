@@ -143,6 +143,7 @@ describe('agent sessions', () => {
       MIM_PORT: '54321',
       MIM_TOKEN: `mcp-token-for-${record.sessionId}`,
     })
+    expect(ptys[0].opts.shellIntegration).toBeUndefined()
     expect(mcpSessionIds).toEqual([record.sessionId])
     expect(ptyId).toBe(ptys[0].ptyId)
 

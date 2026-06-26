@@ -1,8 +1,9 @@
 import * as nodePty from 'node-pty'
-import { BrowserWindow } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import type { ToolRegistry } from '@main/tools/registry.js'
 import { defaultShell, userHomeDir } from '@main/platform.js'
 import { normalizePtySpawnCommand } from '@main/ptyCommand.js'
+import { preparePtyShellIntegration } from '@main/ptyShellIntegration.js'
 
 // Shared pty spawn helper. Scratch terminals (terminal.spawn) and agent
 // sessions (agents/agentSessions.ts) both go through spawnPtyProcess, so every
@@ -21,6 +22,7 @@ export interface PtySpawnOptions {
   // (agent sessions append scrollback and classify exits).
   onData?: (data: string) => void
   onExit?: (exitCode: number) => void
+  shellIntegration?: boolean
 }
 
 export interface PtyHandle {
@@ -41,12 +43,19 @@ export function writePty(id: number, data: string): void {
 export function spawnPtyProcess(options: PtySpawnOptions): PtyHandle {
   const id = nextId++
   const command = normalizePtySpawnCommand(options.file, options.args)
-  const pty = nodePty.spawn(command.file, command.args, {
+  const prepared = preparePtyShellIntegration({
+    enabled: options.shellIntegration === true,
+    file: command.file,
+    args: command.args,
+    env: { ...process.env, TERM: 'xterm-256color', ...options.env },
+    userDataDir: options.shellIntegration === true ? app.getPath('userData') : '',
+  })
+  const pty = nodePty.spawn(prepared.file, prepared.args, {
     name: 'xterm-256color',
     cols: options.cols ?? 80,
     rows: options.rows ?? 24,
     cwd: options.cwd,
-    env: { ...process.env, TERM: 'xterm-256color', ...options.env } as Record<string, string>,
+    env: prepared.env,
   })
 
   instances.set(id, pty)
@@ -85,7 +94,7 @@ export function registerPtyTools(tools: ToolRegistry): void {
       const cols = (params.cols as number) || 80
       const rows = (params.rows as number) || 24
 
-      const handle = spawnPtyProcess({ file: shell, args: [], cwd, cols, rows })
+      const handle = spawnPtyProcess({ file: shell, args: [], cwd, cols, rows, shellIntegration: true })
 
       return { id: handle.ptyId }
     }
