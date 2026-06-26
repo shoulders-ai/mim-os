@@ -91,7 +91,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Main Process — Web & Content
 
-- **Web tools.** `web.search` (Exa), `web.read` (fetch + Readability), `web.readAuto` (Chromium + Research Browser fallback), `web.readRendered`, `web.readResearch`. `src/main/web/`, `tools/web.ts`. Docs: [web-reading.md](web-reading.md).
+- **Web tools.** `web.search` (Exa) and `web.read` (single workhorse reader: PDF extraction, stateless Chromium, optional Research Browser state). `src/main/web/`, `tools/web.ts`. Docs: [web-reading.md](web-reading.md).
 - **HTML-to-Markdown.** Pure parser shared by web readers and DOCX extraction. `src/main/html/markdown.ts`. Docs: [html-markdown.md](html-markdown.md).
 - **Document import.** DOCX/XLSX/BibTeX/PDF → Markdown. `src/main/documents/importMarkdown.ts`, `tools/documents.ts`.
 - **Document export.** Markdown → PDF (Chromium `printToPDF`) and → DOCX (pure JS). `src/main/export/`, `tools/export.ts`. Docs: [export.md](export.md).
@@ -203,12 +203,12 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [activity-review-rethink.md](activity-review-rethink.md) | Monitor surface design rationale |
 | [brand/README.md](brand/README.md) | Logo toolkit and brand assets |
 
-### Proposals (not yet implemented)
+### Proposals
 
-- [proposals/integration-architecture.md](proposals/integration-architecture.md) — reorganize integration code by service directory.
+- [proposals/integration-architecture.md](proposals/integration-architecture.md) — implemented reorganization of integration code by service directory.
 - [proposals/slack-connector.md](proposals/slack-connector.md) — productize Slack into a policy-controlled connector.
 - [proposals/google-connector.md](proposals/google-connector.md) — productize Google into a policy-controlled connector.
-- [web-read-workhorse.md](web-read-workhorse.md) — collapse web reading into one model-facing tool.
+- [proposals/web-read-workhorse.md](proposals/web-read-workhorse.md) — implemented collapse of web reading into one model-facing tool.
 
 ## File Tree
 
@@ -277,7 +277,7 @@ src/
       secrets.ts                # OS keychain boundary
       http.ts                   # HTTP boundary
       slack/                    # Slack client, tools, AI tools, policy
-      google/                   # Google client, tools, AI tools
+      google/                   # Google client, tools, AI tools, policy
     comments/model.ts           # Inline comment parser
     html/markdown.ts            # HTML-to-Markdown parser
     documents/

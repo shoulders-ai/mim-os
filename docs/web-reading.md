@@ -1,39 +1,63 @@
 # Web Reading
 
-Mim has two web-reading layers:
+Mim exposes one model-facing web reader: `web_read`, backed by the kernel tool
+`web.read`.
 
-- `web.read` is the direct HTTP reader. It fetches HTML/plain text or selectable PDFs, blocks private/loopback URLs, extracts HTML with Readability plus the shared HTML-to-Markdown parser, and extracts PDFs locally with `pdfjs-dist`.
-- `web.readAuto` is the default agent reader for websites. It renders the page in Chromium, waits adaptively for content/readiness, classifies clear blockers, falls back to the persistent Research Browser profile for configured sources, and can return a recent workspace cache entry when the live page needs attention.
+`web.read` accepts an `http` or `https` URL, blocks private and loopback
+addresses, follows redirects manually so every hop is checked by the same URL
+policy, and returns a cleaned text payload for the agent to interpret. It does
+not classify pages as blocked, logged out, consent-gated, partial, or ready.
+
+## Routing
+
+`web.read` has predictable mechanical routing:
+
+- Selectable PDFs use local PDF extraction through `pdfjs-dist`. A URL is treated
+  as a PDF when its path ends in `.pdf` or a best-effort `HEAD` request returns a
+  PDF content type. Failed `HEAD` requests fall through to rendered reading.
+- Normal pages render in a hidden stateless Chromium window, capture visible
+  hydrated DOM through `src/main/web/renderedCapture.ts`, then convert the
+  captured HTML with the shared HTML-to-Markdown parser.
+- Passing `stateful: true` renders through the Research Browser profile after a
+  domain grant exists. Use this only when the user has asked for, or approved,
+  saved site state such as login cookies.
+
+The returned shape is intentionally thin: `url`, `final_url`, `title`,
+`content`, `content_length`, `source`, `elapsed_ms`, and chunk continuation fields
+when the output is truncated. Hidden fallback attempts, page verdicts, cache
+metadata, and capture diagnostics are not part of the model-facing contract.
 
 ## Research Browser
 
-The Research Browser uses the persistent Electron partition `persist:mim-research`. The user grants domains in Settings > Connections, opens the setup browser when a source needs login/consent/session state, and the agent later reads the same source asynchronously through the saved browser profile.
+The Research Browser uses the persistent Electron partition
+`persist:mim-research`. Settings > Connections lets the user grant domains,
+open a visible setup browser for those domains, remove grants, and clear the
+profile.
 
-Source state is stored in `.mim/settings.json`:
+Workspace Research Browser state in `.mim/settings.json` contains:
 
-- `allowedDomains[]` is the grant list.
-- `sources[]` is the health list shown in Settings > Connections.
-- Source status is `ready`, `needs_attention`, or `not_configured`.
+- `enabled`: whether Research Browser features are enabled for the workspace.
+- `allowedDomains[]`: normalized grant patterns.
 
-`web.readAuto` records blocked unconfigured sources with `source_not_configured`, `source_domain`, and `setup_url`. Configured sources that still render login, consent, captcha, security verification, site errors, or truly empty captures become `needs_attention`.
+Legacy `researchBrowser.sources` data is ignored and dropped on the next
+Research Browser settings write.
 
-## Partial Captures
+## Security
 
-Rendered reads do not treat readiness timeouts as hard failures. If a page is still changing, exposes very little content, or the capture budget ends before readiness is certain, the reader returns the best captured Markdown with `status: "partial"`, `attention_required: false`, and `capture` evidence:
+Fetch and Chromium-rendered reads share the same URL policy. Initial URLs and
+redirect targets must be public `http` or `https` URLs. Hidden Chromium sessions
+also install a request blocker so subresource requests to private, loopback, or
+otherwise disallowed targets are cancelled.
 
-- `capture.status` is `complete` or `partial`.
-- `capture.confidence` is `high`, `medium`, or `low`.
-- `capture.reason` explains why readiness was uncertain.
-- `capture.signals` includes elapsed time, timeout/stability flags, visible text length, and visible link/button/form/table/heading/image counts.
-
-The agent should inspect this evidence, answer from the captured content when reasonable, or retry with a larger `timeout_ms` for slow SPAs. A partial capture alone is not a reason to interrupt the user. Research Browser setup is the right next step only when the evidence points to missing access, session state, consent, or authentication.
-
-## Cache
-
-Successful complete default reads are cached in `.mim/web-read-cache.json`. Partial captures are not cached as clean reads. A cache entry is used only after a fresh live read needs attention and only for default reads without link/image extraction. Cached fallback returns `source: "cache"` plus `cache.cached_at` and adds a cache attempt after the live attempt. Source health still records the live blocker, so the UI can surface setup work without interrupting the agent response.
-
-The cache is bounded, URL-normalized without fragments, and currently expires after six hours.
+Package backends cannot call `web.read`, `web.search`, or Research Browser
+kernel tools in runtime v1. Packages use `ctx.http` with declared host
+permissions.
 
 ## Evaluation
 
-`src/main/web/webReadEvaluation.test.ts` is the deterministic 50-site web-reading evaluation set. It uses real domains with synthetic fixture HTML so CI stays stable while covering public content, consent walls, login pages, low-content SPA shells such as Linear, captcha pages, security checks, site errors, partial captures, and configured Research Browser recovery.
+`src/main/web/webReadEvaluation.test.ts` is the deterministic 50-site
+web-reading evaluation set. It uses real domains with synthetic fixture HTML so
+CI stays stable while covering public content, consent walls, login pages, SPA
+shells, captcha pages, security checks, site errors, and pages with thin but
+still useful content. The evaluation asserts that `web.read` returns content for
+the agent to interpret rather than deterministic page-status verdicts.

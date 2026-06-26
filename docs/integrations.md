@@ -99,32 +99,64 @@ Source:
 - Client: `src/main/integrations/google/client.ts`
 - Tools: `src/main/integrations/google/tools.ts`
 - AI tools: `src/main/integrations/google/aiTools.ts`
-- Tests: `src/main/integrations/google/client.test.ts`, `src/main/integrations/google/tools.test.ts`, `src/main/integrations/google/aiTools.test.ts`
+- Policy: `src/main/integrations/google/policy.ts`
+- Tests: `src/main/integrations/google/client.test.ts`, `src/main/integrations/google/tools.test.ts`, `src/main/integrations/google/aiTools.test.ts`, `src/main/integrations/google/policy.test.ts`
+- Settings UI: `src/renderer/components/settings/ConnectionsSettingsPanel.vue`
 
 OAuth tools:
 
 - `google.setOAuthClient`
 - `google.setTokenBundle`
+- `google.connect`, `google.disconnect`
 - `google.status`
 - `google.authUrl`
 - `google.exchangeCode`
 
-There is no local OAuth callback listener yet. `google.authUrl` returns the consent URL, and `google.exchangeCode` stores tokens from a code copied out of the redirect URL.
+There is no local OAuth callback listener yet. `google.authUrl` returns the consent URL, `google.exchangeCode` stores tokens from a code copied out of the redirect URL, and `google.connect` stores a raw token bundle while caching userinfo profile metadata.
 
 Gmail and Calendar tools:
 
-- `gmail.inbox`, `gmail.search`, `gmail.thread`, `gmail.send`
+- `gmail.search`, `gmail.read`, `gmail.send`
 - `calendar.events`, `calendar.create`
 
 Drive, Docs, and Sheets tools:
 
 - `drive.search`, `drive.meta`
 - `docs.read`
-- `sheets.read`
+- `sheets.meta`, `sheets.read`, `sheets.write`, `sheets.append`
 
-Chat exposes Gmail, Calendar, Drive, Docs, and Sheets read tools plus `gmail_send` and `calendar_create`. The two outbound chat tools are high risk and go through the main-process approval gate.
+### Connector Policy
 
-Default Google OAuth scopes are read-only for Gmail, Drive, Docs, and Sheets, plus the explicit outbound scopes `gmail.send` and `calendar.events`.
+Google AI access is governed by a 7-boolean connector policy:
+
+- `aiEnabled` — expose Google tools to AI chat (default: false)
+- `gmailEnabled` — expose `gmail_search` and `gmail_read` (default: false)
+- `gmailSendEnabled` — expose `gmail_send` (default: false)
+- `calendarEnabled` — expose `calendar_events` (default: false)
+- `calendarWriteEnabled` — expose `calendar_create` (default: false)
+- `driveEnabled` — expose Drive, Docs, and Sheets read tools (default: false)
+- `sheetsWriteEnabled` — expose `sheets_write` and `sheets_append` (default: false)
+
+Policy resolves per-field: workspace `.mim/settings.json` → user-global `~/.mim/config.yaml` → defaults. Both locations use the `connectors.google` key.
+
+Settings > Connections provides connection status, raw-token connect/disconnect controls, granted scope summaries, and policy toggles.
+
+### AI Tool Exposure
+
+Chat tools are conditionally included based on policy, connection state, and granted OAuth scopes:
+
+- `gmail_search`, `gmail_read` — visible when connected, `aiEnabled` and `gmailEnabled` are true, and the token grants Gmail read scope
+- `gmail_send` — additionally requires `gmailSendEnabled` and Gmail send scope
+- `calendar_events` — visible when `calendarEnabled` is true and the token grants Calendar read/write scope
+- `calendar_create` — additionally requires `calendarWriteEnabled` and Calendar write scope
+- `drive_search`, `docs_read`, `sheets_meta`, `sheets_read` — visible when `driveEnabled` is true and the token grants Drive or Sheets read scope as appropriate
+- `sheets_write`, `sheets_append` — additionally require `sheetsWriteEnabled` and Sheets write scope
+
+Backend policy enforcement runs in the tool execution layer for the `ai` actor, so direct calls cannot bypass disabled policy flags. User and system actors are not filtered by connector policy.
+
+### Trace Capture
+
+Google content tools set `captureResult: false`, including Gmail, Calendar reads, Drive/Docs, and Sheets read/write tools. Secret-bearing Google setup tools (`google.setOAuthClient`, `google.setTokenBundle`, `google.exchangeCode`, `google.connect`) never capture params or results.
 
 ## Permission Rules
 
@@ -133,9 +165,9 @@ Policies live in `src/main/security/gate.ts`. Whether a tool prompts is decided 
 approval card's caution styling. All Slack/Google integration tools are
 `external`, so they prompt in Normal and Strict.
 
-- Integration reads (inbox, search, history, channels, replies, events, drive/docs/sheets) are `external` → approval in Normal and Strict.
-- Outbound send/create tools (`gmail.send`, `calendar.create`, kernel `slack.send`) are `external` and additionally `high` risk, so the card adds a caution treatment.
-- Secret setup and OAuth exchange tools mutate stored credentials; `google.exchangeCode` is `external`. `slack.connect` and `slack.disconnect` are `secrets`/`high`.
+- Integration reads (search, history, channels, replies, events, Gmail/Drive/Docs/Sheets reads) are `external` → approval in Normal and Strict.
+- Outbound send/create/write tools (`gmail.send`, `calendar.create`, `sheets.write`, `sheets.append`, kernel `slack.send`) are `external` and additionally `high` risk, so the card adds a caution treatment.
+- Secret setup and OAuth exchange tools mutate stored credentials; `google.exchangeCode` is `external`. `slack.connect`, `slack.disconnect`, `google.connect`, and `google.disconnect` are `secrets`/`high`.
 - Status checks (`slack.status`, `google.status`) are treated as reads and do not prompt.
 - Packages cannot call personal Slack or Google integration tools in runtime v1.
 
