@@ -34,11 +34,29 @@ vi.mock('@main/ai/ai.js', () => ({
   resolveKey: vi.fn(() => ({ key: 'sk-test', source: 'env' })),
 }))
 
-function mockRegistry(workspacePath: string | null = null) {
+function mockRegistry(
+  workspacePath: string | null = null,
+  opts: {
+    googleStatus?: Record<string, unknown>
+  } = {},
+) {
   const calls: Array<{ name: string; params: Record<string, unknown>; ctx: Record<string, unknown> }> = []
   const tools = {
     call: vi.fn(async (name: string, params: Record<string, unknown>, ctx: Record<string, unknown>) => {
       calls.push({ name, params, ctx })
+      if (name === 'google.status') {
+        return opts.googleStatus ?? {
+          configured: true,
+          tokenConfigured: true,
+          grantedScopes: [
+            'https://www.googleapis.com/auth/gmail.readonly',
+            'https://www.googleapis.com/auth/gmail.send',
+            'https://www.googleapis.com/auth/calendar.events',
+            'https://www.googleapis.com/auth/drive.readonly',
+            'https://www.googleapis.com/auth/spreadsheets',
+          ],
+        }
+      }
       return { ok: true, name, params }
     }),
     getWorkspacePath: () => workspacePath,
@@ -52,6 +70,15 @@ function withSlackPolicy(policy: Record<string, unknown>): string {
   mkdirSync(join(dir, '.mim'), { recursive: true })
   writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
     connectors: { slack: policy },
+  }))
+  return dir
+}
+
+function withGooglePolicy(policy: Record<string, unknown>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mim-ai-test-'))
+  mkdirSync(join(dir, '.mim'), { recursive: true })
+  writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
+    connectors: { google: policy },
   }))
   return dir
 }
@@ -92,7 +119,7 @@ describe('central AI runtime tools', () => {
 
   it('executes chat tools through the main registry as the AI actor', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
     expect(aiTools.fs_read.description).toContain('Returns total_lines')
     expect(aiTools.fs_read.inputSchema).toBeDefined()
@@ -110,7 +137,7 @@ describe('central AI runtime tools', () => {
 
   it('exposes inline comment review tools on the chat profile', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
     expect(aiTools.comments_list.inputSchema).toBeDefined()
     expect(aiTools.comments_add.inputSchema).toBeDefined()
@@ -145,7 +172,7 @@ describe('central AI runtime tools', () => {
 
   it('exposes the registry and install tools on the chat profile', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
     expect(aiTools.registry_list).toBeDefined()
     expect(aiTools.package_readme).toBeDefined()
@@ -172,7 +199,7 @@ describe('central AI runtime tools', () => {
 
   it('exposes package authoring dev-loop tools on the chat profile', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
     expect(aiTools.package_create.description).toContain('headless')
     expect(aiTools.package_validate).toBeDefined()
@@ -254,7 +281,7 @@ describe('central AI runtime tools', () => {
 
   it('exposes trace query and stats tools on the chat profile', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
     expect(aiTools.trace_query).toBeDefined()
     expect(aiTools.trace_stats).toBeDefined()
@@ -413,46 +440,41 @@ describe('central AI runtime tools', () => {
     ])
   })
 
-  it('exposes web readers with PDF and automatic browser fallback guidance', async () => {
+  it('exposes the single web_read workhorse with stateful browser guidance', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
+    expect(aiTools.web_read.description).toContain('rendered')
     expect(aiTools.web_read.description).toContain('PDF')
-    expect(aiTools.web_read_auto.description).toContain('Research Browser')
-    expect(aiTools.web_read_auto.description).toContain('cache')
-    expect(aiTools.web_search.description).toContain('web_read_auto')
-    expect(aiTools.web_research_status.description).toContain('source')
-    expect(aiTools.web_read_auto.inputSchema).toBeDefined()
-    expect(aiTools.web_research_status.inputSchema).toBeDefined()
+    expect(aiTools.web_read.description).toContain('stateful')
+    expect(aiTools.web_read.inputSchema).toBeDefined()
+    expect(aiTools.web_search.description).toContain('web_read')
+    expect(aiTools.web_search.description).not.toContain('web_read_auto')
+    expect(aiTools.web_read_auto).toBeUndefined()
+    expect(aiTools.web_read_rendered).toBeUndefined()
+    expect(aiTools.web_read_research).toBeUndefined()
+    expect(aiTools.web_research_status).toBeUndefined()
 
-    await aiTools.web_read_auto.execute?.({
+    await aiTools.web_read.execute?.({
       url: 'https://example.com/app',
       max_chars: 10_000,
-      prefer_research: true,
+      stateful: true,
     }, {})
 
     expect(calls.at(-1)).toEqual({
-      name: 'web.readAuto',
+      name: 'web.read',
       params: {
         url: 'https://example.com/app',
         max_chars: 10_000,
-        prefer_research: true,
+        stateful: true,
       },
-      ctx: { actor: 'ai', sessionId: 's1' },
-    })
-
-    await aiTools.web_research_status.execute?.({}, {})
-
-    expect(calls.at(-1)).toEqual({
-      name: 'web.research.status',
-      params: {},
       ctx: { actor: 'ai', sessionId: 's1' },
     })
   })
 
   it('converts enabled package tools into dynamic AI SDK tools with sanitized keys', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({
+    const aiTools = await createAiSdkTools({
       tools,
       profile: 'chat',
       sessionId: 's1',
@@ -505,7 +527,7 @@ describe('central AI runtime tools', () => {
       }
     }) as any
 
-    const aiTools = createAiSdkTools({
+    const aiTools = await createAiSdkTools({
       tools,
       profile: 'chat',
       sessionId: 's1',
@@ -596,7 +618,7 @@ describe('central AI runtime tools', () => {
 
 	  it('routes issue package tools through package.tools.execute', async () => {
 	    const { tools, calls } = mockRegistry()
-	    const aiTools = createAiSdkTools({
+	    const aiTools = await createAiSdkTools({
 	      tools,
 	      profile: 'chat',
 	      sessionId: 's1',
@@ -648,7 +670,7 @@ describe('central AI runtime tools', () => {
 
   it('routes chat file mutations to real filesystem tools', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
     await aiTools.fs_write.execute?.({ path: 'full.md', content: 'whole file' }, {})
     await aiTools.fs_edit.execute?.({
@@ -685,7 +707,7 @@ describe('central AI runtime tools', () => {
 
   it('exposes logbook append as a chat tool', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
     expect(aiTools.log_append.description).toContain('logbook')
     expect(aiTools.log_append.inputSchema).toBeDefined()
@@ -701,9 +723,9 @@ describe('central AI runtime tools', () => {
     ])
   })
 
-  it('hides Slack tools when aiEnabled is false (default)', () => {
+  it('hides Slack tools when aiEnabled is false (default)', async () => {
     const { tools } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
     expect(aiTools.slack_search).toBeUndefined()
     expect(aiTools.slack_history).toBeUndefined()
     expect(aiTools.slack_channels).toBeUndefined()
@@ -715,7 +737,7 @@ describe('central AI runtime tools', () => {
     const dir = withSlackPolicy({ aiEnabled: true })
     try {
       const { tools, calls } = mockRegistry(dir)
-      const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+      const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
       expect(aiTools.slack_search).toBeDefined()
       expect(aiTools.slack_history).toBeDefined()
@@ -749,11 +771,11 @@ describe('central AI runtime tools', () => {
     }
   })
 
-  it('exposes slack_send only when sendEnabled is true', () => {
+  it('exposes slack_send only when sendEnabled is true', async () => {
     const dir = withSlackPolicy({ aiEnabled: true, sendEnabled: true })
     try {
       const { tools } = mockRegistry(dir)
-      const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+      const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
       expect(aiTools.slack_send).toBeDefined()
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -761,106 +783,137 @@ describe('central AI runtime tools', () => {
   })
 
   it('exposes Gmail and Calendar read tools to chat', async () => {
-    const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const dir = withGooglePolicy({ aiEnabled: true, gmailEnabled: true, calendarEnabled: true })
+    try {
+      const { tools, calls } = mockRegistry(dir)
+      const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+      calls.length = 0
 
-    await aiTools.gmail_inbox.execute?.({ limit: 3 }, {})
-    await aiTools.gmail_search.execute?.({ query: 'from:rob', limit: 5 }, {})
-    await aiTools.calendar_events.execute?.({
-      from: '2026-06-01T00:00:00Z',
-      to: '2026-06-02T00:00:00Z',
-      limit: 10,
-    }, {})
+      expect(aiTools.gmail_inbox).toBeUndefined()
+      await aiTools.gmail_search.execute?.({ query: 'from:rob', limit: 5 }, {})
+      await aiTools.gmail_read.execute?.({ messageId: 'm1' }, {})
+      await aiTools.calendar_events.execute?.({
+        from: '2026-06-01T00:00:00Z',
+        to: '2026-06-02T00:00:00Z',
+        limit: 10,
+      }, {})
 
-    expect(calls).toEqual([
-      {
-        name: 'gmail.inbox',
-        params: { limit: 3 },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-      {
-        name: 'gmail.search',
-        params: { query: 'from:rob', limit: 5 },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-      {
-        name: 'calendar.events',
-        params: { from: '2026-06-01T00:00:00Z', to: '2026-06-02T00:00:00Z', limit: 10 },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-    ])
+      expect(calls).toEqual([
+        {
+          name: 'gmail.search',
+          params: { query: 'from:rob', limit: 5 },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+        {
+          name: 'gmail.read',
+          params: { messageId: 'm1' },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+        {
+          name: 'calendar.events',
+          params: { from: '2026-06-01T00:00:00Z', to: '2026-06-02T00:00:00Z', limit: 10 },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('exposes Gmail send and Calendar create tools to chat through the gate', async () => {
-    const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const dir = withGooglePolicy({
+      aiEnabled: true,
+      gmailEnabled: true,
+      gmailSendEnabled: true,
+      calendarEnabled: true,
+      calendarWriteEnabled: true,
+    })
+    try {
+      const { tools, calls } = mockRegistry(dir)
+      const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+      calls.length = 0
 
-    await aiTools.gmail_send.execute?.({
-      to: 'person@example.com',
-      subject: 'Hello',
-      body: 'Body',
-    }, {})
-    await aiTools.calendar_create.execute?.({
-      summary: 'Planning',
-      start: '2026-06-01T09:00:00+02:00',
-      end: '2026-06-01T09:30:00+02:00',
-      attendees: ['a@example.com'],
-    }, {})
+      await aiTools.gmail_send.execute?.({
+        to: 'person@example.com',
+        subject: 'Hello',
+        body: 'Body',
+      }, {})
+      await aiTools.calendar_create.execute?.({
+        summary: 'Planning',
+        start: '2026-06-01T09:00:00+02:00',
+        end: '2026-06-01T09:30:00+02:00',
+        attendees: ['a@example.com'],
+      }, {})
 
-    expect(calls).toEqual([
-      {
-        name: 'gmail.send',
-        params: { to: 'person@example.com', subject: 'Hello', body: 'Body' },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-      {
-        name: 'calendar.create',
-        params: {
-          summary: 'Planning',
-          start: '2026-06-01T09:00:00+02:00',
-          end: '2026-06-01T09:30:00+02:00',
-          attendees: ['a@example.com'],
+      expect(calls).toEqual([
+        {
+          name: 'gmail.send',
+          params: { to: 'person@example.com', subject: 'Hello', body: 'Body' },
+          ctx: { actor: 'ai', sessionId: 's1' },
         },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-    ])
+        {
+          name: 'calendar.create',
+          params: {
+            summary: 'Planning',
+            start: '2026-06-01T09:00:00+02:00',
+            end: '2026-06-01T09:30:00+02:00',
+            attendees: ['a@example.com'],
+          },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('exposes Drive, Docs, and Sheets read tools to chat', async () => {
-    const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const dir = withGooglePolicy({ aiEnabled: true, driveEnabled: true })
+    try {
+      const { tools, calls } = mockRegistry(dir)
+      const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+      calls.length = 0
 
-    await aiTools.drive_search.execute?.({ query: 'budget' }, {})
-    await aiTools.docs_read.execute?.({ fileId: 'doc-1' }, {})
-    await aiTools.sheets_read.execute?.({ spreadsheetId: 'sheet-1', range: 'A1:B2' }, {})
+      await aiTools.drive_search.execute?.({ query: 'budget' }, {})
+      await aiTools.docs_read.execute?.({ fileId: 'doc-1' }, {})
+      await aiTools.sheets_meta.execute?.({ spreadsheetId: 'sheet-1' }, {})
+      await aiTools.sheets_read.execute?.({ spreadsheetId: 'sheet-1', range: 'A1:B2' }, {})
 
-    expect(calls).toEqual([
-      {
-        name: 'drive.search',
-        params: { query: 'budget' },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-      {
-        name: 'docs.read',
-        params: { fileId: 'doc-1' },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-      {
-        name: 'sheets.read',
-        params: { spreadsheetId: 'sheet-1', range: 'A1:B2' },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-    ])
+      expect(calls).toEqual([
+        {
+          name: 'drive.search',
+          params: { query: 'budget' },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+        {
+          name: 'docs.read',
+          params: { fileId: 'doc-1' },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+        {
+          name: 'sheets.meta',
+          params: { spreadsheetId: 'sheet-1' },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+        {
+          name: 'sheets.read',
+          params: { spreadsheetId: 'sheet-1', range: 'A1:B2' },
+          ctx: { actor: 'ai', sessionId: 's1' },
+        },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
-  it('keeps ghost profile free of workspace mutation tools', () => {
+  it('keeps ghost profile free of workspace mutation tools', async () => {
     const { tools } = mockRegistry()
-    expect(createAiSdkTools({ tools, profile: 'ghost', sessionId: 's1' })).toEqual({})
+    expect(await createAiSdkTools({ tools, profile: 'ghost', sessionId: 's1' })).toEqual({})
   })
 
   it('returns inline suggest_edit output in the shape consumed by InlineAI', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({ tools, profile: 'inline', sessionId: 's1' })
+    const aiTools = await createAiSdkTools({ tools, profile: 'inline', sessionId: 's1' })
 
     expect(aiTools.suggest_edit.description).toContain('Suggest replacement text')
     expect(aiTools.suggest_edit.inputSchema).toBeDefined()
@@ -963,7 +1016,7 @@ describe('central AI runtime tools', () => {
 
   it('sanitizes dotted package tool names to valid SDK keys and executes with original name', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({
+    const aiTools = await createAiSdkTools({
       tools,
       profile: 'chat',
       sessionId: 's1',
@@ -996,7 +1049,7 @@ describe('central AI runtime tools', () => {
 
   it('does not let a package tool shadow a static core tool', async () => {
     const { tools, calls } = mockRegistry()
-    const aiTools = createAiSdkTools({
+    const aiTools = await createAiSdkTools({
       tools,
       profile: 'chat',
       sessionId: 's1',

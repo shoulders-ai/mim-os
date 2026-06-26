@@ -15,6 +15,7 @@ import {
 import { z } from 'zod'
 import { loadRegistry, resolveKey } from '@main/ai/ai.js'
 import { buildGoogleAiTools } from '@main/integrations/google/aiTools.js'
+import { readGooglePolicy, type GoogleConnectorPolicy } from '@main/integrations/google/policy.js'
 import { buildSlackAiTools } from '@main/integrations/slack/aiTools.js'
 import { readSlackPolicy } from '@main/integrations/slack/policy.js'
 import { buildProviderOptions, type ModelConfig } from '@main/ai/providerOptions.js'
@@ -155,7 +156,7 @@ export function createAiRuntime({ tools }: AiRuntimeOptions) {
   }
 }
 
-export function createAiSdkTools({
+export async function createAiSdkTools({
   tools,
   profile,
   sessionId,
@@ -208,63 +209,21 @@ export function createAiSdkTools({
     }),
 
     web_read: tool({
-      description: 'Fetch an HTML/plain-text page or selectable PDF URL and return cleaned, readable text content. HTML pages use Mozilla Readability; PDFs use local text extraction. Returns title, markdown/text content, excerpt, byline, siteName, and PDF page metadata when applicable.',
+      description: 'Read a URL and return cleaned markdown content. Selectable PDFs use local text extraction; ordinary web pages are rendered in Chromium so JavaScript-hydrated content is captured. Set stateful=true only when the user has configured that domain in the persistent Research Browser profile for login, consent, or normal browser state.',
       inputSchema: z.object({
         url: z.string().url(),
-        max_chars: z.number().int().positive().optional().describe('Maximum characters to return (default 80000)'),
-        timeout_ms: z.number().int().positive().optional().describe('Fetch timeout in milliseconds (default 15000)'),
+        stateful: z.boolean().optional().describe('Use the persistent Research Browser profile for granted domains'),
+        max_chars: z.number().int().positive().optional().describe('Target maximum characters for the returned chunk (default 100000)'),
+        start_from_char: z.number().int().nonnegative().optional().describe('Continue reading from this character offset when a prior result was truncated'),
+        extract_links: z.boolean().optional().describe('Preserve link URLs in Markdown'),
+        extract_images: z.boolean().optional().describe('Preserve image URLs in Markdown'),
+        timeout_ms: z.number().int().positive().optional().describe('Render/fetch timeout in milliseconds (default 30000)'),
       }),
       execute: async (params) => call('web.read', params),
     }),
 
-    web_read_auto: tool({
-      description: 'Read a URL through the best available browser reader. Uses rendered Chromium first, then quietly falls back to the persistent Research Browser profile for configured sources when stateless rendering hits consent, login, captcha, security verification, empty capture, or render failure. If readiness is uncertain it returns status="partial" with content and capture signals; retry with a higher timeout_ms for slow SPAs. If a recent complete read exists, it can return source="cache" with cache.cached_at after a live blocker. Returns content plus source/status/attention_required/attempts.',
-      inputSchema: z.object({
-        url: z.string().url(),
-        max_chars: z.number().int().positive().optional().describe('Target maximum characters for the returned chunk (default 100000)'),
-        start_from_char: z.number().int().nonnegative().optional().describe('Continue reading from this character offset when a prior result was truncated'),
-        extract_links: z.boolean().optional().describe('Preserve link URLs in Markdown'),
-        extract_images: z.boolean().optional().describe('Preserve image URLs in Markdown'),
-        timeout_ms: z.number().int().positive().optional().describe('Render timeout in milliseconds (default 30000)'),
-        prefer_research: z.boolean().optional().describe('Use the Research Browser profile first when the domain is configured'),
-      }),
-      execute: async (params) => call('web.readAuto', params),
-    }),
-
-    web_read_rendered: tool({
-      description: 'Render a URL in Chromium and return cleaned markdown from the hydrated page with capture confidence/signals. Use for JavaScript-rendered sites or when web_read misses content. Supports chunk continuation with start_from_char and longer timeout_ms for slow SPAs.',
-      inputSchema: z.object({
-        url: z.string().url(),
-        max_chars: z.number().int().positive().optional().describe('Target maximum characters for the returned chunk (default 100000)'),
-        start_from_char: z.number().int().nonnegative().optional().describe('Continue reading from this character offset when a prior result was truncated'),
-        extract_links: z.boolean().optional().describe('Preserve link URLs in Markdown'),
-        extract_images: z.boolean().optional().describe('Preserve image URLs in Markdown'),
-        timeout_ms: z.number().int().positive().optional().describe('Render timeout in milliseconds (default 30000)'),
-      }),
-      execute: async (params) => call('web.readRendered', params),
-    }),
-
-    web_read_research: tool({
-      description: 'Read a URL through the persistent Research Browser profile, using previously granted domain access and saved cookies/session state. Use for sources that need login, consent, or normal browser state. Returns cleaned markdown plus status/attention_required when the page is still blocked.',
-      inputSchema: z.object({
-        url: z.string().url(),
-        max_chars: z.number().int().positive().optional().describe('Target maximum characters for the returned chunk (default 100000)'),
-        start_from_char: z.number().int().nonnegative().optional().describe('Continue reading from this character offset when a prior result was truncated'),
-        extract_links: z.boolean().optional().describe('Preserve link URLs in Markdown'),
-        extract_images: z.boolean().optional().describe('Preserve image URLs in Markdown'),
-        timeout_ms: z.number().int().positive().optional().describe('Render timeout in milliseconds (default 30000)'),
-      }),
-      execute: async (params) => call('web.readResearch', params),
-    }),
-
-    web_research_status: tool({
-      description: 'Return Research Browser source status: enabled state, granted domains, source readiness/attention state, last read status, reasons, and desktop profile availability.',
-      inputSchema: z.object({}),
-      execute: async () => call('web.research.status', {}),
-    }),
-
     web_search: tool({
-      description: 'Search the web via Exa and return results with title, URL, and snippet. Requires an Exa API key (Settings → Models → Integrations). Use web_read_auto to fetch full content of interesting website results; use web_read for direct HTML/plain-text/PDF URLs.',
+      description: 'Search the web via Exa and return results with title, URL, and snippet. Requires an Exa API key (Settings → Models → Integrations). Use web_read to fetch full content from interesting results.',
       inputSchema: z.object({
         query: z.string().min(1),
         max_results: z.number().int().positive().max(20).optional().describe('Maximum results (default 10)'),
@@ -273,7 +232,8 @@ export function createAiSdkTools({
     }),
   }
 
-  const googleTools = buildGoogleAiTools(call)
+  const googlePolicy = readGooglePolicy(tools.getWorkspacePath())
+  const googleTools = buildGoogleAiTools(call, await resolveGoogleAiToolState(call, googlePolicy))
 
   if (profile === 'inline') {
     return {
@@ -678,6 +638,29 @@ export function createAiSdkTools({
   return staticTools
 }
 
+async function resolveGoogleAiToolState(
+  call: (name: string, params?: Record<string, unknown>) => Promise<unknown>,
+  policy: GoogleConnectorPolicy,
+) {
+  if (!policy.aiEnabled) return { policy, connected: false, grantedScopes: [] }
+  try {
+    const status = await call('google.status', {}) as {
+      configured?: boolean
+      tokenConfigured?: boolean
+      grantedScopes?: unknown
+    }
+    return {
+      policy,
+      connected: status.configured === true || status.tokenConfigured === true,
+      grantedScopes: Array.isArray(status.grantedScopes)
+        ? status.grantedScopes.filter((scope): scope is string => typeof scope === 'string')
+        : [],
+    }
+  } catch {
+    return { policy, connected: false, grantedScopes: [] }
+  }
+}
+
 export function createSkillActiveToolPolicy(
   allToolNames: string[],
   activatedSkillTools: Set<string>,
@@ -839,7 +822,7 @@ async function streamProfileResponse({
     : [[], []] as const
   const gatedToolNames = skillUnlocksFromCatalog(skillCatalog)
   const activatedSkillTools = new Set<string>()
-  const aiTools = createAiSdkTools({
+  const aiTools = await createAiSdkTools({
     tools,
     profile,
     sessionId,
