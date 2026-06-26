@@ -31,6 +31,11 @@ Read this before changing chat tools.
 - Backend-only `fs.exists` remains for packages/internal calls; it is not exposed to chat.
 - `fs.copy`, `fs.trash` (recoverable OS Trash), and `fs.import` (ingest an external absolute path) are kernel tools driven by the Files UI; they are not exposed to chat. Chat deletion stays `fs_delete` (hard delete).
 
+## Cross-Surface Tools
+
+- `editor_open` opens a workspace path in the Editor Artifact.
+- `terminal_run` calls `terminal.run` as the AI actor. The renderer keeps the current Chat Work surface visible and mounts the scratch Terminal in the background before writing the command. The tool returns after the command is sent; it does not return stdout or stderr to the model. Direct user/app-shell terminal actions still reveal Terminal Work before writing.
+
 ## Comment Tools
 
 Chat exposes inline markdown review tools:
