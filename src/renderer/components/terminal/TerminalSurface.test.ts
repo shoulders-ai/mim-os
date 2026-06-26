@@ -320,7 +320,7 @@ describe('TerminalSurface', () => {
     expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(2, 7, '\x1b[F')
   })
 
-  it('uses shell word movement fallbacks for macOS Option+Arrow in terminal profiles', async () => {
+  it('writes explicit xterm modified cursor sequences for macOS Option+Arrow in terminal profiles', async () => {
     stubPlatform('MacIntel')
     mountSurface({ ptyId: 7 })
     await flushUi()
@@ -330,9 +330,40 @@ describe('TerminalSurface', () => {
     expect(lastTerminal().keyHandler?.(optionLeft)).toBe(false)
     expect(lastTerminal().keyHandler?.(optionRight)).toBe(false)
     expect(optionLeft.preventDefault).toHaveBeenCalled()
+    expect(optionLeft.stopPropagation).toHaveBeenCalled()
     expect(optionRight.preventDefault).toHaveBeenCalled()
-    expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(1, 7, '\x1bb')
-    expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(2, 7, '\x1bf')
+    expect(optionRight.stopPropagation).toHaveBeenCalled()
+    expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(1, 7, '\x1b[1;3D')
+    expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(2, 7, '\x1b[1;3C')
+  })
+
+  it('does not let macOS Option+Shift+Arrow fall through to the shell in terminal profiles', async () => {
+    stubPlatform('MacIntel')
+    mountSurface({ ptyId: 7 })
+    await flushUi()
+
+    const optionShiftLeft = keyEvent({ key: 'ArrowLeft', altKey: true, shiftKey: true })
+    const optionShiftRight = keyEvent({ key: 'ArrowRight', altKey: true, shiftKey: true })
+    expect(lastTerminal().keyHandler?.(optionShiftLeft)).toBe(false)
+    expect(lastTerminal().keyHandler?.(optionShiftRight)).toBe(false)
+    expect(optionShiftLeft.preventDefault).toHaveBeenCalled()
+    expect(optionShiftLeft.stopPropagation).toHaveBeenCalled()
+    expect(optionShiftRight.preventDefault).toHaveBeenCalled()
+    expect(optionShiftRight.stopPropagation).toHaveBeenCalled()
+    expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(1, 7, '\x1b[1;3D')
+    expect(window.kernel.ptyWrite).toHaveBeenNthCalledWith(2, 7, '\x1b[1;3C')
+  })
+
+  it('maps macOS terminal Option+Backspace to shell word delete', async () => {
+    stubPlatform('MacIntel')
+    mountSurface({ ptyId: 7 })
+    await flushUi()
+
+    const optionBackspace = keyEvent({ key: 'Backspace', altKey: true })
+    expect(lastTerminal().keyHandler?.(optionBackspace)).toBe(false)
+    expect(optionBackspace.preventDefault).toHaveBeenCalled()
+    expect(optionBackspace.stopPropagation).toHaveBeenCalled()
+    expect(window.kernel.ptyWrite).toHaveBeenCalledWith(7, '\x17')
   })
 
   it('leaves macOS Option+Arrow and Backspace/Delete to xterm for agent profiles', async () => {

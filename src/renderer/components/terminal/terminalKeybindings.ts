@@ -31,9 +31,10 @@ export function terminalOsShortcutSequence(
     return '\x16\n'
   }
 
-  if (!isAgent && isMac && event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
-    if (event.key === 'ArrowLeft') return '\x1bb'
-    if (event.key === 'ArrowRight') return '\x1bf'
+  if (!isAgent && isMac && event.altKey && !event.metaKey && !event.ctrlKey) {
+    if (event.key === 'ArrowLeft') return '\x1b[1;3D'
+    if (event.key === 'ArrowRight') return '\x1b[1;3C'
+    if (event.key === 'Backspace') return '\x17'
     return null
   }
 

@@ -44,15 +44,38 @@ describe('terminalOsShortcutSequence', () => {
     })).toBe('\x1b[F')
   })
 
-  it('maps macOS terminal Option+Arrow to shell word movement escape bindings', () => {
+  it('maps macOS terminal Option+Arrow to explicit xterm modified cursor sequences', () => {
     expect(terminalOsShortcutSequence(event({ key: 'ArrowLeft', altKey: true }), {
       platform: 'MacIntel',
       profile: 'terminal',
-    })).toBe('\x1bb')
+    })).toBe('\x1b[1;3D')
     expect(terminalOsShortcutSequence(event({ key: 'ArrowRight', altKey: true }), {
       platform: 'MacIntel',
       profile: 'terminal',
-    })).toBe('\x1bf')
+    })).toBe('\x1b[1;3C')
+  })
+
+  it('maps macOS terminal Option+Shift+Arrow to the same safe word movement sequences', () => {
+    expect(terminalOsShortcutSequence(event({ key: 'ArrowLeft', altKey: true, shiftKey: true }), {
+      platform: 'MacIntel',
+      profile: 'terminal',
+    })).toBe('\x1b[1;3D')
+    expect(terminalOsShortcutSequence(event({ key: 'ArrowRight', altKey: true, shiftKey: true }), {
+      platform: 'MacIntel',
+      profile: 'terminal',
+    })).toBe('\x1b[1;3C')
+  })
+
+  it('maps macOS terminal Option+Backspace to the shell word-delete control byte', () => {
+    expect(terminalOsShortcutSequence(event({ key: 'Backspace', altKey: true }), {
+      platform: 'MacIntel',
+      profile: 'terminal',
+    })).toBe('\x17')
+
+    expect(terminalOsShortcutSequence(event({ key: 'Backspace', altKey: true }), {
+      platform: 'MacIntel',
+      profile: 'codex',
+    })).toBeNull()
   })
 
   it('leaves macOS agent Option+Arrow to xterm instead of rewriting it to Alt-letter commands', () => {
