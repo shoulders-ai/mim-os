@@ -12,8 +12,10 @@ import {
   createAiSdkTools,
   createSkillActiveToolPolicy,
   convertMimDataPart,
+  aiToolTimeoutMs,
   listSkillUnlocks,
   normalizeFileUIParts,
+  repairIncompleteToolMessages,
   providerBaseUrl,
   summarizeTurnUsage,
 } from '@main/ai/aiRuntime.js'
@@ -472,6 +474,78 @@ describe('central AI runtime tools', () => {
     })
   })
 
+  it('times out a hanging web_read tool call at the AI SDK boundary', async () => {
+    vi.useFakeTimers()
+    try {
+      const tools = {
+        call: vi.fn(() => new Promise(() => undefined)),
+        getWorkspacePath: () => null,
+      } as unknown as ToolRegistry
+      const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+
+      const pending = aiTools.web_read.execute?.({
+        url: 'https://www.bbc.com/news',
+        max_chars: 4000,
+      }, {})
+      const assertion = expect(pending).rejects.toThrow('web.read timed out after 45s')
+      await vi.advanceTimersByTimeAsync(aiToolTimeoutMs('web.read'))
+
+      await assertion
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('repairs incomplete assistant tool calls before message validation', () => {
+    const broken = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'read bbc' }] },
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [
+          { type: 'text', text: 'I will read it.' },
+          { type: 'tool-web_read', toolCallId: 'toolu_01Sdjs6kiFBi6i7R48bBnTEV', state: 'input-available', input: { url: 'https://www.bbc.com/news' } },
+        ],
+      },
+      {
+        id: 'a2',
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'tool-web_read', toolCallId: 'toolu_hanging', state: 'input-streaming', input: { url: 'https://example.com' } },
+        ],
+      },
+      {
+        id: 'a3',
+        role: 'assistant',
+        parts: [
+          { type: 'tool-fs_read', toolCallId: 'toolu_done', state: 'output-available', input: { path: 'notes.md' }, output: { content: 'ok' } },
+          { type: 'dynamic-tool', toolName: 'pkg_lookup', toolCallId: 'toolu_error', state: 'output-error', input: {}, errorText: 'failed' },
+        ],
+      },
+    ] as any
+
+    const repaired = repairIncompleteToolMessages(broken)
+
+    expect(repaired.changed).toBe(true)
+    expect(repaired.messages).toEqual([
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'read bbc' }] },
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [{ type: 'text', text: 'I will read it.' }],
+      },
+      {
+        id: 'a3',
+        role: 'assistant',
+        parts: [
+          { type: 'tool-fs_read', toolCallId: 'toolu_done', state: 'output-available', input: { path: 'notes.md' }, output: { content: 'ok' } },
+          { type: 'dynamic-tool', toolName: 'pkg_lookup', toolCallId: 'toolu_error', state: 'output-error', input: {}, errorText: 'failed' },
+        ],
+      },
+    ])
+  })
+
   it('converts enabled package tools into dynamic AI SDK tools with sanitized keys', async () => {
     const { tools, calls } = mockRegistry()
     const aiTools = await createAiSdkTools({
@@ -904,6 +978,146 @@ describe('central AI runtime tools', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('always exposes connections_status tool regardless of policy', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+
+    expect(aiTools.connections_status).toBeDefined()
+    expect(aiTools.connections_status.description).toContain('connection')
+
+    calls.length = 0
+    await aiTools.connections_status.execute?.({}, {})
+
+    expect(calls.some(c => c.name === 'google.status')).toBe(true)
+    expect(calls.some(c => c.name === 'slack.status')).toBe(true)
+  })
+
+  it('always exposes connection auth tools regardless of policy', async () => {
+    const { tools } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+
+    expect(aiTools.google_set_oauth_client).toBeDefined()
+    expect(aiTools.google_connect).toBeDefined()
+    expect(aiTools.google_disconnect).toBeDefined()
+    expect(aiTools.slack_connect).toBeDefined()
+    expect(aiTools.slack_disconnect).toBeDefined()
+    expect(aiTools.connections_configure).toBeDefined()
+  })
+
+  it('routes google_set_oauth_client through the registry', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    await aiTools.google_set_oauth_client.execute?.({
+      file: '/path/to/client_secret.json',
+    }, {})
+
+    expect(calls).toEqual([{
+      name: 'google.setOAuthClient',
+      params: { file: '/path/to/client_secret.json' },
+      ctx: { actor: 'ai', sessionId: 's1' },
+    }])
+  })
+
+  it('routes google_connect with oauth flag through the registry', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    await aiTools.google_connect.execute?.({
+      oauth: true,
+      capabilities: ['gmail.read', 'calendar.read'],
+    }, {})
+
+    expect(calls).toEqual([{
+      name: 'google.connect',
+      params: { oauth: true, capabilities: ['gmail.read', 'calendar.read'] },
+      ctx: { actor: 'ai', sessionId: 's1' },
+    }])
+  })
+
+  it('routes slack_connect with file through the registry', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    await aiTools.slack_connect.execute?.({ file: '/path/to/token.txt' }, {})
+
+    expect(calls).toEqual([{
+      name: 'slack.connect',
+      params: { file: '/path/to/token.txt' },
+      ctx: { actor: 'ai', sessionId: 's1' },
+    }])
+  })
+
+  it('routes connections_configure through settings.get and settings.set', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    await aiTools.connections_configure.execute?.({
+      integration: 'google',
+      aiEnabled: true,
+      gmailEnabled: true,
+      calendarEnabled: true,
+      driveEnabled: true,
+    }, {})
+
+    expect(calls[0]).toMatchObject({ name: 'settings.get', params: { key: 'connectors' } })
+    expect(calls[1]).toMatchObject({
+      name: 'settings.set',
+      params: {
+        key: 'connectors',
+        value: expect.objectContaining({
+          google: expect.objectContaining({ aiEnabled: true, gmailEnabled: true }),
+        }),
+      },
+    })
+  })
+
+  it('connections_configure merges without clobbering sibling integrations', async () => {
+    const calls: Array<{ name: string; params: Record<string, unknown>; ctx: Record<string, unknown> }> = []
+    const tools = {
+      call: vi.fn(async (name: string, params: Record<string, unknown>, ctx: Record<string, unknown>) => {
+        calls.push({ name, params, ctx })
+        if (name === 'google.status') {
+          return { configured: true, tokenConfigured: true, grantedScopes: [] }
+        }
+        if (name === 'settings.get') {
+          return { value: { slack: { aiEnabled: true, sendEnabled: true } } }
+        }
+        return { ok: true }
+      }),
+      getWorkspacePath: () => null,
+    } as unknown as ToolRegistry
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    await aiTools.connections_configure.execute?.({
+      integration: 'google',
+      aiEnabled: true,
+      gmailEnabled: true,
+    }, {})
+
+    const setCall = calls.find(c => c.name === 'settings.set')
+    expect(setCall).toBeDefined()
+    const value = setCall!.params.value as Record<string, unknown>
+    expect(value.slack).toEqual({ aiEnabled: true, sendEnabled: true })
+    expect(value.google).toEqual({ aiEnabled: true, gmailEnabled: true })
+  })
+
+  it('hides connection auth tools on inline and ghost profiles', async () => {
+    const { tools } = mockRegistry()
+    const inlineTools = await createAiSdkTools({ tools, profile: 'inline', sessionId: 's1' })
+    expect(inlineTools.connections_status).toBeUndefined()
+    expect(inlineTools.google_set_oauth_client).toBeUndefined()
+    expect(inlineTools.slack_connect).toBeUndefined()
+
+    const ghostTools = await createAiSdkTools({ tools, profile: 'ghost', sessionId: 's1' })
+    expect(ghostTools.connections_status).toBeUndefined()
   })
 
   it('keeps ghost profile free of workspace mutation tools', async () => {

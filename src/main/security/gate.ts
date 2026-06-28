@@ -20,6 +20,11 @@ export type ApprovalPreview =
   | { kind: 'create'; content: string }
   | { kind: 'delete' }
 
+export interface SavedBrowserSessionApproval {
+  domain: string
+  granted: boolean
+}
+
 export interface ToolPolicy {
   category: ToolCategory
   risk: ToolRisk
@@ -51,6 +56,7 @@ export interface PermissionApprovalRequest {
   label?: string
   params: Record<string, unknown>
   preview?: ApprovalPreview
+  savedBrowserSession?: SavedBrowserSessionApproval
 }
 
 export interface PermissionApprovalDecision {
@@ -94,6 +100,16 @@ export interface PermissionGateOptions {
   // after the static TOOL_POLICIES map: core tool policies cannot be overridden
   // by an app (security property).
   getDynamicToolPolicy?: (toolName: string) => ToolPolicy | undefined
+  resolveSavedBrowserSessionGrant?: (
+    toolName: string,
+    params: Record<string, unknown>,
+    ctx: ToolContext,
+  ) => SavedBrowserSessionApproval | null | undefined | Promise<SavedBrowserSessionApproval | null | undefined>
+  grantSavedBrowserSessionDomain?: (
+    grant: SavedBrowserSessionApproval,
+    params: Record<string, unknown>,
+    ctx: ToolContext,
+  ) => void | Promise<void>
   sendApprovalRequest: (request: PermissionApprovalRequest) => boolean
   recordDecision?: (event: PermissionDecisionEvent) => void
 }
@@ -277,11 +293,11 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'skill.import': { category: 'write', risk: 'medium', targetParam: 'folder' },
   'skill.delete': { category: 'write', risk: 'medium', targetParam: 'name' },
   'web.read': { category: 'network', risk: 'medium', targetParam: 'url' },
-  'web.research.status': { category: 'read', risk: 'low' },
-  'web.research.allowDomain': { category: 'settings', risk: 'medium', targetParam: 'domain' },
-  'web.research.removeDomain': { category: 'settings', risk: 'medium', targetParam: 'domain' },
-  'web.research.open': { category: 'network', risk: 'medium', targetParam: 'url' },
-  'web.research.clearProfile': { category: 'settings', risk: 'high' },
+  'web.browser.status': { category: 'read', risk: 'low' },
+  'web.browser.allowDomain': { category: 'settings', risk: 'medium', targetParam: 'domain' },
+  'web.browser.removeDomain': { category: 'settings', risk: 'medium', targetParam: 'domain' },
+  'web.browser.open': { category: 'network', risk: 'medium', targetParam: 'url' },
+  'web.browser.clearProfile': { category: 'settings', risk: 'high' },
   'web.search': { category: 'network', risk: 'medium', targetParam: 'query' },
   'skillSource.list': { category: 'read', risk: 'low' },
   'skillSource.inspect': { category: 'network', risk: 'medium' },
@@ -422,7 +438,14 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       return
     }
 
+    let savedBrowserSession: SavedBrowserSessionApproval | null = null
+    if (ctx.actor === 'ai' && options.resolveSavedBrowserSessionGrant) {
+      const resolved = options.resolveSavedBrowserSessionGrant(tool.name, params, ctx)
+      savedBrowserSession = isPromiseLike(resolved) ? (await resolved) ?? null : resolved ?? null
+    }
+
     if (mode === 'developer') {
+      await grantSavedBrowserSessionIfNeeded(savedBrowserSession, params, ctx, options)
       record({ ...baseEvent, decision: 'bypassed', reason: 'developer mode' })
       return
     }
@@ -434,7 +457,8 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
     // independently require a prompt. Sensitive and outside-workspace paths always
     // prompt — the floor promise from docs/security.md must never be suppressed.
     const pathFloorActive = pathInfo?.kind === 'sensitive' || pathInfo?.kind === 'outside-workspace'
-    if (allowKey && sessionToolAllows.has(allowKey) && !pathFloorActive) {
+    const needsSavedBrowserGrant = Boolean(savedBrowserSession && !savedBrowserSession.granted)
+    if (allowKey && sessionToolAllows.has(allowKey) && !pathFloorActive && !needsSavedBrowserGrant) {
       record({ ...baseEvent, decision: 'allowed', reason: 'allowed for this session' })
       return
     }
@@ -459,6 +483,7 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       label: policy.label,
       params: redactedParams,
       preview: buildApprovalPreview(tool.name, params),
+      ...(savedBrowserSession ? { savedBrowserSession } : {}),
     }
 
     record({ ...baseEvent, decision: 'requested', reason })
@@ -483,6 +508,7 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
     if (allowKey && decision.alwaysAllow) {
       sessionToolAllows.add(allowKey)
     }
+    await grantSavedBrowserSessionIfNeeded(savedBrowserSession, params, ctx, options)
     record({ ...baseEvent, decision: 'approved', reason })
   }
 
@@ -513,6 +539,20 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       }
     },
   }
+}
+
+function isPromiseLike<T>(value: T | Promise<T> | null | undefined): value is Promise<T> {
+  return Boolean(value && typeof (value as Promise<T>).then === 'function')
+}
+
+async function grantSavedBrowserSessionIfNeeded(
+  grant: SavedBrowserSessionApproval | null,
+  params: Record<string, unknown>,
+  ctx: ToolContext,
+  options: PermissionGateOptions,
+): Promise<void> {
+  if (!grant || grant.granted) return
+  await options.grantSavedBrowserSessionDomain?.(grant, params, ctx)
 }
 
 // Map a gate decision into the unified trace stream, parented under the tool

@@ -96,6 +96,10 @@ interface SummaryRequest {
 }
 
 export const MAX_TOOL_OUTPUT_CHARS = 24000
+export const DEFAULT_AI_TOOL_TIMEOUT_MS = 5 * 60_000
+const WEB_READ_TOOL_DEFAULT_TIMEOUT_MS = 45_000
+const WEB_READ_TOOL_TIMEOUT_BUFFER_MS = 15_000
+const WEB_READ_TOOL_MAX_TIMEOUT_MS = 180_000
 const MAX_TASK_LABEL_CHARS = 40
 const MAX_TASK_LABEL_WORDS = 4
 // Anthropic tool names must match [A-Za-z0-9_-]+; normalize dotted/other names for SDK keys
@@ -180,7 +184,13 @@ export async function createAiSdkTools({
     ...(sessionId ? { sessionId } : {}),
     ...(trace ? { traceId: trace.traceId, spanId: trace.spanId } : {}),
   }
-  const call = (name: string, params: Record<string, unknown> = {}) => tools.call(name, params, ctx)
+  const call = (name: string, params: Record<string, unknown> = {}) => {
+    return withAiToolTimeout(
+      tools.call(name, params, ctx),
+      aiToolTimeoutMs(name, params),
+      name,
+    )
+  }
 
   const readTools = {
     fs_read: tool({
@@ -209,10 +219,10 @@ export async function createAiSdkTools({
     }),
 
     web_read: tool({
-      description: 'Read a URL and return cleaned markdown content. Selectable PDFs use local text extraction; ordinary web pages are rendered in Chromium so JavaScript-hydrated content is captured. Set stateful=true only when the user has configured that domain in the persistent Research Browser profile for login, consent, or normal browser state.',
+      description: 'Read a URL and return cleaned markdown content. Selectable PDFs use local text extraction; ordinary web pages are rendered in Chromium so JavaScript-hydrated content is captured. Set stateful=true only when the user has approved website access for login, consent, or normal site state; it is not a general fix for timeouts or extraction failures.',
       inputSchema: z.object({
         url: z.string().url(),
-        stateful: z.boolean().optional().describe('Use the persistent Research Browser profile for granted domains'),
+        stateful: z.boolean().optional().describe('Use approved website access for granted domains'),
         max_chars: z.number().int().positive().optional().describe('Target maximum characters for the returned chunk (default 100000)'),
         start_from_char: z.number().int().nonnegative().optional().describe('Continue reading from this character offset when a prior result was truncated'),
         extract_links: z.boolean().optional().describe('Preserve link URLs in Markdown'),
@@ -626,6 +636,102 @@ export async function createAiSdkTools({
       execute: async (params) => call('package.uninstall', params),
     }),
 
+    connections_status: tool({
+      description: 'Check connection status for all integrations (Google, Slack). Returns what is configured, who is authenticated, granted scopes, and setup guidance. Always available regardless of policy.',
+      inputSchema: z.object({}),
+      execute: async () => {
+        const [google, slack] = await Promise.all([
+          call('google.status', {}).catch(() => null),
+          call('slack.status', {}).catch(() => null),
+        ])
+        return { google, slack }
+      },
+    }),
+
+    google_set_oauth_client: tool({
+      description: 'Store a Google OAuth client in the OS keychain. Pass a file path to a Google Cloud Console JSON download (recommended — credentials never enter chat), or inline client_id and client_secret.',
+      inputSchema: z.object({
+        file: z.string().optional(),
+        client_id: z.string().optional(),
+        client_secret: z.string().optional(),
+        account: z.string().optional(),
+      }),
+      execute: async (params) => call('google.setOAuthClient', dropEmpty(params)),
+    }),
+
+    google_connect: tool({
+      description: 'Connect Google. Set oauth=true for browser sign-in (recommended). Or pass a file path to a token bundle JSON, or inline access_token. Browser sign-in opens the consent page, the user authorizes, and the token is stored automatically.',
+      inputSchema: z.object({
+        oauth: z.boolean().optional(),
+        capabilities: z.array(z.string()).optional(),
+        scopes: z.array(z.string()).optional(),
+        file: z.string().optional(),
+        access_token: z.string().optional(),
+        refresh_token: z.string().optional(),
+        expires_at: z.number().optional(),
+        scope: z.string().optional(),
+        account: z.string().optional(),
+      }),
+      execute: async (params) => call('google.connect', dropEmpty(params)),
+    }),
+
+    google_disconnect: tool({
+      description: 'Remove Google tokens from the OS keychain.',
+      inputSchema: z.object({ account: z.string().optional() }),
+      execute: async (params) => call('google.disconnect', dropEmpty(params)),
+    }),
+
+    slack_connect: tool({
+      description: 'Connect Slack. Pass a file path to a token file (recommended — token never enters chat), or an inline token. The token is stored in the OS keychain and verified with Slack.',
+      inputSchema: z.object({
+        file: z.string().optional(),
+        token: z.string().optional(),
+        account: z.string().optional(),
+      }),
+      execute: async (params) => call('slack.connect', dropEmpty(params)),
+    }),
+
+    slack_disconnect: tool({
+      description: 'Remove a Slack token from the OS keychain.',
+      inputSchema: z.object({ account: z.string().optional() }),
+      execute: async (params) => call('slack.disconnect', dropEmpty(params)),
+    }),
+
+    connections_configure: tool({
+      description: 'Enable or disable integration capabilities for the AI agent. Set policy flags like aiEnabled, gmailEnabled, calendarEnabled, driveEnabled, sendEnabled, etc.',
+      inputSchema: z.object({
+        integration: z.enum(['google', 'slack']),
+        aiEnabled: z.boolean().optional(),
+        gmailEnabled: z.boolean().optional(),
+        gmailSendEnabled: z.boolean().optional(),
+        calendarEnabled: z.boolean().optional(),
+        calendarWriteEnabled: z.boolean().optional(),
+        driveEnabled: z.boolean().optional(),
+        sheetsWriteEnabled: z.boolean().optional(),
+        sendEnabled: z.boolean().optional(),
+        privateChannels: z.boolean().optional(),
+        directMessages: z.boolean().optional(),
+      }),
+      execute: async ({ integration, ...flags }) => {
+        const current = await call('settings.get', { key: 'connectors' }) as { value?: unknown }
+        const connectors = (current.value && typeof current.value === 'object' && !Array.isArray(current.value))
+          ? current.value as Record<string, unknown>
+          : {}
+        const existing = (connectors[integration] && typeof connectors[integration] === 'object')
+          ? connectors[integration] as Record<string, unknown>
+          : {}
+        const boolFlags: Record<string, boolean> = {}
+        for (const [key, value] of Object.entries(flags)) {
+          if (typeof value === 'boolean') boolFlags[key] = value
+        }
+        await call('settings.set', {
+          key: 'connectors',
+          value: { ...connectors, [integration]: { ...existing, ...boolFlags } },
+        })
+        return { integration, configured: boolFlags }
+      },
+    }),
+
   }
 
   // Dynamic entries only added when their key is not already present (static wins)
@@ -846,13 +952,19 @@ async function streamProfileResponse({
   const activeToolPolicy = profile === 'chat'
     ? createSkillActiveToolPolicy(Object.keys(aiTools), activatedSkillTools, gatedToolNames)
     : null
+  const normalizedMessages = normalizeFileUIParts(request.messages || [])
+  const repaired = repairIncompleteToolMessages(normalizedMessages)
+  if (profile === 'chat' && sessionId && repaired.changed) {
+    await persistRepairedChatSession(tools, sessionId, repaired.messages, turnTrace)
+  }
   const uiMessages = await validateUIMessages({
-    messages: normalizeFileUIParts(request.messages || []),
+    messages: repaired.messages,
     tools: aiTools,
     dataSchemas: { context: contextDataSchema },
   })
   const modelMessages = await convertToModelMessages(uiMessages, {
     tools: aiTools,
+    ignoreIncompleteToolCalls: true,
     convertDataPart: convertMimDataPart,
   })
   const turnUsageSteps: UsageSummary[] = []
@@ -1017,6 +1129,50 @@ export function normalizeFileUIParts(messages: UIMessage[]): UIMessage[] {
 
     return changed ? { ...message, parts: nextParts } : message
   })
+}
+
+export function repairIncompleteToolMessages(messages: UIMessage[]): { messages: UIMessage[], changed: boolean } {
+  let changed = false
+  const repaired: UIMessage[] = []
+
+  for (const message of messages) {
+    const parts = (message as { parts?: unknown[] }).parts
+    if (message.role !== 'assistant' || !Array.isArray(parts)) {
+      repaired.push(message)
+      continue
+    }
+
+    const nextParts = parts.filter(part => !isNonTerminalToolPart(part))
+    const substantiveParts = nextParts.filter(isSubstantiveAssistantPart)
+    if (nextParts.length !== parts.length) changed = true
+    if (!substantiveParts.length) {
+      changed = true
+      continue
+    }
+    repaired.push(changed && nextParts !== parts ? { ...message, parts: nextParts as UIMessage['parts'] } : message)
+  }
+
+  return changed ? { messages: repaired, changed: true } : { messages, changed: false }
+}
+
+function isNonTerminalToolPart(part: unknown): boolean {
+  if (!part || typeof part !== 'object') return false
+  const item = part as Record<string, unknown>
+  const type = typeof item.type === 'string' ? item.type : ''
+  if (!type.startsWith('tool-') && type !== 'dynamic-tool') return false
+  return item.state !== 'output-available'
+    && item.state !== 'output-error'
+    && item.state !== 'output-denied'
+}
+
+function isSubstantiveAssistantPart(part: unknown): boolean {
+  if (!part || typeof part !== 'object') return false
+  const item = part as Record<string, unknown>
+  if (item.type === 'step-start') return false
+  if ((item.type === 'text' || item.type === 'reasoning') && typeof item.text === 'string') {
+    return item.text.trim().length > 0
+  }
+  return true
 }
 
 function isTextFileMediaType(mediaType: string): boolean {
@@ -1192,6 +1348,46 @@ async function persistChatSession(
     usage,
     lastContextTokens,
   }, ctx)
+}
+
+async function persistRepairedChatSession(
+  tools: ToolRegistry,
+  sessionId: string,
+  messages: UIMessage[],
+  trace?: { traceId: string; spanId: string },
+) {
+  await tools.call('session.update', { id: sessionId, messages }, {
+    actor: 'system',
+    ...(trace ? { traceId: trace.traceId, spanId: trace.spanId } : {}),
+  })
+}
+
+export function aiToolTimeoutMs(name: string, params: Record<string, unknown> = {}): number {
+  if (name === 'web.read') {
+    const requested = typeof params.timeout_ms === 'number' && Number.isFinite(params.timeout_ms) && params.timeout_ms > 0
+      ? params.timeout_ms
+      : null
+    if (requested == null) return WEB_READ_TOOL_DEFAULT_TIMEOUT_MS
+    return Math.min(Math.max(requested + WEB_READ_TOOL_TIMEOUT_BUFFER_MS, WEB_READ_TOOL_DEFAULT_TIMEOUT_MS), WEB_READ_TOOL_MAX_TIMEOUT_MS)
+  }
+  return DEFAULT_AI_TOOL_TIMEOUT_MS
+}
+
+export async function withAiToolTimeout<T>(work: Promise<T>, timeoutMs: number, toolName: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${toolName} timed out after ${Math.round(timeoutMs / 1000)}s`))
+        }, timeoutMs)
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
 }
 
 export async function listSkillUnlocks(tools: ToolRegistry, sessionId?: string): Promise<Set<string>> {
@@ -1456,6 +1652,14 @@ const CITATION_TRIGGERS = [
 function detectCitationContext(text: string) {
   const tail = String(text || '').slice(-120).toLowerCase()
   return CITATION_TRIGGERS.some(trigger => tail.includes(trigger))
+}
+
+function dropEmpty(params: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null) out[key] = value
+  }
+  return out
 }
 
 function escapePromptXml(text: string) {

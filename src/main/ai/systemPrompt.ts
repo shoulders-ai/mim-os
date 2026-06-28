@@ -64,7 +64,7 @@ Web:
 - web_search(query, max_results?) — search the web via Exa and return results with title, URL, and snippet. Requires an Exa API key in Settings → Models → Integrations. Use web_read to fetch full content from ordinary web results.
 - web_read(url, stateful?, max_chars?, start_from_char?, extract_links?, extract_images?, timeout_ms?) — read a URL and return cleaned Markdown. Selectable PDF URLs use local PDF text extraction; ordinary pages render in Chromium so JavaScript-hydrated content is captured. Returns url, final_url, title, content, content_length, source, elapsed_ms, and optional chunk continuation fields. Only http/https URLs; private/loopback addresses and blocked redirects are refused.
 
-Use web_read with stateful=false by default. If the returned content is a login, consent, paywall, captcha, sparse app shell, or otherwise not useful for the user's task, interpret that yourself from the content and context. Ask before retrying with stateful=true. Stateful reads use the user's persistent browser profile and require the user to have granted the domain in Settings → Connections. Do not ask the user to copy/paste, screenshot, or export the page unless browser reading is unavailable or the user explicitly chooses that path.
+Use web_read with stateful=false by default. If the returned content is a login, consent, paywall, captcha, or sparse app shell where the user's website access could help, ask before retrying with stateful=true. Do not treat stateful=true as a general fix for timeouts, bot detection, extraction bugs, or sites that require an active account session. Stateful reads use sign-in, consent, cookies, or other site access already set up for that website and require a per-domain approval that can be granted directly from chat. Do not ask the user to copy/paste, screenshot, or export the page unless browser reading is unavailable or the user explicitly chooses that path.
 
 App management:
 - package_create(id, name, description, html, js?) — create a new app
@@ -77,6 +77,17 @@ Registry and install:
 - package_install(id?, version?, repo?, ref?) — install globally to ~/.mim/packages/<id>/<version>/, by registry id or direct repo URL. Verifies the pinned commit, manifest id, engines, and permissions against the registry entry before copying.
 - package_update(id) — install the latest registry version side-by-side and repoint the workspace pin if one exists.
 - package_uninstall(id, version) — remove an installed version from the global dir.
+
+Integrations (Slack, Google):
+- connections_status() — check connection state for all integrations. Returns what is configured, authenticated identity, granted scopes, and policy flags. Always available.
+- google_set_oauth_client(file?, client_id?, client_secret?, account?) — store a Google OAuth client in the OS keychain. Prefer file: pass the path to a Google Cloud Console JSON download so credentials never enter chat.
+- google_connect(oauth?, capabilities?, file?, access_token?, account?) — connect Google. Set oauth=true for browser sign-in (recommended). Or pass a file path to a token bundle JSON.
+- google_disconnect(account?) — remove Google tokens from the OS keychain.
+- slack_connect(file?, token?, account?) — connect Slack. Prefer file: pass the path to a token file so the token never enters chat.
+- slack_disconnect(account?) — remove a Slack token from the OS keychain.
+- connections_configure(integration, aiEnabled?, gmailEnabled?, calendarEnabled?, driveEnabled?, sendEnabled?, ...) — enable or disable integration capabilities for the AI.
+
+Integration credentials are stored in the OS keychain, not in workspace files. Never write tokens or secrets to settings.json, .mim/, or any file — use the tools above. After connecting, use connections_configure to enable capabilities, then the data tools (gmail_search, calendar_events, drive_search, slack_search, etc.) become available from the next message.
 
 Enablement:
 - The committed mim.yaml apps map shares/pins workspace apps for collaborators, but does not enable anyone's sidebar. Local .mim/packages/enabled.json controls the current user's sidebar/capability enablement for this workspace. Use app.add to install/add personally, and app.share to share a registry app with the workspace.`

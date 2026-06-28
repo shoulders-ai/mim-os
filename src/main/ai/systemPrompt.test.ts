@@ -76,8 +76,19 @@ describe('getSystemPrompt', () => {
     expect(out).not.toContain('status="partial"')
     expect(out).toContain('Selectable PDF')
     expect(out).toContain('stateful')
-    expect(out).toContain('persistent browser profile')
+    expect(out).toContain('website access')
+    expect(out).toContain('granted directly from chat')
     expect(out).toContain('Do not ask the user to copy/paste')
+  })
+
+  it('describes connection management tools for integrations', () => {
+    const out = getSystemPrompt()
+    expect(out).toContain('connections_status')
+    expect(out).toContain('google_connect')
+    expect(out).toContain('slack_connect')
+    expect(out).toContain('connections_configure')
+    expect(out).toContain('keychain')
+    expect(out).toContain('file')
   })
 
   it('describes the enablement model briefly', () => {

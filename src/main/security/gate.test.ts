@@ -29,6 +29,8 @@ function makeGate(options: {
   decisions?: PermissionDecisionEvent[]
   resourcePolicies?: Record<string, 'readonly' | 'direct'>
   getDynamicToolPolicy?: (toolName: string) => ToolPolicy | undefined
+  resolveSavedBrowserSessionGrant?: Parameters<typeof createPermissionGate>[0]['resolveSavedBrowserSessionGrant']
+  grantSavedBrowserSessionDomain?: Parameters<typeof createPermissionGate>[0]['grantSavedBrowserSessionDomain']
 } = {}) {
   const requests = options.requests ?? []
   const decisions = options.decisions ?? []
@@ -42,6 +44,8 @@ function makeGate(options: {
       ? (id) => options.resourcePolicies?.[id] ?? null
       : undefined,
     getDynamicToolPolicy: options.getDynamicToolPolicy,
+    resolveSavedBrowserSessionGrant: options.resolveSavedBrowserSessionGrant,
+    grantSavedBrowserSessionDomain: options.grantSavedBrowserSessionDomain,
     sendApprovalRequest: (request) => {
       requests.push(request)
       return true
@@ -459,7 +463,7 @@ describe('permission gate decisions', () => {
     ).rejects.toThrow('personal Google')
   })
 
-  it('blocks app access to web reader and Research Browser tools', async () => {
+  it('blocks app access to web reader and website access tools', async () => {
     const { gate } = makeGate({ packagePermissions: { workspace: { read: true }, http: ['example.com'] } })
 
     await expect(
@@ -469,7 +473,7 @@ describe('permission gate decisions', () => {
       gate.check(tool('web.search'), { query: 'example' }, { actor: 'package', package_id: 'stats-checker' }),
     ).rejects.toThrow('cannot access web reader tools')
     await expect(
-      gate.check(tool('web.research.open'), { url: 'https://example.com' }, { actor: 'package', package_id: 'stats-checker' }),
+      gate.check(tool('web.browser.open'), { url: 'https://example.com' }, { actor: 'package', package_id: 'stats-checker' }),
     ).rejects.toThrow('cannot access web reader tools')
   })
 
@@ -563,6 +567,77 @@ describe('permission gate decisions', () => {
       decision: 'allowed',
       reason: 'allowed for this session',
     })
+  })
+
+  it('grants an unapproved website access domain from the web.read approval', async () => {
+    const grantSavedBrowserSessionDomain = vi.fn()
+    const { gate, requests, decisions } = makeGate({
+      resolveSavedBrowserSessionGrant: (name, params) => name === 'web.read' && params.stateful === true
+        ? { domain: 'private.example', granted: false }
+        : null,
+      grantSavedBrowserSessionDomain,
+    })
+
+    const pending = gate.check(
+      tool('web.read'),
+      { url: 'https://private.example/page', stateful: true },
+      { actor: 'ai', sessionId: 's1' },
+    )
+    await Promise.resolve()
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      toolName: 'web.read',
+      target: 'https://private.example/page',
+      savedBrowserSession: {
+        domain: 'private.example',
+        granted: false,
+      },
+    })
+
+    gate.respond(requests[0].requestId, { approved: true })
+    await pending
+
+    expect(grantSavedBrowserSessionDomain).toHaveBeenCalledWith(
+      { domain: 'private.example', granted: false },
+      { url: 'https://private.example/page', stateful: true },
+      { actor: 'ai', sessionId: 's1' },
+    )
+    expect(decisions.at(-1)).toMatchObject({ decision: 'approved', tool: 'web.read' })
+  })
+
+  it('does not let a session web.read approval bypass a new website access domain grant', async () => {
+    const grantSavedBrowserSessionDomain = vi.fn()
+    const { gate, requests } = makeGate({
+      resolveSavedBrowserSessionGrant: (_name, params) => params.stateful === true
+        ? { domain: String(params.url).includes('two.example') ? 'two.example' : 'one.example', granted: false }
+        : null,
+      grantSavedBrowserSessionDomain,
+    })
+
+    const first = gate.check(
+      tool('web.read'),
+      { url: 'https://one.example/page', stateful: false },
+      { actor: 'ai', sessionId: 's1' },
+    )
+    await Promise.resolve()
+    gate.respond(requests[0].requestId, { approved: true, alwaysAllow: true })
+    await first
+
+    const second = gate.check(
+      tool('web.read'),
+      { url: 'https://two.example/private', stateful: true },
+      { actor: 'ai', sessionId: 's1' },
+    )
+    await Promise.resolve()
+
+    expect(requests).toHaveLength(2)
+    expect(requests[1]).toMatchObject({
+      savedBrowserSession: { domain: 'two.example', granted: false },
+    })
+    gate.respond(requests[1].requestId, { approved: true })
+    await second
+    expect(grantSavedBrowserSessionDomain).toHaveBeenCalledTimes(1)
   })
 
   it('does not carry session approvals across sessions', async () => {
