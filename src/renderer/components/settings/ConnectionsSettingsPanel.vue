@@ -179,18 +179,33 @@ const GOOGLE_SCOPES = {
   sheetsWrite: 'https://www.googleapis.com/auth/spreadsheets',
 }
 
+const GOOGLE_CONNECT_CAPABILITIES = [
+  'profile',
+  'gmail.read',
+  'gmail.send',
+  'calendar.read',
+  'calendar.write',
+  'drive.read',
+  'sheets.read',
+  'sheets.write',
+]
+
 const googleStatus = ref<GoogleStatus | null>(null)
 const googlePolicy = ref<GooglePolicy>({ ...DEFAULT_GOOGLE_POLICY })
 const googleLoading = ref(false)
 const googleConnecting = ref(false)
 const googleConnectError = ref('')
 const showGoogleTokenInput = ref(false)
+const googleClientSaving = ref(false)
+const googleClientId = ref('')
+const googleClientSecret = ref('')
 const googleAccessToken = ref('')
 const googleRefreshToken = ref('')
 const googleScope = ref('')
 const googleExpiresAt = ref('')
 
 const isGoogleConnected = computed(() => googleStatus.value?.configured === true || googleStatus.value?.tokenConfigured === true)
+const isGoogleOAuthReady = computed(() => googleStatus.value?.clientConfigured === true)
 const googleEmail = computed(() => googleStatus.value?.auth?.email ?? googleStatus.value?.account ?? '')
 const googleName = computed(() => googleStatus.value?.auth?.name ?? '')
 const googleCapabilitySummary = computed(() => {
@@ -261,6 +276,49 @@ async function updateGooglePolicy(key: keyof GooglePolicy, value: boolean) {
   await saveGooglePolicy()
 }
 
+async function connectGoogleOAuth() {
+  if (!isGoogleOAuthReady.value) {
+    googleConnectError.value = missingGoogleOAuthClientMessage()
+    showGoogleTokenInput.value = true
+    return
+  }
+  googleConnecting.value = true
+  googleConnectError.value = ''
+  try {
+    googleStatus.value = normalizeGoogleStatus(await window.kernel.call('google.connect', {
+      oauth: true,
+      capabilities: GOOGLE_CONNECT_CAPABILITIES,
+    }) as Partial<GoogleStatus>)
+    clearGoogleTokenForm()
+    showGoogleTokenInput.value = false
+  } catch (err) {
+    googleConnectError.value = googleConnectionErrorMessage(err)
+  } finally {
+    googleConnecting.value = false
+  }
+}
+
+async function saveGoogleOAuthClient() {
+  const clientId = googleClientId.value.trim()
+  const clientSecret = googleClientSecret.value.trim()
+  if (!clientId || !clientSecret) return
+  googleClientSaving.value = true
+  googleConnectError.value = ''
+  try {
+    await window.kernel.call('google.setOAuthClient', {
+      client_id: clientId,
+      client_secret: clientSecret,
+    })
+    googleClientId.value = ''
+    googleClientSecret.value = ''
+    await loadGoogleStatus()
+  } catch (err) {
+    googleConnectError.value = googleConnectionErrorMessage(err)
+  } finally {
+    googleClientSaving.value = false
+  }
+}
+
 async function connectGoogle() {
   const accessToken = googleAccessToken.value.trim()
   if (!accessToken) return
@@ -273,16 +331,37 @@ async function connectGoogle() {
     const expiresAt = Number(googleExpiresAt.value)
     if (Number.isFinite(expiresAt) && expiresAt > 0) payload.expires_at = expiresAt
     googleStatus.value = normalizeGoogleStatus(await window.kernel.call('google.connect', payload) as Partial<GoogleStatus>)
-    googleAccessToken.value = ''
-    googleRefreshToken.value = ''
-    googleScope.value = ''
-    googleExpiresAt.value = ''
+    clearGoogleTokenForm()
     showGoogleTokenInput.value = false
   } catch (err) {
-    googleConnectError.value = err instanceof Error ? err.message : String(err)
+    googleConnectError.value = googleConnectionErrorMessage(err)
   } finally {
     googleConnecting.value = false
   }
+}
+
+function clearGoogleTokenForm() {
+  googleAccessToken.value = ''
+  googleRefreshToken.value = ''
+  googleScope.value = ''
+  googleExpiresAt.value = ''
+}
+
+function clearGoogleAdvancedForm() {
+  clearGoogleTokenForm()
+  googleClientId.value = ''
+  googleClientSecret.value = ''
+}
+
+function googleConnectionErrorMessage(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  return message.includes('Google OAuth client is not configured')
+    ? missingGoogleOAuthClientMessage()
+    : message.replace(/^Error invoking remote method 'kernel:call': Error: /, '')
+}
+
+function missingGoogleOAuthClientMessage(): string {
+  return 'Google sign-in is not configured for this build. Add an OAuth client in Advanced or set the Google OAuth environment variables.'
 }
 
 async function disconnectGoogle() {
@@ -291,6 +370,7 @@ async function disconnectGoogle() {
     googleStatus.value = {
       account: googleStatus.value?.account ?? 'default',
       configured: false,
+      clientConfigured: googleStatus.value?.clientConfigured === true,
       tokenConfigured: false,
       grantedScopes: [],
     }
@@ -319,79 +399,79 @@ function googleScopeHint(scopes: string[]): string {
   return hasGoogleScope(scopes) ? '' : 'Reconnect required'
 }
 
-// ── Research Browser ──
+// ── Website access ──
 
-interface ResearchStatus {
+interface BrowserSessionStatus {
   enabled: boolean
   allowedDomains: string[]
   profile_available: boolean
 }
 
-const researchLoading = ref(false)
-const researchBusy = ref('')
-const researchError = ref('')
+const browserSessionLoading = ref(false)
+const browserSessionBusy = ref('')
+const browserSessionError = ref('')
 const domainInput = ref('')
-const researchStatus = ref<ResearchStatus>({
+const browserSessionStatus = ref<BrowserSessionStatus>({
   enabled: false,
   allowedDomains: [],
   profile_available: false,
 })
 
-const grantedCount = computed(() => researchStatus.value.allowedDomains.length)
+const grantedCount = computed(() => browserSessionStatus.value.allowedDomains.length)
 
-async function loadResearchStatus() {
-  researchLoading.value = true
-  researchError.value = ''
+async function loadBrowserSessionStatus() {
+  browserSessionLoading.value = true
+  browserSessionError.value = ''
   try {
-    researchStatus.value = normalizeStatus(await window.kernel.call('web.research.status', {}) as Partial<ResearchStatus>)
+    browserSessionStatus.value = normalizeStatus(await window.kernel.call('web.browser.status', {}) as Partial<BrowserSessionStatus>)
   } catch (err) {
-    researchError.value = err instanceof Error ? err.message : String(err)
+    browserSessionError.value = err instanceof Error ? err.message : String(err)
   } finally {
-    researchLoading.value = false
+    browserSessionLoading.value = false
   }
 }
 
 async function addDomain() {
   const domain = domainInput.value.trim()
   if (!domain) return
-  await runResearchAction('add', async () => {
-    researchStatus.value = normalizeStatus(await window.kernel.call('web.research.allowDomain', { domain }) as Partial<ResearchStatus>)
+  await runBrowserSessionAction('add', async () => {
+    browserSessionStatus.value = normalizeStatus(await window.kernel.call('web.browser.allowDomain', { domain }) as Partial<BrowserSessionStatus>)
     domainInput.value = ''
   })
 }
 
 async function removeDomain(domain: string) {
-  await runResearchAction(`remove:${domain}`, async () => {
-    researchStatus.value = normalizeStatus(await window.kernel.call('web.research.removeDomain', { domain }) as Partial<ResearchStatus>)
+  await runBrowserSessionAction(`remove:${domain}`, async () => {
+    browserSessionStatus.value = normalizeStatus(await window.kernel.call('web.browser.removeDomain', { domain }) as Partial<BrowserSessionStatus>)
   })
 }
 
 async function openSource(domain?: string) {
-  await runResearchAction(`open:${domain ?? 'blank'}`, async () => {
-    await window.kernel.call('web.research.open', domain ? { url: sourceSetupUrl(domain) } : {})
+  await runBrowserSessionAction(`open:${domain ?? 'blank'}`, async () => {
+    await window.kernel.call('web.browser.open', domain ? { url: sourceSetupUrl(domain) } : {})
   })
 }
 
 async function clearProfile() {
-  await runResearchAction('clear-profile', async () => {
-    await window.kernel.call('web.research.clearProfile', {})
-    await loadResearchStatus()
+  await runBrowserSessionAction('clear-profile', async () => {
+    await window.kernel.call('web.browser.clearProfile', {})
+    await loadBrowserSessionStatus()
   })
 }
 
-async function runResearchAction(name: string, fn: () => Promise<void>) {
-  researchBusy.value = name
-  researchError.value = ''
+async function runBrowserSessionAction(name: string, fn: () => Promise<void>) {
+  browserSessionBusy.value = name
+  browserSessionError.value = ''
   try {
     await fn()
   } catch (err) {
-    researchError.value = err instanceof Error ? err.message : String(err)
+    browserSessionError.value = err instanceof Error ? err.message : String(err)
   } finally {
-    researchBusy.value = ''
+    browserSessionBusy.value = ''
   }
 }
 
-function normalizeStatus(raw: Partial<ResearchStatus>): ResearchStatus {
+function normalizeStatus(raw: Partial<BrowserSessionStatus>): BrowserSessionStatus {
   return {
     enabled: raw.enabled === true,
     allowedDomains: Array.isArray(raw.allowedDomains) ? raw.allowedDomains.filter(isString) : [],
@@ -472,7 +552,7 @@ onMounted(async () => {
     loadSlackPolicy(),
     loadGoogleStatus(),
     loadGooglePolicy(),
-    loadResearchStatus(),
+    loadBrowserSessionStatus(),
     settings.refreshKeyStatuses(),
   ])
 })
@@ -621,9 +701,16 @@ onMounted(async () => {
               <button
                 type="button"
                 class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink"
+                :disabled="googleConnecting"
                 data-testid="google-connect-toggle"
-                @click="showGoogleTokenInput = true"
-              >Reconnect</button>
+                @click="connectGoogleOAuth"
+              >{{ googleConnecting ? 'Waiting...' : 'Reconnect' }}</button>
+              <button
+                type="button"
+                class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink"
+                data-testid="google-advanced-toggle"
+                @click="showGoogleTokenInput = !showGoogleTokenInput"
+              >Advanced</button>
               <button
                 type="button"
                 class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:border-rem/40 hover:bg-rem/10 hover:text-rem"
@@ -633,13 +720,18 @@ onMounted(async () => {
             </template>
             <template v-else>
               <button
-                v-if="!showGoogleTokenInput"
                 type="button"
                 class="h-6 rounded-[5px] bg-accent px-2.5 text-[10.5px] font-medium text-accent-ink hover:bg-accent/90"
+                :disabled="googleConnecting"
                 data-testid="google-connect-toggle"
-                @click="showGoogleTokenInput = true"
-              >Connect</button>
-              <span v-else class="text-[10px] italic text-ink-3">Not connected</span>
+                @click="connectGoogleOAuth"
+              >{{ googleConnecting ? 'Waiting...' : (isGoogleOAuthReady ? 'Sign in with Google' : 'Set up Google') }}</button>
+              <button
+                type="button"
+                class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink"
+                data-testid="google-advanced-toggle"
+                @click="showGoogleTokenInput = !showGoogleTokenInput"
+              >Advanced</button>
             </template>
           </div>
         </div>
@@ -648,7 +740,53 @@ onMounted(async () => {
           {{ googleCapabilitySummary }}
         </div>
 
+        <div v-if="!googleLoading && !isGoogleOAuthReady" class="border-t border-rule-light px-3 py-2 text-[10px] text-ink-3">
+          Google sign-in is not configured for this build.
+        </div>
+
+        <div v-if="googleConnectError && !showGoogleTokenInput" class="border-t border-rule-light px-3 py-2 text-[10px] text-rem">
+          {{ googleConnectError }}
+        </div>
+
         <div v-if="showGoogleTokenInput" class="border-t border-rule-light px-3 py-2.5">
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <span class="text-[10.5px] font-medium text-ink-2">OAuth app setup</span>
+            <span class="text-[10px] text-ink-4">{{ isGoogleOAuthReady ? 'Configured' : 'Required before sign-in' }}</span>
+          </div>
+          <div class="grid gap-2 border-b border-rule-light pb-2">
+            <input
+              v-model="googleClientId"
+              type="text"
+              class="h-7 min-w-0 rounded-[5px] border border-rule-light bg-chrome-high px-2.5 font-mono text-[11px] text-ink-2 outline-none transition-colors duration-100 focus:border-accent"
+              placeholder="OAuth client ID"
+              aria-label="Google OAuth client ID"
+              data-testid="google-client-id"
+              @keydown.enter="saveGoogleOAuthClient"
+            />
+            <input
+              v-model="googleClientSecret"
+              type="password"
+              class="h-7 min-w-0 rounded-[5px] border border-rule-light bg-chrome-high px-2.5 font-mono text-[11px] text-ink-2 outline-none transition-colors duration-100 focus:border-accent"
+              placeholder="OAuth client secret"
+              aria-label="Google OAuth client secret"
+              data-testid="google-client-secret"
+              @keydown.enter="saveGoogleOAuthClient"
+            />
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                class="h-7 shrink-0 rounded-[5px] border border-rule-light bg-surface px-2.5 text-[11px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
+                :disabled="!googleClientId.trim() || !googleClientSecret.trim() || googleClientSaving"
+                data-testid="google-save-client"
+                @click="saveGoogleOAuthClient"
+              >{{ googleClientSaving ? '...' : 'Save OAuth App' }}</button>
+            </div>
+          </div>
+
+          <div class="mt-2 mb-2 flex items-center justify-between gap-2">
+            <span class="text-[10.5px] font-medium text-ink-2">Manual token setup</span>
+            <span class="text-[10px] text-ink-4">For development and recovery</span>
+          </div>
           <div class="grid gap-2">
             <input
               v-model="googleAccessToken"
@@ -696,7 +834,7 @@ onMounted(async () => {
             <button
               type="button"
               class="h-7 shrink-0 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink"
-              @click="showGoogleTokenInput = false; googleAccessToken = ''; googleRefreshToken = ''; googleScope = ''; googleExpiresAt = ''; googleConnectError = ''"
+              @click="showGoogleTokenInput = false; clearGoogleAdvancedForm(); googleConnectError = ''"
             >Cancel</button>
           </div>
           <p v-if="googleConnectError" class="m-0 mt-1.5 text-[10px] text-rem">{{ googleConnectError }}</p>
@@ -768,18 +906,18 @@ onMounted(async () => {
       </template>
     </SettingsGroup>
 
-    <!-- Research Browser -->
-    <SettingsGroup title="Research Browser">
+    <!-- Website access -->
+    <SettingsGroup title="Website Access">
       <div class="overflow-hidden rounded-[8px] border border-rule-light bg-surface">
         <div class="flex items-center justify-between gap-3 px-3 py-2.5">
           <div class="flex min-w-0 items-center gap-2">
             <span
               class="h-[7px] w-[7px] shrink-0 rounded-full"
-              :class="researchStatus.profile_available ? 'bg-add' : 'bg-ink-4'"
+              :class="browserSessionStatus.profile_available ? 'bg-add' : 'bg-ink-4'"
             />
-            <span class="text-[12px] font-medium text-ink">Research Browser</span>
+            <span class="text-[12px] font-medium text-ink">Website access</span>
             <span class="truncate text-[10px] text-ink-3">
-              {{ researchStatus.profile_available ? 'Profile available' : 'Desktop profile unavailable' }}
+              {{ browserSessionStatus.profile_available ? 'Available' : 'Unavailable' }}
             </span>
           </div>
           <div class="flex shrink-0 items-center gap-1.5 text-[10px] text-ink-3">
@@ -794,15 +932,15 @@ onMounted(async () => {
               type="text"
               class="h-7 min-w-0 flex-1 rounded-[5px] border border-rule-light bg-chrome-high px-2.5 font-mono text-[11px] text-ink-2 outline-none transition-colors duration-100 focus:border-accent"
               placeholder="example.com or *.example.com"
-              aria-label="Research Browser domain"
-              data-testid="research-domain-input"
+              aria-label="Website access domain"
+              data-testid="browser-session-domain-input"
               @keydown.enter="addDomain"
             />
             <button
               type="button"
               class="flex h-7 shrink-0 items-center gap-1.5 rounded-[5px] bg-accent px-2.5 text-[11px] font-medium text-accent-ink hover:bg-accent/90 disabled:opacity-40"
-              :disabled="!domainInput.trim() || researchBusy === 'add'"
-              data-testid="research-add-domain"
+              :disabled="!domainInput.trim() || browserSessionBusy === 'add'"
+              data-testid="browser-session-add-domain"
               @click="addDomain"
             >
               <IconPlus :size="13" :stroke-width="2" />
@@ -811,29 +949,29 @@ onMounted(async () => {
             <button
               type="button"
               class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[5px] border border-rule-light bg-surface text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
-              :disabled="researchLoading"
-              aria-label="Refresh Research Browser domains"
-              data-testid="research-refresh"
-              @click="loadResearchStatus"
+              :disabled="browserSessionLoading"
+              aria-label="Refresh website access domains"
+              data-testid="browser-session-refresh"
+              @click="loadBrowserSessionStatus"
             >
               <IconRefresh :size="13" :stroke-width="2" />
             </button>
           </div>
-          <p v-if="researchError" class="m-0 mt-1.5 text-[10px] text-rem">{{ researchError }}</p>
+          <p v-if="browserSessionError" class="m-0 mt-1.5 text-[10px] text-rem">{{ browserSessionError }}</p>
         </div>
       </div>
     </SettingsGroup>
 
     <SettingsGroup title="Domains">
       <div class="overflow-hidden rounded-[8px] border border-rule-light bg-surface">
-        <div v-if="researchLoading && !researchStatus.allowedDomains.length" class="px-3 py-6 text-center text-[11px] italic text-ink-3">
+        <div v-if="browserSessionLoading && !browserSessionStatus.allowedDomains.length" class="px-3 py-6 text-center text-[11px] italic text-ink-3">
           Loading domains...
         </div>
-        <div v-else-if="!researchStatus.allowedDomains.length" class="px-3 py-6 text-center text-[11px] text-ink-3">
+        <div v-else-if="!browserSessionStatus.allowedDomains.length" class="px-3 py-6 text-center text-[11px] text-ink-3">
           No domains granted
         </div>
         <div
-          v-for="domain in researchStatus.allowedDomains"
+          v-for="domain in browserSessionStatus.allowedDomains"
           :key="domain"
           class="border-b border-rule-light px-3 py-2.5 last:border-b-0"
         >
@@ -853,9 +991,9 @@ onMounted(async () => {
               <button
                 type="button"
                 class="flex h-7 w-7 items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
-                :aria-label="`Open ${domain} in Research Browser`"
-                :data-testid="`research-open-${domain}`"
-                :disabled="researchBusy === `open:${domain}`"
+                :aria-label="`Open ${domain} for website access setup`"
+                :data-testid="`browser-session-open-${domain}`"
+                :disabled="browserSessionBusy === `open:${domain}`"
                 @click="openSource(domain)"
               >
                 <IconExternalLink :size="13" :stroke-width="2" />
@@ -864,8 +1002,8 @@ onMounted(async () => {
                 type="button"
                 class="flex h-7 w-7 items-center justify-center rounded-[5px] text-ink-3 hover:bg-rem/10 hover:text-rem disabled:opacity-40"
                 :aria-label="`Remove ${domain}`"
-                :data-testid="`research-remove-${domain}`"
-                :disabled="researchBusy === `remove:${domain}`"
+                :data-testid="`browser-session-remove-${domain}`"
+                :disabled="browserSessionBusy === `remove:${domain}`"
                 @click="removeDomain(domain)"
               >
                 <IconTrash :size="13" :stroke-width="2" />
@@ -879,21 +1017,21 @@ onMounted(async () => {
     <SettingsGroup title="Profile">
       <div class="flex items-center justify-between gap-3 rounded-[8px] border border-rule-light bg-surface px-3 py-2.5">
         <div class="min-w-0">
-          <div class="text-[12px] font-medium text-ink-2">Persistent browser profile</div>
-          <div class="text-[10px] text-ink-3">Cookies and site storage are used only for granted domains</div>
+          <div class="text-[12px] font-medium text-ink-2">Website access data</div>
+          <div class="text-[10px] text-ink-3">Sign-in, consent, and cookies are used only for granted websites</div>
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <button
             type="button"
             class="h-7 rounded-[5px] border border-rule-light bg-surface px-2.5 text-[11px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink"
-            data-testid="research-open-profile"
+            data-testid="browser-session-open-profile"
             @click="openSource()"
           >Open</button>
           <button
             type="button"
             class="h-7 rounded-[5px] border border-rule-light bg-surface px-2.5 text-[11px] font-medium text-ink-2 hover:bg-rem/10 hover:text-rem disabled:opacity-40"
-            :disabled="researchBusy === 'clear-profile'"
-            data-testid="research-clear-profile"
+            :disabled="browserSessionBusy === 'clear-profile'"
+            data-testid="browser-session-clear-profile"
             @click="clearProfile"
           >Clear</button>
         </div>

@@ -18,6 +18,11 @@ describe('approval logic', () => {
     expect(approvalQuestion({ toolName: 'fs.edit', category: 'write' })).toBe('Allow Mim to edit a file?')
     expect(approvalQuestion({ toolName: 'terminal.run', category: 'system' })).toBe('Allow Mim to run a terminal command?')
     expect(approvalQuestion({ toolName: 'fs.delete', category: 'write' })).toBe('Allow Mim to delete a file?')
+    expect(approvalQuestion({
+      toolName: 'web.read',
+      category: 'network',
+      savedBrowserSession: { domain: 'news.example', granted: false },
+    })).toBe('Allow Mim to use your access to news.example?')
   })
 
   it('falls back to the category, then a readable tool name', () => {
@@ -69,6 +74,10 @@ describe('approval logic', () => {
     expect(approvalNote({ toolName: 'fs.write', pathKind: 'resource', resourceCollectionId: 'designs' }))
       .toContain('shared resource "designs"')
     expect(approvalNote({ toolName: 'fs.write', pathKind: 'resource' })).toContain('shared resource collection')
+    expect(approvalNote({
+      toolName: 'web.read',
+      savedBrowserSession: { domain: 'news.example', granted: false },
+    })).toContain('sign-in, consent, and cookies already set up for news.example')
   })
 
   it('offers review only for changes that have a before/after', () => {
@@ -79,6 +88,11 @@ describe('approval logic', () => {
   it('offers a remember control only when scoped to a conversation', () => {
     expect(canRemember({ toolName: 'fs.edit', sessionId: 's1' })).toBe(true)
     expect(canRemember({ toolName: 'fs.edit' })).toBe(false)
+    expect(canRemember({
+      toolName: 'web.read',
+      sessionId: 's1',
+      savedBrowserSession: { domain: 'news.example', granted: false },
+    })).toBe(false)
     expect(rememberLabel({ toolName: 'fs.edit', category: 'write' })).toBe('Always allow file changes in this chat')
     expect(rememberLabel({ toolName: 'terminal.run' })).toBe('Always allow terminal commands in this chat')
   })

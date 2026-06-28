@@ -38,6 +38,8 @@ import { usePointerReorder } from './usePointerReorder.js'
 import { isImageIcon, packageIconUrl } from './packageIcon.js'
 import { agentIconUrl } from './agentIcon.js'
 import MimDialog from '../ui/MimDialog.vue'
+import MimMenu from '../ui/MimMenu.vue'
+import MimMenuItem from '../ui/MimMenuItem.vue'
 import WorkingIcon from '../ui/WorkingIcon.vue'
 
 interface LoadedPackage {
@@ -65,6 +67,19 @@ interface SurfaceRow {
 type AppRow =
   | { key: string; kind: 'package'; pkg: LoadedPackage }
   | { key: string; kind: 'agent'; agent: DetectedAgent }
+
+type ActivityCreateAgentTarget = {
+  key: string
+  agentId: string
+  label: string
+}
+
+type ActivityCreatePackageTarget = {
+  key: string
+  packageId: string
+  label: string
+  mark: string
+}
 
 const props = defineProps<{
   width: number
@@ -114,6 +129,10 @@ const launchablePackages = computed(() =>
   props.packages.filter(pkg =>
     !!defaultWorkPackageView(pkg) && appsStore.isPackageVisible(pkg.manifest.id),
   ),
+)
+
+const launchablePackageById = computed(() =>
+  new Map(launchablePackages.value.map(pkg => [pkg.manifest.id, pkg])),
 )
 
 const SURFACE_ICONS: Record<SurfaceRow['key'], typeof IconMessage> = {
@@ -251,6 +270,92 @@ function activityRowActive(row: ActivityRow): boolean {
   if (row.kind === 'chat') return props.activeWorkId === `work:chat:${row.session.id}`
   if (row.run.kind === 'agent-session') return props.activeWorkId === agentSessionWorkId(row.run)
   return props.activeWorkId === packageRunWorkId(row.run)
+}
+
+function isCreateTargetStatus(status: NavigatorRun['status']): boolean {
+  return status === 'working'
+    || status === 'needs-input'
+    || status === 'idle'
+    || status === 'needs-approval'
+    || status === 'error'
+    || status === 'paused'
+}
+
+function titleFromId(id: string): string {
+  return id
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function agentTargetName(agentId: string, fallback?: string): string {
+  const detected = agentsStore.agents.find(agent => agent.id === agentId)
+  return detected?.name ?? fallback ?? titleFromId(agentId)
+}
+
+function packageTargetMark(pkg: LoadedPackage): string {
+  const icon = pkg.manifest.icon
+  if (icon && !isImageIcon(icon)) return icon
+  return initialsFrom(pkg.manifest.name).slice(0, 1) || pkg.manifest.id.slice(0, 1).toUpperCase()
+}
+
+const activityCreateAgentTargets = computed<ActivityCreateAgentTarget[]>(() => {
+  const byId = new Map<string, string>()
+  for (const agent of agentsStore.enabledAgents) byId.set(agent.id, agent.name)
+  for (const row of activityRows.value) {
+    if (row.kind !== 'run' || row.run.kind !== 'agent-session') continue
+    if (!activityRowActive(row) && !isCreateTargetStatus(row.run.status)) continue
+    const agentId = agentIdForSession(row.run.sourceId)
+    if (agentId && !byId.has(agentId)) byId.set(agentId, agentTargetName(agentId, row.run.title))
+  }
+  return [...byId.entries()].map(([agentId, name]) => ({
+    key: `agent:${agentId}`,
+    agentId,
+    label: name,
+  }))
+})
+
+const activityCreatePackageTargets = computed<ActivityCreatePackageTarget[]>(() => {
+  const seen = new Set<string>()
+  const targets: ActivityCreatePackageTarget[] = []
+  for (const row of activityRows.value) {
+    if (row.kind !== 'run' || row.run.kind !== 'package-job' || !row.run.packageId) continue
+    if (!activityRowActive(row) && !isCreateTargetStatus(row.run.status)) continue
+    if (seen.has(row.run.packageId)) continue
+    const pkg = launchablePackageById.value.get(row.run.packageId)
+    if (!pkg) continue
+    seen.add(row.run.packageId)
+    targets.push({
+      key: `package:${row.run.packageId}`,
+      packageId: row.run.packageId,
+      label: pkg.manifest.name,
+      mark: packageTargetMark(pkg),
+    })
+  }
+  return targets
+})
+
+const activityCreateHasMenu = computed(() =>
+  activityCreateAgentTargets.value.length > 0 || activityCreatePackageTargets.value.length > 0,
+)
+
+function openNewChat() {
+  emit('selectWork', '__chat__')
+}
+
+function activityCreateAgentAttrs(target: ActivityCreateAgentTarget): Record<string, string> {
+  return {
+    'data-testid': `activity-create-agent-${target.agentId}`,
+    title: `New ${target.label} session`,
+  }
+}
+
+function activityCreatePackageAttrs(target: ActivityCreatePackageTarget): Record<string, string> {
+  return {
+    'data-testid': `activity-create-package-${target.packageId}`,
+    title: `Open ${target.label}`,
+  }
 }
 
 // A small status dot overlays the monogram so running/needs-attention items
@@ -855,14 +960,63 @@ onUnmounted(() => {
         <div class="nav-section-marker" data-testid="section-marker-activity">
           <template v-if="collapsed">
             <button
+              v-if="!activityCreateHasMenu"
               class="ml-[3px] grid h-[22px] w-[22px] place-items-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
               title="New chat"
               aria-label="New chat"
               data-testid="activity-new-chat"
-              @click="emit('selectWork', '__chat__')"
+              @click="openNewChat"
             >
               <IconPlus :size="13" :stroke="1.8" />
             </button>
+            <MimMenu
+              v-else
+              placement="bottom-start"
+              aria-label="New activity"
+              title="New activity"
+              trigger-class="ml-[3px] h-[22px] w-[22px] justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
+              :trigger-attrs="{ 'data-testid': 'activity-new-chat' }"
+              :items-attrs="{ 'data-testid': 'activity-create-menu' }"
+              :min-width="210"
+              :max-width="260"
+            >
+              <template #trigger>
+                <IconPlus :size="13" :stroke="1.8" />
+              </template>
+              <MimMenuItem :button-attrs="{ 'data-testid': 'activity-create-chat' }" @select="openNewChat">
+                <IconMessage :size="14" :stroke="1.8" class="shrink-0 text-ink-3" />
+                <span class="min-w-0 truncate">New chat</span>
+              </MimMenuItem>
+              <template v-if="activityCreateAgentTargets.length">
+                <MimMenuItem
+                  v-for="target in activityCreateAgentTargets"
+                  :key="target.key"
+                  :button-attrs="activityCreateAgentAttrs(target)"
+                  @select="emit('launchAgent', target.agentId)"
+                >
+                  <IconTerminal2 :size="14" :stroke="1.8" class="shrink-0 text-ink-3" />
+                  <span class="min-w-0 truncate">{{ target.label }}</span>
+                </MimMenuItem>
+              </template>
+              <div
+                v-if="activityCreateAgentTargets.length && activityCreatePackageTargets.length"
+                class="my-1 border-t border-rule-light"
+                data-testid="activity-create-divider"
+              />
+              <template v-if="activityCreatePackageTargets.length">
+                <MimMenuItem
+                  v-for="target in activityCreatePackageTargets"
+                  :key="target.key"
+                  :button-attrs="activityCreatePackageAttrs(target)"
+                  @select="emit('selectWork', target.packageId)"
+                >
+                  <span class="grid h-4 w-4 shrink-0 place-items-center rounded-[4px] border border-rule-light bg-chrome-mid text-[10px] font-semibold text-ink-2">
+                    {{ target.mark }}
+                  </span>
+                  <span class="min-w-0 truncate">{{ target.label }}</span>
+                </MimMenuItem>
+              </template>
+            </MimMenu>
           </template>
           <template v-else>
             <button
@@ -897,14 +1051,63 @@ onUnmounted(() => {
               <IconHistory :size="13" :stroke="1.8" />
             </button>
             <button
+              v-if="!activityCreateHasMenu"
               class="flex h-[22px] w-[22px] items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
               title="New chat"
               aria-label="New chat"
               data-testid="activity-new-chat"
-              @click="emit('selectWork', '__chat__')"
+              @click="openNewChat"
             >
               <IconPlus :size="13" :stroke="1.8" />
             </button>
+            <MimMenu
+              v-else
+              placement="bottom-end"
+              aria-label="New activity"
+              title="New activity"
+              trigger-class="h-[22px] w-[22px] justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
+              :trigger-attrs="{ 'data-testid': 'activity-new-chat' }"
+              :items-attrs="{ 'data-testid': 'activity-create-menu' }"
+              :min-width="210"
+              :max-width="260"
+            >
+              <template #trigger>
+                <IconPlus :size="13" :stroke="1.8" />
+              </template>
+              <MimMenuItem :button-attrs="{ 'data-testid': 'activity-create-chat' }" @select="openNewChat">
+                <IconMessage :size="14" :stroke="1.8" class="shrink-0 text-ink-3" />
+                <span class="min-w-0 truncate">New chat</span>
+              </MimMenuItem>
+              <template v-if="activityCreateAgentTargets.length">
+                <MimMenuItem
+                  v-for="target in activityCreateAgentTargets"
+                  :key="target.key"
+                  :button-attrs="activityCreateAgentAttrs(target)"
+                  @select="emit('launchAgent', target.agentId)"
+                >
+                  <IconTerminal2 :size="14" :stroke="1.8" class="shrink-0 text-ink-3" />
+                  <span class="min-w-0 truncate">{{ target.label }}</span>
+                </MimMenuItem>
+              </template>
+              <div
+                v-if="activityCreateAgentTargets.length && activityCreatePackageTargets.length"
+                class="my-1 border-t border-rule-light"
+                data-testid="activity-create-divider"
+              />
+              <template v-if="activityCreatePackageTargets.length">
+                <MimMenuItem
+                  v-for="target in activityCreatePackageTargets"
+                  :key="target.key"
+                  :button-attrs="activityCreatePackageAttrs(target)"
+                  @select="emit('selectWork', target.packageId)"
+                >
+                  <span class="grid h-4 w-4 shrink-0 place-items-center rounded-[4px] border border-rule-light bg-chrome-mid text-[10px] font-semibold text-ink-2">
+                    {{ target.mark }}
+                  </span>
+                  <span class="min-w-0 truncate">{{ target.label }}</span>
+                </MimMenuItem>
+              </template>
+            </MimMenu>
           </template>
         </div>
 

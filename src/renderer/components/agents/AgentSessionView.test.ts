@@ -178,7 +178,7 @@ describe('AgentSessionView', () => {
     expect(badge).not.toBeNull()
   })
 
-  it('fetches scrollback once for an ended session and shows replay, banner, and Relaunch', async () => {
+  it('fetches scrollback once for an ended session and shows replay, banner, and Resume', async () => {
     useRunsStore().setAgentSessions([makeSession({
       status: 'error',
       exitCode: 1,
@@ -203,7 +203,7 @@ describe('AgentSessionView', () => {
     expect(surface?.dataset.mode).toBe('replay')
     expect(surface?.dataset.replay).toBe('goodbye world')
     expect(root.textContent).toContain('Failed (exit 1)')
-    expect(buttonByText('Relaunch')).not.toBeNull()
+    expect(buttonByText('Resume')).not.toBeNull()
     expect(buttonByText('Stop')).toBeNull()
   })
 
@@ -220,7 +220,7 @@ describe('AgentSessionView', () => {
     expect(root.textContent).toContain('Interrupted — Mim was closed while this session ran')
   })
 
-  it('relaunches the agent, applies the new session to the store, and emits openAgentSession', async () => {
+  it('resumes the session in place and applies the updated record to the store', async () => {
     useRunsStore().setAgentSessions([makeSession({
       agentId: 'gemini-cli',
       title: 'Gemini CLI',
@@ -229,22 +229,23 @@ describe('AgentSessionView', () => {
       ptyId: undefined,
       runtimeStatus: undefined,
     })])
-    const newSession = makeSession({ sessionId: 's2', agentId: 'gemini-cli', status: 'running', ptyId: 12 })
+    const resumedSession = makeSession({ sessionId: 's1', agentId: 'gemini-cli', status: 'running', ptyId: 12 })
     call.mockImplementation(async (tool: string) => {
       if (tool === 'agent.sessions.get') return { session: makeSession({ status: 'stopped', scrollback: '' }) }
-      if (tool === 'agent.launch') return { session: newSession, ptyId: 12 }
+      if (tool === 'agent.resume') return { session: resumedSession, ptyId: 12 }
       return {}
     })
-    const onOpenAgentSession = vi.fn()
-    mountView({ agentId: 'claude-code' }, { onOpenAgentSession })
+    mountView({ agentId: 'claude-code' })
     await flushUi()
 
-    buttonByText('Relaunch')?.click()
+    buttonByText('Resume')?.click()
     await flushUi()
 
-    expect(call).toHaveBeenCalledWith('agent.launch', { agentId: 'gemini-cli' })
-    expect(useRunsStore().agentSessions.some(item => item.sessionId === 's2')).toBe(true)
-    expect(onOpenAgentSession).toHaveBeenCalledWith('gemini-cli', 's2')
+    expect(call).toHaveBeenCalledWith('agent.resume', { sessionId: 's1' })
+    const store = useRunsStore()
+    const session = store.agentSessions.find(item => item.sessionId === 's1')
+    expect(session?.status).toBe('running')
+    expect(session?.ptyId).toBe(12)
   })
 
   it('shows a plain-language recovery state when the session record is missing', async () => {

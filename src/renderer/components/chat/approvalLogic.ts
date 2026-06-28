@@ -13,6 +13,11 @@ export interface ApprovalPreviewLike {
   content?: string
 }
 
+export interface SavedBrowserSessionApprovalLike {
+  domain: string
+  granted?: boolean
+}
+
 export interface ApprovalLike {
   toolName: string
   category?: string
@@ -27,6 +32,7 @@ export interface ApprovalLike {
   sessionId?: string
   params?: Record<string, unknown>
   preview?: ApprovalPreviewLike
+  savedBrowserSession?: SavedBrowserSessionApprovalLike
 }
 
 export function formatToolName(name: string): string {
@@ -73,6 +79,10 @@ export function actionPhrase(approval: ApprovalLike): string {
 }
 
 export function approvalQuestion(approval: ApprovalLike): string {
+  const domain = approval.savedBrowserSession?.domain
+  if (approval.toolName === 'web.read' && domain) {
+    return `Allow Mim to use your access to ${domain}?`
+  }
   return `Allow Mim to ${actionPhrase(approval)}?`
 }
 
@@ -86,6 +96,7 @@ function asString(value: unknown): string {
 // passed over the resolved absolute path.
 export function targetDisplay(approval: ApprovalLike): string {
   const params = approval.params ?? {}
+  if (approval.toolName === 'web.read') return asString(params.url) || asString(approval.target)
   if (approval.toolName === 'fs.rename') {
     const from = asString(params.old_path)
     const to = asString(params.new_path)
@@ -163,6 +174,13 @@ export function approvalTone(approval: ApprovalLike): 'normal' | 'caution' {
 // A short heads-up, shown only when the target itself is unusual. Empty for
 // ordinary in-workspace changes.
 export function approvalNote(approval: ApprovalLike): string {
+  if (approval.savedBrowserSession?.domain) {
+    const domain = approval.savedBrowserSession.domain
+    if (approval.savedBrowserSession.granted) {
+      return `This can use sign-in, consent, and cookies already set up for ${domain}.`
+    }
+    return `Approving lets Mim use sign-in, consent, and cookies already set up for ${domain}.`
+  }
   if (approval.pathKind === 'sensitive') return 'This file is in a sensitive location. Check it before allowing.'
   if (approval.pathKind === 'outside-workspace') return 'This is outside your workspace folder.'
   if (approval.pathKind === 'resource') {
@@ -180,6 +198,7 @@ export function canReviewChange(approval: ApprovalLike): boolean {
 }
 
 export function canRemember(approval: ApprovalLike): boolean {
+  if (approval.savedBrowserSession && approval.savedBrowserSession.granted !== true) return false
   return typeof approval.sessionId === 'string' && approval.sessionId.length > 0
 }
 

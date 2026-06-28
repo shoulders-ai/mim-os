@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { IconFileExport, IconMessageCirclePlus, IconQuote } from '@tabler/icons-vue'
+import { IconDownload, IconMessageCirclePlus, IconQuote } from '@tabler/icons-vue'
 import { shortcutLabel } from '../../services/shortcutLabels.js'
 
 const props = defineProps<{
@@ -122,7 +122,7 @@ watch(() => props.commentCount, () => nextTick(checkOverflow))
       @mousedown.prevent
       @click="emit('export')"
     >
-      <IconFileExport :size="13" stroke-width="2" />
+      <IconDownload :size="13" stroke-width="2" />
       <span v-show="!compact">Export</span>
     </button>
   </div>

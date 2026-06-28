@@ -65,7 +65,7 @@ describe('SettingsDialog model defaults', () => {
       }
       if (tool === 'package.capabilities.list') return { packages: [] }
       if (tool === 'agent.list') return { agents: [] }
-      if (tool === 'web.research.status') return {
+      if (tool === 'web.browser.status') return {
         enabled: true,
         allowedDomains: ['dbregio-berlin-brandenburg.de'],
         profile_available: true,

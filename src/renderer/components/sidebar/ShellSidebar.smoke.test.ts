@@ -529,6 +529,126 @@ describe('ShellSidebar smoke', () => {
     expect(call.mock.calls.some(([tool]) => tool === 'session.create')).toBe(false)
   })
 
+  it('opens an Activity create menu when a CLI agent is available', async () => {
+    const onSelectWork = vi.fn()
+    const onLaunchAgent = vi.fn()
+    useAgentsStore().agents = [makeAgent()]
+    useSettingsStore().enabledAgents = ['claude-code']
+    app = createApp(ShellSidebar, {
+      width: 220,
+      packages: [],
+      activeWorkId: 'work:agent-session:sess-1',
+      workspaceName: 'Workspace',
+      recentWorkspaces: [],
+      onSelectWork,
+      onLaunchAgent,
+    })
+    app.use(pinia)
+    app.mount(root)
+    await flushUi()
+
+    const create = root.querySelector<HTMLButtonElement>('[data-testid="activity-new-chat"]')
+    expect(create?.getAttribute('title')).toBe('New activity')
+    create?.click()
+    await flushUi()
+
+    expect(onSelectWork).not.toHaveBeenCalled()
+    const menu = document.body.querySelector('[data-testid="activity-create-menu"]')
+    expect(menu).not.toBeNull()
+    expect(menu?.textContent).toContain('New chat')
+    expect(menu?.textContent).toContain('Claude Code')
+    expect(menu?.textContent).not.toContain('New Claude Code session')
+    expect(menu?.textContent).not.toContain('CLI tools')
+    expect(menu?.textContent).not.toContain('Apps')
+    expect(menu?.querySelector('[data-testid="activity-create-divider"]')).toBeNull()
+
+    document.body.querySelector<HTMLButtonElement>('[data-testid="activity-create-agent-claude-code"]')?.click()
+    expect(onLaunchAgent).toHaveBeenCalledWith('claude-code')
+
+    create?.click()
+    await flushUi()
+    document.body.querySelector<HTMLButtonElement>('[data-testid="activity-create-chat"]')?.click()
+    expect(onSelectWork).toHaveBeenCalledWith('__chat__')
+  })
+
+  it('offers active app activity targets from the Activity create menu without visible section labels', async () => {
+    const onSelectWork = vi.fn()
+    useRunsStore().setPackageRuns([{
+      runId: 'run-review-1',
+      packageId: 'doc-review',
+      jobId: 'review-document',
+      status: 'running',
+      inputs: {},
+      startedAt: '2026-01-01T00:10:00.000Z',
+      events: [],
+    }])
+    app = createApp(ShellSidebar, {
+      width: 220,
+      packages: [{
+        manifest: { id: 'doc-review', name: 'DOCX Review', icon: 'D', views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }] },
+        dir: '/packages/doc-review',
+        source: 'global',
+      }],
+      activeWorkId: 'work:package-run:doc-review:run-review-1',
+      workspaceName: 'Workspace',
+      recentWorkspaces: [],
+      onSelectWork,
+    })
+    app.use(pinia)
+    app.mount(root)
+    await flushUi()
+
+    root.querySelector<HTMLButtonElement>('[data-testid="activity-new-chat"]')?.click()
+    await flushUi()
+
+    const menu = document.body.querySelector('[data-testid="activity-create-menu"]')
+    expect(menu).not.toBeNull()
+    expect(menu?.textContent).toContain('DOCX Review')
+    expect(menu?.textContent).not.toContain('Open DOCX Review')
+    expect(menu?.textContent).not.toContain('CLI tools')
+    expect(menu?.textContent).not.toContain('Apps')
+    expect(menu?.querySelector('[data-testid="activity-create-divider"]')).toBeNull()
+
+    document.body.querySelector<HTMLButtonElement>('[data-testid="activity-create-package-doc-review"]')?.click()
+    expect(onSelectWork).toHaveBeenCalledWith('doc-review')
+  })
+
+  it('uses a thin divider when the Activity create menu has CLI and app targets', async () => {
+    useAgentsStore().agents = [makeAgent()]
+    useSettingsStore().enabledAgents = ['claude-code']
+    useRunsStore().setPackageRuns([{
+      runId: 'run-review-1',
+      packageId: 'doc-review',
+      jobId: 'review-document',
+      status: 'running',
+      inputs: {},
+      startedAt: '2026-01-01T00:10:00.000Z',
+      events: [],
+    }])
+    app = createApp(ShellSidebar, {
+      width: 220,
+      packages: [{
+        manifest: { id: 'doc-review', name: 'DOCX Review', icon: 'D', views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }] },
+        dir: '/packages/doc-review',
+        source: 'global',
+      }],
+      activeWorkId: 'work:package-run:doc-review:run-review-1',
+      workspaceName: 'Workspace',
+      recentWorkspaces: [],
+    })
+    app.use(pinia)
+    app.mount(root)
+    await flushUi()
+
+    root.querySelector<HTMLButtonElement>('[data-testid="activity-new-chat"]')?.click()
+    await flushUi()
+
+    const menu = document.body.querySelector('[data-testid="activity-create-menu"]')
+    expect(menu?.textContent).toContain('Claude Code')
+    expect(menu?.textContent).toContain('DOCX Review')
+    expect(menu?.querySelector('[data-testid="activity-create-divider"]')).not.toBeNull()
+  })
+
   it('offers archive and delete commands for app run rows', async () => {
     const onArchivePackageRun = vi.fn()
     const onDeletePackageRun = vi.fn()

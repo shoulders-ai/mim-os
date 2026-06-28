@@ -81,6 +81,26 @@ describe('InlineApproval', () => {
     expect(root.textContent).toContain('Q3 numbers are in')
   })
 
+  it('asks for website access from chat', async () => {
+    app = createApp(InlineApproval, {
+      approval: {
+        toolName: 'web.read',
+        category: 'network',
+        sessionId: 's1',
+        target: 'https://news.example/private',
+        params: { url: 'https://news.example/private', stateful: true },
+        savedBrowserSession: { domain: 'news.example', granted: false },
+      },
+    })
+    app.mount(root)
+    await flush()
+
+    expect(root.textContent).toContain('Allow Mim to use your access to news.example?')
+    expect(root.textContent).toContain('https://news.example/private')
+    expect(root.textContent).toContain('sign-in, consent, and cookies already set up for news.example')
+    expect(root.querySelector('input[type="checkbox"]')).toBeFalsy()
+  })
+
   it('hides Review change when there is no before/after to show', async () => {
     app = createApp(InlineApproval, {
       approval: { toolName: 'terminal.run', category: 'system', sessionId: 's1', params: { command: 'rm -rf build' } },

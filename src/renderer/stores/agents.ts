@@ -27,7 +27,7 @@ export const useAgentsStore = defineStore('agents', () => {
   )
 
   // Launcher rows: installed AND user-enabled. Enablement controls visibility
-  // only — session records and relaunch are unaffected by toggling off.
+  // only — session records and resume are unaffected by toggling off.
   const enabledAgents = computed<DetectedAgent[]>(() =>
     installedAgents.value.filter(agent => settings.enabledAgents.includes(agent.id))
   )

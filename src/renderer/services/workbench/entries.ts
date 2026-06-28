@@ -140,7 +140,7 @@ export function packageRunWorkEntry(
 }
 
 // Identity is the session id alone — session ids are globally unique, so the
-// agent id rides along as metadata for the view (icon, relaunch).
+// agent id rides along as metadata for the view (icon, resume).
 export function agentSessionWorkEntry(agentId: string, sessionId: string, title: string): WorkEntry {
   return {
     id: `work:agent-session:${sessionId}`,

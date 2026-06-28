@@ -5,6 +5,8 @@ import { createApp, nextTick } from 'vue'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import ShellSidebar from './ShellSidebar.vue'
 import { useSessionStore, type Session } from '../../stores/sessions.js'
+import { useAgentsStore, type DetectedAgent } from '../../stores/agents.js'
+import { useSettingsStore } from '../../stores/settings.js'
 import { NAVIGATOR_SPINE_WIDTH } from '../../services/workbench/entries.js'
 
 async function flushUi() {
@@ -27,6 +29,18 @@ function makeSession(overrides: Partial<Session> = {}): Session {
     archived: false,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  }
+}
+
+function makeAgent(overrides: Partial<DetectedAgent> = {}): DetectedAgent {
+  return {
+    id: 'claude-code',
+    name: 'Claude Code',
+    bin: 'claude',
+    args: [],
+    installed: true,
+    binPath: '/usr/local/bin/claude',
     ...overrides,
   }
 }
@@ -199,6 +213,23 @@ describe('ShellSidebar collapsed rail', () => {
     expect(newChat).toBeTruthy()
     expect(newChat?.getAttribute('title')).toBe('New chat')
     expect(root.querySelector('[data-testid="activity-history"]')).toBeNull()
+  })
+
+  it('opens the Activity create menu from the rail when CLI targets exist', async () => {
+    const onLaunchAgent = vi.fn()
+    useAgentsStore().agents = [makeAgent()]
+    useSettingsStore().enabledAgents = ['claude-code']
+    mountCollapsed({ onLaunchAgent })
+    await flushUi()
+
+    const create = root.querySelector<HTMLButtonElement>('[data-testid="activity-new-chat"]')
+    expect(create?.getAttribute('title')).toBe('New activity')
+    create?.click()
+    await flushUi()
+
+    expect(document.body.querySelector('[data-testid="activity-create-menu"]')).not.toBeNull()
+    document.body.querySelector<HTMLButtonElement>('[data-testid="activity-create-agent-claude-code"]')?.click()
+    expect(onLaunchAgent).toHaveBeenCalledWith('claude-code')
   })
 
   it('represents Activity chats as title-derived monograms in list order', async () => {

@@ -3,7 +3,7 @@
 // live TerminalSurface while the pty runs, scrollback replay with an
 // end-state banner once it ends. Session data comes from the runs store;
 // only identity arrives via props.
-import { IconAlertTriangle, IconPlayerStop, IconRefresh } from '@tabler/icons-vue'
+import { IconAlertTriangle, IconPlayerPlay, IconPlayerStop } from '@tabler/icons-vue'
 import { computed, ref, watch } from 'vue'
 import TerminalSurface from '../terminal/TerminalSurface.vue'
 import type { TerminalKeybindingProfile } from '../terminal/terminalKeybindings.js'
@@ -116,7 +116,7 @@ function isMissingSessionError(message: string, sessionId: string): boolean {
 }
 
 /* ── Actions ── */
-const actionBusy = ref<'stop' | 'relaunch' | null>(null)
+const actionBusy = ref<'stop' | 'resume' | null>(null)
 const actionError = ref<string | null>(null)
 
 async function stopSession() {
@@ -132,26 +132,30 @@ async function stopSession() {
   }
 }
 
-async function relaunch() {
+async function resumeSession() {
   if (actionBusy.value) return
-  actionBusy.value = 'relaunch'
+  actionBusy.value = 'resume'
   actionError.value = null
   try {
-    const agentId = effectiveAgentId.value
-    const extraArgs = agentsStore.getExtraArgs(agentId)
-    const result = await window.kernel.call('agent.launch', { agentId, ...(extraArgs.length ? { extraArgs } : {}) }) as {
+    const result = await window.kernel.call('agent.resume', { sessionId: props.sessionId }) as {
       session?: AgentSessionRuntime
       ptyId?: number
     }
-    if (!result.session) throw new Error('Launch did not return a session')
+    if (!result.session) throw new Error('Resume did not return a session')
     runsStore.applyAgentSessionEvent({ type: 'session.started', session: result.session })
-    emit('openAgentSession', agentId, result.session.sessionId)
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : String(err)
   } finally {
     actionBusy.value = null
   }
 }
+
+watch(running, (isRunning) => {
+  if (isRunning) {
+    fetchedFor = null
+    replayText.value = null
+  }
+})
 
 </script>
 
@@ -218,12 +222,12 @@ async function relaunch() {
         <span class="min-w-0 flex-1 truncate font-semibold">{{ bannerText }}</span>
         <button
           class="flex h-6 shrink-0 items-center gap-1.5 rounded-[5px] border border-rule-light bg-surface px-2 font-sans text-[11px] font-semibold text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-50"
-          :disabled="actionBusy === 'relaunch'"
-          title="Start a new session with this agent"
-          @click="relaunch"
+          :disabled="actionBusy === 'resume'"
+          title="Resume this session"
+          @click="resumeSession"
         >
-          <IconRefresh :size="12" :stroke-width="2.2" />
-          Relaunch
+          <IconPlayerPlay :size="12" :stroke-width="2.2" />
+          Resume
         </button>
       </div>
       <div class="relative mt-1 min-h-0 flex-1 overflow-hidden bg-surface">

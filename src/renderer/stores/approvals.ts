@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { useSessionStore } from './sessions.js'
-import type { ApprovalPreviewLike } from '../components/chat/approvalLogic.js'
+import type { ApprovalPreviewLike, SavedBrowserSessionApprovalLike } from '../components/chat/approvalLogic.js'
 
 // A pending permission request from the main-process gate. Only AI actions reach
 // the renderer; direct user and package actions are resolved in the gate itself.
@@ -23,6 +23,7 @@ export interface ApprovalRequest {
   label?: string
   params: Record<string, unknown>
   preview?: ApprovalPreviewLike
+  savedBrowserSession?: SavedBrowserSessionApprovalLike
 }
 
 export interface ApprovalDecision {
