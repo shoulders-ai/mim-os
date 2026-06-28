@@ -51,6 +51,23 @@ export function registerAgentTools(tools: ToolRegistry, deps?: AgentToolsDeps): 
   })
 
   tools.register({
+    name: 'agent.resume',
+    description: 'Resume an interrupted or ended agent session using the CLI\'s native resume flag. User-only: denied to AI and package actors.',
+    inputSchema: objectSchema({ sessionId: { type: 'string' } }, ['sessionId']),
+    execute: async (params) => {
+      const sessionId = params.sessionId as string
+      const session = sessions().get(sessionId)
+      if (!session) throw new Error(`Agent session not found: ${sessionId}`)
+      const agents = await detect()
+      const agent = agents.find(a => a.id === session.agentId)
+      if (!agent) throw new Error(`Unknown agent: ${session.agentId}`)
+      if (!agent.installed || !agent.binPath) throw new Error(`Agent not installed: ${session.agentId}`)
+      const { record, ptyId } = sessions().resume(sessionId, agent)
+      return { session: record, ptyId }
+    },
+  })
+
+  tools.register({
     name: 'agent.stop',
     description: 'Stop a running agent session. User-only: denied to AI and package actors.',
     inputSchema: objectSchema({ sessionId: { type: 'string' } }, ['sessionId']),

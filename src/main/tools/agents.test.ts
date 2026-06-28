@@ -26,6 +26,7 @@ const record = {
 function fakeSessions() {
   return {
     launch: vi.fn(() => ({ record: { ...record, ptyId: 7 }, ptyId: 7 })),
+    resume: vi.fn(() => ({ record: { ...record, status: 'running' as const, ptyId: 8 }, ptyId: 8 })),
     stop: vi.fn(() => ({ ...record, status: 'stopped' as const })),
     list: vi.fn(() => [{ ...record }]),
     get: vi.fn((_id: string, options?: { scrollback?: boolean }) =>
@@ -66,6 +67,7 @@ describe('agent tools', () => {
       'agent.mcp.connect',
       'agent.mcp.disconnect',
       'agent.mcp.status',
+      'agent.resume',
       'agent.sessions.archive',
       'agent.sessions.delete',
       'agent.sessions.get',
@@ -107,6 +109,32 @@ describe('agent tools', () => {
     await expect(tools.call('agent.launch', { agentId: 'nope' }, ctx)).rejects.toThrow('Unknown agent: nope')
     await expect(tools.call('agent.launch', { agentId: 'codex' }, ctx)).rejects.toThrow('Agent not installed: codex')
     expect(sessions.launch).not.toHaveBeenCalled()
+  })
+
+  it('agent.resume resolves the agent and resumes the session', async () => {
+    const { tools, sessions } = harness()
+    sessions.get.mockReturnValueOnce({ ...record, status: 'interrupted' as const } as never)
+
+    const result = await tools.call('agent.resume', { sessionId: 's1' }, ctx) as { session: { status: string }; ptyId: number }
+
+    expect(sessions.get).toHaveBeenCalledWith('s1')
+    expect(sessions.resume).toHaveBeenCalledWith('s1', detected[0])
+    expect(result.ptyId).toBe(8)
+    expect(result.session.status).toBe('running')
+  })
+
+  it('agent.resume rejects unknown sessions', async () => {
+    const { tools, sessions } = harness()
+    sessions.get.mockReturnValueOnce(null as never)
+
+    await expect(tools.call('agent.resume', { sessionId: 'nope' }, ctx)).rejects.toThrow('Agent session not found: nope')
+  })
+
+  it('agent.resume rejects uninstalled agents', async () => {
+    const { tools, sessions } = harness()
+    sessions.get.mockReturnValueOnce({ ...record, agentId: 'codex' } as never)
+
+    await expect(tools.call('agent.resume', { sessionId: 's1' }, ctx)).rejects.toThrow('Agent not installed: codex')
   })
 
   it('agent.stop forwards to the sessions service', async () => {

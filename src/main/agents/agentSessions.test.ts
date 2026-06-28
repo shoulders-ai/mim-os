@@ -12,6 +12,7 @@ import {
   type AgentSessionsOptions,
 } from '@main/agents/agentSessions.js'
 import type { DetectedAgent } from '@main/agents/agentCatalog.js'
+import { resumeArgs } from '@main/agents/agentCatalog.js'
 import type { PtyHandle, PtySpawnOptions } from '@main/pty.js'
 
 const claude: DetectedAgent = {
@@ -542,5 +543,137 @@ describe('agent sessions', () => {
   it('throws when no workspace is open', () => {
     const { sessions } = makeHarness({ getWorkspacePath: () => null })
     expect(() => sessions.launch(claude)).toThrow('No workspace open')
+  })
+
+  it('launch passes agent args without appending session-id (CLIs manage their own)', () => {
+    const { sessions, ptys } = makeHarness()
+    const { record } = sessions.launch(claude)
+
+    expect(ptys[0].opts.args).toEqual(['--verbose'])
+    expect(record.command).toBe('/opt/homebrew/bin/claude --verbose')
+    ptys[0].exit(0)
+  })
+
+  describe('resume', () => {
+    it('spawns the agent with resume args and reuses the session record', () => {
+      const { sessions, events, ptys, mcpSessionIds } = makeHarness()
+      const { record: original } = sessions.launch(claude)
+      ptys[0].exit(0)
+      events.length = 0
+
+      const { record: resumed, ptyId } = sessions.resume(original.sessionId, claude)
+
+      expect(resumed.sessionId).toBe(original.sessionId)
+      expect(resumed.agentId).toBe('claude-code')
+      expect(resumed.status).toBe('running')
+      expect(resumed.endedAt).toBeUndefined()
+      expect(resumed.exitCode).toBeUndefined()
+      expect(resumed.ptyId).toBe(ptyId)
+
+      expect(ptys[1].opts.args).toEqual(['--continue'])
+      expect(ptys[1].opts.cwd).toBe(dir)
+      expect(resumed.command).toBe('/opt/homebrew/bin/claude --continue')
+
+      expect(mcpSessionIds).toContain(original.sessionId)
+      expect(events[0]).toMatchObject({ type: 'session.started', session: { sessionId: original.sessionId, status: 'running' } })
+      expect(sessions.activeSessionCount()).toBe(1)
+
+      ptys[1].exit(0)
+    })
+
+    it('appends new output to existing scrollback', () => {
+      const { sessions, ptys } = makeHarness()
+      const { record } = sessions.launch(claude)
+      ptys[0].data('before resume ')
+      ptys[0].exit(0)
+
+      sessions.resume(record.sessionId, claude)
+      ptys[1].data('after resume')
+      ptys[1].exit(0)
+
+      const withScrollback = sessions.get(record.sessionId, { scrollback: true })!
+      expect(withScrollback.scrollback).toBe('before resume after resume')
+    })
+
+    it('throws on a running session', () => {
+      const { sessions, ptys } = makeHarness()
+      const { record } = sessions.launch(claude)
+
+      expect(() => sessions.resume(record.sessionId, claude)).toThrow('Agent session is already running')
+
+      ptys[0].exit(0)
+    })
+
+    it('throws on a non-existent session', () => {
+      const { sessions } = makeHarness()
+      expect(() => sessions.resume('nonexistent', claude)).toThrow('Agent session not found: nonexistent')
+    })
+
+    it('un-archives an archived session on resume', () => {
+      const { sessions, ptys } = makeHarness()
+      const { record } = sessions.launch(claude)
+      ptys[0].exit(0)
+      sessions.archive(record.sessionId, true)
+
+      const { record: resumed } = sessions.resume(record.sessionId, claude)
+
+      expect(resumed.archived).toBe(false)
+      ptys[1].exit(0)
+    })
+
+    it('revokes MCP token on spawn failure', () => {
+      let spawnCount = 0
+      const { sessions, revokedMcpTokens, ptys } = makeHarness({
+        spawnPty: (opts) => {
+          spawnCount++
+          if (spawnCount === 2) throw new Error('spawn failed')
+          const fake = {
+            ptyId: 100,
+            write: vi.fn(),
+            resize: vi.fn(),
+            kill: vi.fn(() => opts.onExit?.(1)),
+          }
+          ptys.push({ ...fake, opts, data: (c: string) => opts.onData?.(c), exit: (code: number) => opts.onExit?.(code) } as unknown as FakePty)
+          return { ptyId: fake.ptyId, write: fake.write, resize: fake.resize, kill: fake.kill }
+        },
+      })
+      const { record } = sessions.launch(claude)
+      ptys[0].exit(0)
+
+      expect(() => sessions.resume(record.sessionId, claude)).toThrow('spawn failed')
+      expect(revokedMcpTokens.at(-1)).toMatch(/^mcp-token-for-/)
+      expect(sessions.activeSessionCount()).toBe(0)
+
+      const onDisk = JSON.parse(readFileSync(join(sessionsDir(), `${record.sessionId}.json`), 'utf-8'))
+      expect(onDisk.status).toBe('done')
+    })
+
+    it('works on interrupted, stopped, and error sessions', () => {
+      const { sessions, ptys } = makeHarness()
+
+      const s1 = sessions.launch(claude)
+      ptys[0].exit(0)
+      expect(sessions.resume(s1.record.sessionId, claude).record.status).toBe('running')
+      ptys[1].exit(0)
+
+      const s2 = sessions.launch(claude)
+      sessions.stop(s2.record.sessionId)
+      expect(sessions.resume(s2.record.sessionId, claude).record.status).toBe('running')
+      ptys[3].exit(0)
+
+      const s3 = sessions.launch(claude)
+      ptys[4].exit(1)
+      expect(sessions.resume(s3.record.sessionId, claude).record.status).toBe('running')
+      ptys[5].exit(0)
+    })
+
+    it('refuses to resume an uninstalled agent', () => {
+      const { sessions, ptys } = makeHarness()
+      const { record } = sessions.launch(claude)
+      ptys[0].exit(0)
+
+      const uninstalled: DetectedAgent = { ...claude, installed: false, binPath: undefined }
+      expect(() => sessions.resume(record.sessionId, uninstalled)).toThrow('Agent not installed')
+    })
   })
 })

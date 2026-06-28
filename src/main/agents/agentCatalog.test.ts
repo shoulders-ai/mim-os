@@ -3,6 +3,8 @@ import {
   AGENT_CATALOG,
   detectAgents,
   resetAgentDetection,
+  sessionIdArgs,
+  resumeArgs,
   type DetectedAgent,
   type ExecLoginShell,
 } from '@main/agents/agentCatalog.js'
@@ -24,6 +26,33 @@ describe('agent catalog', () => {
       { id: 'codex', name: 'Codex', bin: 'codex', args: [] },
       { id: 'gemini-cli', name: 'Gemini CLI', bin: 'gemini', args: [] },
     ])
+  })
+})
+
+describe('sessionIdArgs', () => {
+  it('returns empty for all agents (CLIs manage their own session IDs)', () => {
+    expect(sessionIdArgs('claude-code', 'abc-123')).toEqual([])
+    expect(sessionIdArgs('codex', 'abc-123')).toEqual([])
+    expect(sessionIdArgs('gemini-cli', 'abc-123')).toEqual([])
+    expect(sessionIdArgs('unknown', 'abc-123')).toEqual([])
+  })
+})
+
+describe('resumeArgs', () => {
+  it('returns --continue for claude-code', () => {
+    expect(resumeArgs('claude-code', 'abc-123')).toEqual(['--continue'])
+  })
+
+  it('returns resume --last for codex', () => {
+    expect(resumeArgs('codex', 'abc-123')).toEqual(['resume', '--last'])
+  })
+
+  it('returns --resume latest for gemini-cli', () => {
+    expect(resumeArgs('gemini-cli', 'abc-123')).toEqual(['--resume', 'latest'])
+  })
+
+  it('returns empty for unknown agents', () => {
+    expect(resumeArgs('unknown', 'abc-123')).toEqual([])
   })
 })
 

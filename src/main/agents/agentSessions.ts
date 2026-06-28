@@ -8,11 +8,12 @@
 // production), the emit-to-windows function, clock, and id generator — so
 // tests never touch node-pty or Electron.
 
-import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'fs'
+import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { atomicWriteJson } from '@main/atomicJson.js'
 import { createAgentStatusTracker, type AgentRuntimeStatus, type AgentStatusTracker } from '@main/agents/agentStatus.js'
+import { sessionIdArgs, resumeArgs as catalogResumeArgs } from '@main/agents/agentCatalog.js'
 import type { DetectedAgent } from '@main/agents/agentCatalog.js'
 import type { PtyHandle, PtySpawnOptions } from '@main/pty.js'
 
@@ -69,6 +70,7 @@ export interface AgentSessionsOptions {
 
 export interface AgentSessions {
   launch(agent: DetectedAgent): { record: AgentSessionRuntime; ptyId: number }
+  resume(sessionId: string, agent: DetectedAgent): { record: AgentSessionRuntime; ptyId: number }
   stop(sessionId: string): AgentSessionRuntime
   list(options?: { includeArchived?: boolean; archived?: boolean }): AgentSessionRuntime[]
   get(sessionId: string, options?: { scrollback?: boolean }): AgentSessionRuntime | null
@@ -250,11 +252,13 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     const cwd = requireWorkspace()
     const sessionId = generateId()
     const mcpToken = options.createMcpToken(sessionId)
+    const sidArgs = sessionIdArgs(agent.id, sessionId)
+    const spawnArgs = [...agent.args, ...sidArgs]
     const record: AgentSessionRecord = {
       sessionId,
       agentId: agent.id,
       title: defaultTitle(agent.name),
-      command: [agent.binPath, ...agent.args].join(' '),
+      command: [agent.binPath, ...spawnArgs].join(' '),
       cwd,
       status: 'running',
       startedAt: now().toISOString(),
@@ -274,7 +278,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     try {
       live.handle = options.spawnPty({
         file: agent.binPath,
-        args: agent.args,
+        args: spawnArgs,
         cwd,
         env: {
           MIM_PORT: String(options.getMcpServerPort()),
@@ -287,6 +291,61 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
       revokeLiveMcpToken(live)
       throw err
     }
+    active.set(sessionId, live)
+    persist(record)
+    const merged = withRuntime(record)
+    emitEvent('session.started', merged)
+    return { record: merged, ptyId: live.handle.ptyId }
+  }
+
+  function resume(sessionId: string, agent: DetectedAgent): { record: AgentSessionRuntime; ptyId: number } {
+    if (!agent.installed || !agent.binPath) throw new Error(`Agent not installed: ${agent.id}`)
+    const record = requireRecord(sessionId)
+    if (record.status === 'running') throw new Error(`Agent session is already running: ${sessionId}`)
+
+    const rArgs = catalogResumeArgs(record.agentId, sessionId)
+    const mcpToken = options.createMcpToken(sessionId)
+
+    record.status = 'running'
+    delete record.endedAt
+    delete record.exitCode
+    record.startedAt = now().toISOString()
+    record.command = [agent.binPath, ...rArgs].join(' ')
+    if (record.archived) record.archived = false
+
+    const tracker = createAgentStatusTracker({ idleThresholdMs })
+    const sbPath = scrollbackPath(sessionId)
+    const existingBytes = existsSync(sbPath) ? statSync(sbPath).size : 0
+
+    const live: LiveSession = {
+      record,
+      handle: null as unknown as PtyHandle,
+      tracker,
+      scrollbackPath: sbPath,
+      scrollbackBytes: existingBytes,
+      stopRequested: false,
+      lastStatus: tracker.status(),
+      lastTitleHint: record.titleHint,
+      mcpToken,
+    }
+
+    try {
+      live.handle = options.spawnPty({
+        file: agent.binPath,
+        args: rArgs,
+        cwd: record.cwd,
+        env: {
+          MIM_PORT: String(options.getMcpServerPort()),
+          MIM_TOKEN: mcpToken,
+        },
+        onData: (chunk) => onData(live, chunk),
+        onExit: (exitCode) => onExit(live, exitCode),
+      })
+    } catch (err) {
+      revokeLiveMcpToken(live)
+      throw err
+    }
+
     active.set(sessionId, live)
     persist(record)
     const merged = withRuntime(record)
@@ -399,5 +458,5 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     live.mcpToken = undefined
   }
 
-  return { launch, stop, list, get, rename, archive, delete: deleteSession, reconcileStaleSessions, activeSessionCount }
+  return { launch, resume, stop, list, get, rename, archive, delete: deleteSession, reconcileStaleSessions, activeSessionCount }
 }

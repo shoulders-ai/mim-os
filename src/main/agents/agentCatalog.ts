@@ -101,3 +101,14 @@ export function detectAgents(deps?: DetectAgentsDeps): Promise<DetectedAgent[]> 
 export function resetAgentDetection(): void {
   cache = null
 }
+
+export function sessionIdArgs(_agentId: string, _sessionId: string): string[] {
+  return []
+}
+
+export function resumeArgs(agentId: string, _sessionId: string): string[] {
+  if (agentId === 'claude-code') return ['--continue']
+  if (agentId === 'codex') return ['resume', '--last']
+  if (agentId === 'gemini-cli') return ['--resume', 'latest']
+  return []
+}
