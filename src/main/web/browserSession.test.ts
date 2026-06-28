@@ -28,13 +28,13 @@ vi.mock('@main/web/renderedBrowser.js', () => ({
 }))
 
 const {
-  RESEARCH_BROWSER_PARTITION,
-  clearResearchBrowserProfile,
-  openResearchBrowserWindow,
-  renderUrlInResearchSession,
-} = await import('./researchBrowser.js')
+  BROWSER_SESSION_PARTITION,
+  clearBrowserSessionProfile,
+  openBrowserSessionWindow,
+  renderUrlInBrowserSession,
+} = await import('./browserSession.js')
 
-describe('researchBrowser Electron boundary', () => {
+describe('website access Electron boundary', () => {
   beforeEach(() => {
     browserWindowMock.mockClear()
     mockWindow.loadURL.mockClear()
@@ -46,14 +46,14 @@ describe('researchBrowser Electron boundary', () => {
     renderInWindow.mockClear()
   })
 
-  it('opens a visible setup window with the persistent research partition', async () => {
-    const result = await openResearchBrowserWindow({ url: 'https://example.com/login' })
+  it('opens a visible setup window with the persistent browser session partition', async () => {
+    const result = await openBrowserSessionWindow({ url: 'https://example.com/login' })
 
-    expect(result).toEqual({ opened: true, partition: 'persist:mim-research' })
+    expect(result).toEqual({ opened: true, partition: 'persist:mim-browser-session' })
     expect(browserWindowMock).toHaveBeenCalledWith(expect.objectContaining({
       show: true,
       webPreferences: expect.objectContaining({
-        partition: RESEARCH_BROWSER_PARTITION,
+        partition: BROWSER_SESSION_PARTITION,
         sandbox: true,
         nodeIntegration: false,
         contextIsolation: true,
@@ -62,25 +62,25 @@ describe('researchBrowser Electron boundary', () => {
     expect(mockWindow.loadURL).toHaveBeenCalledWith('https://example.com/login')
   })
 
-  it('renders hidden reads with the same persistent research partition', async () => {
-    const result = await renderUrlInResearchSession({ url: 'https://example.com/private', timeoutMs: 1000 })
+  it('renders hidden reads with the same persistent browser session partition', async () => {
+    const result = await renderUrlInBrowserSession({ url: 'https://example.com/private', timeoutMs: 1000 })
 
     expect(result.finalUrl).toBe('https://example.com/private#done')
     expect(browserWindowMock).toHaveBeenCalledWith(expect.objectContaining({
       show: false,
       webPreferences: expect.objectContaining({
-        partition: RESEARCH_BROWSER_PARTITION,
+        partition: BROWSER_SESSION_PARTITION,
       }),
     }))
     expect(renderInWindow).toHaveBeenCalledWith(mockWindow, { url: 'https://example.com/private', timeoutMs: 1000 })
     expect(mockWindow.destroy).toHaveBeenCalled()
   })
 
-  it('clears storage and cache for the persistent research partition', async () => {
-    const result = await clearResearchBrowserProfile()
+  it('clears storage and cache for the persistent browser session partition', async () => {
+    const result = await clearBrowserSessionProfile()
 
-    expect(result).toEqual({ cleared: true, partition: 'persist:mim-research' })
-    expect(fromPartition).toHaveBeenCalledWith(RESEARCH_BROWSER_PARTITION)
+    expect(result).toEqual({ cleared: true, partition: 'persist:mim-browser-session' })
+    expect(fromPartition).toHaveBeenCalledWith(BROWSER_SESSION_PARTITION)
     expect(mockSession.clearStorageData).toHaveBeenCalled()
     expect(mockSession.clearCache).toHaveBeenCalled()
   })

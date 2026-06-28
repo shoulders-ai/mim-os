@@ -1,12 +1,12 @@
 import type { ToolRegistry } from '@main/tools/registry.js'
-import type { ResearchPageRenderer } from '@main/web/readResearchUrl.js'
+import type { BrowserSessionPageRenderer } from '@main/web/readBrowserSessionUrl.js'
 import { readWebUrl, type WebPageRenderer } from '@main/web/readWebUrl.js'
 import type { FetchLike } from '@main/web/readUrl.js'
 import {
-  addResearchBrowserDomain,
-  readResearchBrowserSettings,
-  removeResearchBrowserDomain,
-} from '@main/web/researchSettings.js'
+  addBrowserSessionDomain,
+  readBrowserSessionSettings,
+  removeBrowserSessionDomain,
+} from '@main/web/browserSessionSettings.js'
 import { webSearch } from '@main/web/webSearch.js'
 
 function objectSchema(properties: Record<string, unknown>, required: string[] = []) {
@@ -16,18 +16,18 @@ function objectSchema(properties: Record<string, unknown>, required: string[] = 
 export interface WebToolsDeps {
   fetch?: FetchLike
   renderRenderedPage?: WebPageRenderer
-  renderResearchPage?: ResearchPageRenderer
-  openResearchBrowser?: (params: { url?: string }) => Promise<unknown> | unknown
-  clearResearchBrowserProfile?: () => Promise<unknown> | unknown
+  renderSavedBrowserSessionPage?: BrowserSessionPageRenderer
+  openSavedBrowserSession?: (params: { url?: string }) => Promise<unknown> | unknown
+  clearSavedBrowserSessionProfile?: () => Promise<unknown> | unknown
 }
 
 export function registerWebTools(tools: ToolRegistry, deps: WebToolsDeps = {}): void {
   tools.register({
     name: 'web.read',
-    description: 'Read a URL through the workhorse web reader: PDFs use local text extraction, ordinary pages render in stateless Chromium, and stateful=true uses the persistent Research Browser profile for granted domains.',
+    description: 'Read a URL through the workhorse web reader: PDFs use local text extraction, ordinary pages render in stateless Chromium, and stateful=true uses approved website access for granted domains.',
     inputSchema: objectSchema({
       url: { type: 'string', description: 'The URL to read (http/https only)' },
-      stateful: { type: 'boolean', description: 'Use the persistent Research Browser profile for granted domains (default false)' },
+      stateful: { type: 'boolean', description: 'Use approved website access for granted domains (default false)' },
       max_chars: { type: 'number', description: 'Target maximum characters for the returned chunk (default 100000)' },
       start_from_char: { type: 'number', description: 'Continue reading from this character offset in the full Markdown output' },
       extract_links: { type: 'boolean', description: 'Preserve link URLs in Markdown (default false)' },
@@ -47,64 +47,64 @@ export function registerWebTools(tools: ToolRegistry, deps: WebToolsDeps = {}): 
         workspacePath: tools.getWorkspacePath(),
         fetch: deps.fetch,
         renderRendered: deps.renderRenderedPage,
-        renderResearch: deps.renderResearchPage,
+        renderBrowserSession: deps.renderSavedBrowserSessionPage,
       })
     },
   })
 
   tools.register({
-    name: 'web.research.status',
-    description: 'Return Research Browser enablement, domain grants, and runtime availability.',
+    name: 'web.browser.status',
+    description: 'Return website access enablement, domain grants, and runtime availability.',
     inputSchema: objectSchema({}),
     execute: async () => ({
-      ...readResearchBrowserSettings(tools.getWorkspacePath()),
-      profile_available: Boolean(deps.renderResearchPage || deps.openResearchBrowser || deps.clearResearchBrowserProfile),
+      ...readBrowserSessionSettings(tools.getWorkspacePath()),
+      profile_available: Boolean(deps.renderSavedBrowserSessionPage || deps.openSavedBrowserSession || deps.clearSavedBrowserSessionProfile),
     }),
   })
 
   tools.register({
-    name: 'web.research.allowDomain',
-    description: 'Allow the persistent Research Browser profile to read a domain asynchronously.',
+    name: 'web.browser.allowDomain',
+    description: 'Approve website access for a domain.',
     inputSchema: objectSchema({
       domain: { type: 'string', description: 'Exact domain or wildcard domain such as example.com or *.example.com' },
     }, ['domain']),
-    execute: async (params) => addResearchBrowserDomain(workspacePath(tools), params.domain as string),
+    execute: async (params) => addBrowserSessionDomain(workspacePath(tools), params.domain as string),
   })
 
   tools.register({
-    name: 'web.research.removeDomain',
-    description: 'Remove a Research Browser domain grant.',
+    name: 'web.browser.removeDomain',
+    description: 'Remove a website access domain grant.',
     inputSchema: objectSchema({
       domain: { type: 'string', description: 'Exact domain or wildcard domain to remove' },
     }, ['domain']),
-    execute: async (params) => removeResearchBrowserDomain(workspacePath(tools), params.domain as string),
+    execute: async (params) => removeBrowserSessionDomain(workspacePath(tools), params.domain as string),
   })
 
   tools.register({
-    name: 'web.research.open',
-    description: 'Open the visible Research Browser setup window using the persistent profile.',
+    name: 'web.browser.open',
+    description: 'Open a visible browser window to set up website access.',
     inputSchema: objectSchema({
       url: { type: 'string', description: 'Optional http/https URL to open for login or consent setup' },
     }),
     execute: async (params) => {
-      if (!deps.openResearchBrowser) {
-        throw new Error('Research browser setup is only available in the Electron desktop runtime')
+      if (!deps.openSavedBrowserSession) {
+        throw new Error('Website access setup is only available in the Electron desktop runtime')
       }
-      return deps.openResearchBrowser({
+      return deps.openSavedBrowserSession({
         url: typeof params.url === 'string' && params.url.trim() ? params.url : undefined,
       })
     },
   })
 
   tools.register({
-    name: 'web.research.clearProfile',
-    description: 'Clear cookies, storage, and cache from the persistent Research Browser profile.',
+    name: 'web.browser.clearProfile',
+    description: 'Clear cookies, storage, and cache used for website access.',
     inputSchema: objectSchema({}),
     execute: async () => {
-      if (!deps.clearResearchBrowserProfile) {
-        throw new Error('Research browser profile clearing is only available in the Electron desktop runtime')
+      if (!deps.clearSavedBrowserSessionProfile) {
+        throw new Error('Website access clearing is only available in the Electron desktop runtime')
       }
-      return deps.clearResearchBrowserProfile()
+      return deps.clearSavedBrowserSessionProfile()
     },
   })
 

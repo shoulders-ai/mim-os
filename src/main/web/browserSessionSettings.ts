@@ -2,23 +2,23 @@ import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { atomicWriteJson } from '@main/atomicJson.js'
 
-export interface ResearchBrowserSettings {
+export interface BrowserSessionSettings {
   enabled: boolean
   allowedDomains: string[]
 }
 
-export interface ResearchBrowserMatch {
+export interface BrowserSessionMatch {
   allowed: boolean
   host: string
   matchedDomain?: string
 }
 
-const DEFAULT_SETTINGS: ResearchBrowserSettings = {
+const DEFAULT_SETTINGS: BrowserSessionSettings = {
   enabled: false,
   allowedDomains: [],
 }
 
-export function normalizeResearchDomainPattern(input: string): string {
+export function normalizeBrowserSessionDomainPattern(input: string): string {
   const trimmed = input.trim().toLowerCase()
   if (!trimmed) return ''
   const wildcard = trimmed.startsWith('*.')
@@ -33,10 +33,10 @@ export function normalizeResearchDomainPattern(input: string): string {
   return normalized ? `${wildcard ? '*.' : ''}${normalized}` : ''
 }
 
-export function isResearchBrowserAllowed(rawUrl: string, allowedDomains: string[]): ResearchBrowserMatch {
+export function isBrowserSessionAllowed(rawUrl: string, allowedDomains: string[]): BrowserSessionMatch {
   const host = new URL(rawUrl).hostname.toLowerCase()
   for (const rawPattern of allowedDomains) {
-    const pattern = normalizeResearchDomainPattern(rawPattern)
+    const pattern = normalizeBrowserSessionDomainPattern(rawPattern)
     if (!pattern) continue
     if (pattern.startsWith('*.')) {
       const base = pattern.slice(2)
@@ -48,11 +48,11 @@ export function isResearchBrowserAllowed(rawUrl: string, allowedDomains: string[
   return { allowed: false, host }
 }
 
-export function readResearchBrowserSettings(workspacePath: string | null | undefined): ResearchBrowserSettings {
+export function readBrowserSessionSettings(workspacePath: string | null | undefined): BrowserSessionSettings {
   if (!workspacePath) return { ...DEFAULT_SETTINGS }
   try {
     const raw = readRawSettings(workspacePath)
-    const nested = raw.researchBrowser
+    const nested = raw.browserSession
     if (!nested || typeof nested !== 'object') return { ...DEFAULT_SETTINGS }
     const record = nested as Record<string, unknown>
     return {
@@ -64,36 +64,36 @@ export function readResearchBrowserSettings(workspacePath: string | null | undef
   }
 }
 
-export function writeResearchBrowserSettings(workspacePath: string, settings: ResearchBrowserSettings): void {
+export function writeBrowserSessionSettings(workspacePath: string, settings: BrowserSessionSettings): void {
   const raw = readRawSettings(workspacePath)
   atomicWriteJson(settingsPath(workspacePath), {
     ...raw,
-    researchBrowser: {
+    browserSession: {
       enabled: settings.enabled,
       allowedDomains: normalizeDomainList(settings.allowedDomains),
     },
   })
 }
 
-export function addResearchBrowserDomain(workspacePath: string, domain: string): ResearchBrowserSettings {
-  const settings = readResearchBrowserSettings(workspacePath)
-  const normalized = normalizeResearchDomainPattern(domain)
+export function addBrowserSessionDomain(workspacePath: string, domain: string): BrowserSessionSettings {
+  const settings = readBrowserSessionSettings(workspacePath)
+  const normalized = normalizeBrowserSessionDomainPattern(domain)
   const allowedDomains = normalized
     ? Array.from(new Set([...settings.allowedDomains, normalized]))
     : settings.allowedDomains
   const next = { enabled: true, allowedDomains }
-  writeResearchBrowserSettings(workspacePath, next)
+  writeBrowserSessionSettings(workspacePath, next)
   return next
 }
 
-export function removeResearchBrowserDomain(workspacePath: string, domain: string): ResearchBrowserSettings {
-  const settings = readResearchBrowserSettings(workspacePath)
-  const normalized = normalizeResearchDomainPattern(domain)
+export function removeBrowserSessionDomain(workspacePath: string, domain: string): BrowserSessionSettings {
+  const settings = readBrowserSessionSettings(workspacePath)
+  const normalized = normalizeBrowserSessionDomainPattern(domain)
   const next = {
     enabled: settings.enabled,
-    allowedDomains: settings.allowedDomains.filter(item => normalizeResearchDomainPattern(item) !== normalized),
+    allowedDomains: settings.allowedDomains.filter(item => normalizeBrowserSessionDomainPattern(item) !== normalized),
   }
-  writeResearchBrowserSettings(workspacePath, next)
+  writeBrowserSessionSettings(workspacePath, next)
   return next
 }
 
@@ -102,7 +102,7 @@ function normalizeDomainList(value: unknown): string[] {
   return Array.from(new Set(
     value
       .filter((item): item is string => typeof item === 'string')
-      .map(normalizeResearchDomainPattern)
+      .map(normalizeBrowserSessionDomainPattern)
       .filter(Boolean),
   ))
 }

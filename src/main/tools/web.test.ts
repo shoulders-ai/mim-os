@@ -29,6 +29,8 @@ describe('web tools', () => {
     expect(tools.get('web.readAuto')).toBeUndefined()
     expect(tools.get('web.readRendered')).toBeUndefined()
     expect(tools.get('web.readResearch')).toBeUndefined()
+    expect(tools.get('web.research.status')).toBeUndefined()
+    expect(tools.get('web.browser.status')).toBeTruthy()
   })
 
   it('routes web.read to the stateless renderer by default', async () => {
@@ -46,14 +48,14 @@ describe('web tools', () => {
       title: 'Rendered',
       html: '<body><h1>Rendered Content</h1><p>Hydrated page body.</p></body>',
     }))
-    const renderResearchPage = vi.fn(async ({ url }: { url: string }) => ({
-      requestedUrl: url,
-      finalUrl: `${url}#research`,
-      title: 'Research',
-      html: '<body>Should not be used</body>',
-    }))
+      const renderSavedBrowserSessionPage = vi.fn(async ({ url }: { url: string }) => ({
+        requestedUrl: url,
+        finalUrl: `${url}#browser-session`,
+        title: 'Website Access',
+        html: '<body>Should not be used</body>',
+      }))
 
-    registerWebTools(tools, { fetch, renderRenderedPage, renderResearchPage })
+    registerWebTools(tools, { fetch, renderRenderedPage, renderSavedBrowserSessionPage })
 
     const result = await tools.call('web.read', {
       url: 'https://example.com',
@@ -71,10 +73,10 @@ describe('web tools', () => {
       url: 'https://example.com',
       timeoutMs: 12_345,
     })
-    expect(renderResearchPage).not.toHaveBeenCalled()
+    expect(renderSavedBrowserSessionPage).not.toHaveBeenCalled()
   })
 
-  it('rejects stateful web.read for an ungranted domain before opening the Research Browser renderer', async () => {
+  it('rejects stateful web.read for an ungranted domain before opening the website access renderer', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mim-web-tools-'))
     try {
       const tools = createToolRegistry(createTraceLog())
@@ -86,59 +88,59 @@ describe('web tools', () => {
         text: async () => '',
         arrayBuffer: async () => new ArrayBuffer(0),
       }))
-      const renderResearchPage = vi.fn(async ({ url }: { url: string }) => ({
+      const renderSavedBrowserSessionPage = vi.fn(async ({ url }: { url: string }) => ({
         requestedUrl: url,
-        finalUrl: `${url}#research`,
-        title: 'Research',
+        finalUrl: `${url}#browser-session`,
+        title: 'Website Access',
         html: '<body>Should not be used</body>',
       }))
 
-      registerWebTools(tools, { fetch, renderResearchPage })
-      await tools.call('web.research.allowDomain', { domain: 'allowed.example' }, ctx)
+      registerWebTools(tools, { fetch, renderSavedBrowserSessionPage })
+      await tools.call('web.browser.allowDomain', { domain: 'allowed.example' }, ctx)
 
       await expect(tools.call('web.read', {
         url: 'https://blocked.example/private',
         stateful: true,
-      }, ctx)).rejects.toThrow('Research Browser is not allowed for blocked.example. Add this domain in Settings > Connections first.')
+      }, ctx)).rejects.toThrow('Website access is not approved for blocked.example')
 
-      expect(renderResearchPage).not.toHaveBeenCalled()
+      expect(renderSavedBrowserSessionPage).not.toHaveBeenCalled()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('keeps Research Browser domain management as kernel-only setup tools', async () => {
+  it('keeps website access domain management as kernel-only setup tools', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mim-web-tools-'))
     try {
       const tools = createToolRegistry(createTraceLog())
       tools.setWorkspacePath(dir)
-      const openResearchBrowser = vi.fn(async () => ({ opened: true, partition: 'persist:mim-research' }))
-      const clearResearchBrowserProfile = vi.fn(async () => ({ cleared: true, partition: 'persist:mim-research' }))
+      const openSavedBrowserSession = vi.fn(async () => ({ opened: true, partition: 'persist:mim-browser-session' }))
+      const clearSavedBrowserSessionProfile = vi.fn(async () => ({ cleared: true, partition: 'persist:mim-browser-session' }))
 
       registerWebTools(tools, {
-        openResearchBrowser,
-        clearResearchBrowserProfile,
+        openSavedBrowserSession,
+        clearSavedBrowserSessionProfile,
       })
 
-      const allowed = await tools.call('web.research.allowDomain', { domain: 'https://example.com/path' }, ctx)
+      const allowed = await tools.call('web.browser.allowDomain', { domain: 'https://example.com/path' }, ctx)
       expect(allowed).toEqual({
         enabled: true,
         allowedDomains: ['example.com'],
       })
 
-      const status = await tools.call('web.research.status', {}, ctx)
+      const status = await tools.call('web.browser.status', {}, ctx)
       expect(status).toEqual({
         enabled: true,
         allowedDomains: ['example.com'],
         profile_available: true,
       })
 
-      expect(await tools.call('web.research.open', { url: 'https://example.com/login' }, ctx))
-        .toEqual({ opened: true, partition: 'persist:mim-research' })
-      expect(openResearchBrowser).toHaveBeenCalledWith({ url: 'https://example.com/login' })
-      expect(await tools.call('web.research.clearProfile', {}, ctx))
-        .toEqual({ cleared: true, partition: 'persist:mim-research' })
-      expect(clearResearchBrowserProfile).toHaveBeenCalled()
+      expect(await tools.call('web.browser.open', { url: 'https://example.com/login' }, ctx))
+        .toEqual({ opened: true, partition: 'persist:mim-browser-session' })
+      expect(openSavedBrowserSession).toHaveBeenCalledWith({ url: 'https://example.com/login' })
+      expect(await tools.call('web.browser.clearProfile', {}, ctx))
+        .toEqual({ cleared: true, partition: 'persist:mim-browser-session' })
+      expect(clearSavedBrowserSessionProfile).toHaveBeenCalled()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

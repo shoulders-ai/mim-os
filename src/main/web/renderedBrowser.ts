@@ -8,10 +8,13 @@ import type {
 } from '@main/web/readRenderedUrl.js'
 import { CAPTURE_RENDERED_HTML_SCRIPT } from '@main/web/renderedCapture.js'
 import { parseAllowedHttpUrl, USER_AGENT } from '@main/web/urlPolicy.js'
+import { isBrowserSessionAllowed } from '@main/web/browserSessionSettings.js'
 
 const POLL_MS = 250
 const STABLE_MS = 900
 const LOW_CONFIDENCE_WAIT_MS = 6_000
+const CAPTURE_RESERVE_MS = 5_000
+const MIN_CAPTURE_RESERVE_MS = 500
 
 export async function renderUrlInHiddenWindow(request: RenderedPageRenderRequest): Promise<RenderedPageSnapshot> {
   const win = new BrowserWindow({
@@ -37,20 +40,26 @@ export async function renderInWindow(
   request: RenderedPageRenderRequest,
 ): Promise<RenderedPageSnapshot> {
   const startedAt = Date.now()
-  const removeRequestBlocker = installUrlPolicyRequestBlocker(win)
-  let loadTimedOut = false
+  let blockedWebsiteAccessRequest: BlockedWebsiteAccessRequest | null = null
+  const removeRequestBlocker = installUrlPolicyRequestBlocker(win, request.allowedDomains, (blocked) => {
+    if (!blockedWebsiteAccessRequest || blocked.resourceType === 'mainFrame') {
+      blockedWebsiteAccessRequest = blocked
+    }
+  })
   try {
+    const navigationBudgetMs = navigationTimeoutMs(request.timeoutMs)
     try {
-      await withTimeout(win.loadURL(request.url, { userAgent: USER_AGENT }), request.timeoutMs)
+      await withTimeout(win.loadURL(request.url, { userAgent: USER_AGENT }), navigationBudgetMs)
     } catch (err) {
+      if (blockedWebsiteAccessRequest && isBlockedByClientError(err)) {
+        throw new Error(websiteAccessBlockedMessage(blockedWebsiteAccessRequest))
+      }
       if (!isTimeoutError(err)) throw err
-      loadTimedOut = true
     }
     const remainingMs = Math.max(0, request.timeoutMs - (Date.now() - startedAt))
-    const readiness = loadTimedOut
-      ? timeoutReadiness('Navigation did not finish before the capture budget ended.')
-      : await waitForReadiness(win, remainingMs)
-    const capture = await captureCurrentDocument(win)
+    const readiness = await withTimeout(waitForReadiness(win, remainingMs), Math.max(1, remainingMs))
+    const captureBudgetMs = Math.max(1, Math.min(5_000, request.timeoutMs - (Date.now() - startedAt)))
+    const capture = await withTimeout(captureCurrentDocument(win), captureBudgetMs)
     const elapsedMs = Date.now() - startedAt
     const captureInfo = buildCaptureInfo(readiness, capture.signals, elapsedMs)
 
@@ -64,6 +73,21 @@ export async function renderInWindow(
   } finally {
     removeRequestBlocker()
   }
+}
+
+interface BlockedWebsiteAccessRequest {
+  url: string
+  host: string
+  resourceType?: string
+}
+
+function navigationTimeoutMs(totalTimeoutMs: number): number {
+  if (totalTimeoutMs <= 1) return 1
+  const reserve = Math.min(
+    CAPTURE_RESERVE_MS,
+    Math.max(MIN_CAPTURE_RESERVE_MS, Math.floor(totalTimeoutMs / 2)),
+  )
+  return Math.max(1, totalTimeoutMs - reserve)
 }
 
 async function waitForReadiness(win: BrowserWindow, budgetMs: number): Promise<ReadinessResult> {
@@ -270,11 +294,24 @@ function timeoutReadiness(reason: string): ReadinessResult {
   }
 }
 
-function installUrlPolicyRequestBlocker(win: BrowserWindow): () => void {
+function installUrlPolicyRequestBlocker(
+  win: BrowserWindow,
+  allowedDomains?: string[],
+  onWebsiteAccessBlocked?: (blocked: BlockedWebsiteAccessRequest) => void,
+): () => void {
   const filter = { urls: ['http://*/*', 'https://*/*'] }
   win.webContents.session.webRequest.onBeforeRequest(filter, (details, callback) => {
     try {
-      parseAllowedHttpUrl(details.url)
+      const parsed = parseAllowedHttpUrl(details.url)
+      if (allowedDomains?.length && !isBrowserSessionAllowed(parsed.href, allowedDomains).allowed) {
+        onWebsiteAccessBlocked?.({
+          url: parsed.href,
+          host: parsed.hostname,
+          resourceType: typeof details.resourceType === 'string' ? details.resourceType : undefined,
+        })
+        callback({ cancel: true })
+        return
+      }
       callback({ cancel: false })
     } catch {
       callback({ cancel: true })
@@ -283,6 +320,15 @@ function installUrlPolicyRequestBlocker(win: BrowserWindow): () => void {
   return () => {
     win.webContents.session.webRequest.onBeforeRequest(filter, null)
   }
+}
+
+function isBlockedByClientError(err: unknown): boolean {
+  const message = (err as Error).message || String(err)
+  return /ERR_BLOCKED_BY_CLIENT/i.test(message)
+}
+
+function websiteAccessBlockedMessage(blocked: BlockedWebsiteAccessRequest): string {
+  return `Website access is not approved for ${blocked.host}. Approve this website from chat or add it in Settings > Connections.`
 }
 
 function buildCaptureInfo(

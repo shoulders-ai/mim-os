@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { describe, expect, it, vi } from 'vitest'
-import { addResearchBrowserDomain } from './researchSettings.js'
+import { addBrowserSessionDomain } from './browserSessionSettings.js'
 import { readWebUrl, type WebPageRenderer } from './readWebUrl.js'
 
 function rendererReturning(html: string, title = 'Rendered Page'): WebPageRenderer {
@@ -69,7 +69,7 @@ describe('readWebUrl', () => {
 
   it('uses the persistent renderer only for granted stateful domains', async () => {
     await withWorkspace(async (workspacePath) => {
-      addResearchBrowserDomain(workspacePath, 'example.com')
+      addBrowserSessionDomain(workspacePath, 'example.com')
       const fetch = vi.fn(async () => headResponse())
       const render = rendererReturning('<body><h1>Account Page</h1><p>Logged-in content.</p></body>', 'Account')
 
@@ -79,7 +79,7 @@ describe('readWebUrl', () => {
       }, {
         workspacePath,
         fetch,
-        renderResearch: render,
+        renderBrowserSession: render,
         now: () => 2_500,
       })
 
@@ -92,7 +92,7 @@ describe('readWebUrl', () => {
 
   it('refuses ungranted stateful domains before opening the persistent profile', async () => {
     await withWorkspace(async (workspacePath) => {
-      addResearchBrowserDomain(workspacePath, 'allowed.example')
+      addBrowserSessionDomain(workspacePath, 'allowed.example')
       const fetch = vi.fn(async () => headResponse())
       const render = rendererReturning('<body>Never reached</body>')
 
@@ -102,8 +102,8 @@ describe('readWebUrl', () => {
       }, {
         workspacePath,
         fetch,
-        renderResearch: render,
-      })).rejects.toThrow('Research Browser is not allowed for blocked.example')
+        renderBrowserSession: render,
+      })).rejects.toThrow('Website access is not approved for blocked.example')
 
       expect(render).not.toHaveBeenCalled()
     })

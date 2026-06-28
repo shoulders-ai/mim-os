@@ -178,19 +178,40 @@ describe('readRenderedUrl', () => {
     expect(result.content).toBe('Local fixture')
   })
 
-  it('returns an empty partial capture when the renderer times out without a snapshot', async () => {
+  it('fails clearly when the renderer times out without readable content', async () => {
     const render = vi.fn(async () => {
       throw new Error('Rendered read timed out after 30s')
     })
 
-    const result = await readRenderedUrl({ url: 'https://example.com/slow' }, { render })
+    await expect(readRenderedUrl({ url: 'https://example.com/slow' }, { render }))
+      .rejects.toThrow('No readable content captured from https://example.com/slow')
+  })
 
-    expect(result.content).toBe('')
-    expect(result.capture).toMatchObject({
-      status: 'partial',
-      confidence: 'low',
-      reason: 'Rendered read timed out after 30s',
+  it('fails clearly when a rendered page exposes no readable text', async () => {
+    const render = rendererReturning('<body></body>', {
+      finalUrl: 'https://www.reddit.com/',
+      title: 'Reddit - Please wait for verification',
+      capture: {
+        status: 'complete',
+        confidence: 'low',
+        reason: 'The page stayed stable but exposed very little readable content.',
+        signals: {
+          elapsed_ms: 30_000,
+          timed_out: false,
+          dom_stable: true,
+          visible_text_chars: 0,
+          link_count: 0,
+          button_count: 0,
+          form_control_count: 0,
+          table_row_count: 0,
+          heading_count: 0,
+          image_count: 0,
+        },
+      },
     })
+
+    await expect(readRenderedUrl({ url: 'https://www.reddit.com/' }, { render }))
+      .rejects.toThrow('title: Reddit - Please wait for verification')
   })
 
   it('retries a transient navigation failure once before extracting content', async () => {

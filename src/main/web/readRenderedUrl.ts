@@ -21,6 +21,7 @@ export interface RenderedPageSnapshot {
 export interface RenderedPageRenderRequest {
   url: string
   timeoutMs: number
+  allowedDomains?: string[]
 }
 
 export type RenderedCaptureStatus = 'complete' | 'partial'
@@ -102,6 +103,13 @@ export async function readRenderedUrl(
   })
   const fullMarkdown = converted.markdown
   const capture = normalizeCapture(snapshot.capture, fullMarkdown)
+  assertReadableRenderedContent({
+    requestedUrl: params.url,
+    finalUrl: snapshot.finalUrl || params.url,
+    title: snapshot.title,
+    markdown: fullMarkdown,
+    capture,
+  })
   const chunks = chunkMarkdownByStructure(fullMarkdown, {
     maxChunkChars: maxChars,
     startFromChar,
@@ -222,6 +230,37 @@ function normalizeCapture(value: RenderedCaptureInfo | undefined, markdown: stri
       ...normalizeSignals(value.signals),
     },
   }
+}
+
+function assertReadableRenderedContent({
+  requestedUrl,
+  finalUrl,
+  title,
+  markdown,
+  capture,
+}: {
+  requestedUrl: string
+  finalUrl: string
+  title: string
+  markdown: string
+  capture: RenderedCaptureInfo
+}): void {
+  if (markdown.trim().length > 0) return
+
+  const signals = capture.signals ?? {}
+  const visibleTextChars = signals.visible_text_chars ?? 0
+  const elapsed = signals.elapsed_ms != null ? ` after ${signals.elapsed_ms}ms` : ''
+  const titleText = title.trim()
+  const titlePart = titleText ? `; title: ${titleText}` : ''
+  const reasonPart = capture.reason ? ` ${capture.reason}` : ''
+  const requestedPart = finalUrl && finalUrl !== requestedUrl ? ` (requested ${requestedUrl})` : ''
+
+  throw new Error(
+    `No readable content captured from ${finalUrl}${requestedPart}. ` +
+    `The rendered page exposed ${visibleTextChars} visible text characters${elapsed}${titlePart}. ` +
+    'This can mean the page timed out, blocked automation, requires sign-in or verification, or rendered content in a way Mim cannot extract yet.' +
+    reasonPart,
+  )
 }
 
 function normalizeConfidence(value: unknown): RenderedCaptureConfidence {

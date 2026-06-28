@@ -3,14 +3,14 @@ import type { RenderedPageRenderRequest, RenderedPageSnapshot } from '@main/web/
 import { renderInWindow } from '@main/web/renderedBrowser.js'
 import { parseAllowedHttpUrl } from '@main/web/urlPolicy.js'
 
-export const RESEARCH_BROWSER_PARTITION = 'persist:mim-research'
+export const BROWSER_SESSION_PARTITION = 'persist:mim-browser-session'
 
-export async function renderUrlInResearchSession(request: RenderedPageRenderRequest): Promise<RenderedPageSnapshot> {
+export async function renderUrlInBrowserSession(request: RenderedPageRenderRequest): Promise<RenderedPageSnapshot> {
   const win = new BrowserWindow({
     show: false,
     width: 1365,
     height: 900,
-    webPreferences: researchWebPreferences(),
+    webPreferences: browserSessionWebPreferences(),
   })
   try {
     return await withTimeout(renderInWindow(win, request), request.timeoutMs)
@@ -19,30 +19,30 @@ export async function renderUrlInResearchSession(request: RenderedPageRenderRequ
   }
 }
 
-export async function openResearchBrowserWindow(params: { url?: string } = {}): Promise<{ opened: true, partition: string }> {
+export async function openBrowserSessionWindow(params: { url?: string } = {}): Promise<{ opened: true, partition: string }> {
   const url = params.url?.trim()
   if (url) parseAllowedHttpUrl(url)
   const win = new BrowserWindow({
     show: true,
     width: 1180,
     height: 820,
-    title: 'Mim Research Browser',
-    webPreferences: researchWebPreferences(),
+    title: 'Mim Website Access',
+    webPreferences: browserSessionWebPreferences(),
   })
   await win.loadURL(url || 'about:blank')
-  return { opened: true, partition: RESEARCH_BROWSER_PARTITION }
+  return { opened: true, partition: BROWSER_SESSION_PARTITION }
 }
 
-export async function clearResearchBrowserProfile(): Promise<{ cleared: true, partition: string }> {
-  const researchSession = session.fromPartition(RESEARCH_BROWSER_PARTITION)
-  await researchSession.clearStorageData()
-  await researchSession.clearCache()
-  return { cleared: true, partition: RESEARCH_BROWSER_PARTITION }
+export async function clearBrowserSessionProfile(): Promise<{ cleared: true, partition: string }> {
+  const browserSession = session.fromPartition(BROWSER_SESSION_PARTITION)
+  await browserSession.clearStorageData()
+  await browserSession.clearCache()
+  return { cleared: true, partition: BROWSER_SESSION_PARTITION }
 }
 
-function researchWebPreferences() {
+function browserSessionWebPreferences() {
   return {
-    partition: RESEARCH_BROWSER_PARTITION,
+    partition: BROWSER_SESSION_PARTITION,
     sandbox: true,
     nodeIntegration: false,
     contextIsolation: true,
@@ -55,7 +55,7 @@ async function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
     return await Promise.race([
       work,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Research browser read timed out after ${Math.round(ms / 1000)}s`)), ms)
+        timer = setTimeout(() => reject(new Error(`Website access read timed out after ${Math.round(ms / 1000)}s`)), ms)
         timer.unref?.()
       }),
     ])

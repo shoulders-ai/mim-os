@@ -5,7 +5,7 @@ import {
   type ReadRenderedUrlResult,
   type RenderedPageRenderer,
 } from './readRenderedUrl.js'
-import { readResearchUrl, type ResearchPageRenderer } from './readResearchUrl.js'
+import { readBrowserSessionUrl, type BrowserSessionPageRenderer } from './readBrowserSessionUrl.js'
 import { BlockedUrlError, parseAllowedHttpUrl, USER_AGENT, type UrlPolicyOptions } from './urlPolicy.js'
 
 export interface ReadWebUrlParams extends ReadRenderedUrlParams {
@@ -16,7 +16,7 @@ export interface ReadWebUrlDeps extends UrlPolicyOptions {
   workspacePath?: string | null
   fetch?: FetchLike
   renderRendered?: RenderedPageRenderer
-  renderResearch?: ResearchPageRenderer
+  renderBrowserSession?: BrowserSessionPageRenderer
   now?: () => number
 }
 
@@ -62,10 +62,10 @@ export async function readWebUrl(
   }
 
   const rendered = params.stateful === true
-    ? await readResearchUrl(params, {
+    ? await readBrowserSessionUrl(params, {
         ...deps,
         workspacePath: deps.workspacePath,
-        render: deps.renderResearch,
+        render: deps.renderBrowserSession,
       })
     : await readRenderedUrl(params, {
         ...deps,
