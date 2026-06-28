@@ -13,7 +13,7 @@ import { dirname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { atomicWriteJson } from '@main/atomicJson.js'
 import { createAgentStatusTracker, type AgentRuntimeStatus, type AgentStatusTracker } from '@main/agents/agentStatus.js'
-import { sessionIdArgs, resumeArgs as catalogResumeArgs } from '@main/agents/agentCatalog.js'
+import { resumeArgs as catalogResumeArgs, cliSessionsDir } from '@main/agents/agentCatalog.js'
 import type { DetectedAgent } from '@main/agents/agentCatalog.js'
 import type { PtyHandle, PtySpawnOptions } from '@main/pty.js'
 
@@ -38,6 +38,7 @@ export interface AgentSessionRecord {
   exitCode?: number
   archived?: boolean
   titleHint?: string // last OSC 0/1/2 title seen; persisted on change
+  cliSessionId?: string // agent CLI's own session ID, detected after spawn
 }
 
 // Record plus live runtime state, merged for the renderer: ptyId lets it
