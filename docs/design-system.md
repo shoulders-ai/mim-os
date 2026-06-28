@@ -376,14 +376,20 @@ to `--rule` while the list is scrolled) — then
 collapsible **Apps** and **Activity** sections. Apps contains enabled app
 launchers; the Apps header gear opens Settings > Apps. Activity contains
 active chats, agent runs, and package jobs; its header carries right-aligned
-History and New chat icon actions. Settings is the only footer row. Navigator
+History and create icon actions. The create `+` opens New chat directly when
+chat is the only target; when enabled CLI agents or active package Activity
+targets exist, the same `+` opens a `MimMenu` with terse labels: New chat,
+CLI agent names, and app names. The menu uses row icons/marks for type, no
+visible section headings, and only a thin divider when both CLI and app targets
+are present. Settings is the only footer row. Navigator
 rows are nouns: places, launchers, and instances, never actions. Creation
-verbs live in headers and shortcuts, not rows: the Activity header's New chat
-icon and the Work pane header action plus Cmd+N create chats, while the Chat
+verbs live in headers and shortcuts, not rows: the Activity header create
+action and the Work pane header action plus Cmd+N create chats, while the Chat
 row is the launcher for the draft composer. On collapse, rows survive as rail
 tokens; section furniture (labels, toggles, header buttons) drops, with one
-exception: the Activity section marker keeps the New chat `+` token so the
-rail retains one-click chat creation (History stays expanded-tray only). Rows use the sidebar grammar: 32px row height,
+exception: the Activity section marker keeps the create `+` token so the rail
+retains one-click chat creation when chat is the only target, or the same
+create menu when other targets exist (History stays expanded-tray only). Rows use the sidebar grammar: 32px row height,
 1.75rem token, 7px radius, icon plus label, theme tokens only. Separate groups with
 whitespace, not extra borders or card frames. Every row carries its
 icon/monogram in the shared 1.75rem `nav-token` lane so it aligns with the

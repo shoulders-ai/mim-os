@@ -91,7 +91,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Main Process — Web & Content
 
-- **Web tools.** `web.search` (Exa) and `web.read` (single workhorse reader: PDF extraction, stateless Chromium, optional Research Browser state). `src/main/web/`, `tools/web.ts`. Docs: [web-reading.md](web-reading.md).
+- **Web tools.** `web.search` (Exa) and `web.read` (single workhorse reader: PDF extraction, stateless Chromium, optional Website Access, explicit no-readable-content errors). Both exposed over MCP. `src/main/web/`, `tools/web.ts`. Docs: [web-reading.md](web-reading.md).
 - **HTML-to-Markdown.** Pure parser shared by web readers and DOCX extraction. `src/main/html/markdown.ts`. Docs: [html-markdown.md](html-markdown.md).
 - **Document import.** DOCX/XLSX/BibTeX/PDF → Markdown. `src/main/documents/importMarkdown.ts`, `tools/documents.ts`.
 - **Document export.** Markdown → PDF (Chromium `printToPDF`) and → DOCX (pure JS). `src/main/export/`, `tools/export.ts`. Docs: [export.md](export.md).
@@ -114,7 +114,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Main Process — Integrations
 
-- **Slack & Google.** Keychain-backed clients, kernel tools, AI tool builders, policy. `src/main/integrations/`. Docs: [integrations.md](integrations.md).
+- **Slack & Google.** Keychain-backed connectors, Google browser OAuth, kernel tools, AI tool builders, policy. Data tools exposed over MCP when connected. AI agent can manage connection lifecycle (connect, disconnect, configure policy) via `connections_status`, `google_set_oauth_client`, `google_connect`, `slack_connect`, `connections_configure` tools. File-based credential ingestion reads secrets server-side so they never enter model context. `src/main/integrations/`. Docs: [integrations.md](integrations.md).
 - **Account tokens.** Org registry token management in `~/.mim/keys.env`. `src/main/tools/account.ts`.
 
 ### Main Process — Observability
@@ -180,7 +180,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [cli.md](cli.md) | Headless CLI commands |
 | [mcp.md](mcp.md) | MCP stdio bridge to the desktop |
 | [integrations.md](integrations.md) | Slack/Google tools, keychain, policy |
-| [web-reading.md](web-reading.md) | Web/PDF reading, Research Browser, evaluation harness |
+| [web-reading.md](web-reading.md) | Web/PDF reading, website access, evaluation harness |
 | [html-markdown.md](html-markdown.md) | HTML-to-Markdown parser |
 | [history.md](history.md) | Local file recovery |
 | [git.md](git.md) | Git tools and managed sync |
@@ -205,10 +205,8 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 ### Proposals
 
-- [proposals/integration-architecture.md](proposals/integration-architecture.md) — implemented reorganization of integration code by service directory.
-- [proposals/slack-connector.md](proposals/slack-connector.md) — productize Slack into a policy-controlled connector.
-- [proposals/google-connector.md](proposals/google-connector.md) — productize Google into a policy-controlled connector.
-- [proposals/web-read-workhorse.md](proposals/web-read-workhorse.md) — implemented collapse of web reading into one model-facing tool.
+- [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with Markdown observations and action refs.
+- [proposals/side-by-side-editing.md](proposals/side-by-side-editing.md) — side-by-side editing workflow proposal.
 
 ## File Tree
 
@@ -408,7 +406,7 @@ src/
         sections.ts             # Section id protocol
         AppsSettingsPanel.vue   # Apps + CLI tools
         AiSettingsPanel.vue     # Keys + model defaults
-        ConnectionsSettingsPanel.vue  # Integrations + Research Browser
+        ConnectionsSettingsPanel.vue  # Integrations + website access
       ui/                       # MimDialog, MimSelect, MimMenu, MimContextMenu, etc.
       CommandPalette.vue        # Cmd/Ctrl+P palette
       AddProjectDialog.vue      # Open/New/Clone workspace

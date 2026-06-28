@@ -7,9 +7,9 @@ Pure core HTML-to-Markdown conversion lives in `src/main/html/markdown.ts`, with
 The parser accepts already-fetched or already-rendered HTML and returns AI-ready Markdown plus extraction stats. It does not fetch pages, run JavaScript, call Readability, or own browser automation. Current callers:
 
 - `src/main/web/readUrl.ts` runs Readability first, then converts the selected article HTML; selectable PDF URLs bypass this parser and use local PDF text extraction.
-- `src/main/web/readWebUrl.ts` is the single web-reading router. It sends selectable PDFs to `readUrl.ts`, normal pages to the stateless rendered reader, and `stateful: true` reads to the Research Browser path after domain-grant enforcement.
+- `src/main/web/readWebUrl.ts` is the single web-reading router. It sends selectable PDFs to `readUrl.ts`, normal pages to the stateless rendered reader, and `stateful: true` reads to the Website Access path after domain-grant enforcement.
 - `src/main/web/readRenderedUrl.ts` renders a page in Chromium through `src/main/web/renderedBrowser.ts`, captures visible hydrated DOM via `src/main/web/renderedCapture.ts`, then converts the captured HTML.
-- `src/main/web/readResearchUrl.ts` uses the same rendered conversion path through a persistent Research Browser profile.
+- `src/main/web/readBrowserSessionUrl.ts` uses the same rendered conversion path with approved Website Access data.
 - `src/main/docx/reader.ts` runs Mammoth first, then converts the generated DOCX HTML for review output.
 
 ## Conversion Contract

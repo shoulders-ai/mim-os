@@ -62,6 +62,10 @@ MCP tool names avoid dots. The desktop returns metadata from `__meta.tools`; the
 stdio bridge exposes those names to MCP clients and forwards calls to the Mim
 tool names.
 
+### Static Tools
+
+Always present in the MCP catalog:
+
 | MCP Tool | Mim Tool |
 |---|---|
 | `editor_open` | `editor.open` |
@@ -84,8 +88,63 @@ tool names.
 | `log_append` | `log.append` |
 | `workspace_info` | `workspace.info` |
 | `system_prompt` | `system.prompt` |
+| `web_read` | `web.read` |
+| `web_search` | `web.search` |
+| `settings_get` | `settings.get` |
+| `settings_set` | `settings.set` |
+| `slack_status` | `slack.status` |
+| `slack_connect` | `slack.connect` |
+| `slack_disconnect` | `slack.disconnect` |
+| `google_status` | `google.status` |
+| `google_set_oauth_client` | `google.setOAuthClient` |
+| `google_connect` | `google.connect` |
+| `google_disconnect` | `google.disconnect` |
 
 `log_append` is the MCP logbook surface; MCP does not expose `log.read`. The `system_prompt` tool resolves `{{PROJECT_LOG}}` for clients that request the full prompt.
+
+Connection management tools (`slack_connect`, `google_connect`, etc.) and
+`settings_get`/`settings_set` are always present so CLI agents can set up
+integrations and configure policy flags (`connectors.slack.aiEnabled`, etc.)
+the same way the in-app chat agent does.
+
+### Conditional Integration Data Tools
+
+Slack and Google data tools appear in the MCP catalog only when the corresponding
+token is configured in the OS keychain. MCP calls use the `user` actor, so the
+AI connector policy toggles (aiEnabled, sendEnabled, etc.) do not apply — the
+MCP allowlist is the security boundary, and CLI agents have their own permission
+gates.
+
+**Slack** (when token is configured):
+
+| MCP Tool | Mim Tool |
+|---|---|
+| `slack_channels` | `slack.channels` |
+| `slack_users` | `slack.users` |
+| `slack_dms` | `slack.dms` |
+| `slack_history` | `slack.history` |
+| `slack_replies` | `slack.replies` |
+| `slack_search` | `slack.search` |
+| `slack_send` | `slack.send` |
+
+**Google** (when OAuth token is configured):
+
+| MCP Tool | Mim Tool |
+|---|---|
+| `gmail_search` | `gmail.search` |
+| `gmail_read` | `gmail.read` |
+| `gmail_send` | `gmail.send` |
+| `calendar_events` | `calendar.events` |
+| `calendar_create` | `calendar.create` |
+| `drive_search` | `drive.search` |
+| `drive_meta` | `drive.meta` |
+| `docs_read` | `docs.read` |
+| `sheets_meta` | `sheets.meta` |
+| `sheets_read` | `sheets.read` |
+| `sheets_write` | `sheets.write` |
+| `sheets_append` | `sheets.append` |
+
+### Dynamic App Tools
 
 Each exposed Mim tool must have an `inputSchema`; missing schemas fail MCP
 metadata generation loudly for core tools. Named tools from enabled apps are

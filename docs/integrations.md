@@ -55,7 +55,7 @@ Source:
 Tools:
 
 - `slack.setToken`, `slack.deleteToken`, `slack.status`
-- `slack.connect`, `slack.disconnect`
+- `slack.connect` (accepts `file` for file-based token ingestion), `slack.disconnect`
 - `slack.channels`, `slack.users`, `slack.dms`
 - `slack.history`, `slack.search`, `slack.replies`
 - `slack.send`
@@ -83,6 +83,10 @@ Chat tools are conditionally included based on policy and connection state:
 When `privateChannels` is false, `slack.channels` excludes `private_channel` from the types parameter for AI calls. When `directMessages` is false, `slack.dms` is blocked for AI.
 
 Backend policy enforcement runs in the tool execution layer: even direct kernel/CLI/MCP calls respect the policy for the `ai` actor.
+
+### MCP Exposure
+
+`slack.status`, `slack.connect`, and `slack.disconnect` are always present in the MCP catalog so CLI agents can check status and manage the connection lifecycle. Data tools (`slack.channels`, `slack.users`, `slack.dms`, `slack.history`, `slack.replies`, `slack.search`, `slack.send`) appear conditionally when a token is configured. MCP calls use the `user` actor, so the AI connector policy toggles do not apply — the MCP allowlist is the security boundary, and CLI agents have their own permission gates.
 
 ### Rate Limits
 
@@ -112,7 +116,38 @@ OAuth tools:
 - `google.authUrl`
 - `google.exchangeCode`
 
-There is no local OAuth callback listener yet. `google.authUrl` returns the consent URL, `google.exchangeCode` stores tokens from a code copied out of the redirect URL, and `google.connect` stores a raw token bundle while caching userinfo profile metadata.
+`google.connect` is the primary setup path. With `{ oauth: true }`,
+it starts a localhost callback listener, opens the Google consent URL in the
+default browser, validates the OAuth `state`, exchanges the returned code, and
+stores the token bundle plus userinfo profile metadata in the OS keychain. The
+callback listener binds to `127.0.0.1` on a random local port and shuts down
+after success, failure, or timeout.
+
+`google.setOAuthClient` stores a Google desktop OAuth client in the keychain.
+Accepts a `file` parameter pointing to a Google Cloud Console JSON download
+(`installed` or `web` format), or inline `client_id`/`client_secret`. Builds
+can also provide `MIM_GOOGLE_OAUTH_CLIENT_ID` / `MIM_GOOGLE_OAUTH_CLIENT_SECRET`
+(or the `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` aliases).
+
+`google.setTokenBundle` and `google.connect` with `access_token` (or `file`
+pointing to a token bundle JSON) are advanced/manual setup paths.
+
+### AI Agent Connection Management
+
+The AI agent can manage the full Google and Slack connection lifecycle through
+always-present tools in the chat profile:
+
+- `connections_status()` — check connection state for all integrations
+- `google_set_oauth_client(file?)` — store OAuth client from file (credentials never enter chat)
+- `google_connect(oauth?, file?)` — browser sign-in or file-based token bundle
+- `google_disconnect()` — remove tokens
+- `slack_connect(file?)` — store and verify a Slack token from file
+- `slack_disconnect()` — remove tokens
+- `connections_configure(integration, ...)` — set policy flags (aiEnabled, etc.)
+
+File-based credential ingestion reads secrets server-side in the main process —
+they never appear in the model context, session history, or trace logs. The
+permission gate prompts for approval on every credential-writing call.
 
 Gmail and Calendar tools:
 
@@ -139,7 +174,9 @@ Google AI access is governed by a 7-boolean connector policy:
 
 Policy resolves per-field: workspace `.mim/settings.json` → user-global `~/.mim/config.yaml` → defaults. Both locations use the `connectors.google` key.
 
-Settings > Connections provides connection status, raw-token connect/disconnect controls, granted scope summaries, and policy toggles.
+Settings > Connections provides connection status, a browser-based Google sign-in
+button, an advanced manual token form for development/recovery, granted scope
+summaries, and policy toggles.
 
 ### AI Tool Exposure
 
@@ -153,6 +190,10 @@ Chat tools are conditionally included based on policy, connection state, and gra
 - `sheets_write`, `sheets_append` — additionally require `sheetsWriteEnabled` and Sheets write scope
 
 Backend policy enforcement runs in the tool execution layer for the `ai` actor, so direct calls cannot bypass disabled policy flags. User and system actors are not filtered by connector policy.
+
+### MCP Exposure
+
+`google.status`, `google.setOAuthClient`, `google.connect`, and `google.disconnect` are always present in the MCP catalog so CLI agents can check status and manage the full connection lifecycle (including browser OAuth). Data tools (`gmail.search`, `gmail.read`, `gmail.send`, `calendar.events`, `calendar.create`, `drive.search`, `drive.meta`, `docs.read`, `sheets.meta`, `sheets.read`, `sheets.write`, `sheets.append`) appear conditionally when a token is configured. MCP calls use the `user` actor, so the AI connector policy toggles do not apply. `settings.get`/`settings.set` are also in MCP so CLI agents can configure policy flags the same way the in-app chat agent does.
 
 ### Trace Capture
 
