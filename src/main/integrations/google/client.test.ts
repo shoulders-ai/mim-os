@@ -94,18 +94,27 @@ describe('GoogleIntegration', () => {
     expect(result.url).toContain('access_type=offline')
   })
 
-  it('exchanges an OAuth code and stores normalized tokens', async () => {
+  it('exchanges an OAuth code, stores normalized tokens, and caches profile metadata', async () => {
     const calls: Array<Record<string, unknown>> = []
     const secrets = createMemorySecretStore({
       [`${MIM_KEYCHAIN_SERVICE}:${googleClientAccount('work')}`]: JSON.stringify({ client_id: 'client', client_secret: 'secret' }),
     })
     const google = new GoogleIntegration({
       secrets,
-      http: fakeHttp([{ access_token: 'access', refresh_token: 'refresh', expires_in: 3600, scope: 'scope-a scope-b' }], calls),
+      http: fakeHttp([
+        { access_token: 'access', refresh_token: 'refresh', expires_in: 3600, scope: 'scope-a scope-b' },
+        { email: 'person@example.com', name: 'Person Example' },
+      ], calls),
       now: () => 1_000_000,
     })
 
-    await google.exchangeCode({ account: 'work', code: 'code', redirectUri: 'http://127.0.0.1/callback' })
+    await expect(google.exchangeCode({ account: 'work', code: 'code', redirectUri: 'http://127.0.0.1/callback' })).resolves.toMatchObject({
+      account: 'work',
+      configured: true,
+      tokenConfigured: true,
+      auth: { email: 'person@example.com', name: 'Person Example' },
+      grantedScopes: ['scope-a', 'scope-b'],
+    })
 
     expect(calls[0]).toMatchObject({
       url: 'https://oauth2.googleapis.com/token',
@@ -113,11 +122,13 @@ describe('GoogleIntegration', () => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })
     expect(String(calls[0].body)).toContain('grant_type=authorization_code')
+    expect(String(calls[1].url)).toContain('/oauth2/v1/userinfo')
     expect(JSON.parse(secrets.dump()[`${MIM_KEYCHAIN_SERVICE}:${googleTokenAccount('work')}`])).toMatchObject({
       access_token: 'access',
       refresh_token: 'refresh',
       expires_at: 4600,
       scope: 'scope-a scope-b',
+      auth: { email: 'person@example.com', name: 'Person Example' },
     })
   })
 

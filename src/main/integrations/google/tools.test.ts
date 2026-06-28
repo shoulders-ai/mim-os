@@ -156,6 +156,58 @@ describe('Google tools', () => {
     expect(result.scopes).toContain('https://www.googleapis.com/auth/spreadsheets')
   })
 
+  it('connects through browser OAuth loopback when requested', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${googleClientAccount('default')}`]: JSON.stringify({ client_id: 'client', client_secret: 'secret' }),
+    })
+    const openExternal = vi.fn(async (url: string) => {
+      const authUrl = new URL(url)
+      const redirectUri = authUrl.searchParams.get('redirect_uri')
+      const state = authUrl.searchParams.get('state')
+      if (!redirectUri || !state) throw new Error('Missing redirect data')
+      await fetch(`${redirectUri}?code=browser-code&state=${state}`)
+    })
+    registerGoogleTools(tools, {
+      secrets,
+      http: fakeHttp([
+        {
+          access_token: 'access',
+          refresh_token: 'refresh',
+          expires_in: 3600,
+          scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email',
+        },
+        { email: 'person@example.com', name: 'Person Example' },
+      ], calls),
+      now: () => 1_000,
+      openExternal,
+      oauthTimeoutMs: 1000,
+    })
+
+    const result = await tools.call('google.connect', {
+      oauth: true,
+      capabilities: ['profile', 'gmail.read'],
+    }, ctx) as Record<string, unknown>
+
+    expect(result).toMatchObject({
+      account: 'default',
+      configured: true,
+      tokenConfigured: true,
+      auth: { email: 'person@example.com', name: 'Person Example' },
+      grantedScopes: [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/userinfo.email',
+      ],
+    })
+    expect(openExternal).toHaveBeenCalledTimes(1)
+    const openedUrl = new URL(openExternal.mock.calls[0][0])
+    expect(openedUrl.searchParams.get('client_id')).toBe('client')
+    expect(openedUrl.searchParams.get('scope')).toContain('https://www.googleapis.com/auth/gmail.readonly')
+    expect(String(calls[0].body)).toContain('code=browser-code')
+    expect(String(calls[1].url)).toContain('/oauth2/v1/userinfo')
+    expect(secrets.dump()[`${MIM_KEYCHAIN_SERVICE}:${googleTokenAccount('default')}`]).toContain('person@example.com')
+  })
+
   it('routes Drive, Docs, and Sheets tools', async () => {
     const calls: Array<Record<string, unknown>> = []
     const secrets = createMemorySecretStore({
@@ -215,6 +267,142 @@ describe('Google tools', () => {
       expect.stringContaining('/gmail/v1/users/me/messages'),
       expect.stringContaining('/gmail/v1/users/me/messages/m1'),
     ])
+  })
+
+  it('reads Google OAuth client credentials from a file', async () => {
+    const secrets = createMemorySecretStore()
+    registerGoogleTools(tools, { secrets, http: fakeHttp([]) })
+
+    const clientFile = join(dir, 'client_secret.json')
+    writeFileSync(clientFile, JSON.stringify({
+      installed: { client_id: 'file-client', client_secret: 'file-secret', redirect_uris: ['http://localhost'] },
+    }))
+
+    expect(await tools.call('google.setOAuthClient', { file: clientFile }, ctx))
+      .toEqual({ account: 'default', clientConfigured: true })
+
+    const stored = JSON.parse(secrets.dump()[`${MIM_KEYCHAIN_SERVICE}:${googleClientAccount('default')}`])
+    expect(stored.client_id).toBe('file-client')
+    expect(stored.client_secret).toBe('file-secret')
+  })
+
+  it('reads Google OAuth client from web-type credential file', async () => {
+    const secrets = createMemorySecretStore()
+    registerGoogleTools(tools, { secrets, http: fakeHttp([]) })
+
+    const clientFile = join(dir, 'client_web.json')
+    writeFileSync(clientFile, JSON.stringify({
+      web: { client_id: 'web-client', client_secret: 'web-secret' },
+    }))
+
+    expect(await tools.call('google.setOAuthClient', { file: clientFile }, ctx))
+      .toEqual({ account: 'default', clientConfigured: true })
+
+    const stored = JSON.parse(secrets.dump()[`${MIM_KEYCHAIN_SERVICE}:${googleClientAccount('default')}`])
+    expect(stored.client_id).toBe('web-client')
+  })
+
+  it('reads Google OAuth client from plain client_id/client_secret JSON', async () => {
+    const secrets = createMemorySecretStore()
+    registerGoogleTools(tools, { secrets, http: fakeHttp([]) })
+
+    const clientFile = join(dir, 'plain.json')
+    writeFileSync(clientFile, JSON.stringify({ client_id: 'plain-id', client_secret: 'plain-secret' }))
+
+    expect(await tools.call('google.setOAuthClient', { file: clientFile }, ctx))
+      .toEqual({ account: 'default', clientConfigured: true })
+
+    const stored = JSON.parse(secrets.dump()[`${MIM_KEYCHAIN_SERVICE}:${googleClientAccount('default')}`])
+    expect(stored.client_id).toBe('plain-id')
+  })
+
+  it('rejects missing credential file', async () => {
+    registerGoogleTools(tools, { secrets: createMemorySecretStore(), http: fakeHttp([]) })
+    await expect(tools.call('google.setOAuthClient', { file: join(dir, 'nonexistent.json') }, ctx))
+      .rejects.toThrow('Credential file not found')
+  })
+
+  it('rejects credential file without client_id', async () => {
+    registerGoogleTools(tools, { secrets: createMemorySecretStore(), http: fakeHttp([]) })
+    const bad = join(dir, 'bad.json')
+    writeFileSync(bad, JSON.stringify({ installed: { redirect_uris: [] } }))
+    await expect(tools.call('google.setOAuthClient', { file: bad }, ctx))
+      .rejects.toThrow('client_id')
+  })
+
+  it('rejects credential file with unparseable JSON', async () => {
+    registerGoogleTools(tools, { secrets: createMemorySecretStore(), http: fakeHttp([]) })
+    const bad = join(dir, 'garbage.json')
+    writeFileSync(bad, 'not valid json {{{')
+    await expect(tools.call('google.setOAuthClient', { file: bad }, ctx))
+      .rejects.toThrow('credential file')
+  })
+
+  it('reads Google token bundle from a file via connect', async () => {
+    const secrets = createMemorySecretStore()
+    registerGoogleTools(tools, {
+      secrets,
+      http: fakeHttp([{ email: 'file@example.com', name: 'File User' }]),
+      now: () => 1_000,
+    })
+
+    const tokenFile = join(dir, 'tokens.json')
+    writeFileSync(tokenFile, JSON.stringify({
+      access_token: 'file-access',
+      refresh_token: 'file-refresh',
+      scope: 'https://www.googleapis.com/auth/gmail.readonly',
+      expires_at: 999999,
+    }))
+
+    const result = await tools.call('google.connect', { file: tokenFile }, ctx) as Record<string, unknown>
+    expect(result).toMatchObject({
+      account: 'default',
+      configured: true,
+      auth: { email: 'file@example.com' },
+    })
+    expect(secrets.dump()[`${MIM_KEYCHAIN_SERVICE}:${googleTokenAccount('default')}`]).toContain('file@example.com')
+  })
+
+  it('reads Google token bundle from a file via setTokenBundle', async () => {
+    const secrets = createMemorySecretStore()
+    registerGoogleTools(tools, { secrets, http: fakeHttp([]), now: () => 1_000 })
+
+    const tokenFile = join(dir, 'bundle.json')
+    writeFileSync(tokenFile, JSON.stringify({
+      access_token: 'bundle-access',
+      refresh_token: 'bundle-refresh',
+    }))
+
+    expect(await tools.call('google.setTokenBundle', { file: tokenFile }, ctx))
+      .toEqual({ account: 'default', tokenConfigured: true })
+    expect(secrets.dump()[`${MIM_KEYCHAIN_SERVICE}:${googleTokenAccount('default')}`]).toContain('bundle-access')
+  })
+
+  it('returns MCP state that tracks connection', async () => {
+    const secrets = createMemorySecretStore()
+    const state = registerGoogleTools(tools, {
+      secrets,
+      http: fakeHttp([
+        { email: 'person@example.com', name: 'Person' },
+        {},
+      ]),
+      now: () => 1_000,
+    })
+
+    expect(state.connected).toBe(false)
+    await state.refresh()
+    expect(state.connected).toBe(false)
+
+    await tools.call('google.connect', {
+      access_token: 'access',
+      scope: 'https://www.googleapis.com/auth/gmail.readonly',
+    }, ctx)
+    await state.refresh()
+    expect(state.connected).toBe(true)
+
+    await tools.call('google.disconnect', {}, ctx)
+    await state.refresh()
+    expect(state.connected).toBe(false)
   })
 
   it('routes Gmail send and Calendar create tools', async () => {

@@ -5,6 +5,7 @@ import { fetchHttpClient, type HttpClient } from '@main/integrations/http.js'
 import { loadUserConfig } from '@main/userConfig.js'
 import { parseMimYaml } from '@main/workspace/workspaceContract.js'
 import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
+import type { IntegrationMcpState } from '@main/integrations/mcpState.js'
 import { SlackIntegration } from './client.js'
 import { readSlackPolicy } from './policy.js'
 
@@ -45,11 +46,21 @@ function requireSlackDmAccess(tools: ToolRegistry, ctx: ToolContext): void {
   if (!policy.directMessages) throw new Error('Slack DM access is disabled. Enable it in Settings > Integrations.')
 }
 
-export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}): void {
+export type { IntegrationMcpState } from '@main/integrations/mcpState.js'
+
+export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}): IntegrationMcpState {
   const slack = new SlackIntegration({
     secrets: deps.secrets ?? createKeytarSecretStore(),
     http: deps.http ?? fetchHttpClient,
   })
+
+  const mcpState: IntegrationMcpState = {
+    connected: false,
+    async refresh() {
+      const account = resolveSlackAccount(tools)
+      mcpState.connected = await slack.hasToken(account)
+    },
+  }
 
   tools.register({
     name: 'slack.setToken',
@@ -61,6 +72,7 @@ export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}
     execute: async (params) => {
       const account = resolveSlackAccount(tools, optionalString(params.account))
       await slack.setToken(account, requireString(params, 'token'))
+      void mcpState.refresh()
       return { account, configured: true }
     },
   })
@@ -71,7 +83,9 @@ export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}
     inputSchema: objectSchema({ account: { type: 'string' } }),
     execute: async (params) => {
       const account = resolveSlackAccount(tools, optionalString(params.account))
-      return { account, deleted: await slack.deleteToken(account) }
+      const deleted = await slack.deleteToken(account)
+      void mcpState.refresh()
+      return { account, deleted }
     },
   })
 
@@ -202,19 +216,24 @@ export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}
 
   tools.register({
     name: 'slack.connect',
-    description: 'Store a Slack token and verify it. Returns account metadata from auth.test.',
+    description: 'Store a Slack token and verify it. Accepts a file path to a token file (plain text or JSON with token field), or an inline token.',
     inputSchema: objectSchema({
       account: { type: 'string' },
+      file: { type: 'string' },
       token: { type: 'string' },
-    }, ['token']),
+    }),
     execute: async (params) => {
       const account = resolveSlackAccount(tools, optionalString(params.account))
-      await slack.setToken(account, requireString(params, 'token'))
+      const filePath = optionalString(params.file)
+      const token = filePath ? readSlackTokenFromFile(filePath) : requireString(params, 'token')
+      await slack.setToken(account, token)
       try {
         const auth = await slack.authTest({ account })
+        void mcpState.refresh()
         return { account, configured: true, auth }
       } catch (err) {
         await slack.deleteToken(account)
+        void mcpState.refresh()
         throw new Error(`Slack token verification failed: ${err instanceof Error ? err.message : String(err)}`)
       }
     },
@@ -227,6 +246,7 @@ export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}
     execute: async (params) => {
       const account = resolveSlackAccount(tools, optionalString(params.account))
       const deleted = await slack.deleteToken(account)
+      void mcpState.refresh()
       return { account, disconnected: deleted }
     },
   })
@@ -253,6 +273,8 @@ export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}
       })
     },
   })
+
+  return mcpState
 }
 
 function resolveSlackAccount(tools: ToolRegistry, explicit?: string): string {
@@ -270,6 +292,20 @@ function resolveSlackAccount(tools: ToolRegistry, explicit?: string): string {
     }
   }
   return loadUserConfig().defaults.slack ?? 'default'
+}
+
+function readSlackTokenFromFile(filePath: string): string {
+  if (!existsSync(filePath)) throw new Error(`Token file not found: ${filePath}`)
+  const raw = readFileSync(filePath, 'utf-8').trim()
+  if (raw.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw)
+      const token = typeof parsed?.token === 'string' ? parsed.token.trim() : ''
+      if (token) return token
+    } catch { /* fall through to use raw content */ }
+  }
+  if (!raw) throw new Error('Token file is empty')
+  return raw
 }
 
 function requireString(params: Record<string, unknown>, key: string): string {

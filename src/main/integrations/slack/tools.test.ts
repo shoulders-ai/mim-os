@@ -117,6 +117,42 @@ describe('Slack tools', () => {
     expect(calls[0].url).toContain('auth.test')
   })
 
+  it('connect reads a Slack token from a plain text file', async () => {
+    const secrets = createMemorySecretStore()
+    registerSlackTools(tools, {
+      secrets,
+      http: fakeHttp({ ok: true, team: 'Acme', user: 'paul', user_id: 'U1', team_id: 'T1' }),
+    })
+
+    const tokenFile = join(dir, 'slack-token.txt')
+    writeFileSync(tokenFile, '  xoxb-from-file  \n')
+
+    const result = await tools.call('slack.connect', { file: tokenFile }, ctx) as Record<string, unknown>
+    expect(result.configured).toBe(true)
+    expect(secrets.dump()[`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]).toBe('xoxb-from-file')
+  })
+
+  it('connect reads a Slack token from a JSON file', async () => {
+    const secrets = createMemorySecretStore()
+    registerSlackTools(tools, {
+      secrets,
+      http: fakeHttp({ ok: true, team: 'Acme', user: 'paul', user_id: 'U1', team_id: 'T1' }),
+    })
+
+    const tokenFile = join(dir, 'slack-creds.json')
+    writeFileSync(tokenFile, JSON.stringify({ token: 'xoxb-json-token' }))
+
+    const result = await tools.call('slack.connect', { file: tokenFile }, ctx) as Record<string, unknown>
+    expect(result.configured).toBe(true)
+    expect(secrets.dump()[`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]).toBe('xoxb-json-token')
+  })
+
+  it('connect rejects missing token file', async () => {
+    registerSlackTools(tools, { secrets: createMemorySecretStore(), http: fakeHttp({ ok: true }) })
+    await expect(tools.call('slack.connect', { file: join(dir, 'nonexistent.txt') }, ctx))
+      .rejects.toThrow('Token file not found')
+  })
+
   it('connect rolls back token on verification failure', async () => {
     const secrets = createMemorySecretStore()
     registerSlackTools(tools, {
@@ -184,6 +220,26 @@ describe('Slack tools', () => {
       method: 'POST',
       body: JSON.stringify({ channel: 'C1', text: 'Hello' }),
     })
+  })
+
+  it('returns MCP state that tracks connection', async () => {
+    const secrets = createMemorySecretStore()
+    const state = registerSlackTools(tools, {
+      secrets,
+      http: fakeHttp({ ok: true, team: 'Acme', user: 'paul', user_id: 'U1', team_id: 'T1' }),
+    })
+
+    expect(state.connected).toBe(false)
+    await state.refresh()
+    expect(state.connected).toBe(false)
+
+    await tools.call('slack.connect', { token: 'xoxb-test' }, ctx)
+    await state.refresh()
+    expect(state.connected).toBe(true)
+
+    await tools.call('slack.disconnect', {}, ctx)
+    await state.refresh()
+    expect(state.connected).toBe(false)
   })
 })
 

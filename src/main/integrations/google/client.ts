@@ -124,12 +124,12 @@ export class GoogleIntegration {
     } catch {
       // Profile lookup is a convenience; a valid token is still worth storing.
     }
-    const stored = auth ? { ...bundle, auth } : bundle
+    const stored = hasGoogleProfileMetadata(auth) ? { ...bundle, auth } : bundle
     await this.setTokenBundle(input.account, stored)
     return {
       account: input.account,
       configured: true,
-      ...(auth ? { auth } : {}),
+      ...(hasGoogleProfileMetadata(auth) ? { auth } : {}),
       grantedScopes: grantedScopesFromBundle(stored),
     }
   }
@@ -154,7 +154,7 @@ export class GoogleIntegration {
     return {
       account,
       configured: bundle !== null,
-      clientConfigured: clientRaw !== null,
+      clientConfigured: clientRaw !== null || googleOAuthClientFromEnv() !== null,
       tokenConfigured: bundle !== null,
       ...(bundle?.auth ? { auth: bundle.auth } : {}),
       grantedScopes: bundle ? grantedScopesFromBundle(bundle) : [],
@@ -166,6 +166,7 @@ export class GoogleIntegration {
     redirectUri?: string
     scopes?: string[]
     capabilities?: GoogleCapability[]
+    state?: string
   }): Promise<{ account: string; url: string; redirectUri: string; scopes: string[] }> {
     const client = await this.requireClient(input.account)
     const redirectUri = input.redirectUri ?? DEFAULT_REDIRECT_URI
@@ -179,10 +180,17 @@ export class GoogleIntegration {
     url.searchParams.set('scope', scopes.join(' '))
     url.searchParams.set('access_type', 'offline')
     url.searchParams.set('prompt', 'consent')
+    if (input.state?.trim()) url.searchParams.set('state', input.state.trim())
     return { account: input.account, url: url.toString(), redirectUri, scopes }
   }
 
-  async exchangeCode(input: { account: string; code: string; redirectUri?: string }): Promise<{ account: string; tokenConfigured: true }> {
+  async exchangeCode(input: { account: string; code: string; redirectUri?: string }): Promise<{
+    account: string
+    configured: true
+    tokenConfigured: true
+    auth?: GoogleProfile
+    grantedScopes: string[]
+  }> {
     if (!input.code.trim()) throw new Error('Google OAuth code is required')
     const client = await this.requireClient(input.account)
     const data = await this.tokenRequest({
@@ -192,8 +200,22 @@ export class GoogleIntegration {
       redirect_uri: input.redirectUri ?? DEFAULT_REDIRECT_URI,
       grant_type: 'authorization_code',
     })
-    await this.setTokenBundle(input.account, normalizeTokenResponse(data, this.now()))
-    return { account: input.account, tokenConfigured: true }
+    const bundle = normalizeTokenResponse(data, this.now())
+    let auth: GoogleProfile | undefined
+    try {
+      auth = await this.userProfile(bundle.access_token)
+    } catch {
+      // Profile lookup is a convenience; the token exchange is still complete.
+    }
+    const stored = hasGoogleProfileMetadata(auth) ? { ...bundle, auth } : bundle
+    await this.setTokenBundle(input.account, stored)
+    return {
+      account: input.account,
+      configured: true,
+      tokenConfigured: true,
+      ...(hasGoogleProfileMetadata(auth) ? { auth } : {}),
+      grantedScopes: grantedScopesFromBundle(stored),
+    }
   }
 
   async gmailSearch(input: {
@@ -554,7 +576,11 @@ export class GoogleIntegration {
 
   private async requireClient(account: string): Promise<GoogleOAuthClient> {
     const raw = await this.secrets.get(MIM_KEYCHAIN_SERVICE, googleClientAccount(account))
-    if (!raw) throw new Error(`Google OAuth client is not configured for account: ${account}`)
+    if (!raw) {
+      const envClient = googleOAuthClientFromEnv()
+      if (envClient) return envClient
+      throw new Error(`Google OAuth client is not configured for account: ${account}`)
+    }
     return JSON.parse(raw) as GoogleOAuthClient
   }
 
@@ -865,6 +891,17 @@ function unique(values: readonly string[]): string[] {
 
 function isGoogleProfile(value: unknown): value is GoogleProfile {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function hasGoogleProfileMetadata(value: GoogleProfile | undefined): value is GoogleProfile {
+  return Boolean(value?.email || value?.name || value?.picture)
+}
+
+function googleOAuthClientFromEnv(): GoogleOAuthClient | null {
+  const client_id = process.env.MIM_GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_OAUTH_CLIENT_ID
+  const client_secret = process.env.MIM_GOOGLE_OAUTH_CLIENT_SECRET || process.env.GOOGLE_OAUTH_CLIENT_SECRET
+  if (!client_id?.trim() || !client_secret?.trim()) return null
+  return { client_id: client_id.trim(), client_secret: client_secret.trim() }
 }
 
 function retryAfterMs(value: string | null | undefined): number | null {
