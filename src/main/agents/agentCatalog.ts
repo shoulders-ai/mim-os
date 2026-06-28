@@ -8,7 +8,7 @@
 // No Electron imports — unit-testable.
 
 import { execFile } from 'child_process'
-import { basename, isAbsolute, win32 } from 'path'
+import { basename, isAbsolute, join, win32 } from 'path'
 import { defaultShell } from '@main/platform.js'
 
 export interface AgentDefinition {
@@ -102,13 +102,15 @@ export function resetAgentDetection(): void {
   cache = null
 }
 
-export function sessionIdArgs(_agentId: string, _sessionId: string): string[] {
-  return []
-}
-
-export function resumeArgs(agentId: string, _sessionId: string): string[] {
-  if (agentId === 'claude-code') return ['--continue']
+export function resumeArgs(agentId: string, cliSessionId?: string): string[] {
+  if (agentId === 'claude-code') return cliSessionId ? ['--resume', cliSessionId] : ['--continue']
   if (agentId === 'codex') return ['resume', '--last']
   if (agentId === 'gemini-cli') return ['--resume', 'latest']
   return []
+}
+
+export function cliSessionsDir(agentId: string, cwd: string): string | null {
+  if (agentId !== 'claude-code') return null
+  const home = process.env.HOME || process.env.USERPROFILE || ''
+  return join(home, '.claude', 'projects', cwd.replace(/[\\/]/g, '-'))
 }
