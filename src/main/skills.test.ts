@@ -146,6 +146,29 @@ describe('filesystem skill loader', () => {
     expect(loader.listDetailed().map(skill => skill.id)).toEqual(['shared'])
   })
 
+  it('resolves package skills by short name when no authored skill shadows them', () => {
+    const pkgDir = join(root, 'pkg-skills')
+    writeSkill(pkgDir, 'knowledge', 'name: knowledge\ndescription: Knowledge tools')
+
+    const loader = createSkillLoader({
+      builtinDir,
+      personalDir,
+      getPackageSkillRoots: () => [{ packageId: 'knowledge', packageName: 'Knowledge', dir: pkgDir }],
+      getWorkspacePath: () => workspaceDir,
+    })
+
+    expect(loader.get('knowledge')).toMatchObject({
+      id: 'package:knowledge/knowledge',
+      name: 'knowledge',
+      source: 'package',
+    })
+    expect(loader.get('package:knowledge/knowledge')).toMatchObject({
+      id: 'package:knowledge/knowledge',
+      name: 'knowledge',
+      source: 'package',
+    })
+  })
+
   it('tolerates an app root that does not exist', () => {
     const loader = createSkillLoader({
       builtinDir,

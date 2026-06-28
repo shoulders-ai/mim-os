@@ -46,6 +46,8 @@ import { registerWebTools } from '@main/tools/web.js'
 import { readAccountToken, registerAccountTools } from '@main/tools/account.js'
 import { registerWorkspaceTools } from '@main/tools/workspace.js'
 import { registerSessionTools } from '@main/sessions.js'
+import { parseAllowedHttpUrl } from '@main/web/urlPolicy.js'
+import { addBrowserSessionDomain, isBrowserSessionAllowed, readBrowserSessionSettings } from '@main/web/browserSessionSettings.js'
 import { resolveTelemetryConfig } from '@main/telemetry/config.js'
 import { readTelemetryIdentity, setTelemetryIdentityEnabled } from '@main/telemetry/identity.js'
 import { createTelemetry } from '@main/telemetry/telemetry.js'
@@ -246,6 +248,24 @@ function createHeadlessGate(
     getApprovalMode: () => 'normal',
     getWorkspacePath,
     getDynamicToolPolicy,
+    resolveSavedBrowserSessionGrant: (toolName, params) => {
+      if (toolName !== 'web.read' || params.stateful !== true || typeof params.url !== 'string') return null
+      const ws = getWorkspacePath()
+      if (!ws) return null
+      try {
+        const parsed = parseAllowedHttpUrl(params.url)
+        const settings = readBrowserSessionSettings(ws)
+        const match = isBrowserSessionAllowed(parsed.href, settings.allowedDomains)
+        return { domain: match.host, granted: settings.enabled && match.allowed }
+      } catch {
+        return null
+      }
+    },
+    grantSavedBrowserSessionDomain: (grant) => {
+      const ws = getWorkspacePath()
+      if (!ws) throw new Error('No workspace open')
+      addBrowserSessionDomain(ws, grant.domain)
+    },
     recordDecision: (event) => traceGateDecision(traceLog, event),
     sendApprovalRequest(request) {
       if (approvals === 'deny') return false

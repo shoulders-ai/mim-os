@@ -73,6 +73,42 @@ export const MCP_TOOL_SPECS: McpToolSpec[] = [
   { name: 'log_append', mimName: 'log.append', description: 'Append a durable activity note to the workspace log' },
   { name: 'workspace_info', mimName: 'workspace.info', description: 'Get workspace metadata' },
   { name: 'system_prompt', mimName: 'system.prompt', description: 'Get the resolved AI system prompt' },
+  { name: 'web_read', mimName: 'web.read', description: 'Read a URL (web page or PDF)' },
+  { name: 'web_search', mimName: 'web.search', description: 'Search the web via Exa' },
+  { name: 'settings_get', mimName: 'settings.get', description: 'Read a workspace setting' },
+  { name: 'settings_set', mimName: 'settings.set', description: 'Write a workspace setting' },
+  { name: 'slack_status', mimName: 'slack.status', description: 'Check Slack connection status' },
+  { name: 'slack_connect', mimName: 'slack.connect', description: 'Store and verify a Slack token' },
+  { name: 'slack_disconnect', mimName: 'slack.disconnect', description: 'Remove a Slack token from the OS keychain' },
+  { name: 'google_status', mimName: 'google.status', description: 'Check Google connection status' },
+  { name: 'google_set_oauth_client', mimName: 'google.setOAuthClient', description: 'Store a Google OAuth client in the OS keychain' },
+  { name: 'google_connect', mimName: 'google.connect', description: 'Connect Google through browser OAuth or token bundle' },
+  { name: 'google_disconnect', mimName: 'google.disconnect', description: 'Remove Google tokens from the OS keychain' },
+]
+
+export const SLACK_MCP_TOOL_SPECS: McpToolSpec[] = [
+  { name: 'slack_channels', mimName: 'slack.channels', description: 'List Slack channels' },
+  { name: 'slack_users', mimName: 'slack.users', description: 'List Slack users' },
+  { name: 'slack_dms', mimName: 'slack.dms', description: 'List Slack direct message conversations' },
+  { name: 'slack_history', mimName: 'slack.history', description: 'Read Slack conversation history' },
+  { name: 'slack_replies', mimName: 'slack.replies', description: 'Read threaded Slack replies' },
+  { name: 'slack_search', mimName: 'slack.search', description: 'Search Slack messages' },
+  { name: 'slack_send', mimName: 'slack.send', description: 'Post a message to a Slack channel' },
+]
+
+export const GOOGLE_MCP_TOOL_SPECS: McpToolSpec[] = [
+  { name: 'gmail_search', mimName: 'gmail.search', description: 'Search Gmail messages' },
+  { name: 'gmail_read', mimName: 'gmail.read', description: 'Read a Gmail message or thread' },
+  { name: 'gmail_send', mimName: 'gmail.send', description: 'Send a Gmail message' },
+  { name: 'calendar_events', mimName: 'calendar.events', description: 'Read Google Calendar events' },
+  { name: 'calendar_create', mimName: 'calendar.create', description: 'Create a Google Calendar event' },
+  { name: 'drive_search', mimName: 'drive.search', description: 'Search Google Drive files' },
+  { name: 'drive_meta', mimName: 'drive.meta', description: 'Read Google Drive file metadata' },
+  { name: 'docs_read', mimName: 'docs.read', description: 'Export a Google Doc as plain text' },
+  { name: 'sheets_meta', mimName: 'sheets.meta', description: 'Read Google Sheets spreadsheet metadata' },
+  { name: 'sheets_read', mimName: 'sheets.read', description: 'Read values from a Google Sheet range' },
+  { name: 'sheets_write', mimName: 'sheets.write', description: 'Write values into a Google Sheet range' },
+  { name: 'sheets_append', mimName: 'sheets.append', description: 'Append values to a Google Sheet range' },
 ]
 
 const MCP_ALLOWED_TOOLS = new Set(MCP_TOOL_SPECS.map(tool => tool.mimName))
@@ -94,6 +130,12 @@ export async function createServer(
   const mcpConnections = new Map<string, Set<WebSocket>>()
   const aiRuntime = createAiRuntime({ tools })
   const getNamedMcpTools = options?.getNamedMcpTools ?? (() => [])
+
+  for (const spec of MCP_TOOL_SPECS) {
+    const tool = tools.get(spec.mimName)
+    if (!tool) console.error(`[server] MCP tool is not registered: ${spec.mimName}`)
+    else if (!tool.inputSchema) console.error(`[server] MCP tool is missing inputSchema: ${spec.mimName}`)
+  }
 
   function isMcpAllowed(method: string): boolean {
     if (MCP_ALLOWED_TOOLS.has(method)) return true

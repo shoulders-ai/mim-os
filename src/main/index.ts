@@ -60,13 +60,20 @@ import { registerLogbookTools } from '@main/tools/logbook.js'
 import { registerWebTools } from '@main/tools/web.js'
 import { renderUrlInHiddenWindow } from '@main/web/renderedBrowser.js'
 import {
-  clearResearchBrowserProfile,
-  openResearchBrowserWindow,
-  renderUrlInResearchSession,
-} from '@main/web/researchBrowser.js'
+  clearBrowserSessionProfile,
+  openBrowserSessionWindow,
+  renderUrlInBrowserSession,
+} from '@main/web/browserSession.js'
+import {
+  addBrowserSessionDomain,
+  isBrowserSessionAllowed,
+  readBrowserSessionSettings,
+} from '@main/web/browserSessionSettings.js'
+import { parseAllowedHttpUrl } from '@main/web/urlPolicy.js'
 import { registerAccountTools, readAccountToken, setAccountDev } from '@main/tools/account.js'
 import { registerSlackTools } from '@main/integrations/slack/tools.js'
 import { registerGoogleTools } from '@main/integrations/google/tools.js'
+import { SLACK_MCP_TOOL_SPECS, GOOGLE_MCP_TOOL_SPECS } from '@main/server/server.js'
 import { registerTelemetryTools } from '@main/tools/telemetry.js'
 import { createKeytarSecretStore } from '@main/integrations/secrets.js'
 import { registerResourceTools } from '@main/tools/resources.js'
@@ -315,6 +322,24 @@ async function boot(): Promise<void> {
     getWorkspacePath: () => tools.getWorkspacePath(),
     getPackagePermissions: (packageId) => packages?.get(packageId)?.manifest.permissions,
     getDynamicToolPolicy: (name) => namedPackageTools?.getPolicy(name),
+    resolveSavedBrowserSessionGrant: (toolName, params) => {
+      if (toolName !== 'web.read' || params.stateful !== true || typeof params.url !== 'string') return null
+      const ws = tools.getWorkspacePath()
+      if (!ws) return null
+      try {
+        const parsed = parseAllowedHttpUrl(params.url)
+        const settings = readBrowserSessionSettings(ws)
+        const match = isBrowserSessionAllowed(parsed.href, settings.allowedDomains)
+        return { domain: match.host, granted: settings.enabled && match.allowed }
+      } catch {
+        return null
+      }
+    },
+    grantSavedBrowserSessionDomain: (grant) => {
+      const ws = tools.getWorkspacePath()
+      if (!ws) throw new Error('No workspace open')
+      addBrowserSessionDomain(ws, grant.domain)
+    },
     // The gate hard-denies writes to readonly/unknown collections for every
     // actor; this resolver supplies the effective per-collection policy.
     getResourceWritePolicy: (id) => {
@@ -408,12 +433,16 @@ async function boot(): Promise<void> {
   registerLogbookTools(tools)
   registerWebTools(tools, {
     renderRenderedPage: renderUrlInHiddenWindow,
-    renderResearchPage: renderUrlInResearchSession,
-    openResearchBrowser: openResearchBrowserWindow,
-    clearResearchBrowserProfile,
+    renderSavedBrowserSessionPage: renderUrlInBrowserSession,
+    openSavedBrowserSession: openBrowserSessionWindow,
+    clearSavedBrowserSessionProfile: clearBrowserSessionProfile,
   })
-  registerSlackTools(tools)
-  registerGoogleTools(tools)
+  const slackMcp = registerSlackTools(tools)
+  const googleMcp = registerGoogleTools(tools, {
+    openExternal: (url) => shell.openExternal(url),
+  })
+  void slackMcp.refresh()
+  void googleMcp.refresh()
   registerTelemetryTools(tools, telemetry)
   setAccountDev(is.dev)
   setAccountRegistryDev(is.dev)
@@ -671,16 +700,16 @@ async function boot(): Promise<void> {
 
   server = await createServer(tools, packages, {
     getNamedMcpTools: () => {
-      if (!namedPackageTools) return []
-      return namedPackageTools.ownedNames().map(name => {
-        const tool = tools.get(name)
-        if (!tool) return null
-        return {
-          name: name.replace(/\./g, '_'),
-          mimName: name,
-          description: tool.description,
+      const specs: Array<{ name: string; mimName: string; description: string }> = []
+      if (namedPackageTools) {
+        for (const name of namedPackageTools.ownedNames()) {
+          const tool = tools.get(name)
+          if (tool) specs.push({ name: name.replace(/\./g, '_'), mimName: name, description: tool.description })
         }
-      }).filter((s): s is NonNullable<typeof s> => s !== null)
+      }
+      if (slackMcp.connected) specs.push(...SLACK_MCP_TOOL_SPECS)
+      if (googleMcp.connected) specs.push(...GOOGLE_MCP_TOOL_SPECS)
+      return specs
     },
   })
   try {

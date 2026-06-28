@@ -132,7 +132,11 @@ export function createSkillLoader(options: SkillLoaderOptions = {}): SkillLoader
     get(idOrName: string) {
       const trimmed = typeof idOrName === 'string' ? idOrName.trim() : ''
       if (!trimmed) return undefined
-      return scan().skills.find(skill => skill.id === trimmed || (skill.source !== 'package' && skill.name === trimmed))
+      const all = scan().skills
+      const disabled = options.getDisabledSkillNames?.() ?? options.disabledNames
+      return all.find(s => s.id === trimmed)
+        ?? all.find(s => s.source !== 'package' && s.name === trimmed)
+        ?? (disabled?.has(trimmed) ? undefined : all.find(s => s.source === 'package' && s.name === trimmed))
     },
     diagnostics() {
       return scan().diagnostics

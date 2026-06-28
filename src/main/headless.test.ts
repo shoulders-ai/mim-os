@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import { createHeadlessKernel } from '@main/headless.js'
 import { PermissionDeniedError } from '@main/security/gate.js'
 import type { AppStatus } from '@main/tools/coreApps.js'
+import { MCP_TOOL_SPECS } from '@main/server/server.js'
 
 describe('createHeadlessKernel', () => {
   let dir: string
@@ -32,7 +33,7 @@ describe('createHeadlessKernel', () => {
       'skill.list',
       'log.append', 'log.read',
       'web.read', 'web.search',
-      'web.research.status', 'web.research.allowDomain',
+      'web.browser.status', 'web.browser.allowDomain',
       'ai.registry',
       'documents.docx.read',
       'slack.status',
@@ -41,6 +42,17 @@ describe('createHeadlessKernel', () => {
     ]) {
       expect(names.has(expected), `missing tool: ${expected}`).toBe(true)
     }
+  })
+
+  it('every static MCP tool that is registered has an inputSchema', () => {
+    const kernel = createHeadlessKernel()
+    const missing: string[] = []
+    for (const spec of MCP_TOOL_SPECS) {
+      const tool = kernel.tools.get(spec.mimName)
+      if (!tool) continue
+      if (!tool.inputSchema) missing.push(spec.mimName)
+    }
+    expect(missing, `MCP tools missing inputSchema: ${missing.join(', ')}`).toEqual([])
   })
 
   it('openWorkspace opens a tmp dir and scaffolds .mim/workspace.json', async () => {
@@ -119,6 +131,44 @@ describe('createHeadlessKernel', () => {
     expect(existsSync(join(dir, 'rejected.md'))).toBe(false)
 
     expect(seen).toEqual(['fs.write', 'fs.write'])
+  })
+
+  it("approvals 'allow' grants website access domains before a stateful web read executes", async () => {
+    const kernel = createHeadlessKernel({ approvals: 'allow' })
+    await kernel.openWorkspace(dir)
+
+    await expect(
+      kernel.tools.call('web.read', {
+        url: 'https://private.example/report',
+        stateful: true,
+      }, { actor: 'ai', sessionId: 's1' }),
+    ).rejects.toThrow('Stateful web reads are only available')
+
+    const status = await kernel.tools.call('web.browser.status', {}, { actor: 'user' }) as {
+      allowedDomains: string[]
+    }
+    expect(status.allowedDomains).toContain('private.example')
+  })
+
+  it("approvals 'prompt' shows the website access domain in the approval request", async () => {
+    const seen: unknown[] = []
+    const kernel = createHeadlessKernel({
+      approvals: 'prompt',
+      confirmApproval: async (request) => {
+        seen.push(request.savedBrowserSession)
+        return true
+      },
+    })
+    await kernel.openWorkspace(dir)
+
+    await expect(
+      kernel.tools.call('web.read', {
+        url: 'https://secure.example/report',
+        stateful: true,
+      }, { actor: 'ai', sessionId: 's1' }),
+    ).rejects.toThrow('Stateful web reads are only available')
+
+    expect(seen).toEqual([{ domain: 'secure.example', granted: false }])
   })
 
   it('direct user mutations do not need approval even under deny', async () => {

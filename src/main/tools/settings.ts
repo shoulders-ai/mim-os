@@ -152,6 +152,12 @@ export function registerSettingsTools(tools: ToolRegistry): void {
   tools.register({
     name: 'settings.get',
     description: 'Read all settings or a specific key',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Setting key to read, or omit for all settings' },
+      },
+    },
     execute: async (params) => {
       const settings = readSettings(tools)
       const key = params.key as string | undefined
@@ -163,6 +169,14 @@ export function registerSettingsTools(tools: ToolRegistry): void {
   tools.register({
     name: 'settings.set',
     description: 'Write a setting',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: 'Setting key' },
+        value: { description: 'Setting value' },
+      },
+      required: ['key', 'value'],
+    },
     execute: async (params) => {
       const key = params.key as string
       const value = params.value

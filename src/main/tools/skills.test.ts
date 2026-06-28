@@ -326,7 +326,12 @@ describe('skill tools', () => {
     const detailed = await registry.call('skill.list', { detailed: true }, ctx) as { skills: Array<Record<string, unknown>> }
     expect(active.skills.map(skill => skill.id)).toContain('package:review-app/review-work')
     expect(detailed.skills.map(skill => skill.id)).not.toContain('package:review-app/review-work')
-    await expect(registry.call('skill.get', { name: 'review-work' }, ctx)).rejects.toThrow('Skill not found')
+    await expect(registry.call('skill.get', { name: 'review-work' }, ctx)).resolves.toMatchObject({
+      skill: {
+        source: 'package',
+        packageId: 'review-app',
+      },
+    })
     await expect(registry.call('skill.get', { name: 'package:review-app/review-work' }, ctx)).resolves.toMatchObject({
       skill: {
         source: 'package',
