@@ -6,8 +6,9 @@ import {
   IconDotsVertical,
   IconEdit,
   IconSparkles,
+  IconTrash,
 } from '@tabler/icons-vue'
-import type { CommentThread } from '@main/comments/model.js'
+import { isAgentAuthor, type CommentThread } from '@main/comments/model.js'
 import MimMenu from '../../ui/MimMenu.vue'
 import MimMenuItem from '../../ui/MimMenuItem.vue'
 import { shortcutLabel } from '../../../services/shortcutLabels.js'
@@ -17,12 +18,14 @@ const props = withDefaults(
     thread?: CommentThread
     draft?: boolean
     draftAnchor?: string
+    draftText?: string
     active?: boolean
   }>(),
   {
     thread: undefined,
     draft: false,
     draftAnchor: '',
+    draftText: '',
     active: false,
   },
 )
@@ -37,10 +40,16 @@ const emit = defineEmits<{
   sendToChat: [id: string]
   copyAnchor: [id: string]
   editNote: [id: string, noteIndex: number, text: string]
+  deleteNote: [id: string, noteIndex: number]
+  updateDraftText: [text: string]
 }>()
 
 const cardRef = ref<HTMLElement | null>(null)
-const draftText = ref('')
+// Draft text lives in the parent so a typed draft survives tab switches.
+const draftText = computed({
+  get: () => props.draftText,
+  set: (value: string) => emit('updateDraftText', value),
+})
 const replyText = ref('')
 const editingNoteIndex = ref<number | null>(null)
 const editingText = ref('')
@@ -70,6 +79,12 @@ async function startEditing(index: number) {
   await nextTick()
   editTextarea.value?.focus()
   editTextarea.value?.select()
+}
+
+// A string ref inside v-for collects into an array in Vue 3; only one note
+// is ever in edit mode, so a function ref keeps editTextarea a single element.
+function setEditTextareaRef(el: unknown) {
+  editTextarea.value = (el as HTMLTextAreaElement | null) ?? null
 }
 
 function commitEdit() {
@@ -113,6 +128,10 @@ function onDraftBlur() {
 
 function activate() {
   if (props.thread) emit('activate', props.thread.id)
+}
+
+function absoluteTime(value: string): string {
+  return value.replace('T', ' ')
 }
 
 function relativeTime(value: string): string {
@@ -181,10 +200,11 @@ function relativeTime(value: string): string {
     @click="activate"
   >
     <div class="flex items-center gap-1.5">
+      <IconSparkles v-if="firstNote && isAgentAuthor(firstNote.by)" :size="11" stroke-width="2" class="shrink-0 text-accent" />
       <span class="shrink-0 font-mono text-[11px] font-semibold text-ink-3">{{ firstNote?.by }}</span>
       <div class="flex-1" />
       <span v-if="replyCount" class="shrink-0 font-mono text-[11px] text-ink-4">+{{ replyCount }}</span>
-      <span v-if="firstNote" class="shrink-0 font-mono text-[11px] text-ink-4">{{ relativeTime(firstNote.at) }}</span>
+      <span v-if="firstNote" class="shrink-0 font-mono text-[11px] text-ink-4" :title="absoluteTime(firstNote.at)">{{ relativeTime(firstNote.at) }}</span>
       <button
         v-if="thread"
         type="button"
@@ -209,8 +229,18 @@ function relativeTime(value: string): string {
   >
     <!-- Header -->
     <div class="flex items-center gap-1.5">
+      <IconSparkles v-if="firstNote && isAgentAuthor(firstNote.by)" :size="11" stroke-width="2" class="shrink-0 text-accent" />
       <span class="font-mono text-[11px] font-semibold text-ink-3">{{ firstNote?.by }}</span>
-      <span v-if="firstNote" class="font-mono text-[11px] text-ink-4">{{ relativeTime(firstNote.at) }}</span>
+      <span v-if="firstNote" class="font-mono text-[11px] text-ink-4" :title="absoluteTime(firstNote.at)">{{ relativeTime(firstNote.at) }}</span>
+      <button
+        v-if="thread"
+        type="button"
+        class="flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] text-ink-4 opacity-0 hover:bg-chrome-high hover:text-ink-2 group-hover:opacity-100"
+        title="Edit"
+        @click.stop="startEditing(0)"
+      >
+        <IconEdit :size="12" stroke-width="2" />
+      </button>
       <div class="flex-1" />
       <button
         v-if="thread"
@@ -262,8 +292,9 @@ function relativeTime(value: string): string {
     <div class="mt-1 max-h-[240px] space-y-2 overflow-y-auto overscroll-contain">
       <div v-for="(note, index) in notes" :key="`${thread!.id}:${index}:${note.at}`">
         <div v-if="index > 0" class="flex items-center gap-1.5">
+          <IconSparkles v-if="isAgentAuthor(note.by)" :size="11" stroke-width="2" class="shrink-0 text-accent" />
           <span class="font-mono text-[11px] font-semibold text-ink-3">{{ note.by }}</span>
-          <span class="font-mono text-[11px] text-ink-4">{{ relativeTime(note.at) }}</span>
+          <span class="font-mono text-[11px] text-ink-4" :title="absoluteTime(note.at)">{{ relativeTime(note.at) }}</span>
           <button
             type="button"
             class="ml-auto flex h-5 w-5 items-center justify-center rounded-[4px] text-ink-4 opacity-0 hover:bg-chrome-high hover:text-ink-2 group-hover:opacity-100"
@@ -272,10 +303,18 @@ function relativeTime(value: string): string {
           >
             <IconEdit :size="12" stroke-width="2" />
           </button>
+          <button
+            type="button"
+            class="flex h-5 w-5 items-center justify-center rounded-[4px] text-ink-4 opacity-0 hover:bg-chrome-high hover:text-red-600 group-hover:opacity-100 dark:hover:text-red-400"
+            title="Delete reply"
+            @click.stop="emit('deleteNote', thread!.id, index)"
+          >
+            <IconTrash :size="12" stroke-width="2" />
+          </button>
         </div>
         <textarea
           v-if="editingNoteIndex === index"
-          ref="editTextarea"
+          :ref="setEditTextareaRef"
           v-model="editingText"
           class="mt-0.5 w-full min-h-[40px] resize-y border border-rule-light bg-surface px-2 py-1.5 font-sans text-[13px] leading-snug text-ink outline-none focus:border-accent"
           @keydown.meta.enter.prevent="commitEdit"

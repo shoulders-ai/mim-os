@@ -3,6 +3,8 @@ import {
   COMMENTS_CONTEXT_MEDIA_TYPE,
   buildCommentsContextAttachment,
   buildCommentsInstruction,
+  buildReviewRequestAttachment,
+  buildReviewRequestInstruction,
   toCommentThreadContext,
 } from './sendToChat.js'
 
@@ -56,6 +58,27 @@ describe('comments send-to-chat helpers', () => {
     })
     const parsed = JSON.parse(attachment.content)
     expect(parsed.document).toBe(doc)
+  })
+
+  it('builds a review-request attachment with the document and comment tool guidance', () => {
+    const doc = '# Plan\n\nWe propose a staged rollout now.'
+    const attachment = buildReviewRequestAttachment({ path: 'docs/plan.md', document: doc })
+
+    expect(attachment).toMatchObject({
+      filename: 'Review request: plan.md',
+      mediaType: COMMENTS_CONTEXT_MEDIA_TYPE,
+      kind: 'comments',
+      path: 'docs/plan.md',
+      threads: [],
+    })
+    const parsed = JSON.parse(attachment.content)
+    expect(parsed.document).toBe(doc)
+    expect(parsed.instruction).toContain('comments_add')
+    expect(parsed.instruction).toContain('exact')
+  })
+
+  it('builds a short editable review-request composer instruction', () => {
+    expect(buildReviewRequestInstruction()).toBe('Review this document and leave inline comments.')
   })
 
   it('builds a short human-facing instruction for the composer draft', () => {

@@ -62,6 +62,33 @@ export function buildCommentsInstruction(context: CommentsChatContext): string {
   return count === 1 ? 'Address this comment.' : `Address these ${count} comments.`
 }
 
+export function buildReviewRequestAttachment(context: { path: string; document: string }): CommentsContextAttachment {
+  const payload: Record<string, unknown> = {
+    path: context.path,
+    threads: [],
+    instruction: [
+      'Review this document and add inline review comments with comments_add,',
+      'each anchored to a short exact passage copied from the text.',
+      'Comment where the writing, structure, or reasoning can improve;',
+      'do not rewrite the document.',
+    ].join(' '),
+    document: context.document,
+  }
+
+  return {
+    filename: `Review request: ${context.path.split('/').pop() || 'document'}`,
+    mediaType: COMMENTS_CONTEXT_MEDIA_TYPE,
+    content: JSON.stringify(payload, null, 2),
+    kind: 'comments',
+    path: context.path,
+    threads: [],
+  }
+}
+
+export function buildReviewRequestInstruction(): string {
+  return 'Review this document and leave inline comments.'
+}
+
 function commentsContextFilename(path: string, count: number): string {
   const basename = path.split('/').pop() || 'document'
   return `${count} comment${count === 1 ? '' : 's'} on ${basename}`

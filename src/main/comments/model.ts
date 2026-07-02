@@ -204,6 +204,42 @@ export function resolveComment(raw: string, id: string): { text: string; anchor:
   }
 }
 
+export function resolveAllComments(raw: string): { text: string; count: number } {
+  const threads = parseComments(raw)
+  if (!threads.length) return { text: raw, count: 0 }
+  let result = raw
+  for (const thread of [...threads].reverse()) {
+    result = resolveComment(result, thread.id).text
+  }
+  return { text: result, count: threads.length }
+}
+
+export interface CommentThreadsDelta {
+  resolved: number
+  replied: number
+  added: number
+}
+
+/** Summarize thread changes between two versions of a document (e.g. before
+ *  and after an external agent edit): threads removed, threads that gained
+ *  notes, and threads that appeared. */
+export function diffCommentThreads(beforeRaw: string, afterRaw: string): CommentThreadsDelta {
+  const before = new Map(parseComments(beforeRaw).map(thread => [thread.id, thread]))
+  const after = new Map(parseComments(afterRaw).map(thread => [thread.id, thread]))
+  let resolved = 0
+  let replied = 0
+  let added = 0
+  for (const id of before.keys()) {
+    if (!after.has(id)) resolved++
+  }
+  for (const [id, thread] of after) {
+    const previous = before.get(id)
+    if (!previous) added++
+    else if (thread.notes.length > previous.notes.length) replied++
+  }
+  return { resolved, replied, added }
+}
+
 export function findCommentById(raw: string, id: string): CommentThread | null {
   return parseComments(raw).find(thread => thread.id === id) ?? null
 }
@@ -238,6 +274,15 @@ export function sanitizeAuthorHandle(value: unknown): string {
     .replace(/[^A-Za-z0-9_.-]/g, '')
     .slice(0, 32)
   return sanitized || 'user'
+}
+
+// Known machine-author handles: desktop chat writes 'ai'; MCP connections are
+// attributed by client name (claude-code, codex, gemini-cli, and versioned or
+// suffixed variants of those). Used for presentation only, never authorization.
+const AGENT_AUTHOR_PATTERN = /^(ai|assistant|agent|mim|claude(-[\w.-]+)?|codex(-[\w.-]+)?|gemini(-[\w.-]+)?)$/i
+
+export function isAgentAuthor(by: string): boolean {
+  return AGENT_AUTHOR_PATTERN.test(String(by ?? '').trim())
 }
 
 export function normalizeMinuteTimestamp(value?: string, now: Date = new Date()): string {

@@ -3,15 +3,28 @@ import {
   addCommentAtRawRange,
   appendCommentReply,
   findCommentById,
+  resolveAllComments,
   resolveComment,
   serializeComment,
   type CommentThread,
 } from '@main/comments/model.js'
+import {
+  addCodeCommentAtOffset,
+  appendCodeCommentReply,
+  commentPrefixForPath,
+  deleteCodeCommentNote,
+  editCodeCommentNote,
+  findCodeCommentById,
+  resolveAllCodeComments,
+  resolveCodeComment,
+} from '@main/comments/codeModel.js'
 import type { useSettingsStore } from '../../stores/settings.js'
 import type { useToastStore } from '../../stores/toasts.js'
 import {
   buildCommentsContextAttachment,
   buildCommentsInstruction,
+  buildReviewRequestAttachment,
+  buildReviewRequestInstruction,
   toCommentThreadContext,
 } from '../../services/comments/sendToChat.js'
 import { commentMutation, getCommentState, setActiveComment } from './codemirror/comments.js'
@@ -28,6 +41,9 @@ interface ChatDraftPayload {
 
 interface UseEditorCommentsOptions {
   activeIsMarkdown: ComputedRef<boolean>
+  // Markdown or a code/plain-text file with a known comment syntax.
+  activeSupportsComments: ComputedRef<boolean>
+  activeFilePath: ComputedRef<string>
   historyPreviewActive: ComputedRef<boolean>
   activeTabTruncated: ComputedRef<boolean>
   activeTabReadOnly: ComputedRef<boolean>
@@ -45,17 +61,28 @@ interface UseEditorCommentsOptions {
 export function useEditorComments(options: UseEditorCommentsOptions) {
   const commentThreads = ref<CommentThread[]>([])
   const activeCommentId = ref<string | null>(null)
-  const draftComment = ref<{ from: number; to: number; anchor: string } | null>(null)
+  const draftComment = ref<{ from: number; to: number; anchor: string; text: string } | null>(null)
   const commentContextMenu = ref<{ x: number; y: number } | null>(null)
   const commentRailCollapsed = ref(false)
+  // Typed-but-unsaved drafts survive tab switches: stashed per tab, restored
+  // when the tab becomes active again and the anchor still matches.
+  const stashedDrafts = new Map<string, { from: number; to: number; anchor: string; text: string }>()
 
   function currentCommentAuthor(): string {
     return options.settingsStore.configUserName || options.settingsStore.configUserEmail || 'user'
   }
 
+  function isMarkdownMode(): boolean {
+    return options.activeIsMarkdown.value
+  }
+
+  function findThread(raw: string, id: string): CommentThread | null {
+    return isMarkdownMode() ? findCommentById(raw, id) : findCodeCommentById(raw, id)
+  }
+
   function syncCommentThreadsFromEditor() {
     const editorView = options.getEditorView()
-    if (!editorView || !options.activeIsMarkdown.value || options.activeTabReadOnly.value) {
+    if (!editorView || !options.activeSupportsComments.value || options.activeTabReadOnly.value) {
       commentThreads.value = []
       activeCommentId.value = null
       return
@@ -72,7 +99,7 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
     if (
       !editorView ||
       options.historyPreviewActive.value ||
-      !options.activeIsMarkdown.value ||
+      !options.activeSupportsComments.value ||
       options.activeTabTruncated.value ||
       options.activeTabReadOnly.value
     ) {
@@ -93,7 +120,7 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
     const editorView = options.getEditorView()
     if (!editorView) return
     const effects = [setActiveComment.of(id)]
-    const thread = id ? findCommentById(options.activeDocumentText(), id) : null
+    const thread = id ? findThread(options.activeDocumentText(), id) : null
     if (thread && params.scroll) {
       editorView.dispatch({
         selection: { anchor: thread.anchorFrom },
@@ -122,13 +149,33 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
     }
     options.onStartComment?.()
     commentRailCollapsed.value = false
-    draftComment.value = range
+    draftComment.value = { ...range, text: '' }
     setEditorActiveComment(null)
+  }
+
+  function updateCommentDraftText(text: string) {
+    if (draftComment.value) draftComment.value = { ...draftComment.value, text }
+  }
+
+  function stashCommentDraftForTab(tabId: string) {
+    const draft = draftComment.value
+    if (draft && draft.text.trim() && tabId) stashedDrafts.set(tabId, { ...draft })
+    draftComment.value = null
+  }
+
+  function restoreCommentDraftForTab(tabId: string) {
+    const stashed = tabId ? stashedDrafts.get(tabId) : undefined
+    if (!stashed) return
+    stashedDrafts.delete(tabId)
+    const raw = options.activeDocumentText()
+    if (raw.slice(stashed.from, stashed.to) !== stashed.anchor) return
+    draftComment.value = stashed
+    commentRailCollapsed.value = false
   }
 
   function openEditorContextMenu(event: MouseEvent) {
     if (options.historyPreviewActive.value || options.activeTabReadOnly.value) return
-    if (!options.activeIsMarkdown.value || !selectedCommentRange()) return
+    if (!options.activeSupportsComments.value || !selectedCommentRange()) return
     event.preventDefault()
     event.stopPropagation()
     commentContextMenu.value = { x: event.clientX, y: event.clientY }
@@ -151,22 +198,36 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
     }
 
     try {
-      const result = addCommentAtRawRange(raw, {
-        from: range.from,
-        to: range.to,
+      if (isMarkdownMode()) {
+        const result = addCommentAtRawRange(raw, {
+          from: range.from,
+          to: range.to,
+          text,
+          by: currentCommentAuthor(),
+        })
+        const inserted = result.text.slice(range.from, result.text.length - (raw.length - range.to))
+        draftComment.value = null
+        editorView.dispatch({
+          changes: { from: range.from, to: range.to, insert: inserted },
+          annotations: commentMutation.of(true),
+          effects: setActiveComment.of(result.thread.id),
+          scrollIntoView: true,
+        })
+        activeCommentId.value = result.thread.id
+        afterCommentMutation(result.thread.id)
+        return
+      }
+
+      const prefix = commentPrefixForPath(options.activeFilePath.value)
+      if (!prefix) throw new Error('Comments are not supported for this file type')
+      const result = addCodeCommentAtOffset(raw, {
+        offset: range.from,
         text,
         by: currentCommentAuthor(),
+        prefix,
       })
-      const inserted = result.text.slice(range.from, result.text.length - (raw.length - range.to))
       draftComment.value = null
-      editorView.dispatch({
-        changes: { from: range.from, to: range.to, insert: inserted },
-        annotations: commentMutation.of(true),
-        effects: setActiveComment.of(result.thread.id),
-        scrollIntoView: true,
-      })
-      activeCommentId.value = result.thread.id
-      afterCommentMutation(result.thread.id)
+      replaceDocumentForComment(result.text, result.thread.id)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
       options.toastStore.push({ kind: 'error', message: 'Comment not added', detail: message })
@@ -188,11 +249,10 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
 
   function replyToComment(id: string, text: string) {
     try {
-      const result = appendCommentReply(options.activeDocumentText(), {
-        id,
-        text,
-        by: currentCommentAuthor(),
-      })
+      const input = { id, text, by: currentCommentAuthor() }
+      const result = isMarkdownMode()
+        ? appendCommentReply(options.activeDocumentText(), input)
+        : appendCodeCommentReply(options.activeDocumentText(), input)
       replaceDocumentForComment(result.text, result.thread.id)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error'
@@ -205,6 +265,11 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
     if (!editorView) return
     try {
       const raw = options.activeDocumentText()
+      if (!isMarkdownMode()) {
+        const result = editCodeCommentNote(raw, id, noteIndex, text)
+        replaceDocumentForComment(result.text, id)
+        return
+      }
       const thread = findCommentById(raw, id)
       if (!thread) throw new Error(`Comment not found: ${id}`)
       if (noteIndex < 0 || noteIndex >= thread.notes.length) throw new Error('Note not found')
@@ -224,16 +289,64 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
     }
   }
 
+  function deleteCommentNote(id: string, noteIndex: number) {
+    const editorView = options.getEditorView()
+    if (!editorView) return
+    try {
+      const raw = options.activeDocumentText()
+      if (!isMarkdownMode()) {
+        const result = deleteCodeCommentNote(raw, id, noteIndex)
+        replaceDocumentForComment(result.text, id)
+      } else {
+        const thread = findCommentById(raw, id)
+        if (!thread) throw new Error(`Comment not found: ${id}`)
+        // The first note is the comment itself; removing it is resolve/delete
+        // of the whole thread, not a note deletion.
+        if (noteIndex < 1 || noteIndex >= thread.notes.length) throw new Error('Note not found')
+        const notes = thread.notes.filter((_, index) => index !== noteIndex)
+        const replacement = serializeComment(thread.id, thread.anchor, notes)
+        editorView.dispatch({
+          changes: { from: thread.tagFrom, to: thread.tagTo, insert: replacement },
+          annotations: commentMutation.of(true),
+          effects: setActiveComment.of(id),
+        })
+        activeCommentId.value = id
+        afterCommentMutation(id)
+      }
+      const viewAtDelete = editorView
+      const tabId = options.activeTabId.value
+      options.toastStore.push({
+        kind: 'info',
+        message: 'Reply deleted',
+        actionLabel: 'Undo',
+        action: () => {
+          if (!viewAtDelete || options.activeTabId.value !== tabId) return
+          void import('@codemirror/commands').then(({ undo }) => {
+            undo(viewAtDelete)
+            afterCommentMutation(id)
+          })
+        },
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      options.toastStore.push({ kind: 'error', message: 'Delete failed', detail: message })
+    }
+  }
+
   function resolveCommentThread(id: string) {
     const editorView = options.getEditorView()
     if (!editorView) return
     try {
       const raw = options.activeDocumentText()
-      const thread = findCommentById(raw, id)
+      const thread = findThread(raw, id)
       if (!thread) throw new Error(`Comment not found: ${id}`)
-      resolveComment(raw, id)
+      // Markdown anchors live inside the tag span and must be re-inserted;
+      // code markers sit above their anchored line and are simply removed.
+      const isMd = isMarkdownMode()
+      if (isMd) resolveComment(raw, id)
+      else resolveCodeComment(raw, id)
       editorView.dispatch({
-        changes: { from: thread.tagFrom, to: thread.tagTo, insert: thread.anchor },
+        changes: { from: thread.tagFrom, to: thread.tagTo, insert: isMd ? thread.anchor : '' },
         annotations: commentMutation.of(true),
         effects: setActiveComment.of(null),
       })
@@ -259,8 +372,40 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
     }
   }
 
+  function resolveAllCommentThreads() {
+    const editorView = options.getEditorView()
+    if (!editorView) return
+    const raw = options.activeDocumentText()
+    const result = isMarkdownMode() ? resolveAllComments(raw) : resolveAllCodeComments(raw)
+    if (result.count === 0) return
+    const previousRaw = raw
+    const previousTabId = options.activeTabId.value
+    editorView.dispatch({
+      changes: { from: 0, to: editorView.state.doc.length, insert: result.text },
+      annotations: commentMutation.of(true),
+      effects: setActiveComment.of(null),
+    })
+    activeCommentId.value = null
+    afterCommentMutation(null)
+    options.toastStore.push({
+      kind: 'info',
+      message: `${result.count} comment${result.count === 1 ? '' : 's'} resolved`,
+      actionLabel: 'Undo',
+      action: () => {
+        const view = options.getEditorView()
+        if (!view || options.activeTabId.value !== previousTabId) return
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: previousRaw },
+          annotations: commentMutation.of(true),
+          effects: setActiveComment.of(null),
+        })
+        afterCommentMutation(null)
+      },
+    })
+  }
+
   async function copyCommentAnchor(id: string) {
-    const thread = findCommentById(options.activeDocumentText(), id)
+    const thread = findThread(options.activeDocumentText(), id)
     if (!thread) return
     try {
       await navigator.clipboard?.writeText(thread.anchor)
@@ -283,7 +428,7 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
   }
 
   function applyCommentAsEdit(id: string) {
-    const thread = findCommentById(options.activeDocumentText(), id)
+    const thread = findThread(options.activeDocumentText(), id)
     if (!thread) return
     setEditorActiveComment(id, { scroll: true })
     options.openInlineAIForComment({
@@ -313,6 +458,17 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
     })
   }
 
+  function requestAIReview(targetSessionId: string | null = null) {
+    options.prepareChatDraft({
+      targetSessionId,
+      text: buildReviewRequestInstruction(),
+      attachments: [buildReviewRequestAttachment({
+        path: options.activeDocumentLabel.value,
+        document: options.activeDocumentText(),
+      })],
+    })
+  }
+
   return {
     commentThreads,
     activeCommentId,
@@ -326,11 +482,17 @@ export function useEditorComments(options: UseEditorCommentsOptions) {
     openEditorContextMenu,
     cancelCommentDraft,
     saveCommentDraft,
+    updateCommentDraftText,
+    stashCommentDraftForTab,
+    restoreCommentDraftForTab,
     replyToComment,
     editCommentNote,
+    deleteCommentNote,
     resolveCommentThread,
+    resolveAllCommentThreads,
     copyCommentAnchor,
     applyCommentAsEdit,
     sendCommentsToChat,
+    requestAIReview,
   }
 }

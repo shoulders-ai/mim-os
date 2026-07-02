@@ -3,9 +3,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   IconArrowBarToRight,
   IconArrowUp,
+  IconCheck,
+  IconChecks,
   IconChevronDown,
   IconChevronUp,
   IconMessageCircle,
+  IconSparkles,
+  IconX,
 } from '@tabler/icons-vue'
 import type { CommentThread } from '@main/comments/model.js'
 import { useSessionStore } from '../../../stores/sessions.js'
@@ -13,13 +17,14 @@ import MimMenu from '../../ui/MimMenu.vue'
 import MimMenuItem from '../../ui/MimMenuItem.vue'
 import CommentCard from './CommentCard.vue'
 import { useCommentPositions } from './useCommentPositions.js'
+import { shortcutLabel } from '../../../services/shortcutLabels.js'
 
 const props = withDefaults(
   defineProps<{
     threads: CommentThread[]
     activeId?: string | null
     editorView?: any
-    draft?: { from: number; to: number; anchor: string } | null
+    draft?: { from: number; to: number; anchor: string; text: string } | null
   }>(),
   {
     activeId: null,
@@ -32,14 +37,33 @@ const emit = defineEmits<{
   active: [id: string]
   saveDraft: [text: string]
   cancelDraft: []
+  updateDraftText: [text: string]
   reply: [id: string, text: string]
   resolve: [id: string]
+  resolveAll: []
   applyEdit: [id: string]
   sendToChat: [ids: string[], targetSessionId?: string | null]
   copyAnchor: [id: string]
   editNote: [id: string, noteIndex: number, text: string]
+  deleteNote: [id: string, noteIndex: number]
+  requestReview: []
   close: []
 }>()
+
+const confirmingResolveAll = ref(false)
+
+function startResolveAll() {
+  confirmingResolveAll.value = true
+}
+
+function confirmResolveAll() {
+  confirmingResolveAll.value = false
+  emit('resolveAll')
+}
+
+function cancelResolveAll() {
+  confirmingResolveAll.value = false
+}
 
 const sessionStore = useSessionStore()
 const railRef = ref<HTMLElement | null>(null)
@@ -232,8 +256,28 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
+    <!-- Empty state: no threads, no draft -->
+    <div
+      v-if="!threads.length && !draft"
+      class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-4 pb-10"
+      data-testid="comments-empty-state"
+    >
+      <IconMessageCircle :size="20" stroke-width="1.5" class="text-ink-4" />
+      <p class="text-center font-sans text-[12px] leading-snug text-ink-3">No comments yet</p>
+      <p class="text-center font-sans text-[11px] leading-snug text-ink-4">Select text and press {{ shortcutLabel(['Shift', 'Mod', 'M']) }} to comment.</p>
+      <button
+        type="button"
+        class="mt-1 flex h-6 items-center gap-1.5 rounded-[4px] px-2 font-sans text-[11px] text-accent hover:bg-chrome-high"
+        title="Ask AI to review this document and leave inline comments"
+        @click="emit('requestReview')"
+      >
+        <IconSparkles :size="13" stroke-width="2" />
+        <span>Request AI review</span>
+      </button>
+    </div>
+
     <!-- Scroll-synced card container -->
-    <div class="relative min-h-0 flex-1 overflow-hidden">
+    <div v-else class="relative min-h-0 flex-1 overflow-hidden">
       <div
         class="absolute inset-x-0 top-0"
         :style="{ transform: `translate3d(0, ${-scrollTop}px, 0)` }"
@@ -255,6 +299,7 @@ onBeforeUnmount(() => {
             @send-to-chat="emit('sendToChat', [$event], null)"
             @copy-anchor="emit('copyAnchor', $event)"
             @edit-note="(id, noteIndex, text) => emit('editNote', id, noteIndex, text)"
+            @delete-note="(id, noteIndex) => emit('deleteNote', id, noteIndex)"
           />
         </div>
 
@@ -267,46 +312,82 @@ onBeforeUnmount(() => {
           <CommentCard
             draft
             :draft-anchor="draft.anchor"
+            :draft-text="draft.text"
             active
             @save-draft="emit('saveDraft', $event)"
             @cancel-draft="emit('cancelDraft')"
+            @update-draft-text="emit('updateDraftText', $event)"
           />
         </div>
       </div>
     </div>
 
-    <!-- Bottom bar: send to chat -->
+    <!-- Bottom bar -->
     <div
       v-if="visibleCount"
       class="flex h-8 shrink-0 items-center border-t border-rule-light px-2.5"
     >
-      <MimMenu
-        placement="top-start"
-        aria-label="Send comments to chat"
-        trigger-class="flex h-6 items-center gap-1.5 rounded-[4px] px-2 font-sans text-[11px] text-ink-3 hover:bg-chrome-high hover:text-ink"
-        :min-width="172"
-      >
-        <template #trigger>
-          <IconArrowUp :size="13" stroke-width="2.5" />
-          <span>Send to chat</span>
-        </template>
-        <MimMenuItem item-class="h-7 px-2 py-0" @select="sendAll(null)">
-          <IconMessageCircle :size="13" stroke-width="2" />
-          <span>New chat</span>
-        </MimMenuItem>
-        <template v-if="chatTargets.length">
-          <div class="mx-1 my-0.5 h-px bg-rule-light" />
-          <MimMenuItem
-            v-for="session in chatTargets"
-            :key="session.id"
-            item-class="h-7 px-2 py-0"
-            @select="sendAll(session.id)"
-          >
+      <!-- Inline resolve-all confirmation -->
+      <template v-if="confirmingResolveAll">
+        <span class="font-sans text-[11px] text-ink-3">Resolve all {{ visibleCount }}?</span>
+        <div class="flex-1" />
+        <button
+          type="button"
+          class="flex h-6 w-6 items-center justify-center rounded-[4px] text-green-600 hover:bg-chrome-high dark:text-green-400"
+          title="Confirm"
+          @click="confirmResolveAll"
+        >
+          <IconCheck :size="14" stroke-width="2.5" />
+        </button>
+        <button
+          type="button"
+          class="flex h-6 w-6 items-center justify-center rounded-[4px] text-ink-4 hover:bg-chrome-high hover:text-ink-2"
+          title="Cancel"
+          @click="cancelResolveAll"
+        >
+          <IconX :size="14" stroke-width="2" />
+        </button>
+      </template>
+
+      <template v-else>
+        <MimMenu
+          placement="top-start"
+          aria-label="Send comments to chat"
+          trigger-class="flex h-6 items-center gap-1.5 rounded-[4px] px-2 font-sans text-[11px] text-ink-3 hover:bg-chrome-high hover:text-ink"
+          :min-width="172"
+        >
+          <template #trigger>
+            <IconArrowUp :size="13" stroke-width="2.5" />
+            <span>Send to chat</span>
+          </template>
+          <MimMenuItem item-class="h-7 px-2 py-0" @select="sendAll(null)">
             <IconMessageCircle :size="13" stroke-width="2" />
-            <span class="min-w-0 truncate">{{ session.label || 'Chat' }}</span>
+            <span>New chat</span>
           </MimMenuItem>
-        </template>
-      </MimMenu>
+          <template v-if="chatTargets.length">
+            <div class="mx-1 my-0.5 h-px bg-rule-light" />
+            <MimMenuItem
+              v-for="session in chatTargets"
+              :key="session.id"
+              item-class="h-7 px-2 py-0"
+              @select="sendAll(session.id)"
+            >
+              <IconMessageCircle :size="13" stroke-width="2" />
+              <span class="min-w-0 truncate">{{ session.label || 'Chat' }}</span>
+            </MimMenuItem>
+          </template>
+        </MimMenu>
+        <div class="flex-1" />
+        <button
+          type="button"
+          class="flex h-6 items-center gap-1.5 rounded-[4px] px-2 font-sans text-[11px] text-ink-4 hover:bg-chrome-high hover:text-ink-2"
+          title="Resolve all comments"
+          @click="startResolveAll"
+        >
+          <IconChecks :size="13" stroke-width="2" />
+          <span>Resolve all</span>
+        </button>
+      </template>
     </div>
   </aside>
 </template>

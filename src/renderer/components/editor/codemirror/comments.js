@@ -1,22 +1,34 @@
-import { Annotation, EditorState, Prec, StateEffect, StateField } from '@codemirror/state'
+import { Annotation, EditorState, Facet, Prec, StateEffect, StateField } from '@codemirror/state'
 import { Decoration, EditorView, keymap } from '@codemirror/view'
 import { parseComments } from '@main/comments/model.js'
 
 export const commentMutation = Annotation.define()
 export const setActiveComment = StateEffect.define()
 
-export function buildCommentDecorations(docText, activeId = null, enabled = true) {
-  const threads = enabled ? parseComments(docText) : []
+// Which comment model parses this document: markdown <comment> tags by
+// default, or @mim line markers when the extension is created with
+// { parse: parseCodeComments }. Thread geometry differs — markdown anchors
+// live inside [tagFrom, tagTo), code anchors on the line after it — and the
+// decoration/protection logic below handles both.
+const commentParser = Facet.define({
+  combine: values => (values.length ? values[0] : parseComments),
+})
+
+export function buildCommentDecorations(docText, activeId = null, enabled = true, parse = parseComments) {
+  const threads = enabled ? parse(docText) : []
   const decorations = []
   const hidden = []
 
   for (const thread of threads) {
-    if (thread.tagFrom < thread.anchorFrom) {
-      const deco = Decoration.replace({ inclusive: false }).range(thread.tagFrom, thread.anchorFrom)
+    const hideTo = Math.min(thread.anchorFrom, thread.tagTo)
+    if (thread.tagFrom < hideTo) {
+      const deco = Decoration.replace({ inclusive: false }).range(thread.tagFrom, hideTo)
       decorations.push(deco)
       hidden.push(deco)
     }
 
+    // Stacked code threads share one anchored line; overlapping mark
+    // decorations are legal (unlike replace ranges), so each thread marks it.
     if (thread.anchorFrom < thread.anchorTo) {
       decorations.push(Decoration.mark({
         class: thread.id === activeId
@@ -47,7 +59,7 @@ export function buildCommentDecorations(docText, activeId = null, enabled = true
 
 const commentField = StateField.define({
   create(state) {
-    return buildCommentDecorations(state.doc.toString(), null)
+    return buildCommentDecorations(state.doc.toString(), null, true, state.facet(commentParser))
   },
   update(value, tr) {
     let activeId = value.activeId
@@ -61,7 +73,7 @@ const commentField = StateField.define({
     }
 
     if (tr.docChanged || activeChanged) {
-      return buildCommentDecorations(tr.newDoc.toString(), activeId)
+      return buildCommentDecorations(tr.newDoc.toString(), activeId, true, tr.state.facet(commentParser))
     }
     return value
   },
@@ -79,10 +91,10 @@ export function getCommentState(state) {
 
 const commentHideField = StateField.define({
   create(state) {
-    return buildCommentDecorations(state.doc.toString(), null)
+    return buildCommentDecorations(state.doc.toString(), null, true, state.facet(commentParser))
   },
   update(value, tr) {
-    if (tr.docChanged) return buildCommentDecorations(tr.newDoc.toString(), null)
+    if (tr.docChanged) return buildCommentDecorations(tr.newDoc.toString(), null, true, tr.state.facet(commentParser))
     return value
   },
   provide(field) {
@@ -90,12 +102,13 @@ const commentHideField = StateField.define({
   },
 })
 
-export function commentsHideExtension() {
-  return commentHideField
+export function commentsHideExtension(parse = parseComments) {
+  return [commentParser.of(parse), commentHideField]
 }
 
 export function commentsExtension(options = {}) {
   return [
+    commentParser.of(options.parse ?? parseComments),
     commentField,
     commentProtection(),
     commentKeymap(),
@@ -135,7 +148,16 @@ function commentProtection() {
 }
 
 function normalizeCommentChange(threads, hidden, from, to, insert) {
-  if (!changeTouchesRanges(hidden, from, to)) {
+  // A deletion that consumes a thread's entire visible anchor would leave an
+  // empty, unparseable <comment> shell whose raw tags become visible text.
+  // Treat it as deleting the whole thread instead.
+  const emptiedThreads = insert
+    ? []
+    : threads.filter(thread =>
+        thread.anchorFrom < thread.anchorTo &&
+        from <= thread.anchorFrom && to >= thread.anchorTo)
+
+  if (emptiedThreads.length === 0 && !changeTouchesRanges(hidden, from, to)) {
     return { normalized: false, changes: [{ from, to, insert }] }
   }
 
@@ -144,15 +166,15 @@ function normalizeCommentChange(threads, hidden, from, to, insert) {
   const touchedThreads = threads.filter(thread =>
     changeTouchesRanges(threadHiddenRanges(thread), from, to)
   )
-  const anchorTouched = touchedThreads.some(thread =>
-    rangesIntersect(from, to, thread.anchorFrom, thread.anchorTo)
-  )
+  const expandThreads = new Set(emptiedThreads)
+  for (const thread of touchedThreads) {
+    if (rangesIntersect(from, to, thread.anchorFrom, thread.anchorTo)) expandThreads.add(thread)
+  }
 
-  if (anchorTouched) {
+  if (expandThreads.size > 0) {
     let expandedFrom = from
     let expandedTo = to
-    for (const thread of touchedThreads) {
-      if (!rangesIntersect(from, to, thread.anchorFrom, thread.anchorTo)) continue
+    for (const thread of expandThreads) {
       expandedFrom = Math.min(expandedFrom, thread.tagFrom)
       expandedTo = Math.max(expandedTo, thread.tagTo)
     }
@@ -282,9 +304,16 @@ function commentClickHandler(options) {
 
 function commentUpdateListener(options) {
   return EditorView.updateListener.of((update) => {
-    if (!options.onThreadsChange) return
     if (!update.docChanged) return
-    options.onThreadsChange(getCommentState(update.state).threads)
+    const state = getCommentState(update.state)
+    options.onThreadsChange?.(state.threads)
+    if (!options.onThreadsRemovedByEdit) return
+    // Only user edits: programmatic add/reply/resolve carries the annotation
+    // and has its own feedback.
+    if (update.transactions.some(tr => tr.annotation(commentMutation))) return
+    const afterIds = new Set(state.threads.map(thread => thread.id))
+    const removed = getCommentState(update.startState).threads.filter(thread => !afterIds.has(thread.id))
+    if (removed.length) options.onThreadsRemovedByEdit(removed)
   })
 }
 
@@ -298,7 +327,8 @@ function hiddenRanges(threads) {
 
 function threadHiddenRanges(thread) {
   const ranges = []
-  if (thread.tagFrom < thread.anchorFrom) ranges.push({ from: thread.tagFrom, to: thread.anchorFrom })
+  const hideTo = Math.min(thread.anchorFrom, thread.tagTo)
+  if (thread.tagFrom < hideTo) ranges.push({ from: thread.tagFrom, to: hideTo })
   if (thread.anchorTo < thread.tagTo) ranges.push({ from: thread.anchorTo, to: thread.tagTo })
   return ranges
 }

@@ -3,14 +3,14 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'fs
 import { dirname, isAbsolute, relative, resolve } from 'path'
 import { loadUserConfig } from '@main/userConfig.js'
 import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
+import { lineNumberAt, type CommentThread } from '@main/comments/model.js'
 import {
-  addComment,
-  appendCommentReply,
-  lineNumberAt,
-  parseComments,
-  resolveComment,
-  type CommentThread,
-} from '@main/comments/model.js'
+  addCommentForPath,
+  parseCommentsForPath,
+  replyCommentForPath,
+  resolveAllCommentsForPath,
+  resolveCommentForPath,
+} from '@main/comments/dispatch.js'
 
 export interface CommentToolOptions {
   isDirtyOpenPath?: (path: string) => boolean
@@ -22,21 +22,21 @@ export interface CommentToolOptions {
 export function registerCommentTools(tools: ToolRegistry, options: CommentToolOptions = {}): void {
   tools.register({
     name: 'comments.list',
-    description: 'List inline review comment threads in a markdown file.',
+    description: 'List inline review comment threads in a file. Markdown files use inline <comment> tags; code and plain-text files use @mim comment-line markers.',
     inputSchema: objectSchema({ path: { type: 'string' } }, ['path']),
     execute: async (params) => {
       const target = resolveWorkspaceFile(tools, requireString(params, 'path'))
       const content = readFileSync(target.abs, 'utf-8')
       return {
         path: target.rel,
-        threads: parseComments(content).map(thread => summarizeThread(thread, content)),
+        threads: parseCommentsForPath(content, target.rel).map(thread => summarizeThread(thread, content)),
       }
     },
   })
 
   tools.register({
     name: 'comments.add',
-    description: 'Add an inline review comment anchored to exact visible text in a markdown file.',
+    description: 'Add an inline review comment anchored to exact visible text. Works on markdown (inline <comment> tags) and code/plain-text files (@mim marker line above the anchored line); do not hand-edit comment markup.',
     inputSchema: objectSchema({
       path: { type: 'string' },
       anchor_text: { type: 'string' },
@@ -49,7 +49,7 @@ export function registerCommentTools(tools: ToolRegistry, options: CommentToolOp
       assertCleanOpenBuffer(target.rel, options)
       const content = readFileSync(target.abs, 'utf-8')
       assertExpectedHash(target.rel, content, optionalString(params, 'expected_hash'))
-      const updated = addComment(content, {
+      const updated = addCommentForPath(content, target.rel, {
         anchorText: requireNonEmptyString(params, 'anchor_text'),
         text: requireString(params, 'text'),
         by: authorFor(params, ctx, options),
@@ -82,7 +82,7 @@ export function registerCommentTools(tools: ToolRegistry, options: CommentToolOp
       assertCleanOpenBuffer(target.rel, options)
       const content = readFileSync(target.abs, 'utf-8')
       assertExpectedHash(target.rel, content, optionalString(params, 'expected_hash'))
-      const updated = appendCommentReply(content, {
+      const updated = replyCommentForPath(content, target.rel, {
         id: requireNonEmptyString(params, 'id'),
         text: requireString(params, 'text'),
         by: authorFor(params, ctx, options),
@@ -101,18 +101,29 @@ export function registerCommentTools(tools: ToolRegistry, options: CommentToolOp
 
   tools.register({
     name: 'comments.resolve',
-    description: 'Resolve an inline review comment by removing the wrapper and notes while keeping the anchored text.',
+    description: 'Resolve inline review comments by removing wrappers and notes while keeping the anchored text. Pass id to resolve one thread, or all=true to resolve every thread in the file.',
     inputSchema: objectSchema({
       path: { type: 'string' },
       id: { type: 'string' },
+      all: { type: 'boolean' },
       expected_hash: { type: 'string' },
-    }, ['path', 'id']),
+    }, ['path']),
     execute: async (params) => {
+      const hasId = typeof params.id === 'string' && params.id.length > 0
+      const hasAll = params.all === true
+      if (hasId === hasAll) throw new Error('Provide either id or all=true, not both')
       const target = resolveWorkspaceFile(tools, requireString(params, 'path'))
       assertCleanOpenBuffer(target.rel, options)
       const content = readFileSync(target.abs, 'utf-8')
       assertExpectedHash(target.rel, content, optionalString(params, 'expected_hash'))
-      const updated = resolveComment(content, requireNonEmptyString(params, 'id'))
+
+      if (hasAll) {
+        const updated = resolveAllCommentsForPath(content, target.rel)
+        if (updated.count > 0) writeTextFile(target.abs, updated.text)
+        return { path: target.rel, count: updated.count }
+      }
+
+      const updated = resolveCommentForPath(content, target.rel, requireNonEmptyString(params, 'id'))
       const version = writeTextFile(target.abs, updated.text)
       return {
         path: target.rel,
@@ -183,6 +194,7 @@ function hashContent(content: string): string {
 function authorFor(params: Record<string, unknown>, ctx: ToolContext, options: CommentToolOptions): string {
   const explicit = optionalString(params, 'by')
   if (explicit) return explicit
+  if (ctx.agent) return ctx.agent
   if (ctx.actor === 'ai') return 'ai'
   return options.userName?.() || loadUserConfig().user?.name || 'user'
 }

@@ -3,11 +3,14 @@ import {
   addComment,
   addCommentAtRawRange,
   appendCommentReply,
+  diffCommentThreads,
   escapeNoteText,
   findCommentById,
   generateCommentId,
+  isAgentAuthor,
   lineNumberAt,
   parseComments,
+  resolveAllComments,
   resolveComment,
   stripComments,
   strippedRangeToRawRange,
@@ -168,5 +171,75 @@ describe('comment model', () => {
     expect(id).toMatch(/^[0-9a-z]{4,6}$/)
     expect(id).not.toBe('0000')
     expect(id).not.toBe('0001')
+  })
+
+  describe('diffCommentThreads', () => {
+    const before = [
+      'A <comment id="c1">one<note by="paul" at="2026-06-13T09:14">x</note></comment>',
+      'B <comment id="c2">two<note by="paul" at="2026-06-13T09:15">y</note></comment>',
+      'C <comment id="c3">three<note by="paul" at="2026-06-13T09:16">z</note></comment>',
+    ].join('\n')
+
+    it('reports resolved, replied, and added threads between two versions', () => {
+      const after = [
+        'A one',
+        'B <comment id="c2">two<note by="paul" at="2026-06-13T09:15">y</note><note by="ai" at="2026-06-13T09:20">done</note></comment>',
+        'C <comment id="c3">three<note by="paul" at="2026-06-13T09:16">z</note></comment>',
+        'D <comment id="c4">four<note by="ai" at="2026-06-13T09:21">new</note></comment>',
+      ].join('\n')
+
+      expect(diffCommentThreads(before, after)).toEqual({ resolved: 1, replied: 1, added: 1 })
+    })
+
+    it('reports zeros when nothing comment-related changed', () => {
+      expect(diffCommentThreads(before, before + '\nplain text')).toEqual({ resolved: 0, replied: 0, added: 0 })
+    })
+  })
+
+  describe('isAgentAuthor', () => {
+    it('recognizes AI and known CLI agent handles', () => {
+      for (const handle of ['ai', 'AI', 'assistant', 'agent', 'claude', 'claude-code', 'Claude-Code', 'codex', 'gemini', 'gemini-cli']) {
+        expect(isAgentAuthor(handle), handle).toBe(true)
+      }
+    })
+
+    it('treats human handles as non-agent', () => {
+      for (const handle of ['paul', 'Paul-Smith', 'user', 'aida', 'claudette', 'paul@priorb.com']) {
+        expect(isAgentAuthor(handle), handle).toBe(false)
+      }
+    })
+  })
+
+  describe('resolveAllComments', () => {
+    it('resolves every thread while preserving all anchor text', () => {
+      const raw = 'A <comment id="c1">first<note by="u" at="2026-06-13T09:00">x</note></comment> B <comment id="c2">second<note by="u" at="2026-06-13T09:01">y</note></comment> C.'
+      const result = resolveAllComments(raw)
+
+      expect(result.text).toBe('A first B second C.')
+      expect(result.count).toBe(2)
+    })
+
+    it('returns unchanged text and zero count when no comments exist', () => {
+      const raw = 'No comments here.'
+      const result = resolveAllComments(raw)
+
+      expect(result.text).toBe('No comments here.')
+      expect(result.count).toBe(0)
+    })
+
+    it('handles threads with multiple notes and replies', () => {
+      const raw = 'Text <comment id="t1">anchor<note by="paul" at="2026-06-13T09:00">First</note><note by="ai" at="2026-06-13T09:01">Reply</note></comment> end.'
+      const result = resolveAllComments(raw)
+
+      expect(result.text).toBe('Text anchor end.')
+      expect(result.count).toBe(1)
+    })
+
+    it('works with the standard multi-thread source fixture', () => {
+      const result = resolveAllComments(source)
+
+      expect(result.text).toBe('We propose a staged rollout over six weeks.')
+      expect(result.count).toBe(1)
+    })
   })
 })
