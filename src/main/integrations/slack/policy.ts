@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { loadUserConfig } from '@main/userConfig.js'
+import { connectorPolicyFromTools } from '@main/tools/toolPolicy.js'
 
 export interface SlackConnectorPolicy {
   aiEnabled: boolean
@@ -67,6 +68,8 @@ export function resolveSlackPolicy(
  * Cascade: workspace .mim/settings.json → user-global ~/.mim/config.yaml → defaults.
  */
 export function readSlackPolicy(workspacePath: string | null): SlackConnectorPolicy {
+  const toolPolicy = connectorPolicyFromTools(workspacePath)
+  if (toolPolicy.explicit && toolPolicy.slack) return toolPolicy.slack
   const userGlobal = loadUserConfig().connectors.slack
   const workspaceRaw = readWorkspaceSlackPolicy(workspacePath)
   return resolveSlackPolicy(workspaceRaw, userGlobal)

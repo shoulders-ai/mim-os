@@ -71,6 +71,22 @@ describe('SettingsDialog model defaults', () => {
         profile_available: true,
       }
       if (tool === 'slack.status') return { account: 'default', configured: false }
+      if (tool === 'google.status') return { account: 'default', configured: false, grantedScopes: [] }
+      if (tool === 'toolPolicy.get') {
+        return {
+          policy: {
+            rows: [{
+              id: 'git.push',
+              domain: 'git',
+              label: 'Push changes',
+              toolIds: ['git.push'],
+              enabled: true,
+            }],
+            enabled: [],
+            disabled: [],
+          },
+        }
+      }
       if (tool === 'settings.get') return { value: null }
       if (tool === 'skill.list') return { skills: [], diagnostics: [] }
       if (tool === 'skillSource.list') return { sources: [] }
@@ -207,5 +223,15 @@ describe('SettingsDialog model defaults', () => {
     expect(document.body.querySelector('[aria-label="Connections settings"]')).toBeTruthy()
     expect(document.body.textContent).toContain('dbregio-berlin-brandenburg.de')
     expect(document.body.querySelector('[data-section="connections"]')).toBeTruthy()
+  })
+
+  it('renders the Tools panel inline when the tools section is active', async () => {
+    app = createApp(SettingsDialog, { initialSection: 'tools' })
+    app.mount(root)
+    await flushUi()
+
+    expect(document.body.querySelector('[aria-label="Tools settings"]')).toBeTruthy()
+    expect(document.body.textContent).toContain('Push changes')
+    expect(document.body.querySelector('[data-section="tools"]')).toBeTruthy()
   })
 })

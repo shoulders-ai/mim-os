@@ -20,6 +20,9 @@ export interface ToolContext {
   actor: 'user' | 'ai' | 'package' | 'system'
   package_id?: string
   sessionId?: string
+  // Connected MCP client identity (e.g. 'claude-code'); used for attribution,
+  // not authorization. The actor field stays the security boundary.
+  agent?: string
   // Span hierarchy: a caller (chat turn, package run, nested tool) sets these
   // so this call's span parents correctly. Absent ids start a fresh trace.
   traceId?: string

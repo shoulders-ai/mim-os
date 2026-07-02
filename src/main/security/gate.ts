@@ -242,6 +242,8 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'sheets.append': { category: 'network', risk: 'high', targetParam: 'spreadsheetId' },
   'settings.get': { category: 'settings', risk: 'low', targetParam: 'key' },
   'settings.set': { category: 'settings', risk: 'medium', targetParam: 'key' },
+  'toolPolicy.get': { category: 'settings', risk: 'low' },
+  'toolPolicy.set': { category: 'settings', risk: 'medium', targetParam: 'rowId' },
   'session.create': { category: 'ui', risk: 'low' },
   'session.list': { category: 'read', risk: 'low' },
   'session.get': { category: 'read', risk: 'low', targetParam: 'id' },
@@ -298,6 +300,8 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'web.browser.removeDomain': { category: 'settings', risk: 'medium', targetParam: 'domain' },
   'web.browser.open': { category: 'network', risk: 'medium', targetParam: 'url' },
   'web.browser.clearProfile': { category: 'settings', risk: 'high' },
+  'web.live.open': { category: 'network', risk: 'medium', targetParam: 'url' },
+  'web.live.act': { category: 'network', risk: 'medium', targetParam: 'action' },
   'web.search': { category: 'network', risk: 'medium', targetParam: 'query' },
   'skillSource.list': { category: 'read', risk: 'low' },
   'skillSource.inspect': { category: 'network', risk: 'medium' },
@@ -670,6 +674,7 @@ export type ToolEffect = 'read' | 'mutate' | 'external'
 // else derives from the category, and any unmapped tool falls through to 'mutate'.
 const EFFECT_OVERRIDES: Record<string, ToolEffect> = {
   'settings.get': 'read',
+  'toolPolicy.get': 'read',
   'telemetry.track': 'read',
   'terminal.resize': 'read',
   'editor.open': 'read',

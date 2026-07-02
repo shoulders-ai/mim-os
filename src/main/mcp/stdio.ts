@@ -37,6 +37,9 @@ export interface McpToolMetadata {
 export interface McpDesktopClient {
   tools(): McpToolMetadata[]
   callTool(mimName: string, args: Record<string, unknown>): Promise<unknown>
+  // Reports the MCP client identity (initialize clientInfo.name) to the
+  // desktop so tool calls can be attributed to the connected agent.
+  setClientName?(name: string): void
   onClose(callback: () => void): void
   close(): void
 }
@@ -108,6 +111,11 @@ export async function handleMcpRequest(
   }
 
   if (method === 'initialize') {
+    const params = isObject(request.params) ? request.params : null
+    const clientInfo = params && isObject(params.clientInfo) ? params.clientInfo : null
+    if (clientInfo && typeof clientInfo.name === 'string' && clientInfo.name.length > 0) {
+      client.setClientName?.(clientInfo.name)
+    }
     return okResponse(id, {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: { tools: {} },
@@ -213,6 +221,11 @@ class WebSocketMcpClient implements McpDesktopClient {
 
   callTool(mimName: string, args: Record<string, unknown>): Promise<unknown> {
     return this.rpc.call(mimName, args)
+  }
+
+  setClientName(name: string): void {
+    // Best-effort attribution metadata; never let it break the session.
+    this.rpc.call('__meta.client', { name }).catch(() => {})
   }
 
   onClose(callback: () => void): void {

@@ -7,7 +7,6 @@ import {
   IconTrash,
 } from '@tabler/icons-vue'
 import { useSettingsStore } from '../../stores/settings.js'
-import MimToggle from '../ui/MimToggle.vue'
 import SettingsGroup from './SettingsGroup.vue'
 import SettingRow from './SettingRow.vue'
 
@@ -27,22 +26,7 @@ interface SlackStatus {
   }
 }
 
-interface SlackPolicy {
-  aiEnabled: boolean
-  sendEnabled: boolean
-  privateChannels: boolean
-  directMessages: boolean
-}
-
-const DEFAULT_POLICY: SlackPolicy = {
-  aiEnabled: false,
-  sendEnabled: false,
-  privateChannels: false,
-  directMessages: false,
-}
-
 const slackStatus = ref<SlackStatus | null>(null)
-const slackPolicy = ref<SlackPolicy>({ ...DEFAULT_POLICY })
 const slackLoading = ref(false)
 const connectError = ref('')
 const showTokenInput = ref(false)
@@ -62,49 +46,6 @@ async function loadSlackStatus() {
   } finally {
     slackLoading.value = false
   }
-}
-
-async function loadSlackPolicy() {
-  try {
-    const result = await window.kernel.call('settings.get', { key: 'connectors' }) as { value: unknown }
-    const connectors = result.value
-    if (connectors && typeof connectors === 'object' && !Array.isArray(connectors)) {
-      const slack = (connectors as Record<string, unknown>).slack
-      if (slack && typeof slack === 'object' && !Array.isArray(slack)) {
-        const raw = slack as Record<string, unknown>
-        slackPolicy.value = {
-          aiEnabled: typeof raw.aiEnabled === 'boolean' ? raw.aiEnabled : false,
-          sendEnabled: typeof raw.sendEnabled === 'boolean' ? raw.sendEnabled : false,
-          privateChannels: typeof raw.privateChannels === 'boolean' ? raw.privateChannels : false,
-          directMessages: typeof raw.directMessages === 'boolean' ? raw.directMessages : false,
-        }
-        return
-      }
-    }
-    slackPolicy.value = { ...DEFAULT_POLICY }
-  } catch {
-    slackPolicy.value = { ...DEFAULT_POLICY }
-  }
-}
-
-async function saveSlackPolicy() {
-  try {
-    const result = await window.kernel.call('settings.get', { key: 'connectors' }) as { value: unknown }
-    const existing = (result.value && typeof result.value === 'object' && !Array.isArray(result.value))
-      ? result.value as Record<string, unknown>
-      : {}
-    await window.kernel.call('settings.set', {
-      key: 'connectors',
-      value: { ...existing, slack: { ...slackPolicy.value } },
-    })
-  } catch {
-    // Policy save failed silently — toggles remain in the local state.
-  }
-}
-
-async function updateSlackPolicy(key: keyof SlackPolicy, value: boolean) {
-  slackPolicy.value[key] = value
-  await saveSlackPolicy()
 }
 
 async function connectSlack() {
@@ -148,26 +89,6 @@ interface GoogleStatus {
   grantedScopes: string[]
 }
 
-interface GooglePolicy {
-  aiEnabled: boolean
-  gmailEnabled: boolean
-  gmailSendEnabled: boolean
-  calendarEnabled: boolean
-  calendarWriteEnabled: boolean
-  driveEnabled: boolean
-  sheetsWriteEnabled: boolean
-}
-
-const DEFAULT_GOOGLE_POLICY: GooglePolicy = {
-  aiEnabled: false,
-  gmailEnabled: false,
-  gmailSendEnabled: false,
-  calendarEnabled: false,
-  calendarWriteEnabled: false,
-  driveEnabled: false,
-  sheetsWriteEnabled: false,
-}
-
 const GOOGLE_SCOPES = {
   gmailRead: 'https://www.googleapis.com/auth/gmail.readonly',
   gmailSend: 'https://www.googleapis.com/auth/gmail.send',
@@ -191,7 +112,6 @@ const GOOGLE_CONNECT_CAPABILITIES = [
 ]
 
 const googleStatus = ref<GoogleStatus | null>(null)
-const googlePolicy = ref<GooglePolicy>({ ...DEFAULT_GOOGLE_POLICY })
 const googleLoading = ref(false)
 const googleConnecting = ref(false)
 const googleConnectError = ref('')
@@ -228,52 +148,6 @@ async function loadGoogleStatus() {
   } finally {
     googleLoading.value = false
   }
-}
-
-async function loadGooglePolicy() {
-  try {
-    const result = await window.kernel.call('settings.get', { key: 'connectors' }) as { value: unknown }
-    const connectors = result.value
-    if (connectors && typeof connectors === 'object' && !Array.isArray(connectors)) {
-      const google = (connectors as Record<string, unknown>).google
-      if (google && typeof google === 'object' && !Array.isArray(google)) {
-        const raw = google as Record<string, unknown>
-        googlePolicy.value = {
-          aiEnabled: typeof raw.aiEnabled === 'boolean' ? raw.aiEnabled : false,
-          gmailEnabled: typeof raw.gmailEnabled === 'boolean' ? raw.gmailEnabled : false,
-          gmailSendEnabled: typeof raw.gmailSendEnabled === 'boolean' ? raw.gmailSendEnabled : false,
-          calendarEnabled: typeof raw.calendarEnabled === 'boolean' ? raw.calendarEnabled : false,
-          calendarWriteEnabled: typeof raw.calendarWriteEnabled === 'boolean' ? raw.calendarWriteEnabled : false,
-          driveEnabled: typeof raw.driveEnabled === 'boolean' ? raw.driveEnabled : false,
-          sheetsWriteEnabled: typeof raw.sheetsWriteEnabled === 'boolean' ? raw.sheetsWriteEnabled : false,
-        }
-        return
-      }
-    }
-    googlePolicy.value = { ...DEFAULT_GOOGLE_POLICY }
-  } catch {
-    googlePolicy.value = { ...DEFAULT_GOOGLE_POLICY }
-  }
-}
-
-async function saveGooglePolicy() {
-  try {
-    const result = await window.kernel.call('settings.get', { key: 'connectors' }) as { value: unknown }
-    const existing = (result.value && typeof result.value === 'object' && !Array.isArray(result.value))
-      ? result.value as Record<string, unknown>
-      : {}
-    await window.kernel.call('settings.set', {
-      key: 'connectors',
-      value: { ...existing, google: { ...googlePolicy.value } },
-    })
-  } catch {
-    // Policy save failed silently — toggles remain in the local state.
-  }
-}
-
-async function updateGooglePolicy(key: keyof GooglePolicy, value: boolean) {
-  googlePolicy.value[key] = value
-  await saveGooglePolicy()
 }
 
 async function connectGoogleOAuth() {
@@ -393,10 +267,6 @@ function normalizeGoogleStatus(raw: Partial<GoogleStatus>): GoogleStatus {
 function hasGoogleScope(scopes: string[]): boolean {
   const granted = new Set(googleStatus.value?.grantedScopes ?? [])
   return scopes.some(scope => granted.has(scope))
-}
-
-function googleScopeHint(scopes: string[]): string {
-  return hasGoogleScope(scopes) ? '' : 'Reconnect required'
 }
 
 // ── Website access ──
@@ -549,9 +419,7 @@ async function clearKey(provider: string) {
 onMounted(async () => {
   await Promise.all([
     loadSlackStatus(),
-    loadSlackPolicy(),
     loadGoogleStatus(),
-    loadGooglePolicy(),
     loadBrowserSessionStatus(),
     settings.refreshKeyStatuses(),
   ])
@@ -632,43 +500,6 @@ onMounted(async () => {
           <p v-if="connectError" class="m-0 mt-1.5 text-[10px] text-rem">{{ connectError }}</p>
         </div>
       </div>
-
-      <template v-if="isConnected">
-        <SettingRow label="Allow AI to use Slack" desc="Expose Slack search, history, and channel tools to the AI agent">
-          <MimToggle
-            :model-value="slackPolicy.aiEnabled"
-            aria-label="Allow AI to use Slack"
-            @update:model-value="updateSlackPolicy('aiEnabled', $event)"
-          />
-        </SettingRow>
-
-        <SettingRow label="Allow private channels" desc="Let AI read private channels (off by default)">
-          <MimToggle
-            :model-value="slackPolicy.privateChannels"
-            :disabled="!slackPolicy.aiEnabled"
-            aria-label="Allow private channels"
-            @update:model-value="updateSlackPolicy('privateChannels', $event)"
-          />
-        </SettingRow>
-
-        <SettingRow label="Allow direct messages" desc="Let AI read DMs and group messages (off by default)">
-          <MimToggle
-            :model-value="slackPolicy.directMessages"
-            :disabled="!slackPolicy.aiEnabled"
-            aria-label="Allow direct messages"
-            @update:model-value="updateSlackPolicy('directMessages', $event)"
-          />
-        </SettingRow>
-
-        <SettingRow label="Allow AI to send messages" desc="High risk — AI can post Slack messages on your behalf">
-          <MimToggle
-            :model-value="slackPolicy.sendEnabled"
-            :disabled="!slackPolicy.aiEnabled"
-            aria-label="Allow AI to send Slack messages"
-            @update:model-value="updateSlackPolicy('sendEnabled', $event)"
-          />
-        </SettingRow>
-      </template>
 
       <p class="m-0 pt-2 text-center text-[10px] text-ink-3">
         Tokens are stored in the OS keychain
@@ -841,69 +672,6 @@ onMounted(async () => {
         </div>
       </div>
 
-      <template v-if="isGoogleConnected">
-        <SettingRow label="Allow AI to use Google" desc="Expose configured Google read tools to the AI agent">
-          <MimToggle
-            :model-value="googlePolicy.aiEnabled"
-            aria-label="Allow AI to use Google"
-            @update:model-value="updateGooglePolicy('aiEnabled', $event)"
-          />
-        </SettingRow>
-
-        <SettingRow label="Allow Gmail" :desc="googleScopeHint([GOOGLE_SCOPES.gmailRead]) || 'Let AI search and read Gmail'">
-          <MimToggle
-            :model-value="googlePolicy.gmailEnabled"
-            :disabled="!googlePolicy.aiEnabled || !hasGoogleScope([GOOGLE_SCOPES.gmailRead])"
-            aria-label="Allow Gmail"
-            @update:model-value="updateGooglePolicy('gmailEnabled', $event)"
-          />
-        </SettingRow>
-
-        <SettingRow label="Allow AI to send Gmail" :desc="googleScopeHint([GOOGLE_SCOPES.gmailSend]) || 'High risk - AI can send email on your behalf'">
-          <MimToggle
-            :model-value="googlePolicy.gmailSendEnabled"
-            :disabled="!googlePolicy.aiEnabled || !googlePolicy.gmailEnabled || !hasGoogleScope([GOOGLE_SCOPES.gmailSend])"
-            aria-label="Allow AI to send Gmail"
-            @update:model-value="updateGooglePolicy('gmailSendEnabled', $event)"
-          />
-        </SettingRow>
-
-        <SettingRow label="Allow Calendar" :desc="googleScopeHint([GOOGLE_SCOPES.calendarRead, GOOGLE_SCOPES.calendarWrite]) || 'Let AI read calendar events'">
-          <MimToggle
-            :model-value="googlePolicy.calendarEnabled"
-            :disabled="!googlePolicy.aiEnabled || !hasGoogleScope([GOOGLE_SCOPES.calendarRead, GOOGLE_SCOPES.calendarWrite])"
-            aria-label="Allow Calendar"
-            @update:model-value="updateGooglePolicy('calendarEnabled', $event)"
-          />
-        </SettingRow>
-
-        <SettingRow label="Allow AI to create events" :desc="googleScopeHint([GOOGLE_SCOPES.calendarWrite]) || 'High risk - AI can create calendar events'">
-          <MimToggle
-            :model-value="googlePolicy.calendarWriteEnabled"
-            :disabled="!googlePolicy.aiEnabled || !googlePolicy.calendarEnabled || !hasGoogleScope([GOOGLE_SCOPES.calendarWrite])"
-            aria-label="Allow AI to create events"
-            @update:model-value="updateGooglePolicy('calendarWriteEnabled', $event)"
-          />
-        </SettingRow>
-
-        <SettingRow label="Allow Drive" :desc="googleScopeHint([GOOGLE_SCOPES.driveRead, GOOGLE_SCOPES.drive]) || 'Let AI search Drive and read supported files'">
-          <MimToggle
-            :model-value="googlePolicy.driveEnabled"
-            :disabled="!googlePolicy.aiEnabled || !hasGoogleScope([GOOGLE_SCOPES.driveRead, GOOGLE_SCOPES.drive])"
-            aria-label="Allow Drive"
-            @update:model-value="updateGooglePolicy('driveEnabled', $event)"
-          />
-        </SettingRow>
-
-        <SettingRow label="Allow AI to update Sheets" :desc="googleScopeHint([GOOGLE_SCOPES.sheetsWrite]) || 'High risk - AI can update spreadsheets'">
-          <MimToggle
-            :model-value="googlePolicy.sheetsWriteEnabled"
-            :disabled="!googlePolicy.aiEnabled || !googlePolicy.driveEnabled || !hasGoogleScope([GOOGLE_SCOPES.sheetsWrite])"
-            aria-label="Allow AI to update Sheets"
-            @update:model-value="updateGooglePolicy('sheetsWriteEnabled', $event)"
-          />
-        </SettingRow>
-      </template>
     </SettingsGroup>
 
     <!-- Website access -->

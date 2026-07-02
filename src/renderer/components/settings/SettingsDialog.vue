@@ -6,6 +6,7 @@ import AiSettingsPanel from './AiSettingsPanel.vue'
 import AppsSettingsPanel from './AppsSettingsPanel.vue'
 import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue'
 import ConnectionsSettingsPanel from './ConnectionsSettingsPanel.vue'
+import ToolsSettingsPanel from './ToolsSettingsPanel.vue'
 import SkillsSettingsPanel from './SkillsSettingsPanel.vue'
 import InstructionsSettingsPanel from './InstructionsSettingsPanel.vue'
 import WorkspaceSettingsPanel from './WorkspaceSettingsPanel.vue'
@@ -121,6 +122,7 @@ function onNavKeydown(e: KeyboardEvent) {
           <AiSettingsPanel v-else-if="activeSection === 'ai'" />
           <InstructionsSettingsPanel v-else-if="activeSection === 'instructions'" />
           <ConnectionsSettingsPanel v-else-if="activeSection === 'connections'" />
+          <ToolsSettingsPanel v-else-if="activeSection === 'tools'" />
           <AppsSettingsPanel
             v-else-if="activeSection === 'apps'"
             @open-package="emit('openPackage', $event)"

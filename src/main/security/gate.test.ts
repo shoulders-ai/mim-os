@@ -85,6 +85,8 @@ describe('tool policy metadata', () => {
     expect(getToolPolicy('docs.read')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'fileId' })
     expect(getToolPolicy('sheets.read')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'spreadsheetId' })
     expect(getToolPolicy('web.read')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'url' })
+    expect(getToolPolicy('web.live.open')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'url' })
+    expect(getToolPolicy('web.live.act')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'action' })
     expect(getToolPolicy('google.exchangeCode')).toMatchObject({ category: 'secrets', risk: 'high', targetParam: 'account' })
     expect(getToolPolicy('documents.importMarkdown')).toMatchObject({ category: 'write', risk: 'medium', pathParam: 'output_path' })
     expect(getToolPolicy('documents.importMarkdown.formats')).toMatchObject({ category: 'read', risk: 'low' })
@@ -122,6 +124,7 @@ describe('tool effect classification', () => {
     expect(toolEffect('editor.open')).toBe('read')
     expect(toolEffect('workbench.openArtifact')).toBe('read')
     expect(toolEffect('settings.get')).toBe('read')
+    expect(toolEffect('toolPolicy.get')).toBe('read')
     expect(toolEffect('telemetry.track')).toBe('read')
     expect(toolEffect('slack.status')).toBe('read')
     // benign internal writes exempted from Normal (still caught by Strict)
@@ -135,6 +138,7 @@ describe('tool effect classification', () => {
     expect(toolEffect('fs.delete')).toBe('mutate')
     expect(toolEffect('terminal.run')).toBe('mutate')
     expect(toolEffect('settings.set')).toBe('mutate')
+    expect(toolEffect('toolPolicy.set')).toBe('mutate')
     expect(toolEffect('references.setBibliographyPath')).toBe('mutate')
     expect(toolEffect('session.delete')).toBe('mutate')
     expect(toolEffect('app.enable')).toBe('mutate')
@@ -475,6 +479,9 @@ describe('permission gate decisions', () => {
     await expect(
       gate.check(tool('web.browser.open'), { url: 'https://example.com' }, { actor: 'package', package_id: 'stats-checker' }),
     ).rejects.toThrow('cannot access web reader tools')
+    await expect(
+      gate.check(tool('web.live.act'), { action: 'observe' }, { actor: 'package', package_id: 'stats-checker' }),
+    ).rejects.toThrow('cannot access web reader tools')
   })
 
   it('allows app secret tools only for declared secret names', async () => {
@@ -604,6 +611,42 @@ describe('permission gate decisions', () => {
       { actor: 'ai', sessionId: 's1' },
     )
     expect(decisions.at(-1)).toMatchObject({ decision: 'approved', tool: 'web.read' })
+  })
+
+  it('grants an unapproved website access domain from the live browser approval', async () => {
+    const grantSavedBrowserSessionDomain = vi.fn()
+    const { gate, requests } = makeGate({
+      resolveSavedBrowserSessionGrant: (name, params) => name === 'web.live.open' && params.stateful === true
+        ? { domain: 'private.example', granted: false }
+        : null,
+      grantSavedBrowserSessionDomain,
+    })
+
+    const pending = gate.check(
+      tool('web.live.open'),
+      { url: 'https://private.example/page', stateful: true },
+      { actor: 'ai', sessionId: 's1' },
+    )
+    await Promise.resolve()
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      toolName: 'web.live.open',
+      target: 'https://private.example/page',
+      savedBrowserSession: {
+        domain: 'private.example',
+        granted: false,
+      },
+    })
+
+    gate.respond(requests[0].requestId, { approved: true })
+    await pending
+
+    expect(grantSavedBrowserSessionDomain).toHaveBeenCalledWith(
+      { domain: 'private.example', granted: false },
+      { url: 'https://private.example/page', stateful: true },
+      expect.objectContaining({ actor: 'ai', sessionId: 's1' }),
+    )
   })
 
   it('does not let a session web.read approval bypass a new website access domain grant', async () => {

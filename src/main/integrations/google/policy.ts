@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { loadUserConfig } from '@main/userConfig.js'
+import { connectorPolicyFromTools } from '@main/tools/toolPolicy.js'
 
 export interface GoogleConnectorPolicy {
   aiEnabled: boolean
@@ -61,6 +62,8 @@ export function resolveGooglePolicy(
 }
 
 export function readGooglePolicy(workspacePath: string | null): GoogleConnectorPolicy {
+  const toolPolicy = connectorPolicyFromTools(workspacePath)
+  if (toolPolicy.explicit && toolPolicy.google) return toolPolicy.google
   const userGlobal = loadUserConfig().connectors.google
   const workspaceRaw = readWorkspaceGooglePolicy(workspacePath)
   return resolveGooglePolicy(workspaceRaw, userGlobal)

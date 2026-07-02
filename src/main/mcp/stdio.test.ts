@@ -38,6 +38,7 @@ class FakeClient implements McpDesktopClient {
   readonly calls: Array<{ mimName: string; args: Record<string, unknown> }> = []
   readonly closeHandlers = new Set<() => void>()
   closed = false
+  clientName: string | undefined
 
   constructor(
     private readonly result: unknown = { ok: true },
@@ -57,6 +58,10 @@ class FakeClient implements McpDesktopClient {
 
   onClose(callback: () => void): void {
     this.closeHandlers.add(callback)
+  }
+
+  setClientName(name: string): void {
+    this.clientName = name
   }
 
   close(): void {
@@ -96,6 +101,30 @@ describe('MCP stdio server', () => {
         serverInfo: { name: 'mim', version: '0.1.0' },
       },
     })
+  })
+
+  it('forwards the MCP client name from initialize to the desktop client', async () => {
+    const client = new FakeClient()
+    await handleMcpRequest({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2099-01-01', clientInfo: { name: 'claude-code', version: '2.1' } },
+    }, client)
+
+    expect(client.clientName).toBe('claude-code')
+  })
+
+  it('ignores initialize without clientInfo', async () => {
+    const client = new FakeClient()
+    await handleMcpRequest({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: { protocolVersion: '2099-01-01' },
+    }, client)
+
+    expect(client.clientName).toBeUndefined()
   })
 
   it('lists MCP tools without leaking Mim dotted names to the MCP client', async () => {

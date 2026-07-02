@@ -11,6 +11,7 @@ export type SettingsSection =
   | 'ai'
   | 'instructions'
   | 'connections'
+  | 'tools'
   | 'apps'
   | 'skills'
   | 'workspace'
@@ -31,6 +32,7 @@ export const SETTINGS_NAV_GROUPS: SettingsNavItem[][] = [
     { id: 'ai', label: 'AI & Models' },
     { id: 'instructions', label: 'Instructions' },
     { id: 'connections', label: 'Connections' },
+    { id: 'tools', label: 'Tools' },
   ],
   [
     { id: 'apps', label: 'Apps' },

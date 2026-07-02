@@ -233,7 +233,7 @@ describe('ConnectionsSettingsPanel — Google', () => {
     expect(call).not.toHaveBeenCalledWith('google.connect', expect.anything())
   })
 
-  it('shows account metadata, scopes, and policy toggles when connected', async () => {
+  it('shows account metadata and scopes when connected', async () => {
     const call = makeCall({
       googleStatus: {
         account: 'default',
@@ -246,15 +246,6 @@ describe('ConnectionsSettingsPanel — Google', () => {
           'https://www.googleapis.com/auth/drive.readonly',
           'https://www.googleapis.com/auth/spreadsheets',
         ],
-      },
-      googlePolicy: {
-        aiEnabled: true,
-        gmailEnabled: true,
-        gmailSendEnabled: false,
-        calendarEnabled: true,
-        calendarWriteEnabled: true,
-        driveEnabled: true,
-        sheetsWriteEnabled: true,
       },
     })
     Object.defineProperty(window, 'kernel', {
@@ -269,9 +260,9 @@ describe('ConnectionsSettingsPanel — Google', () => {
     expect(root.textContent).toContain('person@example.com')
     expect(root.textContent).toContain('Gmail read')
     expect(root.textContent).toContain('Sheets write')
-    expect(root.textContent).toContain('Allow AI to use Google')
-    expect(root.textContent).toContain('Allow Gmail')
-    expect(root.textContent).toContain('Allow AI to update Sheets')
+    expect(root.textContent).not.toContain('Allow AI to use Google')
+    expect(root.textContent).not.toContain('Allow Gmail')
+    expect(root.textContent).not.toContain('Allow AI to update Sheets')
   })
 
   it('connects Google through browser OAuth from the primary button', async () => {
@@ -411,7 +402,7 @@ describe('ConnectionsSettingsPanel — Slack', () => {
     expect(buttons.some(b => b.textContent?.trim() === 'Connect')).toBe(true)
   })
 
-  it('shows team name and policy toggles when connected', async () => {
+  it('shows team name without capability toggles when connected', async () => {
     const call = makeCall({
       slackStatus: {
         account: 'default',
@@ -430,13 +421,13 @@ describe('ConnectionsSettingsPanel — Slack', () => {
 
     expect(root.textContent).toContain('Acme Corp')
     expect(root.textContent).toContain('mim-bot')
-    expect(root.textContent).toContain('Allow AI to use Slack')
-    expect(root.textContent).toContain('Allow private channels')
-    expect(root.textContent).toContain('Allow direct messages')
-    expect(root.textContent).toContain('Allow AI to send messages')
+    expect(root.textContent).not.toContain('Allow AI to use Slack')
+    expect(root.textContent).not.toContain('Allow private channels')
+    expect(root.textContent).not.toContain('Allow direct messages')
+    expect(root.textContent).not.toContain('Allow AI to send messages')
   })
 
-  it('hides policy toggles when disconnected', async () => {
+  it('keeps capability toggles out of disconnected Slack', async () => {
     const call = makeCall()
     Object.defineProperty(window, 'kernel', {
       configurable: true,
@@ -450,7 +441,7 @@ describe('ConnectionsSettingsPanel — Slack', () => {
     expect(root.textContent).not.toContain('Allow AI to use Slack')
   })
 
-  it('calls slack.disconnect and hides policy toggles', async () => {
+  it('calls slack.disconnect and keeps capability toggles out of Connections', async () => {
     const call = makeCall({
       slackStatus: {
         account: 'default',
