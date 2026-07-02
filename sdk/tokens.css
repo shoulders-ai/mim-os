@@ -6,8 +6,8 @@
 
   --color-ink:         #1a1a18;
   --color-ink-2:       #4a4a44;
-  --color-ink-3:       #8a8a80;
-  --color-ink-4:       #b0b0a6;
+  --color-ink-3:       #78786f;
+  --color-ink-4:       #98988e;
   --color-chrome:      #ebe9e3;
   --color-chrome-mid:  #f3f1ec;
   --color-chrome-high: #f9f8f5;
@@ -16,8 +16,8 @@
   --color-accent-soft: rgba(192, 93, 60, 0.08);
   --color-accent-ink:  #ffffff;
   --color-accent-tint: rgba(192, 93, 60, 0.06);
-  --color-rule:        #d8d7d2;
-  --color-rule-light:  #eae9e5;
+  --color-rule:        #cccbc4;
+  --color-rule-light:  #dfded8;
   --color-line-soft:   rgba(0, 0, 0, 0.04);
   --color-add:         #5e8b3e;
   --color-rem:         #c05d3c;

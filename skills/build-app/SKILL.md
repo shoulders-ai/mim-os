@@ -161,6 +161,8 @@ await runtime.call('workbench.openWork', { packageId: runtime.package.id })
 Use SDK helpers (`runtime.jobs`, `runtime.data`, `runtime.secrets`) over raw
 `runtime.call()` when helpers exist.
 
+**Styling.** Always include `<link rel="stylesheet" href="/sdk/tokens.css">` and use CSS vars for all colors, fonts, spacing, and radii — never hardcode visual values. This ensures apps follow the user's chosen theme. Key vars: `--color-ink`, `--color-ink-2`, `--color-surface`, `--color-chrome`, `--color-accent`, `--color-rule`, `--font-sans`, `--font-mono`, `--radius-md`, `--space-sm`/`--space-md`.
+
 ## Reporting
 
 End with capability language:

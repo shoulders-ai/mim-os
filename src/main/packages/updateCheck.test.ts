@@ -180,6 +180,29 @@ describe('checkForUpdates', () => {
     expect(result.updates[0].installed).toBe('1.5.0')
   })
 
+  it('reports an update when a workspace pin selects an older installed version', async () => {
+    writeFileSync(join(dir, 'mim.yaml'), [
+      'name: test-workspace',
+      'apps:',
+      '  github-monitor:',
+      '    source: https://github.com/shoulders-ai/mim-github-monitor',
+      '    version: 1.2.0',
+    ].join('\n') + '\n')
+    seedUrlCache(DEFAULT_REGISTRY_INDEX_URL, validIndex([validEntry({ version: '2.0.0' })]))
+    seedInstalled('github-monitor', '1.2.0')
+    seedInstalled('github-monitor', '2.0.0')
+
+    const result = await checkForUpdates(opts())
+
+    expect(result.updates).toHaveLength(1)
+    expect(result.updates[0]).toMatchObject({
+      id: 'github-monitor',
+      installed: '1.2.0',
+      latest: '2.0.0',
+      registryId: 'default',
+    })
+  })
+
   it('picks the highest registry version across multiple entries in the same source', async () => {
     seedUrlCache(DEFAULT_REGISTRY_INDEX_URL, validIndex([
       validEntry({ version: '1.0.0' }),

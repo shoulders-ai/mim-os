@@ -94,6 +94,19 @@ async function _call(method, params = {}, options = {}) {
 
 connect()
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('message', (ev) => {
+    if (ev.data?.type === 'mim:theme' && ev.data.tokens) {
+      const root = document.documentElement.style
+      for (const [k, v] of Object.entries(ev.data.tokens)) {
+        root.setProperty(k, v)
+      }
+      const cbs = _listeners.get('theme:changed') || []
+      cbs.forEach(cb => cb(ev.data.tokens))
+    }
+  })
+}
+
 export const runtime = {
   async call(tool, params = {}) {
     await _ready

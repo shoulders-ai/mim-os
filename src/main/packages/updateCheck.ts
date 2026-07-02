@@ -1,6 +1,6 @@
-// Update check: compares installed package versions against registry mirrors
-// to surface available updates. No network — mirrors refresh via registry.list;
-// this function reads cached mirrors only (sync: false).
+// Update check: compares the workspace-selected package versions against
+// registry mirrors to surface available updates. No network — mirrors refresh
+// via registry.list; this function reads cached mirrors only (sync: false).
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { dirname, join } from 'path'
@@ -12,6 +12,7 @@ import {
   type RegistrySourcesDeps,
 } from '@main/packages/registrySources.js'
 import { listInstalledVersions } from '@main/tools/registryTools.js'
+import { readCommittedApp } from '@main/workspace/workspaceContract.js'
 
 export interface UpdateEntry {
   id: string
@@ -37,11 +38,11 @@ export interface CheckForUpdatesOpts {
 const THROTTLE_MS = 24 * 60 * 60 * 1000 // 24 hours
 
 /**
- * Compare installed package versions against registry mirrors and report
- * updates. This function never does network in v1 — mirrors refresh via
- * registry.list. The throttle file mainly records checkedAt for the UI
- * (so it can show "last checked: 2h ago"). Even when throttled, the diff
- * is still computed from mirrors on disk (it is cheap).
+ * Compare the package version selected by the current workspace against
+ * registry mirrors and report updates. This function never does network in
+ * v1 — mirrors refresh via registry.list. The throttle file mainly records
+ * checkedAt for the UI (so it can show "last checked: 2h ago"). Even when
+ * throttled, the diff is still computed from mirrors on disk (it is cheap).
  */
 export async function checkForUpdates(opts: CheckForUpdatesOpts): Promise<UpdateCheckResult> {
   const { workspacePath, cacheRoot, globalDir, isSourceTrusted, force } = opts
@@ -105,9 +106,9 @@ export async function checkForUpdates(opts: CheckForUpdatesOpts): Promise<Update
   for (const [id, { registryId, latestVersion }] of ownerByPackageId) {
     const installed = listInstalledVersions(id, globalDir)
     if (installed.length === 0) continue
-    const highestInstalled = installed.sort((a, b) => compareSemver(b, a))[0]
-    if (compareSemver(latestVersion, highestInstalled) > 0) {
-      updates.push({ id, installed: highestInstalled, latest: latestVersion, registryId })
+    const selectedVersion = selectedInstalledVersion(id, installed, workspacePath)
+    if (compareSemver(latestVersion, selectedVersion) > 0) {
+      updates.push({ id, installed: selectedVersion, latest: latestVersion, registryId })
     }
   }
 
@@ -123,4 +124,20 @@ export async function checkForUpdates(opts: CheckForUpdatesOpts): Promise<Update
   }
 
   return { updates, checkedAt: now }
+}
+
+function selectedInstalledVersion(
+  id: string,
+  installedVersions: string[],
+  workspacePath: string | null,
+): string {
+  const sorted = [...installedVersions].sort((a, b) => compareSemver(b, a))
+  const highestInstalled = sorted[0]
+  const pinnedVersion = workspacePath
+    ? readCommittedApp(workspacePath, id)?.version
+    : undefined
+  if (pinnedVersion && installedVersions.includes(pinnedVersion)) {
+    return pinnedVersion
+  }
+  return highestInstalled
 }
