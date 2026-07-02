@@ -1,4 +1,5 @@
 import type { ApprovalPreviewLike } from './approvalLogic.js'
+import { lineDelta } from '../../services/lineDelta.js'
 
 // A plain-language description of a file change, derived deterministically from
 // the change itself. It states magnitude and nature only — never meaning — so it
@@ -14,29 +15,15 @@ function lines(n: number): string {
   return `${n} ${n === 1 ? 'line' : 'lines'}`
 }
 
-// Longest-common-subsequence length over lines, with a rolling row to keep memory
-// bounded. Edit previews are the changed region (not whole files), so inputs stay
-// small; very large inputs fall back to a length-based estimate.
-function lcsLength(a: string[], b: string[]): number {
-  let prev = new Array(b.length + 1).fill(0)
-  for (let i = a.length - 1; i >= 0; i--) {
-    const cur = new Array(b.length + 1).fill(0)
-    for (let j = b.length - 1; j >= 0; j--) {
-      cur[j] = a[i] === b[j] ? prev[j + 1] + 1 : Math.max(prev[j], cur[j + 1])
-    }
-    prev = cur
+// Edit previews are the changed region (not whole files), so inputs stay small;
+// very large inputs (lineDelta null) fall back to a length-based estimate.
+function editDelta(oldText: string, newText: string): { added: number; removed: number } {
+  const exact = lineDelta(oldText, newText)
+  if (exact) return exact
+  return {
+    added: newText ? newText.split('\n').length : 0,
+    removed: oldText ? oldText.split('\n').length : 0,
   }
-  return prev[0]
-}
-
-function lineDelta(oldText: string, newText: string): { added: number; removed: number } {
-  const a = oldText ? oldText.split('\n') : []
-  const b = newText ? newText.split('\n') : []
-  if (a.length > 2000 || b.length > 2000) {
-    return { added: b.length, removed: a.length }
-  }
-  const common = lcsLength(a, b)
-  return { added: b.length - common, removed: a.length - common }
 }
 
 export function changeSummary(preview?: ApprovalPreviewLike | null): string {
@@ -55,7 +42,7 @@ export function changeSummary(preview?: ApprovalPreviewLike | null): string {
   }
 
   // edit
-  const { added, removed } = lineDelta(preview.oldText ?? '', preview.newText ?? '')
+  const { added, removed } = editDelta(preview.oldText ?? '', preview.newText ?? '')
   if (!added && !removed) return ''
   if (added && !removed) return `Adds ${lines(added)}.`
   if (removed && !added) return `Removes ${lines(removed)}.`

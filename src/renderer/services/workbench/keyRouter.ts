@@ -12,6 +12,8 @@ export type KeyAction =
   | { action: 'open-command-palette' }
   | { action: 'session-next' }
   | { action: 'session-prev' }
+  | { action: 'activity-next' }
+  | { action: 'activity-prev' }
   | null
 
 export interface KeyContext {
@@ -19,6 +21,7 @@ export interface KeyContext {
   metaOrCtrl: boolean
   shift: boolean
   ctrlKey: boolean
+  altKey: boolean
   editorFocused: boolean
   terminalFocused: boolean
   /** True when the native event was already handled (e.g., by CodeMirror). */
@@ -71,6 +74,13 @@ export function routeKeyEvent(ctx: KeyContext): KeyAction {
   // neither CodeMirror nor xterm binds Ctrl+Tab).
   if (ctrlKey && key === 'Tab') {
     return ctx.shift ? { action: 'session-prev' } : { action: 'session-next' }
+  }
+
+  // Cmd+Option+ArrowLeft / Cmd+Option+ArrowRight → cycle all activity rows
+  // (Chrome tab-switching convention, extended to cover chat, app, and agent
+  // sessions). Fires even when editor/terminal is focused.
+  if (metaOrCtrl && ctx.altKey && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+    return key === 'ArrowLeft' ? { action: 'activity-prev' } : { action: 'activity-next' }
   }
 
   // Cmd+[ / Cmd+] → focused pane's history Back/Forward

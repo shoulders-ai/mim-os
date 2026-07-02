@@ -7,6 +7,7 @@ function ctx(overrides: Partial<KeyContext> = {}): KeyContext {
     metaOrCtrl: true,
     shift: false,
     ctrlKey: false,
+    altKey: false,
     editorFocused: false,
     terminalFocused: false,
     defaultPrevented: false,
@@ -107,6 +108,27 @@ describe('routeKeyEvent', () => {
 
   it('Cmd+Tab (no ctrl) is left to the OS', () => {
     expect(routeKeyEvent(ctx({ key: 'Tab', metaOrCtrl: true, ctrlKey: false }))).toBeNull()
+  })
+
+  // ── Activity cycling (Cmd+Option+Arrow) ──
+  it('Cmd+Option+ArrowRight cycles to next activity', () => {
+    expect(routeKeyEvent(ctx({ key: 'ArrowRight', altKey: true }))).toEqual({ action: 'activity-next' })
+  })
+
+  it('Cmd+Option+ArrowLeft cycles to previous activity', () => {
+    expect(routeKeyEvent(ctx({ key: 'ArrowLeft', altKey: true }))).toEqual({ action: 'activity-prev' })
+  })
+
+  it('Cmd+Option+ArrowRight works while editor is focused', () => {
+    expect(routeKeyEvent(ctx({ key: 'ArrowRight', altKey: true, editorFocused: true }))).toEqual({ action: 'activity-next' })
+  })
+
+  it('Cmd+Option+ArrowRight works while terminal is focused', () => {
+    expect(routeKeyEvent(ctx({ key: 'ArrowRight', altKey: true, terminalFocused: true }))).toEqual({ action: 'activity-next' })
+  })
+
+  it('Cmd+ArrowRight without Option does not cycle activity', () => {
+    expect(routeKeyEvent(ctx({ key: 'ArrowRight', altKey: false }))).toBeNull()
   })
 
   // ── Guards ──

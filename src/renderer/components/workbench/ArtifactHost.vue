@@ -4,6 +4,7 @@ import EditorPanel from '../editor/EditorPanel.vue'
 import type { ArtifactEntry } from '../../services/workbench/entries.js'
 import type { PackageViewDefinition } from '../../services/workbench/packageViews.js'
 import type { ArtifactReplacementDecision } from '../../stores/workbench.js'
+import type { WorkspaceMoveResult } from '../files/fileMove.js'
 
 interface LoadedPackage {
   manifest: { id: string; name: string; icon?: string; views?: PackageViewDefinition[] }
@@ -62,6 +63,10 @@ function openHistoryForPath(path: string) {
   editorRef.value?.openHistoryForPath?.(path)
 }
 
+function retargetDocumentPath(oldPath: string, newPath: string, type: WorkspaceMoveResult['type']) {
+  editorRef.value?.retargetDocumentPath?.(oldPath, newPath, type)
+}
+
 function newUntitledTab() {
   editorRef.value?.createUntitledTab()
 }
@@ -94,6 +99,7 @@ defineExpose({
   openDocument,
   openReadOnlyTab,
   openHistoryForPath,
+  retargetDocumentPath,
   newUntitledTab,
   closeActiveTab,
   saveActiveFile,

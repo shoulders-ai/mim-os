@@ -20,6 +20,7 @@ export interface RunActionsDeps {
   openWorkEntry(entry: WorkEntry): Promise<unknown> | unknown
   openFallbackWork(): Promise<unknown> | unknown
   openFilesWorkPreservingArtifact(): Promise<unknown> | unknown
+  openNextActivity(closingEntryId: string): Promise<unknown> | unknown
   removeWorkHistoryEntry(entryId: string): Promise<unknown> | unknown
   setWorkNavigationError(error: unknown): void
   upsertPackageRun(run: PackageRunRecord): void
@@ -59,14 +60,15 @@ export function createRunActions(deps: RunActionsDeps) {
 
   async function archivePackageRun(packageId: string, runId: string) {
     try {
+      const entryId = packageRunWorkEntry(packageId, runId).id
       const wasActiveWork = deps.activeWork()?.kind === 'package-run' && deps.activeWork()?.runId === runId
       const result = await deps.callKernel('package.jobs.archive', { runId })
       const run = (result as { run?: PackageRunRecord }).run
       if (run) deps.upsertPackageRun(run)
       else deps.removePackageRun(runId)
-      await deps.removeWorkHistoryEntry(packageRunWorkEntry(packageId, runId).id)
+      await deps.removeWorkHistoryEntry(entryId)
       if (wasActiveWork) {
-        await deps.openFilesWorkPreservingArtifact()
+        await deps.openNextActivity(entryId)
       }
       deps.incrementArchiveRefresh()
       void deps.refreshPackageRuns()
@@ -77,12 +79,13 @@ export function createRunActions(deps: RunActionsDeps) {
 
   async function deletePackageRun(packageId: string, runId: string) {
     try {
+      const entryId = packageRunWorkEntry(packageId, runId).id
       const wasActiveWork = deps.activeWork()?.kind === 'package-run' && deps.activeWork()?.runId === runId
       await deps.callKernel('package.jobs.delete', { runId })
       deps.removePackageRun(runId)
-      await deps.removeWorkHistoryEntry(packageRunWorkEntry(packageId, runId).id)
+      await deps.removeWorkHistoryEntry(entryId)
       if (wasActiveWork) {
-        await deps.openFilesWorkPreservingArtifact()
+        await deps.openNextActivity(entryId)
       }
       deps.incrementArchiveRefresh()
       void deps.refreshPackageRuns()
@@ -124,14 +127,15 @@ export function createRunActions(deps: RunActionsDeps) {
 
   async function archiveAgentSession(sessionId: string) {
     try {
-      const wasActiveWork = deps.activeWork()?.kind === 'agent-session' && deps.activeWork()?.sessionId === sessionId
       const agentId = deps.agentSessions().find(item => item.sessionId === sessionId)?.agentId ?? ''
+      const entryId = agentSessionWorkEntry(agentId, sessionId, '').id
+      const wasActiveWork = deps.activeWork()?.kind === 'agent-session' && deps.activeWork()?.sessionId === sessionId
       const result = await deps.callKernel('agent.sessions.archive', { sessionId }) as { session?: AgentSessionRuntime }
       if (result.session) deps.applyAgentSessionEvent({ type: 'session.changed', session: result.session })
       else deps.removeAgentSession(sessionId)
-      await deps.removeWorkHistoryEntry(agentSessionWorkEntry(agentId, sessionId, '').id)
+      await deps.removeWorkHistoryEntry(entryId)
       if (wasActiveWork) {
-        await deps.openFilesWorkPreservingArtifact()
+        await deps.openNextActivity(entryId)
       }
       deps.incrementArchiveRefresh()
     } catch (err) {
@@ -141,13 +145,14 @@ export function createRunActions(deps: RunActionsDeps) {
 
   async function deleteAgentSession(sessionId: string) {
     try {
-      const wasActiveWork = deps.activeWork()?.kind === 'agent-session' && deps.activeWork()?.sessionId === sessionId
       const agentId = deps.agentSessions().find(item => item.sessionId === sessionId)?.agentId ?? ''
+      const entryId = agentSessionWorkEntry(agentId, sessionId, '').id
+      const wasActiveWork = deps.activeWork()?.kind === 'agent-session' && deps.activeWork()?.sessionId === sessionId
       await deps.callKernel('agent.sessions.delete', { sessionId })
       deps.removeAgentSession(sessionId)
-      await deps.removeWorkHistoryEntry(agentSessionWorkEntry(agentId, sessionId, '').id)
+      await deps.removeWorkHistoryEntry(entryId)
       if (wasActiveWork) {
-        await deps.openFilesWorkPreservingArtifact()
+        await deps.openNextActivity(entryId)
       }
       deps.incrementArchiveRefresh()
     } catch (err) {
@@ -157,10 +162,11 @@ export function createRunActions(deps: RunActionsDeps) {
 
   async function archiveSession(sessionId: string) {
     try {
+      const entryId = chatWorkEntry(sessionId).id
       const wasActiveWork = deps.activeWork()?.kind === 'chat' && deps.activeWork()?.sessionId === sessionId
       await deps.archiveChatSession(sessionId)
-      await deps.removeWorkHistoryEntry(chatWorkEntry(sessionId).id)
-      if (wasActiveWork) await deps.openFallbackWork()
+      await deps.removeWorkHistoryEntry(entryId)
+      if (wasActiveWork) await deps.openNextActivity(entryId)
       deps.incrementArchiveRefresh()
     } catch (err) {
       deps.setWorkNavigationError(err)
@@ -169,10 +175,11 @@ export function createRunActions(deps: RunActionsDeps) {
 
   async function deleteSession(sessionId: string) {
     try {
+      const entryId = chatWorkEntry(sessionId).id
       const wasActiveWork = deps.activeWork()?.kind === 'chat' && deps.activeWork()?.sessionId === sessionId
       await deps.deleteChatSession(sessionId)
-      await deps.removeWorkHistoryEntry(chatWorkEntry(sessionId).id)
-      if (wasActiveWork) await deps.openFallbackWork()
+      await deps.removeWorkHistoryEntry(entryId)
+      if (wasActiveWork) await deps.openNextActivity(entryId)
       deps.incrementArchiveRefresh()
     } catch (err) {
       deps.setWorkNavigationError(err)

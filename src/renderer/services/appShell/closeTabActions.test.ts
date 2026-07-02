@@ -14,6 +14,10 @@ function makeDeps(overrides: Partial<CloseTabActionsDeps> = {}) {
     activeArtifactHostId: vi.fn(() => ''),
     activeSession: vi.fn(() => ({ id: 's1', archived: false })),
     archiveSession: vi.fn(),
+    activeAgentSessionId: vi.fn(() => null),
+    archiveAgentSession: vi.fn(),
+    activePackageRun: vi.fn(() => null),
+    archivePackageRun: vi.fn(),
     ...overrides,
   }
   return deps
@@ -45,8 +49,49 @@ describe('app shell close-tab actions', () => {
     expect(deps.archiveSession).not.toHaveBeenCalled()
   })
 
-  it('closes the visible editor Artifact tab before archiving chat', () => {
+  it('archives the active chat session when chat Work is active', () => {
     const deps = makeDeps({
+      activeWorkHost: vi.fn(() => 'chat'),
+      artifactVisible: vi.fn(() => true),
+      activeArtifactHostId: vi.fn(() => 'editor'),
+    })
+
+    handleCloseTab(deps)
+
+    expect(deps.archiveSession).toHaveBeenCalledWith('s1')
+    expect(deps.closeActiveArtifactTab).not.toHaveBeenCalled()
+  })
+
+  it('archives agent session when agent-session Work is active', () => {
+    const deps = makeDeps({
+      activeWorkHost: vi.fn(() => 'agent-session'),
+      activeAgentSessionId: vi.fn(() => 'agent-1'),
+      artifactVisible: vi.fn(() => true),
+      activeArtifactHostId: vi.fn(() => 'editor'),
+    })
+
+    handleCloseTab(deps)
+
+    expect(deps.archiveAgentSession).toHaveBeenCalledWith('agent-1')
+    expect(deps.closeActiveArtifactTab).not.toHaveBeenCalled()
+    expect(deps.archiveSession).not.toHaveBeenCalled()
+  })
+
+  it('archives package run when package-run Work is active', () => {
+    const deps = makeDeps({
+      activeWorkHost: vi.fn(() => 'package-run'),
+      activePackageRun: vi.fn(() => ({ packageId: 'pkg-1', runId: 'run-1' })),
+    })
+
+    handleCloseTab(deps)
+
+    expect(deps.archivePackageRun).toHaveBeenCalledWith('pkg-1', 'run-1')
+    expect(deps.archiveSession).not.toHaveBeenCalled()
+  })
+
+  it('closes visible editor Artifact tab when Work host has no closeable content', () => {
+    const deps = makeDeps({
+      activeWorkHost: vi.fn(() => 'files'),
       artifactVisible: vi.fn(() => true),
       activeArtifactHostId: vi.fn(() => 'editor'),
     })
@@ -57,8 +102,10 @@ describe('app shell close-tab actions', () => {
     expect(deps.archiveSession).not.toHaveBeenCalled()
   })
 
-  it('archives the active unarchived session as the fallback', () => {
-    const deps = makeDeps()
+  it('falls back to archiving active session when nothing else matches', () => {
+    const deps = makeDeps({
+      activeWorkHost: vi.fn(() => 'files'),
+    })
 
     handleCloseTab(deps)
 
@@ -67,9 +114,11 @@ describe('app shell close-tab actions', () => {
 
   it('does nothing without an active unarchived session', () => {
     const archived = makeDeps({
+      activeWorkHost: vi.fn(() => 'files'),
       activeSession: vi.fn(() => ({ id: 's1', archived: true })),
     })
     const missing = makeDeps({
+      activeWorkHost: vi.fn(() => 'files'),
       activeSession: vi.fn(() => null),
     })
 

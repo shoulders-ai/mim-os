@@ -27,6 +27,8 @@ const sections = [
       { keys: shortcutLabel(['Mod', ']']), label: 'Forward in focused pane history' },
       { keys: shortcutLabel(['Ctrl', 'Tab']), label: 'Next chat session' },
       { keys: shortcutLabel(['Ctrl', 'Shift', 'Tab']), label: 'Previous chat session' },
+      { keys: shortcutLabel(['Mod', 'Alt', '→']), label: 'Next activity' },
+      { keys: shortcutLabel(['Mod', 'Alt', '←']), label: 'Previous activity' },
     ],
   },
   {

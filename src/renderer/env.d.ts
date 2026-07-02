@@ -40,6 +40,8 @@ interface Window {
     quitAndInstall(): Promise<void>
     openWorkspace(): Promise<string | null>
     openWorkspacePath(path: string): Promise<string | null>
+    watchWorkspaceFile(path: string): Promise<{ watching: boolean }>
+    unwatchWorkspaceFile(path: string): Promise<{ unwatched: boolean }>
     openFileDialog(): Promise<string | null>
     saveFileDialog(options?: { defaultPath?: string; filters?: Array<{ name: string; extensions: string[] }>; allowAbsolutePath?: boolean }): Promise<string | null>
     openNativeFile(path: string): Promise<{ opened: string }>

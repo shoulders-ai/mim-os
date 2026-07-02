@@ -45,6 +45,7 @@ function makeDeps(overrides: Partial<RunActionsDeps> = {}) {
     openWorkEntry: vi.fn(async () => ({ opened: true })),
     openFallbackWork: vi.fn(async () => ({ opened: true })),
     openFilesWorkPreservingArtifact: vi.fn(async () => ({ opened: true })),
+    openNextActivity: vi.fn(async () => ({ opened: true })),
     removeWorkHistoryEntry: vi.fn(async () => ({ opened: true })),
     setWorkNavigationError: vi.fn(),
     upsertPackageRun: vi.fn(run => {
@@ -123,7 +124,7 @@ describe('app shell run actions', () => {
 
     expect(deps.upsertPackageRun).toHaveBeenCalledWith(archived)
     expect(deps.removeWorkHistoryEntry).toHaveBeenCalledWith('work:package-run:pkg:run-1')
-    expect(deps.openFilesWorkPreservingArtifact).toHaveBeenCalledOnce()
+    expect(deps.openNextActivity).toHaveBeenCalledWith('work:package-run:pkg:run-1')
     expect(deps.incrementArchiveRefresh).toHaveBeenCalledOnce()
     expect(deps.refreshPackageRuns).toHaveBeenCalledOnce()
   })
@@ -177,11 +178,11 @@ describe('app shell run actions', () => {
 
     expect(deps.applyAgentSessionEvent).toHaveBeenCalledWith({ type: 'session.changed', session: archived })
     expect(deps.removeWorkHistoryEntry).toHaveBeenCalledWith('work:agent-session:sess-1')
-    expect(deps.openFilesWorkPreservingArtifact).toHaveBeenCalledOnce()
+    expect(deps.openNextActivity).toHaveBeenCalledWith('work:agent-session:sess-1')
     expect(deps.incrementArchiveRefresh).toHaveBeenCalledOnce()
   })
 
-  it('deletes active agent sessions, prunes Work history, falls back, and refreshes archive state', async () => {
+  it('deletes active agent sessions, prunes Work history, navigates to next activity, and refreshes archive state', async () => {
     const { deps, agentSessions, setActiveWork } = makeDeps({
       callKernel: vi.fn(async tool => {
         if (tool === 'agent.sessions.delete') return { deleted: 'sess-1' }
@@ -203,11 +204,11 @@ describe('app shell run actions', () => {
     expect(deps.callKernel).toHaveBeenCalledWith('agent.sessions.delete', { sessionId: 'sess-1' })
     expect(deps.removeAgentSession).toHaveBeenCalledWith('sess-1')
     expect(deps.removeWorkHistoryEntry).toHaveBeenCalledWith('work:agent-session:sess-1')
-    expect(deps.openFilesWorkPreservingArtifact).toHaveBeenCalledOnce()
+    expect(deps.openNextActivity).toHaveBeenCalledWith('work:agent-session:sess-1')
     expect(deps.incrementArchiveRefresh).toHaveBeenCalledOnce()
   })
 
-  it('archives and deletes active chat sessions through the chat store then falls back', async () => {
+  it('archives and deletes active chat sessions then navigates to next activity', async () => {
     const { deps, setActiveWork } = makeDeps()
     setActiveWork({
       id: 'work:chat:s1',
@@ -224,7 +225,8 @@ describe('app shell run actions', () => {
     expect(deps.deleteChatSession).toHaveBeenCalledWith('s1')
     expect(deps.removeWorkHistoryEntry).toHaveBeenNthCalledWith(1, 'work:chat:s1')
     expect(deps.removeWorkHistoryEntry).toHaveBeenNthCalledWith(2, 'work:chat:s1')
-    expect(deps.openFallbackWork).toHaveBeenCalledTimes(2)
+    expect(deps.openNextActivity).toHaveBeenNthCalledWith(1, 'work:chat:s1')
+    expect(deps.openNextActivity).toHaveBeenNthCalledWith(2, 'work:chat:s1')
     expect(deps.incrementArchiveRefresh).toHaveBeenCalledTimes(2)
   })
 

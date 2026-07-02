@@ -12,6 +12,7 @@ import type { WorkEntry } from '../../services/workbench/entries.js'
 import type { WorkHostKind } from '../../services/workbench/hosts.js'
 import type { ApprovalRequest } from '../../stores/approvals.js'
 import type { PackageViewDefinition } from '../../services/workbench/packageViews.js'
+import type { WorkspaceMoveResult } from '../files/fileMove.js'
 
 interface LoadedPackage {
   manifest: {
@@ -41,6 +42,7 @@ const emit = defineEmits<{
   openFileHistory: [path: string]
   newFile: []
   openFileDialog: []
+  pathMoved: [move: WorkspaceMoveResult]
   openPackage: [id: string]
   openSession: [id: string]
   archiveSession: [id: string]
@@ -164,6 +166,7 @@ defineExpose({
     @open-file-history="emit('openFileHistory', $event)"
     @new-file="emit('newFile')"
     @open-file-dialog="emit('openFileDialog')"
+    @path-moved="emit('pathMoved', $event)"
   />
   <ActivityTrustView
     v-if="activityTrustMounted"

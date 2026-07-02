@@ -5,6 +5,7 @@ import {
   filterAtItems,
   getAtMentionState,
   groupAtItems,
+  projectFileContextAttachment,
   modelSupportsVision,
   removeAtMention,
   upsertContextChip,
@@ -195,6 +196,28 @@ describe('composer @ mention logic', () => {
       path: 'docs/plan.md',
       mediaType: 'text/markdown',
     }])
+  })
+
+  it('builds project-file context attachments with the workspace path', () => {
+    expect(projectFileContextAttachment(
+      {
+        type: 'project-file',
+        id: 'docs/plan.md',
+        label: 'plan.md',
+        path: 'docs/plan.md',
+        mediaType: 'text/markdown',
+      },
+      '# Plan',
+      'text/markdown',
+    )).toEqual({
+      filename: 'plan.md',
+      path: 'docs/plan.md',
+      mediaType: 'text/markdown',
+      content: '# Plan',
+      type: 'text',
+      size: 6,
+      _contextChipId: 'docs/plan.md',
+    })
   })
 })
 

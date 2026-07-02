@@ -180,20 +180,24 @@ const appRows = computed<AppRow[]>(() => {
   )
 })
 
-const activityRows = computed<ActivityRow[]>(() =>
-  sortWithManualOrder([
+const activityRows = computed<ActivityRow[]>(() => {
+  const rows: (ActivityRow & { ts: number })[] = [
     ...sessionStore.visibleSessions.map(session => ({
       key: activityKeyForSession(session.id),
       kind: 'chat' as const,
       session,
+      ts: new Date(session.updatedAt).getTime(),
     })),
     ...[...runsStore.packageJobRuns, ...runsStore.agentSessionRuns].map(run => ({
       key: activityKeyForRun(run),
       kind: 'run' as const,
       run,
+      ts: run.updatedAt ? new Date(run.updatedAt).getTime() : 0,
     })),
-  ], settingsStore.navigatorActivityOrder),
-)
+  ]
+  rows.sort((a, b) => b.ts - a.ts)
+  return sortWithManualOrder(rows, settingsStore.navigatorActivityOrder)
+})
 
 const appsCollapsed = ref(false)
 const activityCollapsed = ref(false)

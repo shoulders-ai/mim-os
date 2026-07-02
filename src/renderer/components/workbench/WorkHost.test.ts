@@ -70,7 +70,7 @@ vi.mock('../files/FilesWorkView.vue', async () => {
     default: defineComponent({
       name: 'FilesWorkViewStub',
       props: ['active', 'refreshKey', 'recentFiles'],
-      emits: ['openFile', 'newFile', 'openFileDialog'],
+      emits: ['openFile', 'newFile', 'openFileDialog', 'pathMoved'],
       setup(props, { emit }) {
         return () => h('div', {
           'data-testid': 'files-view-root',
@@ -82,6 +82,10 @@ vi.mock('../files/FilesWorkView.vue', async () => {
             'data-testid': 'files-view',
             onClick: () => emit('openFile', 'notes.md'),
           }, 'Files'),
+          h('button', {
+            'data-testid': 'files-path-moved',
+            onClick: () => emit('pathMoved', { oldPath: 'notes.md', newPath: 'docs/notes.md', type: 'file' }),
+          }, 'Moved'),
         ])
       },
     }),
@@ -258,6 +262,16 @@ describe('WorkHost', () => {
 
     root.querySelector<HTMLButtonElement>('[data-testid="chat-open-file"]')?.click()
     expect(onOpenFile).toHaveBeenCalledWith('chat-note.md')
+  })
+
+  it('forwards file path move notifications', async () => {
+    const onPathMoved = vi.fn()
+    mountHost('files', { id: 'work:files', kind: 'files', title: 'Files' }, { onPathMoved })
+    await flushUi()
+
+    root.querySelector<HTMLButtonElement>('[data-testid="files-path-moved"]')?.click()
+
+    expect(onPathMoved).toHaveBeenCalledWith({ oldPath: 'notes.md', newPath: 'docs/notes.md', type: 'file' })
   })
 
   it('mounts the terminal in the background before running a hidden command', async () => {

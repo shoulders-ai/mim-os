@@ -19,6 +19,7 @@ import ToastHost from './components/ToastHost.vue'
 import WelcomeDialog from './components/WelcomeDialog.vue'
 import ShortcutsDialog from './components/ShortcutsDialog.vue'
 import CommandPalette from './components/CommandPalette.vue'
+import type { WorkspaceMoveResult } from './components/files/fileMove.js'
 import { routeKeyEvent, type KeyContext } from './services/workbench/keyRouter.js'
 import { shortcutLabel } from './services/shortcutLabels.js'
 import { decideLanding } from './services/workbench/landingDecision.js'
@@ -29,7 +30,7 @@ import { useAppsStore } from './stores/coreApps.js'
 import { useApprovalsStore, type ApprovalRequest } from './stores/approvals.js'
 import { useDiffStore } from './stores/diff.js'
 import { useToastStore } from './stores/toasts.js'
-import { buildApprovalDiff } from './services/approvalDiff.js'
+import { approvalDiffNotice, buildApprovalDiff } from './services/approvalDiff.js'
 import {
   useWorkbenchStore,
   type ArtifactEntry,
@@ -79,6 +80,7 @@ import { createRunActions } from './services/appShell/runActions.js'
 import { createWorkbenchActions } from './services/appShell/workbenchActions.js'
 import { registerAppKernelEvents } from './services/appShell/kernelEvents.js'
 import { runKeyAction } from './services/appShell/keyboardActions.js'
+import { sortWithManualOrder } from './components/sidebar/sidebarOrdering.js'
 import { runShellAction as executeShellAction } from './services/appShell/shellActions.js'
 import { handleCloseTab as executeCloseTabAction } from './services/appShell/closeTabActions.js'
 import {
@@ -123,6 +125,7 @@ const artifactHostRef = ref<{
   openDocument?: (path: string, kind: 'text' | 'pdf' | 'card' | 'table') => Promise<void> | void
   openReadOnlyTab?: (name: string, content: string, sourceId: string) => Promise<void> | void
   openHistoryForPath?: (path: string) => void
+  retargetDocumentPath?: (oldPath: string, newPath: string, type: WorkspaceMoveResult['type']) => void
   newUntitledTab?: () => void
   closeActiveTab?: () => void
   saveActiveFile?: () => Promise<boolean> | boolean
@@ -393,6 +396,7 @@ const runActions = createRunActions({
   openWorkEntry,
   openFallbackWork,
   openFilesWorkPreservingArtifact,
+  openNextActivity,
   removeWorkHistoryEntry: entryId => workbenchStore.removePaneHistoryEntry('work', entryId),
   setWorkNavigationError: err => workbenchStore.setNavigationError('work', err),
   upsertPackageRun: run => runsStore.upsertPackageRun(run),
@@ -682,6 +686,10 @@ async function openFileViaDialog() {
   await documentActions.openFileViaDialog()
 }
 
+function handleFilePathMoved(move: WorkspaceMoveResult) {
+  artifactHostRef.value?.retargetDocumentPath?.(move.oldPath, move.newPath, move.type)
+}
+
 async function createUntitledInEditor() {
   await documentActions.createUntitledInEditor()
 }
@@ -773,6 +781,12 @@ function handleCloseTab() {
     activeArtifactHostId: () => activeArtifactHostId.value,
     activeSession: () => sessionStore.activeSession,
     archiveSession: sessionId => { sessionStore.archive(sessionId) },
+    activeAgentSessionId: () => activeWork.value?.kind === 'agent-session' ? activeWork.value.sessionId : null,
+    archiveAgentSession: sessionId => { void archiveAgentSession(sessionId) },
+    activePackageRun: () => activeWork.value?.kind === 'package-run'
+      ? { packageId: activeWork.value.packageId, runId: activeWork.value.runId }
+      : null,
+    archivePackageRun: (packageId, runId) => { void archivePackageRun(packageId, runId) },
   })
 }
 
@@ -806,20 +820,28 @@ function handlePaletteSelect(id: string) {
 async function reviewApprovalChange(request: ApprovalRequest) {
   const diff = await buildApprovalDiff(request, readWorkspaceFile)
   if (!diff) return
+  // The request may have been decided while the preview was being built; a
+  // preview for a resolved request would show a change already applied or dropped.
+  if (!approvalsStore.get(request.requestId)) return
   await openArtifactEntry(editorArtifactEntry())
   diffStore.activate({
     source: 'approval',
     original: diff.original,
     modified: diff.modified,
     path: diff.path,
-    review: { type: 'approval', requestId: request.requestId, kind: diff.kind },
+    review: {
+      type: 'approval',
+      requestId: request.requestId,
+      kind: diff.kind,
+      notice: approvalDiffNotice(diff),
+    },
     layout: 'unified',
   })
 }
 
 async function readWorkspaceFile(path: string): Promise<string | null> {
   try {
-    const result = await window.kernel.call('fs.read', { path }) as { content?: unknown }
+    const result = await window.kernel.call('fs.read', { path, full: true }) as { content?: unknown }
     return typeof result?.content === 'string' ? result.content : ''
   } catch {
     return null
@@ -902,6 +924,7 @@ function handleKeydown(e: KeyboardEvent) {
     metaOrCtrl: e.metaKey || e.ctrlKey,
     shift: e.shiftKey,
     ctrlKey: e.ctrlKey,
+    altKey: e.altKey,
     editorFocused: isEditorFocused(),
     terminalFocused: isTerminalFocused(),
     defaultPrevented: e.defaultPrevented,
@@ -922,6 +945,7 @@ function handleKeydown(e: KeyboardEvent) {
     navigateWorkHistory,
     navigateArtifactHistory,
     cycleSession,
+    cycleActivity,
     nextTick: () => nextTick(),
   })
 }
@@ -935,6 +959,76 @@ function cycleSession(direction: 1 | -1) {
     : idx + direction
   if (next < 0 || next >= visible.length) return
   void openChatWork(visible[next].id)
+}
+
+type ActivityItem = { key: string; ts: number } & (
+  | { kind: 'chat'; sessionId: string }
+  | { kind: 'package-job'; packageId: string; runId: string }
+  | { kind: 'agent-session'; agentId: string; sessionId: string }
+)
+
+function buildActivityList(): ActivityItem[] {
+  const items: ActivityItem[] = [
+    ...sessionStore.visibleSessions.map(s => ({
+      key: `chat:${s.id}`,
+      kind: 'chat' as const,
+      sessionId: s.id,
+      ts: new Date(s.updatedAt).getTime(),
+    })),
+    ...runsStore.packageJobRuns.map(r => ({
+      key: r.id,
+      kind: 'package-job' as const,
+      packageId: r.packageId ?? '',
+      runId: r.sourceId,
+      ts: r.updatedAt ? new Date(r.updatedAt).getTime() : 0,
+    })),
+    ...runsStore.agentSessionRuns.map(r => ({
+      key: r.id,
+      kind: 'agent-session' as const,
+      agentId: runsStore.agentSessions.find(a => a.sessionId === r.sourceId)?.agentId ?? '',
+      sessionId: r.sourceId,
+      ts: r.updatedAt ? new Date(r.updatedAt).getTime() : 0,
+    })),
+  ]
+  items.sort((a, b) => b.ts - a.ts)
+  return sortWithManualOrder(items, settingsStore.navigatorActivityOrder)
+}
+
+function activityWorkId(item: ActivityItem): string {
+  if (item.kind === 'chat') return `work:chat:${item.sessionId}`
+  if (item.kind === 'agent-session') return `work:agent-session:${item.sessionId}`
+  return `work:package-run:${item.packageId}:${item.runId}`
+}
+
+function navigateToActivity(item: ActivityItem) {
+  if (item.kind === 'chat') void openChatWork(item.sessionId)
+  else if (item.kind === 'package-job') void openPackageRunWork(item.packageId, item.runId)
+  else void openAgentSessionWork(item.agentId, item.sessionId)
+}
+
+function cycleActivity(direction: 1 | -1) {
+  const sorted = buildActivityList()
+  if (!sorted.length) return
+
+  const workId = activeWorkId.value
+  const currentIdx = sorted.findIndex(item => activityWorkId(item) === workId)
+  const next = currentIdx === -1
+    ? 0
+    : (currentIdx + direction + sorted.length) % sorted.length
+
+  navigateToActivity(sorted[next])
+}
+
+async function openNextActivity(closingEntryId: string) {
+  const sorted = buildActivityList()
+  const idx = sorted.findIndex(item => activityWorkId(item) === closingEntryId)
+  const remaining = sorted.filter(item => activityWorkId(item) !== closingEntryId)
+  if (remaining.length) {
+    const nextIdx = idx <= 0 ? 0 : Math.min(idx, remaining.length) - 1
+    navigateToActivity(remaining[nextIdx])
+  } else {
+    await openDraftChatWork()
+  }
 }
 
 const appLifecycleActions = createAppLifecycleActions({
@@ -1144,6 +1238,7 @@ onBeforeUnmount(() => {
             @open-file-history="openFileHistory"
             @new-file="createUntitledInEditor"
             @open-file-dialog="openFileViaDialog"
+            @path-moved="handleFilePathMoved"
             @open-package="openPackageFromWork"
             @open-session="onArchiveOpenSession"
             @archive-session="archiveSession"

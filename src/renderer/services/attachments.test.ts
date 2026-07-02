@@ -115,12 +115,13 @@ describe('toFileUIParts', () => {
 describe('toContextUIParts', () => {
   it('converts text attachments to structured data-context parts', () => {
     expect(toContextUIParts([
-      { filename: 'notes.md', mediaType: 'text/markdown', content: '# Notes', size: 7 },
+      { filename: 'notes.md', path: 'docs/notes.md', mediaType: 'text/markdown', content: '# Notes', size: 7 },
     ])).toEqual([
       {
         type: 'data-context',
         data: {
           filename: 'notes.md',
+          path: 'docs/notes.md',
           mediaType: 'text/markdown',
           content: '# Notes',
           size: 7,

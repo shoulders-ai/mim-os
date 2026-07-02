@@ -10,6 +10,7 @@ export interface KeyboardActionDeps {
   navigateWorkHistory(direction: 'back' | 'forward'): Promise<unknown> | unknown
   navigateArtifactHistory(direction: 'back' | 'forward'): Promise<unknown> | unknown
   cycleSession(direction: 1 | -1): void
+  cycleActivity(direction: 1 | -1): void
   nextTick(): Promise<void>
 }
 
@@ -48,6 +49,12 @@ export async function runKeyAction(action: Exclude<KeyAction, null>, deps: Keybo
       break
     case 'session-prev':
       deps.cycleSession(-1)
+      break
+    case 'activity-next':
+      deps.cycleActivity(1)
+      break
+    case 'activity-prev':
+      deps.cycleActivity(-1)
       break
   }
 }

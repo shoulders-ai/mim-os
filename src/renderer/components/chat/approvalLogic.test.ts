@@ -23,6 +23,11 @@ describe('approval logic', () => {
       category: 'network',
       savedBrowserSession: { domain: 'news.example', granted: false },
     })).toBe('Allow Mim to use your access to news.example?')
+    expect(approvalQuestion({
+      toolName: 'web.live.open',
+      category: 'network',
+      savedBrowserSession: { domain: 'app.example', granted: false },
+    })).toBe('Allow Mim to use your access to app.example?')
   })
 
   it('falls back to the category, then a readable tool name', () => {
@@ -53,6 +58,8 @@ describe('approval logic', () => {
       .toBe('rm -rf build')
     expect(targetDisplay({ toolName: 'fs.rename', params: { old_path: 'a.md', new_path: 'b.md' } }))
       .toBe('a.md → b.md')
+    expect(targetDisplay({ toolName: 'web.live.open', params: { url: 'https://example.com/app' } }))
+      .toBe('https://example.com/app')
   })
 
   it('renders commands as wrapping blocks, paths as single lines', () => {

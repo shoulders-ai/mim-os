@@ -170,6 +170,45 @@ export function upsertContextChip(chips: ContextChip[], item: ComposerAtItem) {
   return [...chips, nextChip]
 }
 
+export function projectFileContextAttachment(
+  chip: ContextChip,
+  content: string,
+  mediaType: string,
+) {
+  const path = chip.path || chip.id
+  return {
+    filename: chip.label || path.split('/').pop() || path,
+    path,
+    mediaType,
+    content,
+    type: 'text',
+    size: textByteSize(content),
+    _contextChipId: chip.id,
+  }
+}
+
+export function documentContextAttachment(
+  chip: ContextChip,
+  document: { name?: string; path?: string; content?: string },
+  mediaType: string,
+) {
+  const filename = document.name || document.path?.split('/').pop() || 'current-document.md'
+  const content = document.content || ''
+  return {
+    filename,
+    ...(document.path ? { path: document.path } : {}),
+    mediaType,
+    content,
+    type: 'text',
+    size: textByteSize(content),
+    _contextChipId: chip.id,
+  }
+}
+
+function textByteSize(text: string): number {
+  return new TextEncoder().encode(text).byteLength
+}
+
 export function groupAtItems(items: ComposerAtItem[]) {
   const groups: Array<{ label: string; items: ComposerAtItem[] }> = []
   for (const item of items) {

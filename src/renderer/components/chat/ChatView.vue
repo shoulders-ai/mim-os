@@ -2,6 +2,10 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, onDeactivated } from 'vue'
 import { Chat } from '@ai-sdk/vue'
 import { DefaultChatTransport } from 'ai'
+import {
+  compactBrowserToolResultsForContext,
+  estimateMessagesTokens,
+} from '@main/ai/messageCompaction.js'
 import { useSessionStore } from '../../stores/sessions.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useApprovalsStore } from '../../stores/approvals.js'
@@ -10,7 +14,7 @@ import { chatErrorActions, readableError } from './chatErrorActions.js'
 import { isTextType, mediaTypeFromFilename, toUserMessageParts } from '../../services/attachments.js'
 import { isPlaceholderTaskLabel, provisionalTaskLabel, requestTaskLabel, shouldRequestTaskLabel, taskLabelContextLabels } from '../../services/ai/taskLabel.js'
 import { getCurrentDocument, getCurrentDocumentSummary, subscribeCurrentDocument } from '../../services/currentDocument.js'
-import { modelSupportsVision } from './composerLogic.js'
+import { documentContextAttachment, modelSupportsVision, projectFileContextAttachment } from './composerLogic.js'
 import ChatMessage from './ChatMessage.vue'
 import InlineApproval from './InlineApproval.vue'
 import ChatComposer from './ChatComposer.vue'
@@ -79,6 +83,18 @@ function finishMessagesWithElapsed(sessionId, chat) {
   const messagesWithElapsed = withLastAssistantTurnElapsed(chat.messages ?? [], elapsedMs)
   if (messagesWithElapsed !== chat.messages) replaceChatMessages(chat, messagesWithElapsed)
   return messagesWithElapsed
+}
+
+async function compactChatHistoryForContext(sessionId, chat) {
+  const result = compactBrowserToolResultsForContext(chat.messages ?? [])
+  if (!result.changed) return
+  replaceChatMessages(chat, result.messages)
+  await sessionStore.update(sessionId, { messages: result.messages }).catch((err) => {
+    logChatAi('warn', 'context-compact:persist-failed', {
+      sessionId,
+      message: readableError(err),
+    })
+  })
 }
 
 const activeSessionId = computed(() => (
@@ -164,7 +180,11 @@ const concreteModel = computed(() =>
 const needsApiKey = computed(() => settingsStore.loaded && !settingsStore.anyKeyConfigured)
 
 const contextWindow = computed(() => concreteModel.value?.contextWindow || 0)
-const contextTokens = computed(() => session.value?.lastContextTokens || 0)
+const estimatedContextTokens = computed(() => {
+  if (session.value?.lastContextTokens) return 0
+  return estimateMessagesTokens(messages.value)
+})
+const contextTokens = computed(() => session.value?.lastContextTokens || estimatedContextTokens.value || 0)
 
 const contextPercent = computed(() => {
   if (!contextWindow.value || !contextTokens.value) return 0
@@ -507,6 +527,7 @@ async function handleSend({ text, attachments, contextChips }) {
   // messages computed (which drives auto-scroll), and completion is handled by
   // the Chat's onFinish/onError callbacks. No polling required.
   try {
+    await compactChatHistoryForContext(sessionId, chat)
     sessionStore.startTurnTimer(sessionId)
     await chat.sendMessage(sendPayload, selectedSkillIds.length ? { body: { skills: selectedSkillIds } } : undefined)
   } catch (err) {
@@ -598,14 +619,7 @@ async function resolveContextChips(chips) {
       }
       const content = result?.content ?? ''
       const mediaType = chip.mediaType || mediaTypeFromFilename(path) || 'text/plain'
-      resolved.push({
-        filename: chip.label || path.split('/').pop() || path,
-        mediaType,
-        content,
-        type: 'text',
-        size: new Blob([content]).size,
-        _contextChipId: chip.id,
-      })
+      resolved.push(projectFileContextAttachment({ ...chip, path }, content, mediaType))
       continue
     }
 
@@ -614,14 +628,7 @@ async function resolveContextChips(chips) {
       if (!document) throw new Error('Current document context is not available')
       const filename = document.name || document.path?.split('/').pop() || 'current-document.md'
       const mediaType = document.mediaType || mediaTypeFromFilename(filename) || 'text/plain'
-      resolved.push({
-        filename,
-        mediaType,
-        content: document.content || '',
-        type: 'text',
-        size: new Blob([document.content || '']).size,
-        _contextChipId: chip.id,
-      })
+      resolved.push(documentContextAttachment(chip, document, mediaType))
       continue
     }
 

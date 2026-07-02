@@ -80,7 +80,7 @@ export function actionPhrase(approval: ApprovalLike): string {
 
 export function approvalQuestion(approval: ApprovalLike): string {
   const domain = approval.savedBrowserSession?.domain
-  if (approval.toolName === 'web.read' && domain) {
+  if ((approval.toolName === 'web.read' || approval.toolName === 'web.live.open') && domain) {
     return `Allow Mim to use your access to ${domain}?`
   }
   return `Allow Mim to ${actionPhrase(approval)}?`
@@ -96,7 +96,7 @@ function asString(value: unknown): string {
 // passed over the resolved absolute path.
 export function targetDisplay(approval: ApprovalLike): string {
   const params = approval.params ?? {}
-  if (approval.toolName === 'web.read') return asString(params.url) || asString(approval.target)
+  if (approval.toolName === 'web.read' || approval.toolName === 'web.live.open') return asString(params.url) || asString(approval.target)
   if (approval.toolName === 'fs.rename') {
     const from = asString(params.old_path)
     const to = asString(params.new_path)
