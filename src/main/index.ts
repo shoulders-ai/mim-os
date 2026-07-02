@@ -34,6 +34,7 @@ import { registerInstallTools } from '@main/tools/install.js'
 import { DEFAULT_CACHE_ROOT } from '@main/packages/cacheLayout.js'
 import { registerBridgeTools } from '@main/tools/bridge.js'
 import { readTraceCaptureContent, readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
+import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
 import { registerSessionTools } from '@main/sessions.js'
 import { registerArchiveTools } from '@main/tools/archive.js'
 import { registerAiTools } from '@main/ai/ai.js'
@@ -44,7 +45,7 @@ import { registerSearchTools } from '@main/tools/search.js'
 import { registerGitTools } from '@main/tools/git.js'
 import { registerSyncTools } from '@main/tools/sync.js'
 import { registerTraceTools } from '@main/tools/trace.js'
-import { createHistoryStore } from '@main/history/history.js'
+import { createHistoryStore, type HistoryStore } from '@main/history/history.js'
 import { registerHistoryTools } from '@main/tools/history.js'
 import { registerDocumentTools } from '@main/tools/documents.js'
 import { registerRenderTools } from '@main/tools/render.js'
@@ -58,6 +59,7 @@ import { registerCoreAppTools } from '@main/tools/coreApps.js'
 import { checkForUpdates } from '@main/packages/updateCheck.js'
 import { registerLogbookTools } from '@main/tools/logbook.js'
 import { registerWebTools } from '@main/tools/web.js'
+import { createElectronLiveBrowserDriver } from '@main/web/liveBrowser.js'
 import { renderUrlInHiddenWindow } from '@main/web/renderedBrowser.js'
 import {
   clearBrowserSessionProfile,
@@ -86,6 +88,12 @@ import { createWorkspaceFileWatcher } from '@main/workspace/workspaceFileWatcher
 import { toSlashPath, userHomeDir } from '@main/platform.js'
 
 const HOME_DIR = userHomeDir()
+const AUTO_HISTORY_BASELINE_DELAY_MS = 2_000
+const AUTO_HISTORY_BASELINE_OPTIONS = {
+  maxScanned: 1_000,
+  maxCaptured: 200,
+  maxDurationMs: 750,
+} as const
 import { readAttachmentPaths } from '@main/attachments.js'
 import { initSearchDb, closeSearchDb, rebuildIndex } from '@main/search/search.js'
 import { getSystemPrompt } from '@main/ai/systemPrompt.js'
@@ -98,6 +106,7 @@ let workspaceFileWatcher: ReturnType<typeof createWorkspaceFileWatcher> | null =
 let telemetryShutdown: (() => Promise<void>) | null = null
 let appUpdateInitialTimer: ReturnType<typeof setTimeout> | null = null
 let appUpdateInterval: ReturnType<typeof setInterval> | null = null
+let historyBaselineTimer: ReturnType<typeof setTimeout> | null = null
 
 export const OPEN_DIRECTORY_DIALOG_PROPERTIES = ['openDirectory', 'createDirectory'] as const
 
@@ -120,6 +129,14 @@ export function mainWindowChromeOptions(platform: NodeJS.Platform = process.plat
     // NAVIGATOR_HEADER_BRIDGE_INSET.
     trafficLightPosition: { x: 14, y: 14 },
   }
+}
+
+function scheduleAutoHistoryBaseline(history: HistoryStore): void {
+  if (historyBaselineTimer != null) clearTimeout(historyBaselineTimer)
+  historyBaselineTimer = setTimeout(() => {
+    historyBaselineTimer = null
+    try { history.baselineWorkspace(AUTO_HISTORY_BASELINE_OPTIONS) } catch { /* local history baseline is best-effort */ }
+  }, AUTO_HISTORY_BASELINE_DELAY_MS)
 }
 
 export function createMainWindow(): BrowserWindow {
@@ -323,7 +340,7 @@ async function boot(): Promise<void> {
     getPackagePermissions: (packageId) => packages?.get(packageId)?.manifest.permissions,
     getDynamicToolPolicy: (name) => namedPackageTools?.getPolicy(name),
     resolveSavedBrowserSessionGrant: (toolName, params) => {
-      if (toolName !== 'web.read' || params.stateful !== true || typeof params.url !== 'string') return null
+      if ((toolName !== 'web.read' && toolName !== 'web.live.open') || params.stateful !== true || typeof params.url !== 'string') return null
       const ws = tools.getWorkspacePath()
       if (!ws) return null
       try {
@@ -369,7 +386,6 @@ async function boot(): Promise<void> {
   workspaceFileWatcher = createWorkspaceFileWatcher({
     emit: (channel, payload) => {
       mainWindow?.webContents.send(channel, payload)
-      server?.broadcast(channel, payload)
       for (const change of payload.changes) {
         traceOutcomes.observeFileChange(change)
         history.observeFileChange(change)
@@ -387,6 +403,7 @@ async function boot(): Promise<void> {
   registerWorkspaceTools(tools)
   registerBridgeTools(tools)
   registerSettingsTools(tools)
+  registerToolPolicyTools(tools)
   // Registered here (not a tools/ module) because it needs the Electron app
   // handle; the headless server never has these versions to report.
   tools.register({
@@ -436,6 +453,9 @@ async function boot(): Promise<void> {
     renderSavedBrowserSessionPage: renderUrlInBrowserSession,
     openSavedBrowserSession: openBrowserSessionWindow,
     clearSavedBrowserSessionProfile: clearBrowserSessionProfile,
+    liveBrowser: createElectronLiveBrowserDriver({
+      getWorkspacePath: () => tools.getWorkspacePath(),
+    }),
   })
   const slackMcp = registerSlackTools(tools)
   const googleMcp = registerGoogleTools(tools, {
@@ -566,9 +586,7 @@ async function boot(): Promise<void> {
   }
 
   await workspaceFileWatcher.setWorkspace(bootWorkspace)
-  setImmediate(() => {
-    try { history.baselineWorkspace() } catch { /* local history baseline is best-effort */ }
-  })
+  scheduleAutoHistoryBaseline(history)
   syncWorkspaceMounts(bootWorkspace)
   recordLastWorkspace(HOME_DIR, bootWorkspace)
   try { initSearchDb(bootWorkspace) } catch { /* search db init non-fatal */ }
@@ -742,9 +760,7 @@ async function boot(): Promise<void> {
     await tools.call('workspace.open', { path }, { actor: 'user' })
     telemetry.track('workspace_open')
     await workspaceFileWatcher?.setWorkspace(path)
-    setImmediate(() => {
-      try { history.baselineWorkspace() } catch { /* local history baseline is best-effort */ }
-    })
+    scheduleAutoHistoryBaseline(history)
     syncWorkspaceMounts(path)
     recordLastWorkspace(HOME_DIR, path)
     try { closeSearchDb(); initSearchDb(path) } catch { /* search db init non-fatal */ }
@@ -777,6 +793,14 @@ async function boot(): Promise<void> {
     if (typeof path !== 'string' || path.length === 0) return null
     return openWorkspacePath(path)
   })
+
+  ipcMain.handle('kernel:watch-workspace-file', async (_event, path: string) => ({
+    watching: typeof path === 'string' ? workspaceFileWatcher?.watchFile(path) === true : false,
+  }))
+
+  ipcMain.handle('kernel:unwatch-workspace-file', async (_event, path: string) => ({
+    unwatched: typeof path === 'string' ? await workspaceFileWatcher?.unwatchFile(path) === true : false,
+  }))
 
   ipcMain.handle('kernel:open-folder-dialog', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
@@ -840,11 +864,16 @@ async function boot(): Promise<void> {
     if (result.canceled || result.filePaths.length === 0) {
       return { attachments: [] }
     }
-    return { attachments: readAttachmentPaths(result.filePaths) }
+    return { attachments: readAttachmentPaths(result.filePaths, { workspacePath: tools.getWorkspacePath() }) }
   })
 
   ipcMain.handle('kernel:read-attachments', async (_event, paths: string[]) => {
-    return { attachments: readAttachmentPaths(paths.filter(path => typeof path === 'string' && path.length > 0)) }
+    return {
+      attachments: readAttachmentPaths(
+        paths.filter(path => typeof path === 'string' && path.length > 0),
+        { workspacePath: tools.getWorkspacePath() },
+      ),
+    }
   })
 
   ipcMain.handle('kernel:create-directory', async (_event, dirPath: string) => {
@@ -1031,6 +1060,10 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   clearAppUpdateTimers()
+  if (historyBaselineTimer != null) {
+    clearTimeout(historyBaselineTimer)
+    historyBaselineTimer = null
+  }
   void telemetryShutdown?.()
   telemetryShutdown = null
   void workspaceFileWatcher?.close()

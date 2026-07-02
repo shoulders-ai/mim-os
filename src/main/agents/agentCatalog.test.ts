@@ -3,8 +3,9 @@ import {
   AGENT_CATALOG,
   detectAgents,
   resetAgentDetection,
-  sessionIdArgs,
   resumeArgs,
+  cliSessionsDir,
+  extractCodexSessionId,
   type DetectedAgent,
   type ExecLoginShell,
 } from '@main/agents/agentCatalog.js'
@@ -29,30 +30,64 @@ describe('agent catalog', () => {
   })
 })
 
-describe('sessionIdArgs', () => {
-  it('returns empty for all agents (CLIs manage their own session IDs)', () => {
-    expect(sessionIdArgs('claude-code', 'abc-123')).toEqual([])
-    expect(sessionIdArgs('codex', 'abc-123')).toEqual([])
-    expect(sessionIdArgs('gemini-cli', 'abc-123')).toEqual([])
-    expect(sessionIdArgs('unknown', 'abc-123')).toEqual([])
-  })
-})
-
 describe('resumeArgs', () => {
-  it('returns --continue for claude-code', () => {
-    expect(resumeArgs('claude-code', 'abc-123')).toEqual(['--continue'])
+  it('returns --resume <cliSessionId> for claude-code when detected', () => {
+    expect(resumeArgs('claude-code', 'cc-uuid-456')).toEqual(['--resume', 'cc-uuid-456'])
   })
 
-  it('returns resume --last for codex', () => {
-    expect(resumeArgs('codex', 'abc-123')).toEqual(['resume', '--last'])
+  it('falls back to --continue for claude-code when no cliSessionId', () => {
+    expect(resumeArgs('claude-code')).toEqual(['--continue'])
   })
 
-  it('returns --resume latest for gemini-cli', () => {
-    expect(resumeArgs('gemini-cli', 'abc-123')).toEqual(['--resume', 'latest'])
+  it('returns resume <cliSessionId> for codex when detected', () => {
+    expect(resumeArgs('codex', 'codex-uuid-789')).toEqual(['resume', 'codex-uuid-789'])
+  })
+
+  it('falls back to resume --last for codex when no cliSessionId', () => {
+    expect(resumeArgs('codex')).toEqual(['resume', '--last'])
+  })
+
+  it('returns --session-file for gemini-cli when cliSessionId and cwd provided', () => {
+    const home = process.env.HOME || ''
+    const result = resumeArgs('gemini-cli', 'session-2026-06-25T13-45-abc12345', '/Users/waqr/Desktop/mim-os')
+    expect(result).toEqual(['--session-file', `${home}/.gemini/tmp/mim-os/chats/session-2026-06-25T13-45-abc12345.jsonl`])
+  })
+
+  it('falls back to --resume latest for gemini-cli when no cliSessionId', () => {
+    expect(resumeArgs('gemini-cli')).toEqual(['--resume', 'latest'])
   })
 
   it('returns empty for unknown agents', () => {
-    expect(resumeArgs('unknown', 'abc-123')).toEqual([])
+    expect(resumeArgs('unknown')).toEqual([])
+  })
+})
+
+describe('cliSessionsDir', () => {
+  it('returns Claude Code project sessions path', () => {
+    const home = process.env.HOME || ''
+    expect(cliSessionsDir('claude-code', '/Users/waqr/Desktop/mim-os'))
+      .toBe(`${home}/.claude/projects/-Users-waqr-Desktop-mim-os`)
+  })
+
+  it('returns Gemini sessions path using basename of cwd', () => {
+    const home = process.env.HOME || ''
+    expect(cliSessionsDir('gemini-cli', '/Users/waqr/Desktop/mim-os'))
+      .toBe(`${home}/.gemini/tmp/mim-os/chats`)
+  })
+
+  it('returns null for codex (date-based, computed at snapshot time)', () => {
+    expect(cliSessionsDir('codex', '/workspace')).toBeNull()
+  })
+})
+
+describe('extractCodexSessionId', () => {
+  it('extracts UUID from codex session filename', () => {
+    expect(extractCodexSessionId('rollout-2026-06-28T17-12-01-019f0ec9-9bf9-73f0-8d38-9f98d67a8668.jsonl'))
+      .toBe('019f0ec9-9bf9-73f0-8d38-9f98d67a8668')
+  })
+
+  it('returns undefined for non-matching filenames', () => {
+    expect(extractCodexSessionId('something-else.jsonl')).toBeUndefined()
   })
 })
 

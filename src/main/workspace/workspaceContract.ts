@@ -145,7 +145,7 @@ Apps use the SDK at /sdk/mim.js to interact with the kernel:
 </html>
 \`\`\`
 
-When the user asks you to build a UI, create an app. Use plain HTML + JS with the SDK. The tokens.css file provides design tokens (--color-ink, --color-accent, --font-sans, etc.) so apps match the Mim aesthetic.
+When the user asks you to build a UI, create an app. Use plain HTML + JS with the SDK. The tokens.css file provides design tokens that follow the user's theme. Always use var(--color-*), var(--font-*), var(--radius-*), and var(--space-*) — never hardcode colors or fonts.
 
 ## Skills
 
@@ -157,10 +157,15 @@ When the user asks you to build a UI, create an app. Use plain HTML + JS with th
 - Committed contract files are \`mim.yaml\`, \`AGENTS.md\`, and \`CLAUDE.md\`. Keep them deterministic; do not write volatile state (dates, inbox/calendar summaries, secrets) into them.
 - Runtime state lives in \`.mim/\` and is gitignored. Do not commit it.
 - Issues live in \`issues/\` and knowledge in \`knowledge/\` when those folders exist. They are optional.
+- Attached-file context blocks with a \`path\` attribute identify a workspace-relative file path; use that path with fs.* tools when you need to inspect or edit the file. Direct attachments may only have a name.
 
 ## Workspace context
 
 {{AGENT_CONTEXT}}
+
+## Workspace tree
+
+{{WORKSPACE_TREE}}
 
 ## Project log
 

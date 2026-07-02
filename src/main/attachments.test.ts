@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { MAX_ATTACHMENT_BYTES, mediaTypeFromPath, readAttachmentPath } from '@main/attachments.js'
@@ -27,6 +27,39 @@ describe('main attachment reader', () => {
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('annotates workspace files with workspace-relative paths', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mim-attachment-test-'))
+    try {
+      mkdirSync(join(dir, 'docs'), { recursive: true })
+      const path = join(dir, 'docs', 'notes.md')
+      writeFileSync(path, '# Notes', 'utf-8')
+
+      expect(readAttachmentPath(path, { workspacePath: dir })).toMatchObject({
+        filename: 'notes.md',
+        path: 'docs/notes.md',
+        mediaType: 'text/markdown',
+        type: 'text',
+        content: '# Notes',
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not annotate arbitrary symlink escapes as workspace paths', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mim-attachment-test-'))
+    const outside = mkdtempSync(join(tmpdir(), 'mim-attachment-outside-'))
+    try {
+      writeFileSync(join(outside, 'secret.md'), '# Secret', 'utf-8')
+      symlinkSync(outside, join(dir, 'linked'), 'dir')
+
+      expect(readAttachmentPath(join(dir, 'linked', 'secret.md'), { workspacePath: dir })).not.toHaveProperty('path')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(outside, { recursive: true, force: true })
     }
   })
 

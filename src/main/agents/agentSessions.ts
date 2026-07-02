@@ -13,7 +13,7 @@ import { dirname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { atomicWriteJson } from '@main/atomicJson.js'
 import { createAgentStatusTracker, type AgentRuntimeStatus, type AgentStatusTracker } from '@main/agents/agentStatus.js'
-import { resumeArgs as catalogResumeArgs, cliSessionsDir } from '@main/agents/agentCatalog.js'
+import { resumeArgs as catalogResumeArgs, cliSessionsDir, extractCodexSessionId } from '@main/agents/agentCatalog.js'
 import type { DetectedAgent } from '@main/agents/agentCatalog.js'
 import type { PtyHandle, PtySpawnOptions } from '@main/pty.js'
 
@@ -95,6 +95,8 @@ interface LiveSession {
   lastStatus: AgentRuntimeStatus
   lastTitleHint: string | undefined
   mcpToken?: string
+  preSpawnSessions?: Set<string>
+  preSpawnDir?: string
 }
 
 export function createAgentSessions(options: AgentSessionsOptions): AgentSessions {
@@ -210,8 +212,26 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     }
   }
 
+  function detectCliSessionId(live: LiveSession): void {
+    const dir = live.preSpawnDir
+    if (!dir || !existsSync(dir)) return
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.jsonl')) continue
+      if (live.preSpawnSessions!.has(f)) continue
+      if (live.record.agentId === 'codex') {
+        live.record.cliSessionId = extractCodexSessionId(f)
+      } else {
+        live.record.cliSessionId = f.replace('.jsonl', '')
+      }
+      live.preSpawnSessions = undefined
+      if (live.record.cliSessionId) persist(live.record)
+      return
+    }
+  }
+
   function onData(live: LiveSession, chunk: string): void {
     appendScrollback(live, chunk)
+    if (live.preSpawnSessions) detectCliSessionId(live)
     live.tracker.feed(chunk)
     const status = live.tracker.status()
     const hint = live.tracker.titleHint()
@@ -248,22 +268,39 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     emitEvent('session.exited', { ...live.record })
   }
 
+  function snapshotCliSessions(agentId: string, cwd: string): { dir: string; ids: Set<string> } | undefined {
+    let dir = cliSessionsDir(agentId, cwd)
+    if (!dir && agentId === 'codex') {
+      const home = process.env.HOME || process.env.USERPROFILE || ''
+      const d = now()
+      dir = join(home, '.codex', 'sessions',
+        String(d.getFullYear()),
+        String(d.getMonth() + 1).padStart(2, '0'),
+        String(d.getDate()).padStart(2, '0'))
+    }
+    if (!dir || !existsSync(dir)) return undefined
+    const ids = new Set<string>()
+    for (const f of readdirSync(dir)) {
+      if (f.endsWith('.jsonl')) ids.add(f)
+    }
+    return { dir, ids }
+  }
+
   function launch(agent: DetectedAgent): { record: AgentSessionRuntime; ptyId: number } {
     if (!agent.installed || !agent.binPath) throw new Error(`Agent not installed: ${agent.id}`)
     const cwd = requireWorkspace()
     const sessionId = generateId()
     const mcpToken = options.createMcpToken(sessionId)
-    const sidArgs = sessionIdArgs(agent.id, sessionId)
-    const spawnArgs = [...agent.args, ...sidArgs]
     const record: AgentSessionRecord = {
       sessionId,
       agentId: agent.id,
       title: defaultTitle(agent.name),
-      command: [agent.binPath, ...spawnArgs].join(' '),
+      command: [agent.binPath, ...agent.args].join(' '),
       cwd,
       status: 'running',
       startedAt: now().toISOString(),
     }
+    const snapshot = snapshotCliSessions(agent.id, cwd)
     const tracker = createAgentStatusTracker({ idleThresholdMs })
     const live: LiveSession = {
       record,
@@ -275,11 +312,13 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
       lastStatus: tracker.status(),
       lastTitleHint: tracker.titleHint(),
       mcpToken,
+      preSpawnSessions: snapshot?.ids,
+      preSpawnDir: snapshot?.dir,
     }
     try {
       live.handle = options.spawnPty({
         file: agent.binPath,
-        args: spawnArgs,
+        args: agent.args,
         cwd,
         env: {
           MIM_PORT: String(options.getMcpServerPort()),
@@ -304,7 +343,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     const record = requireRecord(sessionId)
     if (record.status === 'running') throw new Error(`Agent session is already running: ${sessionId}`)
 
-    const rArgs = catalogResumeArgs(record.agentId, sessionId)
+    const rArgs = catalogResumeArgs(record.agentId, record.cliSessionId, record.cwd)
     const mcpToken = options.createMcpToken(sessionId)
 
     record.status = 'running'

@@ -102,15 +102,27 @@ export function resetAgentDetection(): void {
   cache = null
 }
 
-export function resumeArgs(agentId: string, cliSessionId?: string): string[] {
+export function resumeArgs(agentId: string, cliSessionId?: string, cwd?: string): string[] {
   if (agentId === 'claude-code') return cliSessionId ? ['--resume', cliSessionId] : ['--continue']
-  if (agentId === 'codex') return ['resume', '--last']
-  if (agentId === 'gemini-cli') return ['--resume', 'latest']
+  if (agentId === 'codex') return cliSessionId ? ['resume', cliSessionId] : ['resume', '--last']
+  if (agentId === 'gemini-cli') {
+    if (cliSessionId && cwd) {
+      const dir = cliSessionsDir('gemini-cli', cwd)
+      if (dir) return ['--session-file', join(dir, `${cliSessionId}.jsonl`)]
+    }
+    return ['--resume', 'latest']
+  }
   return []
 }
 
 export function cliSessionsDir(agentId: string, cwd: string): string | null {
-  if (agentId !== 'claude-code') return null
   const home = process.env.HOME || process.env.USERPROFILE || ''
-  return join(home, '.claude', 'projects', cwd.replace(/[\\/]/g, '-'))
+  if (agentId === 'claude-code') return join(home, '.claude', 'projects', cwd.replace(/[\\/]/g, '-'))
+  if (agentId === 'gemini-cli') return join(home, '.gemini', 'tmp', basename(cwd), 'chats')
+  return null
+}
+
+export function extractCodexSessionId(filename: string): string | undefined {
+  const match = filename.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/)
+  return match?.[1]
 }

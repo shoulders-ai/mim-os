@@ -3,6 +3,7 @@ import { dirname, join } from 'path'
 import type { ToolRegistry } from '@main/tools/registry.js'
 import { indexSession, removeSessionFromIndex } from '@main/search/search.js'
 import { writeAgentContext } from '@main/ai/agentContext.js'
+import { compactBrowserToolResultsForContext } from '@main/ai/messageCompaction.js'
 import { atomicWriteJson } from '@main/atomicJson.js'
 import { loadManifest, upsertManifestEntry, removeManifestEntry, extractManifestEntry } from '@main/sessionManifest.js'
 
@@ -169,7 +170,10 @@ export function registerSessionTools(tools: ToolRegistry, options: SessionToolOp
       if (params.label !== undefined) session.label = params.label as string
       if (params.modelId !== undefined) session.modelId = params.modelId as string
       if (params.controlId !== undefined) session.controlId = params.controlId as string
-      if (params.messages !== undefined) session.messages = params.messages as SessionMessage[]
+      if (params.messages !== undefined) {
+        const compacted = compactBrowserToolResultsForContext(params.messages as SessionMessage[])
+        session.messages = compacted.messages
+      }
       if (params.usage !== undefined) Object.assign(session.usage, params.usage)
       if (params.lastContextTokens !== undefined) session.lastContextTokens = params.lastContextTokens as number
       if (params.lastInputTokens !== undefined) session.lastInputTokens = params.lastInputTokens as number

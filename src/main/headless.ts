@@ -40,6 +40,7 @@ import { registerTraceTools } from '@main/tools/trace.js'
 import { createHistoryStore } from '@main/history/history.js'
 import { registerHistoryTools } from '@main/tools/history.js'
 import { readTraceCaptureContent, readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
+import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
 import { registerSlackTools } from '@main/integrations/slack/tools.js'
 import { registerGoogleTools } from '@main/integrations/google/tools.js'
 import { registerWebTools } from '@main/tools/web.js'
@@ -127,6 +128,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   registerCommentTools(tools)
   registerWorkspaceTools(tools)
   registerSettingsTools(tools)
+  registerToolPolicyTools(tools)
   registerSessionTools(tools)
   registerArchiveTools(tools)
   registerAiTools(tools)
@@ -249,7 +251,7 @@ function createHeadlessGate(
     getWorkspacePath,
     getDynamicToolPolicy,
     resolveSavedBrowserSessionGrant: (toolName, params) => {
-      if (toolName !== 'web.read' || params.stateful !== true || typeof params.url !== 'string') return null
+      if ((toolName !== 'web.read' && toolName !== 'web.live.open') || params.stateful !== true || typeof params.url !== 'string') return null
       const ws = getWorkspacePath()
       if (!ws) return null
       try {

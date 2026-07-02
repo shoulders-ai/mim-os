@@ -105,6 +105,13 @@ export interface HistoryBaselineResult {
   scanned: number
   captured: number
   skipped: number
+  truncated: boolean
+}
+
+export interface HistoryBaselineOptions {
+  maxScanned?: number
+  maxCaptured?: number
+  maxDurationMs?: number
 }
 
 export interface HistoryPruneResult {
@@ -129,7 +136,7 @@ export interface HistoryToolObserver {
 export interface HistoryStore {
   captureFile(path: string, meta: HistoryCaptureMeta): HistoryVersion | null
   captureDeletion(path: string, meta: HistoryCaptureMeta): HistoryVersion | null
-  baselineWorkspace(): HistoryBaselineResult
+  baselineWorkspace(options?: HistoryBaselineOptions): HistoryBaselineResult
   observeFileChange(change: { path: string; kind: string }): void
   listFileVersions(path: string, options?: { includeFolded?: boolean }): HistoryListResult
   previewVersion(path: string, versionId: string): HistoryPreviewResult
@@ -287,14 +294,29 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
     }, { ...meta, anchor: meta.anchor ?? true })
   }
 
-  function baselineWorkspace(): HistoryBaselineResult {
+  function baselineWorkspace(options: HistoryBaselineOptions = {}): HistoryBaselineResult {
     const ws = workspace()
     const ignore = loadIgnoreMatcher(ws)
+    const index = readIndex(ws)
+    const startedAt = Date.now()
     let scanned = 0
     let captured = 0
     let skipped = 0
+    let truncated = false
+    let changed = false
+
+    function hitLimit(): boolean {
+      if (options.maxScanned !== undefined && scanned >= options.maxScanned) return true
+      if (options.maxCaptured !== undefined && captured >= options.maxCaptured) return true
+      if (options.maxDurationMs !== undefined && Date.now() - startedAt >= options.maxDurationMs) return true
+      return false
+    }
 
     function walk(dir: string): void {
+      if (hitLimit()) {
+        truncated = true
+        return
+      }
       let entries: ReturnType<typeof readdirSync>
       try {
         entries = readdirSync(dir, { withFileTypes: true })
@@ -303,6 +325,10 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
       }
 
       for (const entry of entries) {
+        if (hitLimit()) {
+          truncated = true
+          return
+        }
         const fullPath = join(dir, entry.name)
         const relPath = toSlashPath(relative(ws, fullPath))
         if (!relPath || shouldSkipGenerated(relPath) || ignore(relPath)) {
@@ -323,12 +349,21 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
           skipped++
           continue
         }
-        if (captureFile(relPath, { actor: 'system', event: 'baseline' })) captured++
+        const snapshot = snapshotExistingFile(relPath, fullPath, before.size)
+        if (!snapshot) {
+          skipped++
+          continue
+        }
+        if (appendSnapshotVersion(index, ws, snapshot, { actor: 'system', event: 'baseline' }, { assumeEligible: true })) {
+          captured++
+          changed = true
+        }
       }
     }
 
     walk(ws)
-    return { scanned, captured, skipped }
+    if (changed) writeIndex(ws, index)
+    return { scanned, captured, skipped, truncated }
   }
 
   function observeFileChange(change: { path: string; kind: string }): void {
@@ -540,7 +575,7 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
     }
 
     if (tool === 'fs.write' || tool === 'fs.writeBytes') add(params.path, 'before-write')
-    else if (tool === 'fs.edit') add(params.path, 'before-edit')
+    else if (tool === 'fs.edit' || isCommentMutationTool(tool)) add(params.path, 'before-edit')
     else if (tool === 'fs.delete' || tool === 'fs.trash') add(params.path, 'before-delete', true)
     else if (tool === 'fs.rename') add(params.old_path, 'before-rename', true)
     else if (tool === 'documents.importMarkdown') add(params.output_path, 'before-write')
@@ -580,7 +615,7 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
     const pendingCount = Array.isArray(pending) ? pending.length : 0
 
     if (tool === 'fs.write' || tool === 'fs.writeBytes') capture(params.path, pendingCount === 0 ? 'create' : 'after-write')
-    else if (tool === 'fs.edit') capture(params.path, 'after-edit')
+    else if (tool === 'fs.edit' || isCommentMutationTool(tool)) capture(params.path, 'after-edit')
     else if (tool === 'fs.create') capture(params.path, 'create', true)
     else if (tool === 'fs.delete' || tool === 'fs.trash') deletion(params.path, 'delete', true)
     else if (tool === 'fs.rename') {
@@ -595,12 +630,29 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
     }
   }
 
+  function isCommentMutationTool(tool: string): boolean {
+    return tool === 'comments.add' || tool === 'comments.reply' || tool === 'comments.resolve'
+  }
+
   function persistSnapshot(ws: string, snapshot: Snapshot, meta: HistoryCaptureMeta): HistoryVersion | null {
+    const index = readIndex(ws)
+    const version = appendSnapshotVersion(index, ws, snapshot, meta)
+    if (!version) return null
+    writeIndex(ws, index)
+    return version
+  }
+
+  function appendSnapshotVersion(
+    index: HistoryIndex,
+    ws: string,
+    snapshot: Snapshot,
+    meta: HistoryCaptureMeta,
+    options: { assumeEligible?: boolean } = {},
+  ): HistoryVersion | null {
     const relPath = snapshot.path
     if (!snapshot.deleted && snapshot.bytes > maxFileBytes) return null
-    if (!isHistoryEligibleForWorkspace(ws, relPath)) return null
+    if (!options.assumeEligible && !isHistoryEligibleForWorkspace(ws, relPath)) return null
 
-    const index = readIndex(ws)
     const file = index.files[relPath] ?? { versions: [] }
     const latest = file.versions[file.versions.length - 1]
     if (
@@ -634,7 +686,6 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
     }
     file.versions.push(version)
     index.files[relPath] = file
-    writeIndex(ws, index)
     return version
   }
 
@@ -661,14 +712,23 @@ function snapshotFile(workspacePath: string, path: string): Snapshot | null {
   const stat = statsSafe(fullPath)
   if (!stat || !stat.isFile()) return null
   if (resolvesOutsideWorkspace(workspacePath, fullPath)) return null
-  const buffer = readFileSync(fullPath)
+  return snapshotExistingFile(relPath, fullPath, stat.size)
+}
+
+function snapshotExistingFile(relPath: string, fullPath: string, size?: number): Snapshot | null {
+  let buffer: Buffer
+  try {
+    buffer = readFileSync(fullPath)
+  } catch {
+    return null
+  }
   const hash = hashBuffer(buffer)
   const kind: HistoryKind = TEXT_EXTENSIONS.has(extensionOf(relPath)) ? 'text' : 'binary'
   return {
     path: relPath,
     kind,
     hash,
-    bytes: buffer.length,
+    bytes: size ?? buffer.length,
     deleted: false,
     buffer,
   }

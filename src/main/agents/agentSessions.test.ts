@@ -12,7 +12,25 @@ import {
   type AgentSessionsOptions,
 } from '@main/agents/agentSessions.js'
 import type { DetectedAgent } from '@main/agents/agentCatalog.js'
-import { resumeArgs } from '@main/agents/agentCatalog.js'
+import { cliSessionsDir } from '@main/agents/agentCatalog.js'
+
+const codex: DetectedAgent = {
+  id: 'codex',
+  name: 'Codex',
+  bin: 'codex',
+  args: [],
+  installed: true,
+  binPath: '/opt/homebrew/bin/codex',
+}
+
+const gemini: DetectedAgent = {
+  id: 'gemini-cli',
+  name: 'Gemini CLI',
+  bin: 'gemini',
+  args: [],
+  installed: true,
+  binPath: '/opt/homebrew/bin/gemini',
+}
 import type { PtyHandle, PtySpawnOptions } from '@main/pty.js'
 
 const claude: DetectedAgent = {
@@ -545,40 +563,134 @@ describe('agent sessions', () => {
     expect(() => sessions.launch(claude)).toThrow('No workspace open')
   })
 
-  it('launch passes agent args without appending session-id (CLIs manage their own)', () => {
+  it('detects Claude Code cliSessionId from new .jsonl file on first pty output', () => {
+    vi.stubEnv('HOME', dir)
+    const projectDir = cliSessionsDir('claude-code', dir)!
+    mkdirSync(projectDir, { recursive: true })
+    writeFileSync(join(projectDir, 'existing-session.jsonl'), '')
+
     const { sessions, ptys } = makeHarness()
     const { record } = sessions.launch(claude)
 
-    expect(ptys[0].opts.args).toEqual(['--verbose'])
-    expect(record.command).toBe('/opt/homebrew/bin/claude --verbose')
+    writeFileSync(join(projectDir, 'new-claude-session.jsonl'), '')
+    ptys[0].data('hello')
+
+    expect(sessions.get(record.sessionId)!.cliSessionId).toBe('new-claude-session')
     ptys[0].exit(0)
+    vi.unstubAllEnvs()
+  })
+
+  it('detects Codex cliSessionId by extracting UUID from rollout filename', () => {
+    vi.stubEnv('HOME', dir)
+    const codexDir = join(dir, '.codex', 'sessions', '2026', '01', '01')
+    mkdirSync(codexDir, { recursive: true })
+    writeFileSync(join(codexDir, 'rollout-2026-01-01T00-00-00-aaaa1111-bbbb-cccc-dddd-eeeeffffaaaa.jsonl'), '')
+
+    const { sessions, ptys } = makeHarness({ now: () => new Date('2026-01-01T00:00:00Z') })
+    const { record } = sessions.launch(codex)
+
+    writeFileSync(join(codexDir, 'rollout-2026-01-01T00-05-00-019f0ec9-9bf9-73f0-8d38-9f98d67a8668.jsonl'), '')
+    ptys[0].data('hello')
+
+    expect(sessions.get(record.sessionId)!.cliSessionId).toBe('019f0ec9-9bf9-73f0-8d38-9f98d67a8668')
+    ptys[0].exit(0)
+    vi.unstubAllEnvs()
+  })
+
+  it('detects Gemini cliSessionId from new session file', () => {
+    vi.stubEnv('HOME', dir)
+    const geminiDir = cliSessionsDir('gemini-cli', dir)!
+    mkdirSync(geminiDir, { recursive: true })
+    writeFileSync(join(geminiDir, 'session-2026-06-24T16-04-3ec1763e.jsonl'), '')
+
+    const { sessions, ptys } = makeHarness()
+    const { record } = sessions.launch(gemini)
+
+    writeFileSync(join(geminiDir, 'session-2026-06-25T13-45-19cc6840.jsonl'), '')
+    ptys[0].data('hello')
+
+    expect(sessions.get(record.sessionId)!.cliSessionId).toBe('session-2026-06-25T13-45-19cc6840')
+    ptys[0].exit(0)
+    vi.unstubAllEnvs()
   })
 
   describe('resume', () => {
-    it('spawns the agent with resume args and reuses the session record', () => {
+    it('spawns Claude Code with --resume <cliSessionId> when detected', () => {
+      vi.stubEnv('HOME', dir)
+      const projectDir = cliSessionsDir('claude-code', dir)!
+      mkdirSync(projectDir, { recursive: true })
+
       const { sessions, events, ptys, mcpSessionIds } = makeHarness()
       const { record: original } = sessions.launch(claude)
+      writeFileSync(join(projectDir, 'cc-real-id.jsonl'), '')
+      ptys[0].data('output')
       ptys[0].exit(0)
       events.length = 0
+
+      expect(sessions.get(original.sessionId)!.cliSessionId).toBe('cc-real-id')
 
       const { record: resumed, ptyId } = sessions.resume(original.sessionId, claude)
 
       expect(resumed.sessionId).toBe(original.sessionId)
-      expect(resumed.agentId).toBe('claude-code')
       expect(resumed.status).toBe('running')
-      expect(resumed.endedAt).toBeUndefined()
-      expect(resumed.exitCode).toBeUndefined()
-      expect(resumed.ptyId).toBe(ptyId)
-
-      expect(ptys[1].opts.args).toEqual(['--continue'])
-      expect(ptys[1].opts.cwd).toBe(dir)
-      expect(resumed.command).toBe('/opt/homebrew/bin/claude --continue')
+      expect(ptys[1].opts.args).toEqual(['--resume', 'cc-real-id'])
+      expect(resumed.command).toBe('/opt/homebrew/bin/claude --resume cc-real-id')
 
       expect(mcpSessionIds).toContain(original.sessionId)
       expect(events[0]).toMatchObject({ type: 'session.started', session: { sessionId: original.sessionId, status: 'running' } })
       expect(sessions.activeSessionCount()).toBe(1)
 
       ptys[1].exit(0)
+      vi.unstubAllEnvs()
+    })
+
+    it('falls back to --continue for Claude Code when cliSessionId is not detected', () => {
+      const { sessions, ptys } = makeHarness()
+      const { record: original } = sessions.launch(claude)
+      ptys[0].exit(0)
+
+      const { record: resumed } = sessions.resume(original.sessionId, claude)
+
+      expect(ptys[1].opts.args).toEqual(['--continue'])
+      expect(resumed.command).toBe('/opt/homebrew/bin/claude --continue')
+      ptys[1].exit(0)
+    })
+
+    it('spawns Codex with resume <uuid> when cliSessionId detected', () => {
+      vi.stubEnv('HOME', dir)
+      const codexDir = join(dir, '.codex', 'sessions', '2026', '01', '01')
+      mkdirSync(codexDir, { recursive: true })
+
+      const { sessions, ptys } = makeHarness({ now: () => new Date('2026-01-01T00:00:00Z') })
+      const { record: original } = sessions.launch(codex)
+      writeFileSync(join(codexDir, 'rollout-2026-01-01T00-05-00-abcd1234-ef56-7890-abcd-ef1234567890.jsonl'), '')
+      ptys[0].data('output')
+      ptys[0].exit(0)
+
+      const { record: resumed } = sessions.resume(original.sessionId, codex)
+
+      expect(ptys[1].opts.args).toEqual(['resume', 'abcd1234-ef56-7890-abcd-ef1234567890'])
+      expect(resumed.command).toBe('/opt/homebrew/bin/codex resume abcd1234-ef56-7890-abcd-ef1234567890')
+      ptys[1].exit(0)
+      vi.unstubAllEnvs()
+    })
+
+    it('spawns Gemini with --session-file when cliSessionId detected', () => {
+      vi.stubEnv('HOME', dir)
+      const geminiDir = cliSessionsDir('gemini-cli', dir)!
+      mkdirSync(geminiDir, { recursive: true })
+
+      const { sessions, ptys } = makeHarness()
+      const { record: original } = sessions.launch(gemini)
+      writeFileSync(join(geminiDir, 'session-2026-06-25T13-45-19cc6840.jsonl'), '')
+      ptys[0].data('output')
+      ptys[0].exit(0)
+
+      const { record: resumed } = sessions.resume(original.sessionId, gemini)
+
+      expect(ptys[1].opts.args).toEqual(['--session-file', join(geminiDir, 'session-2026-06-25T13-45-19cc6840.jsonl')])
+      ptys[1].exit(0)
+      vi.unstubAllEnvs()
     })
 
     it('appends new output to existing scrollback', () => {

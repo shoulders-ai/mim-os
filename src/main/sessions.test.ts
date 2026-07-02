@@ -105,6 +105,35 @@ describe('Session tools', () => {
     expect(got.messages).toEqual(messages)
   })
 
+  it('compacts old browser tool result payloads when persisted messages exceed the context threshold', async () => {
+    const created = await tools.call('session.create', { label: 'Browser' }, ctx) as { id: string }
+    const messages = [{
+      id: 'm1',
+      role: 'assistant',
+      parts: Array.from({ length: 4 }, (_value, index) => ({
+        type: 'tool-browser_open',
+        toolCallId: `call_${index + 1}`,
+        state: 'output-available',
+        input: { url: `https://example.com/${index + 1}` },
+        output: {
+          title: `Page ${index + 1}`,
+          observation: 'browser content '.repeat(8_000),
+          refs: [{ ref: '1', kind: 'link', label: 'Open' }],
+          ref_count: 1,
+        },
+      })),
+    }]
+
+    await tools.call('session.update', { id: created.id, messages }, ctx)
+
+    const got = await tools.call('session.get', { id: created.id }, ctx) as { messages: typeof messages }
+    const parts = got.messages[0].parts
+    expect(parts[0].output.compacted).toBe(true)
+    expect(parts[1].output.compacted).toBe(true)
+    expect(parts[2].output.observation).toContain('browser content')
+    expect(parts[3].output.observation).toContain('browser content')
+  })
+
   it('deletes a session', async () => {
     const created = await tools.call('session.create', { label: 'Doomed' }, ctx) as { id: string }
     await tools.call('session.delete', { id: created.id }, ctx)

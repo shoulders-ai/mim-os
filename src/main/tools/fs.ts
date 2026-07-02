@@ -553,6 +553,7 @@ async function listEntries(
     lastChangedBy?: string
   }> = []
   let truncated = false
+  let missing = false
 
   function addEntry(fullPath: string, type: 'directory' | 'file'): void {
     const relPath = toSlashPath(relative(workspace, fullPath))
@@ -562,7 +563,13 @@ async function listEntries(
       truncated = true
       return
     }
-    const stat = statSync(fullPath)
+    let stat: ReturnType<typeof statSync>
+    try {
+      stat = statSync(fullPath)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw err
+    }
     entries.push({
       name,
       path: relPath || '.',
@@ -575,8 +582,17 @@ async function listEntries(
 
   function walk(current: string): void {
     if (truncated) return
-    const dirents = readdirSync(current, { withFileTypes: true })
-      .sort((a, b) => a.name.localeCompare(b.name))
+    let dirents: ReturnType<typeof readdirSync>
+    try {
+      dirents = readdirSync(current, { withFileTypes: true })
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        missing = current === dir
+        return
+      }
+      throw err
+    }
+    dirents = dirents.sort((a, b) => a.name.localeCompare(b.name))
 
     for (const dirent of dirents) {
       if (truncated) return
@@ -605,6 +621,7 @@ async function listEntries(
     entries,
     truncated,
     limit: options.limit,
+    ...(missing ? { missing: true } : {}),
   }
 }
 

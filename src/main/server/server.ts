@@ -10,6 +10,11 @@ import type { ToolRegistry, ToolContext } from '@main/tools/registry.js'
 import type { PackageLoader } from '@main/packages/packages.js'
 import { createAiRuntime } from '@main/ai/aiRuntime.js'
 import { resolveInsidePackage } from '@main/packages/packageManifest.js'
+import {
+  isToolPolicySettingWrite,
+  mcpToolNameEnabled,
+  readToolsPolicy,
+} from '@main/tools/toolPolicy.js'
 
 interface ServerHandle {
   port: number
@@ -55,10 +60,10 @@ export interface McpToolSpec {
 export const MCP_TOOL_SPECS: McpToolSpec[] = [
   { name: 'editor_open', mimName: 'editor.open', description: 'Open a file in the editor' },
   { name: 'chat_send', mimName: 'chat.send', description: 'Send a message to chat' },
-  { name: 'comments_list', mimName: 'comments.list', description: 'List inline comments on a file' },
-  { name: 'comments_add', mimName: 'comments.add', description: 'Add an inline comment' },
-  { name: 'comments_reply', mimName: 'comments.reply', description: 'Reply to a comment' },
-  { name: 'comments_resolve', mimName: 'comments.resolve', description: 'Resolve a comment' },
+  { name: 'comments_list', mimName: 'comments.list', description: 'List inline review comment threads in a file (markdown or code)' },
+  { name: 'comments_add', mimName: 'comments.add', description: 'Add an inline review comment anchored to a short exact passage of visible text; never hand-edit <comment> tags or @mim marker lines with file tools' },
+  { name: 'comments_reply', mimName: 'comments.reply', description: 'Append a reply note to an existing inline review comment thread' },
+  { name: 'comments_resolve', mimName: 'comments.resolve', description: 'Resolve inline review comments, keeping the anchored text: pass id for one thread, or all=true for every thread in the file' },
   { name: 'history_list', mimName: 'history.list', description: 'List local file versions' },
   { name: 'history_restore', mimName: 'history.restore', description: 'Restore a file from local history' },
   { name: 'search_sessions', mimName: 'search.sessions', description: 'Search past sessions' },
@@ -75,6 +80,8 @@ export const MCP_TOOL_SPECS: McpToolSpec[] = [
   { name: 'system_prompt', mimName: 'system.prompt', description: 'Get the resolved AI system prompt' },
   { name: 'web_read', mimName: 'web.read', description: 'Read a URL (web page or PDF)' },
   { name: 'web_search', mimName: 'web.search', description: 'Search the web via Exa' },
+  { name: 'browser_open', mimName: 'web.live.open', description: 'Open a live browser session for interactive websites' },
+  { name: 'browser_act', mimName: 'web.live.act', description: 'Observe or act in the live browser session' },
   { name: 'settings_get', mimName: 'settings.get', description: 'Read a workspace setting' },
   { name: 'settings_set', mimName: 'settings.set', description: 'Write a workspace setting' },
   { name: 'slack_status', mimName: 'slack.status', description: 'Check Slack connection status' },
@@ -138,8 +145,12 @@ export async function createServer(
   }
 
   function isMcpAllowed(method: string): boolean {
-    if (MCP_ALLOWED_TOOLS.has(method)) return true
-    return getNamedMcpTools().some(s => s.mimName === method)
+    const spec = mcpSpecForMethod(method, getNamedMcpTools())
+    if (!spec) return false
+    const policy = readToolsPolicy(tools.getWorkspacePath(), {
+      knownToolIds: tools.list().map(tool => tool.name),
+    })
+    return mcpToolNameEnabled(policy, spec.name, spec.mimName)
   }
 
   const sdkDir = resolveSdkDir()
@@ -303,6 +314,7 @@ export async function createServer(
     let packageId: string | undefined
     let mcpSessionId: string | undefined
     let mcpToken: string | undefined
+    let mcpClientName: string | undefined
     let connectionType: 'package' | 'mcp' | undefined
 
     ws.on('error', (err) => {
@@ -397,9 +409,26 @@ export async function createServer(
           return
         }
 
-        if (connectionType === 'mcp' && !isMcpAllowed(method)) {
-          sendWs(ws, { id, error: `Tool is not exposed over MCP: ${method}` })
+        if (method === '__meta.client') {
+          if (connectionType !== 'mcp') {
+            sendWs(ws, { id, error: 'Method is only available for MCP connections' })
+            return
+          }
+          const name = typeof params.name === 'string' ? params.name.trim().slice(0, 64) : ''
+          if (name) mcpClientName = name
+          sendWs(ws, { id, result: { ok: true } })
           return
+        }
+
+        if (connectionType === 'mcp') {
+          if (method === 'settings.set' && isToolPolicySettingWrite(params)) {
+            sendWs(ws, { id, error: 'Tool policy cannot be changed over MCP' })
+            return
+          }
+          if (!isMcpAllowed(method)) {
+            sendWs(ws, { id, error: `Tool is not exposed over MCP: ${method}` })
+            return
+          }
         }
 
         // All other methods route through the tool registry.
@@ -409,6 +438,7 @@ export async function createServer(
           ? {
               actor: 'user',
               sessionId: mcpSessionId,
+              ...(mcpClientName ? { agent: mcpClientName } : {}),
             }
           : {
               actor: 'package',
@@ -573,18 +603,30 @@ function errorMessage(err: unknown): string {
 
 function mcpToolMetadata(tools: ToolRegistry, namedSpecs: McpToolSpec[] = []): Array<McpToolSpec & { inputSchema: Record<string, unknown> }> {
   const result: Array<McpToolSpec & { inputSchema: Record<string, unknown> }> = []
+  const policy = readToolsPolicy(tools.getWorkspacePath(), {
+    knownToolIds: tools.list().map(tool => tool.name),
+  })
   for (const spec of MCP_TOOL_SPECS) {
+    if (!mcpToolNameEnabled(policy, spec.name, spec.mimName)) continue
     const tool = tools.get(spec.mimName)
     if (!tool) throw new Error(`MCP tool is not registered: ${spec.mimName}`)
     if (!tool.inputSchema) throw new Error(`MCP tool is missing inputSchema: ${spec.mimName}`)
     result.push({ ...spec, inputSchema: tool.inputSchema })
   }
   for (const spec of namedSpecs) {
+    if (!mcpToolNameEnabled(policy, spec.name, spec.mimName)) continue
     const tool = tools.get(spec.mimName)
     if (!tool?.inputSchema) continue
     result.push({ ...spec, inputSchema: tool.inputSchema })
   }
   return result
+}
+
+function mcpSpecForMethod(method: string, namedSpecs: McpToolSpec[]): McpToolSpec | undefined {
+  const staticSpec = MCP_ALLOWED_TOOLS.has(method)
+    ? MCP_TOOL_SPECS.find(spec => spec.mimName === method)
+    : undefined
+  return staticSpec ?? namedSpecs.find(spec => spec.mimName === method)
 }
 
 export function resolveWorkspaceFilePath(workspace: string, requestPath: string): string | null {

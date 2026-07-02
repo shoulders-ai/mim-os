@@ -184,11 +184,18 @@ async function searchInFile(
   for (let i = 0; i < lines.length && results.length < max; i++) {
     const lowerLine = lines[i].toLowerCase()
     if (lineMatchesQuery(lowerLine, query)) {
-      const line = lines[i]
+      // Snippets render inline comment markup readably; matching stays on the
+      // raw line so tag text remains findable.
+      let line = displayLine(lines[i])
+      let lowerDisplay = line.toLowerCase()
+      if (!lineMatchesQuery(lowerDisplay, query)) {
+        line = lines[i]
+        lowerDisplay = lowerLine
+      }
       // Build snippet: trim to reasonable length around the match
-      const matchIdx = firstMatchIndex(lowerLine, query)
+      const matchIdx = firstMatchIndex(lowerDisplay, query)
       const start = Math.max(0, matchIdx - 40)
-      const end = Math.min(line.length, matchIdx + matchLengthAt(lowerLine, matchIdx, query) + 40)
+      const end = Math.min(line.length, matchIdx + matchLengthAt(lowerDisplay, matchIdx, query) + 40)
       let snippet = ''
       if (start > 0) snippet += '...'
       snippet += line.slice(start, end).trim()
@@ -201,6 +208,17 @@ async function searchInFile(
       })
     }
   }
+}
+
+// Rewrite inline review-comment markup for display: hide the tags, keep the
+// anchor, and show notes as "[author: text]".
+function displayLine(line: string): string {
+  if (!line.includes('<comment') && !line.includes('<note')) return line
+  return line
+    .replace(/<comment id="[^"]*">/g, '')
+    .replace(/<\/comment>/g, '')
+    .replace(/<note by="([^"]*)" at="[^"]*">/g, ' [$1: ')
+    .replace(/<\/note>/g, ']')
 }
 
 function prepareQuery(query: string): PreparedQuery {

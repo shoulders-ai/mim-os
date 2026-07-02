@@ -287,13 +287,75 @@ describe('app server', () => {
 
     expect(call).not.toHaveBeenCalled()
     expect(meta.id).toBe('meta-1')
-    expect((meta.result as { tools: unknown[] }).tools).toHaveLength(MCP_TOOL_SPECS.length)
-    expect((meta.result as { tools: Array<Record<string, unknown>> }).tools[0]).toEqual({
+    const tools = (meta.result as { tools: Array<Record<string, unknown>> }).tools
+    expect(tools).toHaveLength(MCP_TOOL_SPECS.length)
+    expect(tools[0]).toEqual({
       name: 'editor_open',
       mimName: 'editor.open',
       description: 'Open a file in the editor',
       inputSchema: { type: 'object', properties: {} },
     })
+    expect(tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        name: 'browser_open',
+        mimName: 'web.live.open',
+        description: 'Open a live browser session for interactive websites',
+      }),
+      expect.objectContaining({
+        name: 'browser_act',
+        mimName: 'web.live.act',
+        description: 'Observe or act in the live browser session',
+      }),
+    ]))
+  })
+
+  it('filters disabled MCP tools from metadata and direct execution', async () => {
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
+      tools: { disabled: ['editor.open'] },
+    }))
+    const call = vi.fn(async (_name: string) => ({ ok: true }))
+    server = await createServer(makeTools(call, dir, makeMcpToolDefs()), makePackages([addPackage()]))
+    const socket = await openSocket(server.port)
+    const token = server.createMcpToken('agent-session-disabled')
+    await sendJson(socket, {
+      id: 'identify-1',
+      method: 'identify',
+      params: { type: 'mcp', token },
+    })
+
+    const meta = await sendJson(socket, { id: 'meta-1', method: '__meta.tools' })
+    const tools = (meta.result as { tools: Array<{ name: string; mimName: string }> }).tools
+    expect(tools.some(tool => tool.name === 'editor_open')).toBe(false)
+
+    const denied = await sendJson(socket, {
+      id: 'open-1',
+      method: 'editor.open',
+      params: { path: 'README.md' },
+    })
+    expect(denied).toEqual({ id: 'open-1', error: 'Tool is not exposed over MCP: editor.open' })
+    expect(call).not.toHaveBeenCalled()
+  })
+
+  it('prevents MCP clients from rewriting the tool policy through settings.set', async () => {
+    const call = vi.fn(async (_name: string) => ({ ok: true }))
+    server = await createServer(makeTools(call, dir, makeMcpToolDefs()), makePackages([addPackage()]))
+    const socket = await openSocket(server.port)
+    const token = server.createMcpToken('agent-session-settings')
+    await sendJson(socket, {
+      id: 'identify-1',
+      method: 'identify',
+      params: { type: 'mcp', token },
+    })
+
+    const denied = await sendJson(socket, {
+      id: 'settings-1',
+      method: 'settings.set',
+      params: { key: 'tools', value: { disabled: [] } },
+    })
+
+    expect(denied).toEqual({ id: 'settings-1', error: 'Tool policy cannot be changed over MCP' })
+    expect(call).not.toHaveBeenCalled()
   })
 
   it('refuses MCP metadata before identification', async () => {
@@ -369,6 +431,11 @@ describe('app server', () => {
       method: 'editor.open',
       params: { path: 'README.md' },
     })
+    const browser = await sendJson(socket, {
+      id: 'browser-1',
+      method: 'web.live.open',
+      params: { url: 'https://example.com', visible: true },
+    })
     const denied = await sendJson(socket, {
       id: 'write-1',
       method: 'fs.write',
@@ -376,9 +443,14 @@ describe('app server', () => {
     })
 
     expect(allowed).toEqual({ id: 'open-1', result: { ok: true } })
+    expect(browser).toEqual({ id: 'browser-1', result: { ok: true } })
     expect(denied).toEqual({ id: 'write-1', error: 'Tool is not exposed over MCP: fs.write' })
-    expect(call).toHaveBeenCalledTimes(1)
-    expect(call).toHaveBeenCalledWith('editor.open', { path: 'README.md' }, {
+    expect(call).toHaveBeenCalledTimes(2)
+    expect(call).toHaveBeenNthCalledWith(1, 'editor.open', { path: 'README.md' }, {
+      actor: 'user',
+      sessionId: 'agent-session-2',
+    })
+    expect(call).toHaveBeenNthCalledWith(2, 'web.live.open', { url: 'https://example.com', visible: true }, {
       actor: 'user',
       sessionId: 'agent-session-2',
     })
@@ -399,6 +471,24 @@ describe('app server', () => {
 
     expect(result).toEqual({ id: 'packages-1', error: 'Method is not available for MCP connections' })
     expect(call).not.toHaveBeenCalled()
+  })
+
+  it('attributes MCP tool calls to the reported client name', async () => {
+    const call = vi.fn(async () => ({ ok: true }))
+    server = await createServer(makeTools(call, null, makeMcpToolDefs()), makePackages([addPackage()]))
+    const socket = await openSocket(server.port)
+    const token = server.createMcpToken('agent-session-5')
+    await sendJson(socket, { id: 'identify-1', method: 'identify', params: { type: 'mcp', token } })
+
+    const meta = await sendJson(socket, { id: 'client-1', method: '__meta.client', params: { name: 'claude-code' } })
+    await sendJson(socket, { id: 'open-1', method: 'editor.open', params: { path: 'README.md' } })
+
+    expect(meta).toEqual({ id: 'client-1', result: { ok: true } })
+    expect(call).toHaveBeenCalledWith('editor.open', { path: 'README.md' }, {
+      actor: 'user',
+      sessionId: 'agent-session-5',
+      agent: 'claude-code',
+    })
   })
 
   it('exposes dynamic named tools over MCP alongside core tools', async () => {

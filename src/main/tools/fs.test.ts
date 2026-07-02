@@ -263,6 +263,21 @@ describe('File tools', () => {
     expect(result.limit).toBe(1)
   })
 
+  it('fs.list returns an empty missing result when a listed directory vanished', async () => {
+    mkdirSync(join(dir, 'transient'))
+    rmSync(join(dir, 'transient'), { recursive: true, force: true })
+
+    const result = await tools.call('fs.list', { path: 'transient' }, ctx) as {
+      entries: unknown[]
+      missing?: boolean
+      truncated: boolean
+    }
+
+    expect(result.entries).toEqual([])
+    expect(result.missing).toBe(true)
+    expect(result.truncated).toBe(false)
+  })
+
   it('fs.exists checks file existence', async () => {
     writeFileSync(join(dir, 'real.md'), 'yes')
     const yes = await tools.call('fs.exists', { path: 'real.md' }, ctx) as { exists: boolean }

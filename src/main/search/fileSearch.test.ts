@@ -40,6 +40,20 @@ describe('File search', () => {
     expect(results[0].snippet.toLowerCase()).toContain('retry')
   })
 
+  it('renders inline comment markup readably in snippets while keeping notes searchable', async () => {
+    writeFileSync(
+      join(dir, 'plan.md'),
+      'We propose <comment id="k3f9">a staged rollout<note by="paul" at="2026-06-13T09:14">Too slow for launch</note></comment> now.',
+    )
+
+    const results = await searchFiles(dir, 'too slow')
+    expect(results.length).toBe(1)
+    expect(results[0].snippet).toContain('[paul: Too slow for launch]')
+    expect(results[0].snippet).toContain('a staged rollout')
+    expect(results[0].snippet).not.toContain('<comment')
+    expect(results[0].snippet).not.toContain('<note')
+  })
+
   it('returns empty for empty query', async () => {
     writeFileSync(join(dir, 'file.txt'), 'some content')
     expect(await searchFiles(dir, '')).toEqual([])

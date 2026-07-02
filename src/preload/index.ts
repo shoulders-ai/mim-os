@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('kernel', {
   quitAndInstall: () => ipcRenderer.invoke('kernel:quit-and-install'),
   openWorkspace: () => ipcRenderer.invoke('kernel:open-workspace'),
   openWorkspacePath: (path: string) => ipcRenderer.invoke('kernel:open-workspace-path', path),
+  watchWorkspaceFile: (path: string) => ipcRenderer.invoke('kernel:watch-workspace-file', path),
+  unwatchWorkspaceFile: (path: string) => ipcRenderer.invoke('kernel:unwatch-workspace-file', path),
 
   // Editor file open + recent files (native menu integration)
   openFileDialog: () => ipcRenderer.invoke('kernel:open-file-dialog'),

@@ -91,6 +91,34 @@ describe('workspace history store', () => {
     expect([...readFileSync(join(root, 'references', 'pdf', 'paper.pdf'))]).toEqual([1, 2, 3])
   })
 
+  it('captures before/after versions for comment mutations so resolve is recoverable', () => {
+    const withComment = 'Alpha <comment id="ab12">bravo<note by="paul" at="2026-01-01T00:00">Fix.</note></comment> charlie'
+    writeFileSync(join(root, 'paper.md'), withComment)
+    const observer = store.toolObserver()
+
+    const pending = observer.beforeToolCall(
+      root,
+      'comments.resolve',
+      { path: 'paper.md', all: true },
+      { actor: 'ai' },
+    )
+    writeFileSync(join(root, 'paper.md'), 'Alpha bravo charlie')
+    observer.afterToolCall(
+      root,
+      'comments.resolve',
+      { path: 'paper.md', all: true },
+      { path: 'paper.md', count: 1 },
+      { actor: 'ai' },
+      pending,
+    )
+
+    const versions = store.listFileVersions('paper.md', { includeFolded: true }).versions
+    expect(versions.map(version => version.event)).toEqual(['after-edit', 'before-edit'])
+    const before = versions.find(version => version.event === 'before-edit')!
+    store.restoreVersion('paper.md', before.id)
+    expect(readFileSync(join(root, 'paper.md'), 'utf-8')).toBe(withComment)
+  })
+
   it('records a pre-delete anchor so deleted files can be restored', () => {
     writeFileSync(join(root, 'notes.txt'), 'keep me')
     const first = store.captureFile('notes.txt', { actor: 'ai', event: 'before-delete', anchor: true })
@@ -127,6 +155,20 @@ describe('workspace history store', () => {
     expect(store.listFileVersions('ignored.md').versions).toHaveLength(0)
     expect(store.listFileVersions('private/secret.md').versions).toHaveLength(0)
     expect(store.listFileVersions('docs/large.md').versions).toHaveLength(0)
+  })
+
+  it('can bound baseline work for automatic startup recovery', () => {
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    for (let i = 0; i < 5; i++) {
+      writeFileSync(join(root, 'docs', `paper-${i}.md`), `# Paper ${i}`)
+    }
+
+    const result = store.baselineWorkspace({ maxCaptured: 2 })
+
+    expect(result.captured).toBe(2)
+    expect(result.truncated).toBe(true)
+    const stats = store.stats()
+    expect(stats.versionCount).toBe(2)
   })
 
   it('folds a thousand saves into a short default rail', () => {
