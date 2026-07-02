@@ -2,6 +2,8 @@ import { computed, nextTick, ref, watch, type ComputedRef, type Ref } from 'vue'
 import {
   resolveComment,
 } from '@main/comments/model.js'
+import { resolveCodeComment } from '@main/comments/codeModel.js'
+import { isMarkdownPath } from './codemirror/language.js'
 import type { useDiffStore } from '../../stores/diff.js'
 import type { useToastStore } from '../../stores/toasts.js'
 import { commentMutation } from './codemirror/comments.js'
@@ -149,7 +151,10 @@ export function useEditorInlineReview(options: UseEditorInlineReviewOptions) {
       const meta = options.diffStore.reviewMeta as { commentId?: string } | null
       if (meta?.commentId) {
         try {
-          finalContent = resolveComment(resolvedContent, meta.commentId).text
+          const isMd = isMarkdownPath(options.activeTab.value?.path ?? '')
+          finalContent = isMd
+            ? resolveComment(resolvedContent, meta.commentId).text
+            : resolveCodeComment(resolvedContent, meta.commentId).text
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Unknown error'
           options.toastStore.push({ kind: 'error', message: 'Comment resolve failed', detail: message })

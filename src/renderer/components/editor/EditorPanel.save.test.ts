@@ -269,6 +269,8 @@ describe('EditorPanel save behavior', () => {
         call: kernelCall,
         getWorkspace: vi.fn(async () => '/workspace'),
         saveFileDialog,
+        watchWorkspaceFile: vi.fn(async () => ({ watching: true })),
+        unwatchWorkspaceFile: vi.fn(async () => ({ unwatched: true })),
         pushDirtyTabCount: vi.fn(),
         on: vi.fn((channel: string, cb: (...args: unknown[]) => void) => {
           if (!kernelListeners.has(channel)) kernelListeners.set(channel, new Set())
@@ -327,6 +329,7 @@ describe('EditorPanel save behavior', () => {
       title: 'new-note.md',
       path: 'docs/new-note.md',
     })
+    expect(window.kernel.watchWorkspaceFile).toHaveBeenCalledWith('docs/new-note.md')
   })
 
   it('keeps an untitled document dirty when the save dialog is cancelled', async () => {
@@ -437,6 +440,7 @@ describe('EditorPanel save behavior', () => {
 
     await mounted.panelRef.value.openFile('docs/existing.md')
     await flushUi()
+    expect(window.kernel.watchWorkspaceFile).toHaveBeenCalledWith('docs/existing.md')
     expect(mounted.panelRef.value.getCurrentDocument()).toMatchObject({
       path: 'docs/existing.md',
       content: 'old',
@@ -455,6 +459,18 @@ describe('EditorPanel save behavior', () => {
       content: 'external edit',
       dirty: false,
     })
+  })
+
+  it('unregisters watched files when tabs close', async () => {
+    mounted = mountPanel()
+    await flushUi()
+
+    await mounted.panelRef.value.openFile('docs/existing.md')
+    await flushUi()
+    mounted.panelRef.value.closeActiveTab()
+    await flushUi()
+
+    expect(window.kernel.unwatchWorkspaceFile).toHaveBeenCalledWith('docs/existing.md')
   })
 
   it('keeps a dirty open file local and blocks save after an external workspace change', async () => {

@@ -230,6 +230,8 @@ describe('EditorPanel truncation guard', () => {
         call: kernelCall,
         getWorkspace: vi.fn(async () => '/workspace'),
         saveFileDialog,
+        watchWorkspaceFile: vi.fn(async () => ({ watching: true })),
+        unwatchWorkspaceFile: vi.fn(async () => ({ unwatched: true })),
         pushDirtyTabCount: vi.fn(),
         on: vi.fn((channel: string, cb: (...args: unknown[]) => void) => {
           if (!kernelListeners.has(channel)) kernelListeners.set(channel, new Set())

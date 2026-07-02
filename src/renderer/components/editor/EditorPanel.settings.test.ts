@@ -76,6 +76,8 @@ describe('EditorPanel live settings (real CodeMirror)', () => {
         call: kernelCall,
         getWorkspace: vi.fn(async () => '/workspace'),
         saveFileDialog: vi.fn(async () => null),
+        watchWorkspaceFile: vi.fn(async () => ({ watching: true })),
+        unwatchWorkspaceFile: vi.fn(async () => ({ unwatched: true })),
         pushDirtyTabCount: vi.fn(),
         on: vi.fn(),
         off: vi.fn(),

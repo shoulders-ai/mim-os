@@ -1,6 +1,7 @@
 <template>
   <div
     ref="wrapperEl"
+    data-diff-scope
     class="relative flex min-h-0 flex-1 overflow-hidden bg-surface"
     :style="wrapperStyle"
   >
@@ -28,7 +29,7 @@ import {
   getSplitChunks,
   getUnifiedChunks,
 } from './codemirror/merge.js'
-import { shouldCollapseUnchangedDiffSections } from './diffPresentation.js'
+import { nextChunkIndexFromPos, shouldCollapseUnchangedDiffSections } from './diffPresentation.js'
 
 const diff = useDiffStore()
 const settings = useSettingsStore()
@@ -107,6 +108,7 @@ function buildView(): void {
       readOnly: isApproval.value,
       onChunkCountChange: diff.setChunkCount,
       onResolvedContentChange: diff.setResolvedContent,
+      onChunkResolved,
     })
     currentType = 'split'
     nextTick(() => scrollToChunk(diff.currentChunk))
@@ -121,9 +123,28 @@ function buildView(): void {
     readOnly: isApproval.value,
     onChunkCountChange: diff.setChunkCount,
     onResolvedContentChange: diff.setResolvedContent,
+    onChunkResolved,
   })
   currentType = 'unified'
   nextTick(() => scrollToChunk(diff.currentChunk))
+}
+
+// After a per-chunk accept/reject, hop to the next pending chunk nearest the
+// screen position where the reviewer just acted, so the review flows top to
+// bottom without manual navigation.
+function onChunkResolved({ y }: { y: number }): void {
+  requestAnimationFrame(() => {
+    if (!currentView || currentType === 'readonly') return
+    const chunks = currentType === 'unified' ? getUnifiedChunks(currentView) : getSplitChunks(currentView)
+    if (chunks.length === 0) return
+    const view = currentType === 'unified' ? currentView : currentView.b
+    const rect = view.contentDOM.getBoundingClientRect()
+    const pos = view.posAtCoords({ x: rect.left + 2, y }, false)
+    const index = nextChunkIndexFromPos(chunks, typeof pos === 'number' ? pos : 0)
+    if (index < 0) return
+    diff.setCurrentChunk(index)
+    scrollToChunk(index)
+  })
 }
 
 function scrollToChunk(index: number): void {

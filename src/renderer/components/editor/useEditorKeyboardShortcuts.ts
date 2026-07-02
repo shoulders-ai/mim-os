@@ -9,9 +9,9 @@ interface UseEditorKeyboardShortcutsOptions {
   openExportDialog: () => void
   selectedCommentRange: () => { from: number; to: number; anchor: string } | null
   startAddComment: () => void
-  hasComments: ComputedRef<boolean>
+  toggleCommentRail: () => void
+  activeSupportsComments: ComputedRef<boolean>
   historyPreviewActive: ComputedRef<boolean>
-  commentRailCollapsed: Ref<boolean>
   createUntitledTab: () => void
   tabs: TabState[]
   activeTabIndex: Ref<number>
@@ -60,26 +60,14 @@ export function useEditorKeyboardShortcuts(options: UseEditorKeyboardShortcutsOp
       e.stopImmediatePropagation()
       if (options.selectedCommentRange()) {
         options.startAddComment()
-      } else if (options.hasComments.value && !options.historyPreviewActive.value) {
-        options.commentRailCollapsed.value = !options.commentRailCollapsed.value
+      } else if (!options.historyPreviewActive.value && options.activeSupportsComments.value) {
+        options.toggleCommentRail()
       }
     }
     if (meta && !e.shiftKey && !e.altKey && (e.key === 'n' || e.key === 't') && isEditorFocused()) {
       e.preventDefault()
       e.stopImmediatePropagation()
       options.createUntitledTab()
-    }
-    if (meta && e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-      const n = options.tabs.length
-      if (n > 1) {
-        e.preventDefault()
-        e.stopPropagation()
-        const idx = options.activeTabIndex.value
-        const next = e.key === 'ArrowLeft'
-          ? (idx - 1 + n) % n
-          : (idx + 1) % n
-        options.onSelectTab(next)
-      }
     }
   }
 

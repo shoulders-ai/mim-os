@@ -100,6 +100,70 @@ describe('diff store', () => {
     expect(store.chunkCount).toBe(0)
   })
 
+  it('computes line delta into review meta when the caller does not provide one', () => {
+    const store = useDiffStore()
+
+    store.activate({
+      source: 'inline-ai',
+      original: 'a\nb\nc',
+      modified: 'a\nX\nc\nd',
+      review: { type: 'inline-ai' },
+    })
+
+    expect(store.reviewMeta).toMatchObject({ type: 'inline-ai', added: 2, removed: 1 })
+  })
+
+  it('keeps caller-provided delta counts', () => {
+    const store = useDiffStore()
+
+    store.activate({
+      source: 'approval',
+      original: 'a',
+      modified: 'b',
+      review: { type: 'approval', added: 12, removed: 4 },
+    })
+
+    expect(store.reviewMeta).toMatchObject({ added: 12, removed: 4 })
+  })
+
+  it('marks all chunks resolved only when a populated review drains to zero chunks', () => {
+    const store = useDiffStore()
+    store.activate({ source: 'inline-ai', original: 'a', modified: 'b' })
+
+    // An initial zero (identical documents) is not "resolved by the user".
+    store.setChunkCount(0)
+    expect(store.allChunksResolved).toBe(false)
+
+    store.setChunkCount(2)
+    expect(store.allChunksResolved).toBe(false)
+
+    store.setChunkCount(0)
+    expect(store.allChunksResolved).toBe(true)
+
+    // New chunks (e.g. the user edited the result) clear the flag.
+    store.setChunkCount(1)
+    expect(store.allChunksResolved).toBe(false)
+
+    store.setChunkCount(0)
+    store.deactivate()
+    expect(store.allChunksResolved).toBe(false)
+  })
+
+  it('sets the current chunk directly, clamped to the chunk count', () => {
+    const store = useDiffStore()
+    store.activate({ source: 'inline-ai', original: 'a', modified: 'b' })
+    store.setChunkCount(3)
+
+    store.setCurrentChunk(2)
+    expect(store.currentChunk).toBe(2)
+
+    store.setCurrentChunk(9)
+    expect(store.currentChunk).toBe(2)
+
+    store.setCurrentChunk(-1)
+    expect(store.currentChunk).toBe(0)
+  })
+
   it('keeps an explicitly empty resolved result instead of falling back to modified content', () => {
     const store = useDiffStore()
     store.activate({ source: 'inline-ai', original: 'remove me', modified: '' })

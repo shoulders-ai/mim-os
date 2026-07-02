@@ -23,6 +23,7 @@ export interface TabState {
   externalState?: 'changed' | 'deleted'
   truncated?: boolean
   editorState?: any
+  editorScrollSnapshot?: any
 }
 
 export type ViewMode = 'source' | 'split' | 'preview'

@@ -186,7 +186,7 @@ function controlIcon(type) {
   return svg
 }
 
-function renderUnifiedControl(type, action) {
+export function renderUnifiedControl(type, action, onChunkResolved) {
   const button = document.createElement('button')
   button.type = 'button'
   button.className = `mim-merge-control mim-merge-control-${type}`
@@ -195,12 +195,16 @@ function renderUnifiedControl(type, action) {
   button.appendChild(controlIcon(type))
   button.addEventListener('mousedown', (event) => {
     event.preventDefault()
+    // The button's screen position marks where the reviewer is looking; report
+    // it after the resolve applies so the host can advance to the next chunk.
+    const y = button.getBoundingClientRect().top
     action(event)
+    if (onChunkResolved) setTimeout(() => onChunkResolved({ y }), 0)
   })
   return button
 }
 
-function renderSplitRevertControl() {
+export function renderSplitRevertControl(onChunkResolved) {
   const button = document.createElement('button')
   button.type = 'button'
   // a-to-b revert discards the chunk's change, so it reads as "reject this chunk".
@@ -208,6 +212,14 @@ function renderSplitRevertControl() {
   button.title = 'Reject this chunk'
   button.setAttribute('aria-label', 'Reject this chunk')
   button.appendChild(controlIcon('reject'))
+  if (onChunkResolved) {
+    // The MergeView handles the revert via mousedown delegation on the gutter;
+    // this listener fires first, so defer until the revert has applied.
+    button.addEventListener('mousedown', () => {
+      const y = button.getBoundingClientRect().top
+      setTimeout(() => onChunkResolved({ y }), 0)
+    })
+  }
   return button
 }
 
@@ -233,6 +245,7 @@ export function createUnifiedDiffView({
   onAllResolved,
   onChunkCountChange,
   onResolvedContentChange,
+  onChunkResolved,
 }) {
   const state = EditorState.create({
     doc: modifiedContent,
@@ -247,7 +260,9 @@ export function createUnifiedDiffView({
         allowInlineDiffs: true,
         // A read-only preview (approval review) shows the change but offers no
         // per-chunk accept/reject; the decision lives elsewhere.
-        mergeControls: readOnly ? false : renderUnifiedControl,
+        mergeControls: readOnly
+          ? false
+          : (type, action) => renderUnifiedControl(type, action, onChunkResolved),
         diffConfig,
         ...(collapse ? { collapseUnchanged: { margin: 3, minSize: 4 } } : {}),
       }),
@@ -280,6 +295,7 @@ export function createSplitDiffView({
   onAllResolved,
   onChunkCountChange,
   onResolvedContentChange,
+  onChunkResolved,
 }) {
   const mergeView = new MergeView({
     a: {
@@ -300,7 +316,9 @@ export function createSplitDiffView({
     parent,
     orientation: 'a-b',
     // A read-only preview offers no revert (accept) controls.
-    ...(readOnly ? {} : { revertControls: 'a-to-b', renderRevertControl: renderSplitRevertControl }),
+    ...(readOnly
+      ? {}
+      : { revertControls: 'a-to-b', renderRevertControl: () => renderSplitRevertControl(onChunkResolved) }),
     highlightChanges: true,
     gutter: true,
     diffConfig,

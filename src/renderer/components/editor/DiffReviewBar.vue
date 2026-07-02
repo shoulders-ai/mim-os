@@ -1,6 +1,7 @@
 <template>
   <div
     ref="barEl"
+    data-diff-scope
     class="@container flex h-9 shrink-0 items-center gap-2 overflow-hidden border-b border-rule-light bg-chrome-high px-3"
   >
     <!-- Identity: what is being reviewed -->
@@ -101,7 +102,7 @@
         type="button"
         :class="navBtnClass"
         :disabled="busy || diff.chunkCount === 0"
-        title="Previous change"
+        :title="`Previous change (${altUpLabel})`"
         @mousedown.prevent
         @click="onPrevChunk"
       >
@@ -112,7 +113,7 @@
         type="button"
         :class="navBtnClass"
         :disabled="busy || diff.chunkCount === 0"
-        title="Next change"
+        :title="`Next change (${altDownLabel})`"
         @mousedown.prevent
         @click="onNextChunk"
       >
@@ -125,6 +126,16 @@
       class="min-w-0 flex-1 truncate whitespace-nowrap text-right font-sans text-[11px] text-rem @max-[540px]:sr-only"
       :title="error"
     >{{ error }}</span>
+    <span
+      v-else-if="notice"
+      class="min-w-0 flex-1 truncate whitespace-nowrap text-right font-sans text-[11px] text-rem @max-[540px]:sr-only"
+      :title="notice"
+    >{{ notice }}</span>
+    <span
+      v-else-if="showAllResolved"
+      class="min-w-0 flex-1 truncate whitespace-nowrap text-right font-sans text-[11px] text-add @max-[540px]:sr-only"
+      :title="allResolvedHint"
+    >{{ allResolvedHint }}</span>
     <div v-else class="min-w-[4px] flex-1" />
 
     <!-- Decision -->
@@ -132,17 +143,37 @@
       type="button"
       class="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-[5px] px-2.5 font-sans text-[11px] font-medium text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:pointer-events-none disabled:opacity-40 @max-[440px]:w-7 @max-[440px]:justify-center @max-[440px]:px-0"
       :disabled="busy"
-      title="Close review"
+      title="Close review (Esc)"
       @mousedown.prevent
       @click="emit('close')"
     >
       <IconX :size="13" :stroke-width="2.4" class="hidden @max-[440px]:block" />
       <span class="@max-[440px]:sr-only">Close</span>
     </button>
-    <span
+    <button
       v-if="isApproval"
-      class="shrink-0 whitespace-nowrap font-sans text-[10.5px] text-ink-4 @max-[560px]:hidden"
-    >Decide in chat</span>
+      type="button"
+      class="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-[5px] px-2.5 font-sans text-[11px] font-semibold text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:pointer-events-none disabled:opacity-40 @max-[520px]:w-7 @max-[520px]:justify-center @max-[520px]:px-0"
+      :disabled="busy || responding"
+      title="Decline this change"
+      @mousedown.prevent
+      @click="respondApproval(false)"
+    >
+      <IconX :size="13" :stroke-width="2.4" />
+      <span class="@max-[520px]:sr-only">Decline</span>
+    </button>
+    <button
+      v-if="isApproval"
+      type="button"
+      class="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-[5px] bg-accent px-2.5 font-sans text-[11px] font-semibold text-accent-ink hover:bg-accent-2 disabled:pointer-events-none disabled:opacity-40 @max-[520px]:w-7 @max-[520px]:justify-center @max-[520px]:px-0"
+      :disabled="busy || responding"
+      :title="`Approve this change (${modEnterLabel})`"
+      @mousedown.prevent
+      @click="respondApproval(true)"
+    >
+      <IconCheck :size="13" :stroke-width="2.5" />
+      <span class="@max-[520px]:sr-only">Approve</span>
+    </button>
     <button
       v-if="!isApproval"
       type="button"
@@ -159,6 +190,7 @@
       v-if="!isApproval"
       type="button"
       class="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-[5px] bg-accent px-2.5 font-sans text-[11px] font-semibold text-accent-ink hover:bg-accent-2 disabled:pointer-events-none disabled:opacity-40 @max-[520px]:w-7 @max-[520px]:justify-center @max-[520px]:px-0"
+      :class="{ 'diff-accept-pulse': showAllResolved }"
       :disabled="busy"
       :title="acceptTitle"
       @mousedown.prevent
@@ -181,8 +213,11 @@ import {
   IconX,
 } from '@tabler/icons-vue'
 import { useDiffStore, type DiffViewMode } from '../../stores/diff.js'
+import { useApprovalsStore } from '../../stores/approvals.js'
+import { resolveDiffKeyAction } from './diffKeyboard.js'
+import { shortcutLabel } from '../../services/shortcutLabels.js'
 
-defineProps<{
+const props = defineProps<{
   busy?: boolean
   error?: string
 }>()
@@ -195,9 +230,15 @@ const emit = defineEmits<{
 }>()
 
 const diff = useDiffStore()
+const approvals = useApprovalsStore()
 const barEl = ref<HTMLElement | null>(null)
 const barWidth = ref(0)
+const responding = ref(false)
 let resizeObserver: ResizeObserver | null = null
+
+const modEnterLabel = shortcutLabel(['Mod', 'Enter'])
+const altDownLabel = shortcutLabel(['Alt', '↓'])
+const altUpLabel = shortcutLabel(['Alt', '↑'])
 
 const viewModes: Array<{ value: DiffViewMode; label: string; shortLabel: string }> = [
   { value: 'original', label: 'Original', shortLabel: 'O' },
@@ -240,10 +281,12 @@ const secondaryTitle = computed(() => {
 })
 
 const isApproval = computed(() => diff.reviewMeta?.type === 'approval')
+const isConflict = computed(() => diff.reviewMeta?.type === 'conflict')
 
 const sourceLabel = computed(() => {
   if (diff.isBatch) return 'Review all'
   if (diff.reviewMeta?.type === 'inline-ai') return 'AI edit'
+  if (isConflict.value) return 'File changed on disk'
   if (diff.reviewMeta?.kind === 'create') return 'Create'
   if (diff.reviewMeta?.kind === 'delete') return 'Delete'
   if (diff.reviewMeta?.kind === 'write') return 'Overwrite'
@@ -260,8 +303,17 @@ const delta = computed<{ added: number; removed: number } | null>(() => {
   const added = Number(diff.reviewMeta?.added ?? NaN)
   const removed = Number(diff.reviewMeta?.removed ?? NaN)
   if (!Number.isFinite(added) && !Number.isFinite(removed)) return null
+  if (!added && !removed) return null
   return { added: Number.isFinite(added) ? added : 0, removed: Number.isFinite(removed) ? removed : 0 }
 })
+
+const notice = computed(() => {
+  const value = diff.reviewMeta?.notice
+  return typeof value === 'string' ? value : ''
+})
+
+const showAllResolved = computed(() => !diff.isBatch && !isApproval.value && diff.allChunksResolved)
+const allResolvedHint = computed(() => `All changes resolved — ${modEnterLabel} to apply`)
 
 const chunkLabel = computed(() => {
   if (diff.chunkCount <= 0) return '0/0'
@@ -295,10 +347,28 @@ const batchProgressWidthClass = computed(() => {
   return 'w-0'
 })
 
-const acceptLabel = computed(() => diff.isBatch ? 'Accept All' : 'Accept')
-const rejectLabel = computed(() => diff.isBatch ? 'Reject All' : 'Reject')
-const acceptTitle = computed(() => diff.isBatch ? 'Accept all pending files' : 'Accept resolved content')
-const rejectTitle = computed(() => diff.isBatch ? 'Reject all pending files' : 'Reject review')
+// A conflict decision is "which version survives", not accept/reject — the
+// labels must say which side gets discarded before the user commits.
+const acceptLabel = computed(() => {
+  if (diff.isBatch) return 'Accept All'
+  if (isConflict.value) return 'Keep my version'
+  return 'Accept'
+})
+const rejectLabel = computed(() => {
+  if (diff.isBatch) return 'Reject All'
+  if (isConflict.value) return 'Take disk version'
+  return 'Reject'
+})
+const acceptTitle = computed(() => {
+  if (diff.isBatch) return 'Accept all pending files'
+  if (isConflict.value) return `Write my version to disk, replacing the disk copy (${modEnterLabel})`
+  return `Accept resolved content (${modEnterLabel})`
+})
+const rejectTitle = computed(() => {
+  if (diff.isBatch) return 'Reject all pending files'
+  if (isConflict.value) return 'Discard my unsaved edits and load the disk version'
+  return 'Reject review'
+})
 const splitUnavailable = computed(() => !diff.isBatch && barWidth.value > 0 && barWidth.value < 760)
 
 watch(splitUnavailable, unavailable => {
@@ -315,7 +385,53 @@ function onNextChunk(): void {
   emit('navigateChunk', diff.currentChunk)
 }
 
+// The approval decision resolves the same pending request as the chat card;
+// the approvals store is the single decision point for both surfaces. When the
+// request resolves, EditorPanel's watcher closes this review.
+async function respondApproval(approved: boolean): Promise<void> {
+  const requestId = typeof diff.reviewMeta?.requestId === 'string' ? diff.reviewMeta.requestId : ''
+  if (!requestId || responding.value) return
+  if (!approvals.get(requestId)) return
+  responding.value = true
+  try {
+    await approvals.respond(requestId, { approved })
+  } finally {
+    responding.value = false
+  }
+}
+
+function classifyKeyTarget(target: EventTarget | null) {
+  const el = target instanceof Element ? target : null
+  return {
+    isEditable: !!el?.closest('input, textarea, [contenteditable="true"], .cm-content'),
+    isButton: !!el?.closest('button'),
+    inDiffScope: !!el?.closest('[data-diff-scope]'),
+    overlayOpen: !!document.querySelector('.mim-dialog, [role="dialog"]'),
+  }
+}
+
+function onWindowKeydown(event: KeyboardEvent): void {
+  const action = resolveDiffKeyAction(event, classifyKeyTarget(event.target), {
+    active: diff.active,
+    busy: props.busy === true,
+    isApproval: isApproval.value,
+    isBatch: diff.isBatch,
+    viewMode: diff.viewMode,
+    chunkCount: diff.chunkCount,
+    allChunksResolved: diff.allChunksResolved,
+  })
+  if (!action) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (action === 'close') emit('close')
+  else if (action === 'accept') emit('accept')
+  else if (action === 'approve') void respondApproval(true)
+  else if (action === 'next-chunk') onNextChunk()
+  else if (action === 'prev-chunk') onPrevChunk()
+}
+
 onMounted(() => {
+  window.addEventListener('keydown', onWindowKeydown)
   if (!barEl.value) return
   barWidth.value = barEl.value.clientWidth
   if (typeof ResizeObserver === 'undefined') return
@@ -327,7 +443,23 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onWindowKeydown)
   resizeObserver?.disconnect()
   resizeObserver = null
 })
 </script>
+
+<style scoped>
+@keyframes diff-accept-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 45%, transparent);
+  }
+  55% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent) 0%, transparent);
+  }
+}
+
+.diff-accept-pulse {
+  animation: diff-accept-pulse 900ms ease-out 2;
+}
+</style>

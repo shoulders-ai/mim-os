@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildApprovalDiff } from './approvalDiff.js'
+import { approvalDiffNotice, buildApprovalDiff } from './approvalDiff.js'
 import type { ApprovalRequest } from '../stores/approvals.js'
 
 function request(over: Partial<ApprovalRequest>): ApprovalRequest {
@@ -27,7 +27,46 @@ describe('buildApprovalDiff', () => {
       request({ params: { path: 'a.md' }, preview: { kind: 'edit', oldText: 'world', newText: 'there' } }),
       async () => 'hello world',
     )
-    expect(diff).toEqual({ path: 'a.md', original: 'hello world', modified: 'hello there', kind: 'edit' })
+    expect(diff).toEqual({ path: 'a.md', original: 'hello world', modified: 'hello there', kind: 'edit', matchCount: 1 })
+  })
+
+  it('previews edits with the same tolerant text matching as fs.edit', async () => {
+    const original = 'She  said “hello”\r\ntoday.'
+    const diff = await buildApprovalDiff(
+      request({
+        params: { path: 'typography.md' },
+        preview: {
+          kind: 'edit',
+          oldText: 'She said "hello"\ntoday.',
+          newText: 'She said hello today.',
+        },
+      }),
+      async () => original,
+    )
+    expect(diff).toEqual({
+      path: 'typography.md',
+      original,
+      modified: 'She said hello today.',
+      kind: 'edit',
+      matchCount: 1,
+    })
+  })
+
+  it('does not preview a replacement when fs.edit would reject ambiguous matches', async () => {
+    const original = 'target one\ntarget two'
+    const diff = await buildApprovalDiff(
+      request({ params: { path: 'ambiguous.md' }, preview: { kind: 'edit', oldText: 'target', newText: 'replacement' } }),
+      async () => original,
+    )
+    expect(diff).toEqual({ path: 'ambiguous.md', original, modified: original, kind: 'edit', matchCount: 2 })
+  })
+
+  it('reports zero matches when the edit target text is missing', async () => {
+    const diff = await buildApprovalDiff(
+      request({ params: { path: 'a.md' }, preview: { kind: 'edit', oldText: 'ghost', newText: 'x' } }),
+      async () => 'no such text here',
+    )
+    expect(diff).toMatchObject({ modified: 'no such text here', matchCount: 0 })
   })
 
   it('previews a write as current content to proposed content', async () => {
@@ -62,5 +101,23 @@ describe('buildApprovalDiff', () => {
       async () => null,
     )
     expect(diff?.original).toBe('')
+  })
+})
+
+describe('approvalDiffNotice', () => {
+  it('warns when an edit has no match, so an empty diff is not read as harmless', () => {
+    expect(approvalDiffNotice({ path: 'a.md', original: 'x', modified: 'x', kind: 'edit', matchCount: 0 }))
+      .toBe('No match found — this edit will fail as written.')
+  })
+
+  it('warns when an edit is ambiguous', () => {
+    expect(approvalDiffNotice({ path: 'a.md', original: 'x', modified: 'x', kind: 'edit', matchCount: 3 }))
+      .toBe('Matches 3 places — this edit will fail as written.')
+  })
+
+  it('stays silent for a unique match and for non-edit kinds', () => {
+    expect(approvalDiffNotice({ path: 'a.md', original: 'x', modified: 'y', kind: 'edit', matchCount: 1 })).toBeUndefined()
+    expect(approvalDiffNotice({ path: 'a.md', original: '', modified: 'y', kind: 'create' })).toBeUndefined()
+    expect(approvalDiffNotice({ path: 'a.md', original: 'x', modified: '', kind: 'delete' })).toBeUndefined()
   })
 })

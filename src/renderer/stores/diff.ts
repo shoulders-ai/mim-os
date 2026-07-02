@@ -1,8 +1,9 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { lineDelta } from '../services/lineDelta.js'
 
 export type DiffReviewMode = 'single' | 'batch'
-export type DiffReviewSource = 'inline-ai' | 'batch' | 'approval'
+export type DiffReviewSource = 'inline-ai' | 'batch' | 'approval' | 'conflict'
 export type DiffViewMode = 'original' | 'diff' | 'result'
 export type DiffLayout = 'unified' | 'split'
 export type DiffFileStatus = 'pending' | 'accepted' | 'rejected' | 'conflict'
@@ -64,6 +65,7 @@ export const useDiffStore = defineStore('diff', () => {
   const layout = ref<DiffLayout>('unified')
   const chunkCount = ref(0)
   const currentChunk = ref(0)
+  const allChunksResolved = ref(false)
 
   const hasChunks = computed(() => chunkCount.value > 0)
   const isBatch = computed(() => mode.value === 'batch')
@@ -82,13 +84,14 @@ export const useDiffStore = defineStore('diff', () => {
     filePath.value = input.path ?? ''
     reviewIds.value = input.reviewIds ?? []
     batchId.value = input.batch ?? null
-    reviewMeta.value = input.review ?? null
+    reviewMeta.value = withLineDelta(input.review, input.original, input.modified)
     files.value = []
     focusedFile.value = null
     viewMode.value = 'diff'
     layout.value = input.layout ?? 'unified'
     chunkCount.value = 0
     currentChunk.value = 0
+    allChunksResolved.value = false
     active.value = true
   }
 
@@ -113,6 +116,7 @@ export const useDiffStore = defineStore('diff', () => {
     layout.value = input.layout ?? 'unified'
     chunkCount.value = 0
     currentChunk.value = 0
+    allChunksResolved.value = false
     active.value = true
   }
 
@@ -131,6 +135,7 @@ export const useDiffStore = defineStore('diff', () => {
     files.value = []
     chunkCount.value = 0
     currentChunk.value = 0
+    allChunksResolved.value = false
   }
 
   function setResolvedContent(content: string): void {
@@ -213,10 +218,23 @@ export const useDiffStore = defineStore('diff', () => {
   }
 
   function setChunkCount(count: number): void {
-    chunkCount.value = Math.max(0, Math.floor(count))
+    const next = Math.max(0, Math.floor(count))
+    // "All resolved" means the user drained a populated review to zero, not
+    // that the review started with identical documents.
+    if (next === 0 && chunkCount.value > 0) allChunksResolved.value = true
+    else if (next > 0) allChunksResolved.value = false
+    chunkCount.value = next
     if (currentChunk.value >= chunkCount.value) {
       currentChunk.value = Math.max(0, chunkCount.value - 1)
     }
+  }
+
+  function setCurrentChunk(index: number): void {
+    if (chunkCount.value === 0) {
+      currentChunk.value = 0
+      return
+    }
+    currentChunk.value = Math.min(Math.max(0, Math.floor(index)), chunkCount.value - 1)
   }
 
   function nextChunk(): void {
@@ -252,6 +270,7 @@ export const useDiffStore = defineStore('diff', () => {
     layout,
     chunkCount,
     currentChunk,
+    allChunksResolved,
     hasChunks,
     activate,
     activateBatch,
@@ -268,7 +287,27 @@ export const useDiffStore = defineStore('diff', () => {
     setViewMode,
     setLayout,
     setChunkCount,
+    setCurrentChunk,
     nextChunk,
     prevChunk,
   }
 })
+
+// The review bar's +N −N magnitude chip reads added/removed off the review
+// meta. Callers rarely know the counts, so fill them in from the contents;
+// past the lineDelta cap the chip simply stays hidden.
+function withLineDelta(
+  review: DiffReviewMeta | null | undefined,
+  original: string,
+  modified: string,
+): DiffReviewMeta | null {
+  const meta: DiffReviewMeta = { ...(review ?? {}) }
+  if (meta.added == null && meta.removed == null) {
+    const delta = lineDelta(original, modified)
+    if (delta) {
+      meta.added = delta.added
+      meta.removed = delta.removed
+    }
+  }
+  return Object.keys(meta).length > 0 ? meta : (review ?? null)
+}

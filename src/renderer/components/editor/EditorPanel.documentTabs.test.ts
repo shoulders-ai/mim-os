@@ -64,6 +64,7 @@ vi.mock('./codemirror/core.js', () => ({
       get state() { return currentState },
       focus: vi.fn(),
       destroy: vi.fn(),
+      scrollSnapshot: vi.fn(() => ({ type: 'scroll-snapshot', text })),
       dispatch: vi.fn((update: { changes?: { from: number; to: number; insert: string } }) => {
         if (!update?.changes) return
         const { from, to, insert } = update.changes
@@ -286,6 +287,8 @@ describe('EditorPanel document tabs', () => {
         call: kernelCall,
         getWorkspace: vi.fn(async () => '/workspace'),
         saveFileDialog: vi.fn(),
+        watchWorkspaceFile: vi.fn(async () => ({ watching: true })),
+        unwatchWorkspaceFile: vi.fn(async () => ({ unwatched: true })),
         pushDirtyTabCount: vi.fn(),
         on: vi.fn((channel: string, cb: (...args: unknown[]) => void) => {
           if (!kernelListeners.has(channel)) kernelListeners.set(channel, new Set())
@@ -336,6 +339,58 @@ describe('EditorPanel document tabs', () => {
     expect(mounted.root.querySelector('[data-testid="pdf-artifact"]')).toBeNull()
     expect(editorHarness.views).toHaveLength(1)
     expect(editorHarness.views[0].setState).toHaveBeenCalled()
+  })
+
+  it('retargets open document tabs after a workspace folder move', async () => {
+    mounted = mountPanel()
+    await flushUi()
+
+    await mounted.panelRef.value.openDocument('docs/a.md', 'text')
+    await mounted.panelRef.value.openDocument('docs/report.pdf', 'pdf')
+    await flushUi()
+
+    mounted.panelRef.value.retargetDocumentPath('docs', 'archive/docs', 'directory')
+    await flushUi()
+
+    expect(mounted.root.querySelector('[data-testid="pdf-artifact"]')?.getAttribute('data-path')).toBe('archive/docs/report.pdf')
+
+    kernelCall.mockClear()
+    await mounted.panelRef.value.openDocument('archive/docs/a.md', 'text')
+    await flushUi()
+
+    expect(rootReadPaths()).not.toContain('archive/docs/a.md')
+    expect(editorHarness.views[0].setState).toHaveBeenCalled()
+  })
+
+  it('restores the text editor scroll snapshot when returning to a tab', async () => {
+    fileContents = {
+      'docs/a.md': Array.from({ length: 80 }, (_, i) => `A ${i + 1}`).join('\n'),
+      'docs/b.md': Array.from({ length: 80 }, (_, i) => `B ${i + 1}`).join('\n'),
+    }
+    mounted = mountPanel()
+    await flushUi()
+
+    await mounted.panelRef.value.openDocument('docs/a.md', 'text')
+    await flushUi()
+
+    const view = editorHarness.views[0]
+    const snapshotA = { type: 'scroll-snapshot:a' }
+    const snapshotB = { type: 'scroll-snapshot:b' }
+    view.scrollSnapshot
+      .mockReturnValueOnce(snapshotA)
+      .mockReturnValueOnce(snapshotB)
+
+    await mounted.panelRef.value.openDocument('docs/b.md', 'text')
+    await flushUi()
+
+    expect(view.scrollSnapshot).toHaveBeenCalledTimes(1)
+
+    view.dispatch.mockClear()
+    await mounted.panelRef.value.openDocument('docs/a.md', 'text')
+    await flushUi()
+
+    expect(view.scrollSnapshot).toHaveBeenCalledTimes(2)
+    expect(view.dispatch).toHaveBeenCalledWith({ effects: snapshotA })
   })
 
   it('opens table documents as tabs and saves serialized table content with the loaded hash', async () => {

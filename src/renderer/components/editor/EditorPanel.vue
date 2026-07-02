@@ -26,6 +26,7 @@ import { outlineExtension } from './codemirror/outline.js'
 import { ghostExtension } from './codemirror/ghost.js'
 import { citationExtensions } from './codemirror/citations.js'
 import { commentMutation, commentsExtension } from './codemirror/comments.js'
+import { parseCodeComments, supportsCodeCommentPath } from '@main/comments/codeModel.js'
 import { inlineAnchorExtension } from './codemirror/inlineAnchor.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useDiffStore } from '../../stores/diff.js'
@@ -89,6 +90,8 @@ let editorView: any = null
 let unregisterCurrentDocumentProvider: null | (() => void) = null
 let unregisterWorkspaceFileChanges: null | (() => void) = null
 let unregisterAppsChanged: null | (() => void) = null
+let unregisterWorkspaceChanged: null | (() => void) = null
+const watchedWorkspaceFiles = new Set<string>()
 
 const tabs = reactive<TabState[]>([])
 const activeTabIndex = ref(0)
@@ -125,6 +128,12 @@ const activeIsText = computed(() => (activeTab.value?.kind ?? 'text') === 'text'
 const activeIsTable = computed(() => activeTab.value?.kind === 'table')
 const activeTabReadOnly = computed(() => activeTab.value?.readOnly === true)
 const activeIsMarkdown = computed(() => activeIsText.value && isMarkdownPath(activeTab.value?.path ?? ''))
+// Code and plain-text files support @mim line-marker comments when the file
+// type has a known comment syntax (see commentPrefixForPath).
+const activeSupportsComments = computed(() =>
+  activeIsMarkdown.value ||
+  (activeIsText.value && supportsCodeCommentPath(activeTab.value?.path ?? '')),
+)
 const {
   inlineAIState,
   inlineAIKey,
@@ -193,14 +202,22 @@ const {
   openEditorContextMenu,
   cancelCommentDraft,
   saveCommentDraft,
+  updateCommentDraftText,
+  stashCommentDraftForTab,
+  restoreCommentDraftForTab,
   replyToComment,
   editCommentNote,
+  deleteCommentNote,
   resolveCommentThread,
+  resolveAllCommentThreads,
   copyCommentAnchor,
   applyCommentAsEdit,
   sendCommentsToChat,
+  requestAIReview,
 } = useEditorComments({
   activeIsMarkdown,
+  activeSupportsComments,
+  activeFilePath: computed(() => activeTab.value?.path || ''),
   historyPreviewActive,
   activeTabTruncated: computed(() => activeTab.value?.truncated === true),
   activeTabReadOnly,
@@ -215,22 +232,47 @@ const {
   prepareChatDraft: payload => emit('prepareChatDraft', payload),
 })
 const canAddComment = computed(() =>
-  activeIsMarkdown.value &&
+  activeSupportsComments.value &&
   !historyPreviewActive.value &&
   !activeTab.value?.truncated &&
   !activeTabReadOnly.value &&
   Boolean(stats.value.selected)
 )
 const hasComments = computed(() => commentThreads.value.length > 0)
+// Explicitly opened with zero comments: shows the rail's empty state with the
+// request-review action instead of nothing.
+const commentRailOpenedEmpty = ref(false)
 const showCommentsMargin = computed(() =>
-  activeIsMarkdown.value &&
+  activeSupportsComments.value &&
   !historyPreviewActive.value &&
   !activeTabReadOnly.value &&
   viewMode.value !== 'preview' &&
   !historyRailOpen.value &&
   !commentRailCollapsed.value &&
-  (hasComments.value || draftComment.value != null)
+  (hasComments.value || draftComment.value != null || commentRailOpenedEmpty.value)
 )
+
+function toggleCommentRail() {
+  if (showCommentsMargin.value) {
+    closeCommentRail()
+    return
+  }
+  commentRailCollapsed.value = false
+  if (!hasComments.value && !draftComment.value) commentRailOpenedEmpty.value = true
+}
+
+// Toolbar Comment button: with a selection it starts a comment; without one it
+// toggles the review rail (matching the keyboard shortcut) instead of
+// dead-ending in a "select text" toast.
+function onToolbarComment() {
+  if (selectedCommentRange()) startAddComment()
+  else toggleCommentRail()
+}
+
+function closeCommentRail() {
+  commentRailCollapsed.value = true
+  commentRailOpenedEmpty.value = false
+}
 const showHistoryRail = computed(() => Boolean(historyRailOpen.value && activeTab.value?.path))
 const activeHistoryText = computed(() => activeTab.value?.kind === 'text' ? currentTextForHistory() : '')
 
@@ -254,9 +296,13 @@ watch(() => activeTab.value?.path ?? '', () => { void applyLanguageForActiveTab(
 // back to plain source view when a non-markdown document becomes active.
 watch(activeIsMarkdown, (isMd) => {
   if (!isMd) viewMode.value = 'source'
-  if (!isMd) draftComment.value = null
   syncCommentThreadsFromEditor()
   refreshCitationDecorations()
+})
+
+watch(activeSupportsComments, (supports) => {
+  if (!supports) draftComment.value = null
+  syncCommentThreadsFromEditor()
 })
 
 const activeCitationText = computed(() =>
@@ -322,9 +368,9 @@ const { handleKeydown } = useEditorKeyboardShortcuts({
   openExportDialog,
   selectedCommentRange,
   startAddComment,
-  hasComments,
+  toggleCommentRail,
+  activeSupportsComments,
   historyPreviewActive,
-  commentRailCollapsed,
   createUntitledTab,
   tabs,
   activeTabIndex,
@@ -391,8 +437,9 @@ function buildEditorStateOptions(doc: string, options: { readOnly?: boolean } = 
       }),
       citationExtensions(getReferences, getDiagnostics, citationActions),
       inlineAnchorExtension(),
-      ...(activeIsMarkdown.value
+      ...(activeSupportsComments.value
         ? [commentsExtension({
+            parse: activeIsMarkdown.value ? undefined : parseCodeComments,
             onThreadsChange(threads: any[]) {
               commentThreads.value = threads
               if (activeCommentId.value && !threads.some(thread => thread.id === activeCommentId.value)) {
@@ -401,6 +448,20 @@ function buildEditorStateOptions(doc: string, options: { readOnly?: boolean } = 
             },
             onActiveComment(id: string) {
               activeCommentId.value = id
+            },
+            onThreadsRemovedByEdit(removed: any[]) {
+              const view = editorView
+              const tabId = activeTab.value?.id || ''
+              const count = removed.length
+              toastStore.push({
+                kind: 'info',
+                message: count === 1 ? 'Comment removed with edit' : `${count} comments removed with edit`,
+                actionLabel: 'Undo',
+                action: () => {
+                  if (!view || editorView !== view || (activeTab.value?.id || '') !== tabId) return
+                  void import('@codemirror/commands').then(({ undo }) => undo(view))
+                },
+              })
             },
           })]
         : []),
@@ -584,6 +645,12 @@ function switchToDoc(content: string) {
 // EditorState breaks CodeMirror's identity-based internals — compartment
 // reconfigures (settings toggles, language switches) silently no-op on a
 // state that was stored and read back through the proxy.
+function currentEditorScrollSnapshot() {
+  if (!editorView || typeof editorView.scrollSnapshot !== 'function') return undefined
+  const snapshot = editorView.scrollSnapshot()
+  return snapshot ? markRaw(snapshot) : undefined
+}
+
 function saveActiveTabEditorState() {
   if (!editorView) return
   const tab = activeTab.value
@@ -593,6 +660,12 @@ function saveActiveTabEditorState() {
     return
   }
   tab.editorState = markRaw(editorView.state)
+  tab.editorScrollSnapshot = currentEditorScrollSnapshot()
+}
+
+function restoreTabEditorScrollSnapshot(tab: TabState) {
+  if (!editorView || !tab.editorScrollSnapshot) return
+  editorView.dispatch({ effects: tab.editorScrollSnapshot })
 }
 
 // Switch the EditorView to a different tab's state. Uses view.setState() so
@@ -618,6 +691,7 @@ function switchToTabState(tab: TabState | null) {
   // The restored state carries the settings it was created with; sync it to
   // the current ones so a toggle never silently reverts on tab switch.
   applyEditorSettings()
+  restoreTabEditorScrollSnapshot(tab)
   nextTick(() => {
     if (editorView) {
       stats.value = computeStats(editorView.state)
@@ -644,7 +718,7 @@ function enterHistoryPreview(payload: HistoryPreviewPayload) {
   inlineAIState.value = null
   draftComment.value = null
   commentContextMenu.value = null
-  commentRailCollapsed.value = true
+  closeCommentRail()
   historyPreview.value = payload
   viewMode.value = 'source'
   editorView.setState(createEditorState(buildEditorStateOptions(payload.content, { readOnly: true })))
@@ -683,6 +757,7 @@ function cancelHistoryPreview(options: { restoreViewMode?: boolean } = {}) {
     tab!.editorState = markRaw(returnState)
     if (restoreViewMode && returnViewMode) viewMode.value = returnViewMode
     applyEditorSettings()
+    restoreTabEditorScrollSnapshot(tab!)
     void applyLanguageForActiveTab()
     nextTick(() => {
       if (!editorView) return
@@ -761,11 +836,13 @@ function onSelectTab(index: number) {
   if (index === activeTabIndex.value) return
   if (historyPreviewActive.value) cancelHistoryPreview()
   if (diffStore.active) closeActiveDiffReview()
+  stashCommentDraftForTab(activeTab.value?.id || '')
   saveActiveTabEditorState()
   activeTabIndex.value = index
   if (activeTab.value) {
     switchToTabState(activeTab.value)
   }
+  nextTick(() => restoreCommentDraftForTab(activeTab.value?.id || ''))
   notifyActiveEditorArtifactChanged()
 }
 
@@ -1013,6 +1090,69 @@ function getOpenFiles(): string[] {
   return tabs.map(t => t.path).filter(Boolean)
 }
 
+function retargetDocumentPath(oldPath: string, newPath: string, type: 'directory' | 'file') {
+  const from = oldPath.replace(/\/+$/, '')
+  const to = newPath.replace(/\/+$/, '')
+  if (!from || !to || from === to) return
+
+  let changed = false
+  tabs.forEach((tab, index) => {
+    const nextPath = retargetedTabPath(tab.path, from, to, type)
+    if (!nextPath) return
+    tab.path = nextPath
+    tab.name = fileLabel(nextPath)
+    if (tab.kind !== 'text') tab.id = `${tab.kind}:${nextPath}-${Date.now()}-${index}`
+    changed = true
+  })
+
+  if (!changed) return
+  if (historyPreviewActive.value) cancelHistoryPreview()
+  historyRefreshKey.value++
+  notifyCurrentDocumentChanged()
+  notifyActiveEditorArtifactChanged()
+}
+
+function retargetedTabPath(path: string, oldPath: string, newPath: string, type: 'directory' | 'file'): string | null {
+  if (!path) return null
+  if (type === 'file') return path === oldPath ? newPath : null
+  const prefix = `${oldPath}/`
+  if (path === oldPath) return newPath
+  if (!path.startsWith(prefix)) return null
+  return `${newPath}/${path.slice(prefix.length)}`
+}
+
+function watchedTextTabPaths(): string[] {
+  return [...new Set(tabs
+    .filter(tab => tab.kind === 'text' && !tab.readOnly && tab.path)
+    .map(tab => tab.path)
+    .filter((path): path is string => Boolean(path)))]
+}
+
+function syncWatchedWorkspaceFiles(): void {
+  const next = new Set(watchedTextTabPaths())
+  for (const path of watchedWorkspaceFiles) {
+    if (next.has(path)) continue
+    watchedWorkspaceFiles.delete(path)
+    void window.kernel.unwatchWorkspaceFile(path).catch(() => {})
+  }
+  for (const path of next) {
+    if (watchedWorkspaceFiles.has(path)) continue
+    watchedWorkspaceFiles.add(path)
+    void window.kernel.watchWorkspaceFile(path).catch(() => {})
+  }
+}
+
+function unwatchAllWorkspaceFiles(): void {
+  const paths = [...watchedWorkspaceFiles]
+  watchedWorkspaceFiles.clear()
+  for (const path of paths) void window.kernel.unwatchWorkspaceFile(path).catch(() => {})
+}
+
+watch(
+  () => watchedTextTabPaths().sort().join('\0'),
+  () => { syncWatchedWorkspaceFiles() },
+)
+
 function getCurrentDocument() {
   const tab = activeTab.value
   if (!tab) return null
@@ -1034,7 +1174,7 @@ function toggleHistoryRail() {
     return
   }
   historyRailOpen.value = true
-  commentRailCollapsed.value = true
+  closeCommentRail()
 }
 
 function openHistoryForPath(path?: string) {
@@ -1043,7 +1183,7 @@ function openHistoryForPath(path?: string) {
   const index = tabs.findIndex(tab => tab.path === targetPath)
   if (index >= 0 && index !== activeTabIndex.value) onSelectTab(index)
   historyRailOpen.value = true
-  commentRailCollapsed.value = true
+  closeCommentRail()
   historyRefreshKey.value++
 }
 
@@ -1066,6 +1206,7 @@ async function reloadActiveTabAfterRestore() {
     tab.externalState = undefined
     tab.truncated = result.truncated === true
     tab.editorState = undefined
+    tab.editorScrollSnapshot = undefined
     switchToTabState(tab)
     notifyCurrentDocumentChanged()
     notifyActiveEditorArtifactChanged()
@@ -1091,6 +1232,7 @@ defineExpose({
   openFile,
   openReadOnlyTab,
   getOpenFiles,
+  retargetDocumentPath,
   getCurrentDocument,
   getArtifactReplacementDecision,
   createUntitledTab,
@@ -1122,6 +1264,12 @@ onMounted(async () => {
   }
   window.kernel.on('apps:changed', onAppsChanged)
   unregisterAppsChanged = () => window.kernel.off('apps:changed', onAppsChanged)
+  const onWorkspaceChanged = () => {
+    watchedWorkspaceFiles.clear()
+    syncWatchedWorkspaceFiles()
+  }
+  window.kernel.on('workspace:changed', onWorkspaceChanged)
+  unregisterWorkspaceChanged = () => window.kernel.off('workspace:changed', onWorkspaceChanged)
   window.addEventListener('keydown', handleKeydown, true)
   document.addEventListener('pointerdown', handleBibliographyOutsidePointerDown, true)
   void loadReferences()
@@ -1148,6 +1296,9 @@ onBeforeUnmount(() => {
   unregisterWorkspaceFileChanges = null
   unregisterAppsChanged?.()
   unregisterAppsChanged = null
+  unregisterWorkspaceChanged?.()
+  unregisterWorkspaceChanged = null
+  unwatchAllWorkspaceFiles()
   clearAutoSave()
   disposeTabPersistence()
   window.removeEventListener('keydown', handleKeydown, true)
@@ -1193,7 +1344,7 @@ onBeforeUnmount(() => {
       :comment-count="commentThreads.length"
       :comment-rail-open="showCommentsMargin"
       @format="onFormat"
-      @comment="startAddComment"
+      @comment="onToolbarComment"
       @export="openExportDialog"
     />
 
@@ -1292,13 +1443,17 @@ onBeforeUnmount(() => {
           @active="setEditorActiveComment($event, { scroll: true })"
           @save-draft="saveCommentDraft"
           @cancel-draft="cancelCommentDraft"
+          @update-draft-text="updateCommentDraftText"
           @reply="replyToComment"
           @resolve="resolveCommentThread"
+          @resolve-all="resolveAllCommentThreads"
           @apply-edit="applyCommentAsEdit"
           @send-to-chat="sendCommentsToChat"
           @copy-anchor="copyCommentAnchor"
           @edit-note="editCommentNote"
-          @close="commentRailCollapsed = true"
+          @delete-note="deleteCommentNote"
+          @request-review="requestAIReview()"
+          @close="closeCommentRail"
         />
       </div>
 

@@ -101,9 +101,8 @@ watch(() => props.commentCount, () => nextTick(checkOverflow))
     <span class="mx-0 my-1.5 w-px shrink-0 self-stretch bg-rule"></span>
     <button
       :class="TB_BASE"
-      class="shrink-0 gap-1 px-2 text-[11px] disabled:opacity-35"
-      :title="canComment ? `Add comment (${shortcutLabel(['Shift', 'Mod', 'M'])})` : commentCount ? `${commentCount} comments (${shortcutLabel(['Shift', 'Mod', 'M'])})` : `Select text to comment (${shortcutLabel(['Shift', 'Mod', 'M'])})`"
-      :disabled="!canComment && !commentCount"
+      class="shrink-0 gap-1 px-2 text-[11px]"
+      :title="canComment ? `Add comment (${shortcutLabel(['Shift', 'Mod', 'M'])})` : `${commentCount ? `${commentCount} comments` : 'Comments'} (${shortcutLabel(['Shift', 'Mod', 'M'])})`"
       @mousedown.prevent
       @click="emit('comment')"
     >

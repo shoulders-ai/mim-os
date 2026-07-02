@@ -1,4 +1,6 @@
 import type { ComputedRef, Ref } from 'vue'
+import { diffCommentThreads } from '@main/comments/model.js'
+import { isMarkdownPath } from './codemirror/language.js'
 import type { useDiffStore } from '../../stores/diff.js'
 import type { useSettingsStore } from '../../stores/settings.js'
 import type { useToastStore } from '../../stores/toasts.js'
@@ -325,7 +327,7 @@ export function useEditorFileSync(options: UseEditorFileSyncOptions) {
     const bufferContent = editorView?.state?.doc?.toString?.() ?? tab.content
 
     options.diffStore.activate({
-      source: 'inline-ai',
+      source: 'conflict',
       original: diskContent,
       modified: bufferContent,
       path: tab.path,
@@ -402,6 +404,7 @@ export function useEditorFileSync(options: UseEditorFileSyncOptions) {
       return
     }
 
+    notifyCommentDelta(latest.path, latestLiveContent, content)
     latest.content = content
     latest.originalContent = content
     latest.version = version
@@ -412,6 +415,24 @@ export function useEditorFileSync(options: UseEditorFileSyncOptions) {
       options.switchToDoc(content)
       options.notifyCurrentDocumentChanged()
     }
+  }
+
+  // External edits (agents working through the comment tools) reload silently;
+  // surface what happened to the review threads so the round is visible.
+  function notifyCommentDelta(path: string, before: string, after: string) {
+    if (!isMarkdownPath(path)) return
+    const delta = diffCommentThreads(before, after)
+    const parts: string[] = []
+    if (delta.resolved) parts.push(`${delta.resolved} resolved`)
+    if (delta.replied) parts.push(`${delta.replied} repl${delta.replied === 1 ? 'y' : 'ies'}`)
+    if (delta.added) parts.push(`${delta.added} new`)
+    if (!parts.length) return
+    const basename = path.split('/').pop() || path
+    options.toastStore.push({
+      kind: 'info',
+      message: `Comments updated in ${basename}`,
+      detail: parts.join(' · '),
+    })
   }
 
   return {
