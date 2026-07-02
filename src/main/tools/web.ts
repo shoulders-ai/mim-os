@@ -1,5 +1,6 @@
 import type { ToolRegistry } from '@main/tools/registry.js'
 import type { BrowserSessionPageRenderer } from '@main/web/readBrowserSessionUrl.js'
+import type { LiveBrowserDriver } from '@main/web/liveBrowser.js'
 import { readWebUrl, type WebPageRenderer } from '@main/web/readWebUrl.js'
 import type { FetchLike } from '@main/web/readUrl.js'
 import {
@@ -19,6 +20,7 @@ export interface WebToolsDeps {
   renderSavedBrowserSessionPage?: BrowserSessionPageRenderer
   openSavedBrowserSession?: (params: { url?: string }) => Promise<unknown> | unknown
   clearSavedBrowserSessionProfile?: () => Promise<unknown> | unknown
+  liveBrowser?: LiveBrowserDriver
 }
 
 export function registerWebTools(tools: ToolRegistry, deps: WebToolsDeps = {}): void {
@@ -109,6 +111,44 @@ export function registerWebTools(tools: ToolRegistry, deps: WebToolsDeps = {}): 
   })
 
   tools.register({
+    name: 'web.live.open',
+    description: 'Open a Markanywhere-style live browser session and return a bounded page observation with compact actionable refs.',
+    inputSchema: objectSchema({
+      url: { type: 'string', description: 'The URL to open (http/https only)' },
+      stateful: { type: 'boolean', description: 'Use approved Website Access profile for granted domains (default false)' },
+      visible: { type: 'boolean', description: 'Show the AI-controlled browser window so the user can watch or interact (default false)' },
+      timeout_ms: { type: 'number', description: 'Navigation/capture timeout in milliseconds (default 30000)' },
+      max_chars: { type: 'number', description: 'Maximum characters in the returned observation (default 100000)' },
+      start_from_char: { type: 'number', description: 'Continue the returned observation from this character offset in the cleaned page text' },
+    }, ['url']),
+    execute: async (params, ctx) => liveBrowser(deps).open({
+      url: params.url as string,
+      stateful: params.stateful === true,
+      visible: params.visible === true,
+      timeout_ms: typeof params.timeout_ms === 'number' ? params.timeout_ms : undefined,
+      max_chars: typeof params.max_chars === 'number' ? params.max_chars : undefined,
+      start_from_char: typeof params.start_from_char === 'number' ? params.start_from_char : undefined,
+    }, ctx),
+  })
+
+  tools.register({
+    name: 'web.live.act',
+    description: 'Run one Markanywhere-style live browser action: observe, click, type, scroll, wait, extract, show, hide, or close.',
+    inputSchema: objectSchema({
+      action: { type: 'string', enum: ['observe', 'click', 'type', 'scroll', 'wait', 'extract', 'show', 'hide', 'close'], description: 'Live browser action to run' },
+      ref: { type: 'string', description: 'Action ref from the latest observation for click/type' },
+      text: { type: 'string', description: 'Text to enter for type' },
+      direction: { type: 'string', enum: ['down', 'up', 'left', 'right'], description: 'Scroll direction (default down)' },
+      amount: { type: 'number', description: 'Scroll amount in pixels (default 700)' },
+      ms: { type: 'number', description: 'Wait duration for wait action (default 500, capped at 10000)' },
+      wait_ms: { type: 'number', description: 'Post-action wait before returning the next observation (default 500)' },
+      max_chars: { type: 'number', description: 'Maximum characters in the returned observation (default 100000)' },
+      start_from_char: { type: 'number', description: 'Continue returned observation from this character offset in the cleaned page text' },
+    }, ['action']),
+    execute: async (params, ctx) => executeLiveBrowserAction(liveBrowser(deps), params, ctx),
+  })
+
+  tools.register({
     name: 'web.search',
     description: 'Search the web via Exa and return results with title, URL, and snippet. Requires EXA_API_KEY.',
     inputSchema: objectSchema({
@@ -128,4 +168,82 @@ function workspacePath(tools: ToolRegistry): string {
   const workspacePath = tools.getWorkspacePath()
   if (!workspacePath) throw new Error('No workspace open')
   return workspacePath
+}
+
+function liveBrowser(deps: WebToolsDeps): LiveBrowserDriver {
+  if (!deps.liveBrowser) {
+    throw new Error('Live browser is only available in the Electron desktop runtime')
+  }
+  return deps.liveBrowser
+}
+
+async function executeLiveBrowserAction(
+  driver: LiveBrowserDriver,
+  params: Record<string, unknown>,
+  ctx: Parameters<LiveBrowserDriver['open']>[1],
+): Promise<unknown> {
+  const maxChars = typeof params.max_chars === 'number' ? params.max_chars : undefined
+  const startFromChar = typeof params.start_from_char === 'number' ? params.start_from_char : undefined
+  const observeParams = {
+    max_chars: maxChars,
+    start_from_char: startFromChar,
+  }
+  const observeAfter = async (actionResult: unknown) => {
+    const waitMs = typeof params.wait_ms === 'number' ? params.wait_ms : undefined
+    try {
+      await driver.wait({ ms: waitMs }, ctx)
+    } catch {
+      await sleep(Math.min(Math.max(waitMs ?? 500, 1), 10_000))
+    }
+    return {
+      action: actionResult,
+      observation: await driver.observe(observeParams, ctx),
+    }
+  }
+
+  switch (params.action) {
+    case 'observe':
+      return driver.observe(observeParams, ctx)
+    case 'click':
+      return observeAfter(await driver.click({ ref: requiredString(params.ref, 'ref') }, ctx))
+    case 'type':
+      return observeAfter(await driver.type({
+        ref: requiredString(params.ref, 'ref'),
+        text: requiredString(params.text, 'text'),
+      }, ctx))
+    case 'scroll':
+      return observeAfter(await driver.scroll({
+        direction: typeof params.direction === 'string' ? params.direction as 'down' | 'up' | 'left' | 'right' : undefined,
+        amount: typeof params.amount === 'number' ? params.amount : undefined,
+      }, ctx))
+    case 'wait':
+      await driver.wait({
+        ms: typeof params.ms === 'number' ? params.ms : undefined,
+      }, ctx)
+      return driver.observe(observeParams, ctx)
+    case 'extract':
+      return driver.extract({
+        max_chars: maxChars,
+        start_from_char: startFromChar,
+      }, ctx)
+    case 'show':
+      return driver.show({}, ctx)
+    case 'hide':
+      return driver.hide({}, ctx)
+    case 'close':
+      return driver.close({}, ctx)
+    default:
+      throw new Error(`Unsupported live browser action: ${String(params.action)}`)
+  }
+}
+
+function requiredString(value: unknown, name: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`browser action requires ${name}`)
+  }
+  return value
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
