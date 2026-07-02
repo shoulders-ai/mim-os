@@ -70,15 +70,32 @@ describe('getSystemPrompt', () => {
   it('advertises the single web read workhorse', () => {
     const out = getSystemPrompt()
     expect(out).toContain('web_read')
+    expect(out).toContain('browser_open')
+    expect(out).toContain('browser_act')
+    expect(out).toContain('visible=true')
+    expect(out).toContain('action="show"')
+    expect(out).toContain('Markanywhere-style live browser')
+    expect(out).not.toContain('browser_click')
     expect(out).not.toContain('web_read_auto')
     expect(out).not.toContain('web_research_status')
     expect(out).not.toContain('cache.cached_at')
     expect(out).not.toContain('status="partial"')
     expect(out).toContain('Selectable PDF')
     expect(out).toContain('stateful')
-    expect(out).toContain('website access')
+    expect(out).toContain('Website Access')
     expect(out).toContain('granted directly from chat')
     expect(out).toContain('Do not ask the user to copy/paste')
+  })
+
+  it('describes inline review comments: tools, syntax, and the no-hand-editing rule', () => {
+    const out = getSystemPrompt()
+    expect(out).toContain('comments_list')
+    expect(out).toContain('comments_add')
+    expect(out).toContain('comments_reply')
+    expect(out).toContain('comments_resolve')
+    expect(out).toContain('all=true')
+    expect(out).toContain('<comment id="')
+    expect(out).toContain('comments_* tools')
   })
 
   it('describes connection management tools for integrations', () => {
@@ -120,6 +137,21 @@ describe('getSystemPrompt', () => {
     const out = getSystemPrompt(dir)
     expect(out).toContain('Current sprint: fixing bugs')
     expect(out).not.toContain('{{AGENT_CONTEXT}}')
+  })
+
+  it('resolves {{WORKSPACE_TREE}} from the current workspace structure', () => {
+    writeFileSync(join(dir, 'AGENTS.md'), 'Tree:\n{{WORKSPACE_TREE}}\nTools: {{TOOL_SET}}')
+    mkdirSync(join(dir, 'docs'), { recursive: true })
+    writeFileSync(join(dir, 'README.md'), 'readme')
+    writeFileSync(join(dir, 'docs', 'plan.md'), 'plan')
+
+    const out = getSystemPrompt(dir)
+
+    expect(out).toContain('# Workspace tree')
+    expect(out).toContain('README.md')
+    expect(out).toContain('docs/')
+    expect(out).toContain('plan.md')
+    expect(out).not.toContain('{{WORKSPACE_TREE}}')
   })
 
   it('resolves {{PROJECT_LOG}} from .mim/log.md', () => {

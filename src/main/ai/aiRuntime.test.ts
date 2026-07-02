@@ -85,6 +85,15 @@ function withGooglePolicy(policy: Record<string, unknown>): string {
   return dir
 }
 
+function withToolsPolicy(policy: Record<string, unknown>): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mim-ai-test-'))
+  mkdirSync(join(dir, '.mim'), { recursive: true })
+  writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
+    tools: policy,
+  }))
+  return dir
+}
+
 describe('central AI runtime tools', () => {
   it('builds task label instructions for non-technical sidebar work', () => {
     const system = buildTaskLabelSystemPrompt()
@@ -281,6 +290,46 @@ describe('central AI runtime tools', () => {
     ])
   })
 
+  it('filters AI SDK tools through registry tool policy ids', async () => {
+    const dir = withToolsPolicy({ disabled: ['git.push', 'web.live.open', 'web.live.act'] })
+    const { tools } = mockRegistry(dir)
+
+    try {
+      const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+
+      expect(aiTools.git_push).toBeUndefined()
+      expect(aiTools.browser_open).toBeUndefined()
+      expect(aiTools.browser_act).toBeUndefined()
+      expect(aiTools.web_read).toBeDefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('filters dynamic package AI tools by their original registry name', async () => {
+    const dir = withToolsPolicy({ disabled: ['prs.list'] })
+    const { tools } = mockRegistry(dir)
+
+    try {
+      const aiTools = await createAiSdkTools({
+        tools,
+        profile: 'chat',
+        sessionId: 's1',
+        packageTools: [{
+          name: 'prs.list',
+          packageId: 'pr-monitor',
+          packageName: 'PR Monitor',
+          description: 'List pull requests',
+        }],
+      })
+
+      expect(aiTools.prs_list).toBeUndefined()
+      expect(aiTools.package_tools_execute).toBeDefined()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('exposes trace query and stats tools on the chat profile', async () => {
     const { tools, calls } = mockRegistry()
     const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
@@ -372,6 +421,21 @@ describe('central AI runtime tools', () => {
     } as any)).toEqual({
       type: 'text',
       text: '<attached-file name="hello.md" media-type="text/markdown">\n# Hello World\n</attached-file>',
+    })
+  })
+
+  it('includes workspace-relative paths on model-visible attached file blocks', () => {
+    expect(convertMimDataPart({
+      type: 'data-context',
+      data: {
+        filename: 'hello.md',
+        path: 'docs/hello.md',
+        mediaType: 'text/markdown',
+        content: '# Hello World',
+      },
+    } as any)).toEqual({
+      type: 'text',
+      text: '<attached-file path="docs/hello.md" name="hello.md" media-type="text/markdown">\n# Hello World\n</attached-file>',
     })
   })
 
@@ -472,6 +536,55 @@ describe('central AI runtime tools', () => {
       },
       ctx: { actor: 'ai', sessionId: 's1' },
     })
+  })
+
+  it('exposes a compact Markanywhere-style live browser surface', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+
+    expect(aiTools.browser_open.description).toContain('Markanywhere')
+    expect(aiTools.browser_act.description).toContain('observe')
+    expect(aiTools.browser_observe).toBeUndefined()
+    expect(aiTools.browser_click).toBeUndefined()
+    expect(aiTools.browser_type).toBeUndefined()
+    expect(aiTools.browser_scroll).toBeUndefined()
+    expect(aiTools.browser_wait).toBeUndefined()
+    expect(aiTools.browser_extract).toBeUndefined()
+    expect(aiTools.browser_close).toBeUndefined()
+
+    await aiTools.browser_open.execute?.({
+      url: 'https://example.com',
+      stateful: false,
+      visible: true,
+      max_chars: 1000,
+      start_from_char: 25,
+    }, {})
+    await aiTools.browser_act.execute?.({ action: 'click', ref: '3', max_chars: 900 }, {})
+    await aiTools.browser_act.execute?.({ action: 'show' }, {})
+    await aiTools.browser_act.execute?.({ action: 'hide' }, {})
+
+    expect(calls.slice(-4)).toEqual([
+      {
+        name: 'web.live.open',
+        params: { url: 'https://example.com', stateful: false, visible: true, max_chars: 1000, start_from_char: 25 },
+        ctx: { actor: 'ai', sessionId: 's1' },
+      },
+      {
+        name: 'web.live.act',
+        params: { action: 'click', ref: '3', max_chars: 900 },
+        ctx: { actor: 'ai', sessionId: 's1' },
+      },
+      {
+        name: 'web.live.act',
+        params: { action: 'show' },
+        ctx: { actor: 'ai', sessionId: 's1' },
+      },
+      {
+        name: 'web.live.act',
+        params: { action: 'hide' },
+        ctx: { actor: 'ai', sessionId: 's1' },
+      },
+    ])
   })
 
   it('times out a hanging web_read tool call at the AI SDK boundary', async () => {
@@ -981,17 +1094,23 @@ describe('central AI runtime tools', () => {
   })
 
   it('always exposes connections_status tool regardless of policy', async () => {
-    const { tools, calls } = mockRegistry()
-    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    const dir = withToolsPolicy({ disabled: ['editor.open', 'settings.set'] })
+    try {
+      const { tools, calls } = mockRegistry(dir)
+      const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
-    expect(aiTools.connections_status).toBeDefined()
-    expect(aiTools.connections_status.description).toContain('connection')
+      expect(aiTools.connections_status).toBeDefined()
+      expect(aiTools.connections_status.description).toContain('connection')
+      expect(aiTools.connections_configure).toBeUndefined()
 
-    calls.length = 0
-    await aiTools.connections_status.execute?.({}, {})
+      calls.length = 0
+      await aiTools.connections_status.execute?.({}, {})
 
-    expect(calls.some(c => c.name === 'google.status')).toBe(true)
-    expect(calls.some(c => c.name === 'slack.status')).toBe(true)
+      expect(calls.some(c => c.name === 'google.status')).toBe(true)
+      expect(calls.some(c => c.name === 'slack.status')).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('always exposes connection auth tools regardless of policy', async () => {
@@ -1053,7 +1172,7 @@ describe('central AI runtime tools', () => {
     }])
   })
 
-  it('routes connections_configure through settings.get and settings.set', async () => {
+  it('routes connections_configure through toolPolicy.set', async () => {
     const { tools, calls } = mockRegistry()
     const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
     calls.length = 0
@@ -1066,28 +1185,22 @@ describe('central AI runtime tools', () => {
       driveEnabled: true,
     }, {})
 
-    expect(calls[0]).toMatchObject({ name: 'settings.get', params: { key: 'connectors' } })
-    expect(calls[1]).toMatchObject({
-      name: 'settings.set',
+    expect(calls[0]).toMatchObject({
+      name: 'toolPolicy.set',
       params: {
-        key: 'connectors',
-        value: expect.objectContaining({
-          google: expect.objectContaining({ aiEnabled: true, gmailEnabled: true }),
-        }),
+        toolIds: expect.arrayContaining(['gmail.search', 'gmail.read', 'calendar.events', 'drive.search']),
+        enabled: true,
       },
     })
   })
 
-  it('connections_configure merges without clobbering sibling integrations', async () => {
+  it('connections_configure emits separate policy updates without writing legacy connectors', async () => {
     const calls: Array<{ name: string; params: Record<string, unknown>; ctx: Record<string, unknown> }> = []
     const tools = {
       call: vi.fn(async (name: string, params: Record<string, unknown>, ctx: Record<string, unknown>) => {
         calls.push({ name, params, ctx })
         if (name === 'google.status') {
           return { configured: true, tokenConfigured: true, grantedScopes: [] }
-        }
-        if (name === 'settings.get') {
-          return { value: { slack: { aiEnabled: true, sendEnabled: true } } }
         }
         return { ok: true }
       }),
@@ -1102,11 +1215,12 @@ describe('central AI runtime tools', () => {
       gmailEnabled: true,
     }, {})
 
-    const setCall = calls.find(c => c.name === 'settings.set')
-    expect(setCall).toBeDefined()
-    const value = setCall!.params.value as Record<string, unknown>
-    expect(value.slack).toEqual({ aiEnabled: true, sendEnabled: true })
-    expect(value.google).toEqual({ aiEnabled: true, gmailEnabled: true })
+    expect(calls.some(c => c.name === 'settings.set')).toBe(false)
+    const setCall = calls.find(c => c.name === 'toolPolicy.set')
+    expect(setCall?.params).toMatchObject({
+      toolIds: expect.arrayContaining(['gmail.search', 'gmail.read']),
+      enabled: true,
+    })
   })
 
   it('hides connection auth tools on inline and ghost profiles', async () => {
@@ -1349,6 +1463,13 @@ describe('summarizeTurnUsage', () => {
     expect(result.usage.outputTokens).toBe(4200)
     expect(result.usage.estimatedCost).toBeCloseTo(1.53)
     expect(result.contextTokens).toBe(101000)
+  })
+
+  it('falls back to an estimated context size when provider usage is missing', () => {
+    const result = summarizeTurnUsage([], 44000)
+
+    expect(result.usage.inputTokens).toBe(0)
+    expect(result.contextTokens).toBe(44000)
   })
 })
 

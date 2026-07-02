@@ -20,8 +20,18 @@ import { buildSlackAiTools } from '@main/integrations/slack/aiTools.js'
 import { readSlackPolicy } from '@main/integrations/slack/policy.js'
 import { buildProviderOptions, type ModelConfig } from '@main/ai/providerOptions.js'
 import { formatSkillCatalogSection, getSystemPrompt } from '@main/ai/systemPrompt.js'
+import {
+  compactBrowserToolResultsForContext,
+  estimateMessagesTokens,
+} from '@main/ai/messageCompaction.js'
 import type { SkillLoader } from '@main/skills.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
+import {
+  aiToolKeyEnabled,
+  readToolsPolicy,
+  registryToolEnabled,
+  type EffectiveToolPolicy,
+} from '@main/tools/toolPolicy.js'
 import { newSpanId, newTraceId } from '@main/trace/trace.js'
 
 export type AiProfile = 'chat' | 'inline' | 'ghost'
@@ -191,6 +201,9 @@ export async function createAiSdkTools({
       name,
     )
   }
+  const toolPolicy = readToolsPolicy(tools.getWorkspacePath(), {
+    knownToolIds: packageTools.map(packageTool => packageTool.name),
+  })
 
   const readTools = {
     fs_read: tool({
@@ -242,11 +255,42 @@ export async function createAiSdkTools({
     }),
   }
 
+  const liveBrowserTools = {
+    browser_open: tool({
+      description: 'Open a Markanywhere-style live browser session for interactive websites. Returns one bounded observation field plus compact short actionable refs.',
+      inputSchema: z.object({
+        url: z.string().url(),
+        stateful: z.boolean().optional().describe('Use approved Website Access profile for granted domains'),
+        visible: z.boolean().optional().describe('Show the AI-controlled browser window so the user can watch or interact'),
+        timeout_ms: z.number().int().positive().optional().describe('Navigation/capture timeout in milliseconds'),
+        max_chars: z.number().int().positive().optional().describe('Maximum characters in the returned observation (default 100000)'),
+        start_from_char: z.number().int().nonnegative().optional().describe('Continue the returned observation from this character offset in the cleaned page text'),
+      }),
+      execute: async (params) => call('web.live.open', params),
+    }),
+
+    browser_act: tool({
+      description: 'Run a live browser action after browser_open. Actions: observe, click, type, scroll, wait, extract, show, hide, close. Observations return Markanywhere refs valid only until the next observation.',
+      inputSchema: z.object({
+        action: z.enum(['observe', 'click', 'type', 'scroll', 'wait', 'extract', 'show', 'hide', 'close']),
+        ref: z.string().min(1).optional().describe('Required for click/type; ref from the latest observation'),
+        text: z.string().optional().describe('Required for type'),
+        direction: z.enum(['down', 'up', 'left', 'right']).optional().describe('Scroll direction'),
+        amount: z.number().int().positive().optional().describe('Scroll amount in pixels'),
+        ms: z.number().int().positive().optional().describe('Wait duration for action=wait'),
+        wait_ms: z.number().int().positive().optional().describe('Post-action wait before the returned observation for click/type/scroll'),
+        max_chars: z.number().int().positive().optional().describe('Maximum characters in the returned observation (default 100000)'),
+        start_from_char: z.number().int().nonnegative().optional().describe('Continue returned observation from this character offset in the cleaned page text'),
+      }),
+      execute: async (params) => call('web.live.act', params),
+    }),
+  }
+
   const googlePolicy = readGooglePolicy(tools.getWorkspacePath())
   const googleTools = buildGoogleAiTools(call, await resolveGoogleAiToolState(call, googlePolicy))
 
   if (profile === 'inline') {
-    return {
+    return filterAiToolMap({
       ...readTools,
       ...googleTools,
       suggest_edit: tool({
@@ -254,13 +298,14 @@ export async function createAiSdkTools({
         inputSchema: z.object({
           replacement: z.string().describe('The full replacement text for the selection'),
         }),
-        execute: async ({ replacement }) => ({ replacement }),
-      }),
-    }
+          execute: async ({ replacement }) => ({ replacement }),
+        }),
+    }, toolPolicy)
   }
 
   const dynamicPackageTools: Record<string, ReturnType<typeof tool>> = {}
   for (const packageTool of packageTools) {
+    if (!registryToolEnabled(toolPolicy, packageTool.name)) continue
     const key = aiToolKey(packageTool.name)
     // execute uses the ORIGINAL name so the package runtime resolves it
     const originalName = packageTool.name
@@ -295,6 +340,7 @@ export async function createAiSdkTools({
 
   const staticTools = {
     ...readTools,
+    ...liveBrowserTools,
     ...googleTools,
     ...slackTools,
     ...skillTools,
@@ -424,13 +470,13 @@ export async function createAiSdkTools({
     }),
 
     comments_list: tool({
-      description: 'List inline review comment threads in a markdown file. Use before working through existing document review comments.',
+      description: 'List inline review comment threads in a file (markdown or code). Use before working through existing review comments.',
       inputSchema: z.object({ path: z.string() }),
       execute: async ({ path }) => call('comments.list', { path }),
     }),
 
     comments_add: tool({
-      description: 'Add an inline review comment anchored to exact visible text. Use this when reviewing a document; do not hand-edit comment tags.',
+      description: 'Add an inline review comment anchored to exact visible text. Markdown files get inline <comment> tags; code files get an @mim marker line above the anchored line. Do not hand-edit comment markup.',
       inputSchema: z.object({
         path: z.string(),
         anchor_text: z.string().min(1),
@@ -450,12 +496,13 @@ export async function createAiSdkTools({
     }),
 
     comments_resolve: tool({
-      description: 'Resolve an inline review comment. This removes the comment wrapper and notes while keeping the anchored text.',
+      description: 'Resolve inline review comments. Pass id to resolve a single thread, or all=true to resolve every thread in the file. Removes comment wrappers and notes while keeping the anchored text.',
       inputSchema: z.object({
         path: z.string(),
-        id: z.string().min(1),
+        id: z.string().min(1).optional(),
+        all: z.boolean().optional(),
       }),
-      execute: async ({ path, id }) => call('comments.resolve', { path, id }),
+      execute: async ({ path, id, all }) => call('comments.resolve', { path, ...(id ? { id } : {}), ...(all ? { all } : {}) }),
     }),
 
     fs_edit: tool({
@@ -594,7 +641,10 @@ export async function createAiSdkTools({
         name: z.string(),
         input: looseObjectSchema.optional(),
       }),
-      execute: async ({ name, input }) => call('package.tools.execute', { name, input: input ?? {} }),
+      execute: async ({ name, input }) => {
+        if (!registryToolEnabled(toolPolicy, name)) throw new Error(`Tool is disabled by Settings > Tools: ${name}`)
+        return call('package.tools.execute', { name, input: input ?? {} })
+      },
     }),
 
     package_jobs_start: tool({
@@ -713,21 +763,19 @@ export async function createAiSdkTools({
         directMessages: z.boolean().optional(),
       }),
       execute: async ({ integration, ...flags }) => {
-        const current = await call('settings.get', { key: 'connectors' }) as { value?: unknown }
-        const connectors = (current.value && typeof current.value === 'object' && !Array.isArray(current.value))
-          ? current.value as Record<string, unknown>
-          : {}
-        const existing = (connectors[integration] && typeof connectors[integration] === 'object')
-          ? connectors[integration] as Record<string, unknown>
-          : {}
         const boolFlags: Record<string, boolean> = {}
         for (const [key, value] of Object.entries(flags)) {
           if (typeof value === 'boolean') boolFlags[key] = value
         }
-        await call('settings.set', {
-          key: 'connectors',
-          value: { ...connectors, [integration]: { ...existing, ...boolFlags } },
-        })
+        const enableIds: string[] = []
+        const disableIds: string[] = []
+        for (const [key, value] of Object.entries(boolFlags)) {
+          const ids = connectorFlagToolIds(integration, key, value)
+          if (value) enableIds.push(...ids)
+          else disableIds.push(...ids)
+        }
+        if (enableIds.length) await call('toolPolicy.set', { toolIds: uniqueStrings(enableIds), enabled: true })
+        if (disableIds.length) await call('toolPolicy.set', { toolIds: uniqueStrings(disableIds), enabled: false })
         return { integration, configured: boolFlags }
       },
     }),
@@ -741,7 +789,56 @@ export async function createAiSdkTools({
     }
   }
 
-  return staticTools
+  return filterAiToolMap(staticTools, toolPolicy)
+}
+
+function filterAiToolMap<T extends Record<string, ReturnType<typeof tool>>>(
+  tools: T,
+  policy: EffectiveToolPolicy,
+): T {
+  const filtered: Partial<T> = {}
+  for (const [key, value] of Object.entries(tools) as Array<[keyof T & string, T[keyof T]]>) {
+    if (aiToolKeyEnabled(policy, key)) filtered[key] = value
+  }
+  return filtered as T
+}
+
+function connectorFlagToolIds(integration: 'google' | 'slack', key: string, enabled: boolean): string[] {
+  if (integration === 'slack') {
+    if (key === 'aiEnabled') return ['slack.search', 'slack.history', 'slack.channels', 'slack.replies', 'slack.users']
+    if (key === 'sendEnabled') return ['slack.send']
+    if (key === 'privateChannels') return ['slack.privateChannels']
+    if (key === 'directMessages') return ['slack.dms', 'slack.directMessages']
+    return []
+  }
+  if (key === 'aiEnabled') {
+    if (enabled) return []
+    return [
+      'gmail.search',
+      'gmail.read',
+      'gmail.send',
+      'calendar.events',
+      'calendar.create',
+      'drive.search',
+      'drive.meta',
+      'docs.read',
+      'sheets.meta',
+      'sheets.read',
+      'sheets.write',
+      'sheets.append',
+    ]
+  }
+  if (key === 'gmailEnabled') return ['gmail.search', 'gmail.read']
+  if (key === 'gmailSendEnabled') return ['gmail.send']
+  if (key === 'calendarEnabled') return ['calendar.events']
+  if (key === 'calendarWriteEnabled') return ['calendar.create']
+  if (key === 'driveEnabled') return ['drive.search', 'drive.meta', 'docs.read', 'sheets.meta', 'sheets.read']
+  if (key === 'sheetsWriteEnabled') return ['sheets.write', 'sheets.append']
+  return []
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)]
 }
 
 async function resolveGoogleAiToolState(
@@ -954,14 +1051,19 @@ async function streamProfileResponse({
     : null
   const normalizedMessages = normalizeFileUIParts(request.messages || [])
   const repaired = repairIncompleteToolMessages(normalizedMessages)
-  if (profile === 'chat' && sessionId && repaired.changed) {
-    await persistRepairedChatSession(tools, sessionId, repaired.messages, turnTrace)
+  const compacted = profile === 'chat'
+    ? compactBrowserToolResultsForContext(repaired.messages)
+    : { messages: repaired.messages, changed: false }
+  const preparedMessages = compacted.messages
+  if (profile === 'chat' && sessionId && (repaired.changed || compacted.changed)) {
+    await persistRepairedChatSession(tools, sessionId, preparedMessages, turnTrace)
   }
   const uiMessages = await validateUIMessages({
-    messages: repaired.messages,
+    messages: preparedMessages,
     tools: aiTools,
     dataSchemas: { context: contextDataSchema },
   })
+  const estimatedContextTokens = estimateMessagesTokens(uiMessages)
   const modelMessages = await convertToModelMessages(uiMessages, {
     tools: aiTools,
     ignoreIncompleteToolCalls: true,
@@ -1035,7 +1137,7 @@ async function streamProfileResponse({
         ...(messagesRef ? { payloadRef: messagesRef } : {}),
       })
       if (profile !== 'chat' || !sessionId) return
-      const turnUsage = summarizeTurnUsage(turnUsageSteps)
+      const turnUsage = summarizeTurnUsage(turnUsageSteps, estimatedContextTokens)
       await persistChatSession(tools, sessionId, messages, turnUsage.usage, turnUsage.contextTokens, turnTrace)
     },
     onError: (error) => error instanceof Error ? error.message : 'AI request failed',
@@ -1054,18 +1156,21 @@ export function convertMimDataPart(part: { type: string; data: unknown }) {
 function formatContextForModel(data: MimContextData): string {
   const filename = escapeXmlAttribute(data.filename || 'attachment.txt')
   const mediaType = escapeXmlAttribute(data.mediaType || 'text/plain')
+  const path = typeof (data as Record<string, unknown>).path === 'string'
+    ? escapeXmlAttribute((data as Record<string, string>).path)
+    : null
   if ((data as Record<string, unknown>).kind === 'comments') {
-    const path = escapeXmlAttribute(typeof (data as Record<string, unknown>).path === 'string' ? (data as Record<string, string>).path : data.filename)
+    const commentPath = path ?? escapeXmlAttribute(data.filename)
     let parsed: Record<string, unknown> = {}
     try { parsed = JSON.parse(data.content) } catch { /* use raw content below */ }
     const doc = typeof parsed.document === 'string' ? parsed.document : null
     const instruction = typeof parsed.instruction === 'string' ? parsed.instruction : ''
     const parts = [
-      `<attached-comments path="${path}" name="${filename}">`,
+      `<attached-comments path="${commentPath}" name="${filename}">`,
     ]
     if (instruction) parts.push(`<instruction>${instruction}</instruction>`)
     if (doc) {
-      parts.push(`<document path="${path}">`)
+      parts.push(`<document path="${commentPath}">`)
       parts.push(doc)
       parts.push('</document>')
     } else {
@@ -1074,8 +1179,9 @@ function formatContextForModel(data: MimContextData): string {
     parts.push('</attached-comments>')
     return parts.join('\n')
   }
+  const pathAttribute = path ? ` path="${path}"` : ''
   return [
-    `<attached-file name="${filename}" media-type="${mediaType}">`,
+    `<attached-file${pathAttribute} name="${filename}" media-type="${mediaType}">`,
     data.content,
     '</attached-file>',
   ].join('\n')
@@ -1342,11 +1448,13 @@ async function persistChatSession(
   } catch {
     usage = requestUsage
   }
+  const compacted = compactBrowserToolResultsForContext(messages)
   await tools.call('session.update', {
     id: sessionId,
-    messages,
+    messages: compacted.messages,
     usage,
     lastContextTokens,
+    lastInputTokens: lastContextTokens,
   }, ctx)
 }
 
@@ -1768,13 +1876,17 @@ export function addUsage(a?: Partial<UsageSummary> | null, b?: Partial<UsageSumm
   }
 }
 
-export function summarizeTurnUsage(steps: Array<Partial<UsageSummary>>): { usage: UsageSummary; contextTokens: number } {
+export function summarizeTurnUsage(
+  steps: Array<Partial<UsageSummary>>,
+  fallbackContextTokens = 0,
+): { usage: UsageSummary; contextTokens: number } {
   let usage = emptyUsage()
   let contextTokens = 0
   for (const step of steps) {
     usage = addUsage(usage, step)
     contextTokens = Math.max(contextTokens, numberOrZero(step.inputTokens))
   }
+  if (contextTokens === 0) contextTokens = Math.max(0, Math.floor(fallbackContextTokens))
   return { usage, contextTokens }
 }
 
