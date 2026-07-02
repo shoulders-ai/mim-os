@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia } from 'pinia'
 import { createApp, h, nextTick, ref } from 'vue'
 import FilesWorkView from './FilesWorkView.vue'
 
@@ -48,6 +49,7 @@ function mountFiles(props = {}, handlers: Record<string, unknown> = {}) {
     ...props,
     ...handlers,
   })
+  app.use(createPinia())
   app.mount(appRoot)
   return { app, root: appRoot }
 }
@@ -71,6 +73,7 @@ function mountReactiveFiles(
       })
     },
   })
+  app.use(createPinia())
   app.mount(appRoot)
   return { app, root: appRoot }
 }
@@ -99,6 +102,24 @@ async function type(root: HTMLElement, value: string) {
   el.value = value
   el.dispatchEvent(new Event('input', { bubbles: true }))
   await flushUi()
+}
+
+function dataTransfer() {
+  const values = new Map<string, string>()
+  const transfer = {
+    types: [] as string[],
+    files: [],
+    effectAllowed: '',
+    dropEffect: '',
+    setData(type: string, value: string) {
+      values.set(type, value)
+      transfer.types = Array.from(values.keys())
+    },
+    getData(type: string) {
+      return values.get(type) ?? ''
+    },
+  }
+  return transfer
 }
 
 describe('FilesWorkView', () => {
@@ -617,6 +638,59 @@ describe('FilesWorkView', () => {
       source_path: '/Users/test/incoming/report.docx',
       dest_dir: 'docs',
     })
+  })
+
+  it('moves workspace-dragged files into the hovered folder row', async () => {
+    const onPathMoved = vi.fn()
+    mounted = mountFiles({}, { onPathMoved })
+    await flushUi()
+
+    const readmeRow = rowButtons(mounted.root).find(row => row.textContent?.includes('README.md'))!
+    const docsRow = rowButtons(mounted.root).find(row => row.textContent?.includes('docs'))!
+    const transfer = dataTransfer()
+
+    const start = new Event('dragstart', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(start, 'dataTransfer', { value: transfer })
+    readmeRow.dispatchEvent(start)
+
+    const over = new Event('dragover', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(over, 'dataTransfer', { value: transfer })
+    docsRow.dispatchEvent(over)
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(drop, 'dataTransfer', { value: transfer })
+    docsRow.dispatchEvent(drop)
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('fs.rename', {
+      old_path: 'README.md',
+      new_path: 'docs/README.md',
+    })
+    expect(onPathMoved).toHaveBeenCalledWith({
+      oldPath: 'README.md',
+      newPath: 'docs/README.md',
+      type: 'file',
+    })
+  })
+
+  it('ignores workspace-dragged no-op moves before calling fs.rename', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const readmeRow = rowButtons(mounted.root).find(row => row.textContent?.includes('README.md'))!
+    const container = mounted.root.querySelector<HTMLElement>('[data-testid="files-drop-zone"]')!
+    const transfer = dataTransfer()
+
+    const start = new Event('dragstart', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(start, 'dataTransfer', { value: transfer })
+    readmeRow.dispatchEvent(start)
+
+    const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(drop, 'dataTransfer', { value: transfer })
+    container.dispatchEvent(drop)
+    await flushUi()
+
+    expect(call).not.toHaveBeenCalledWith('fs.rename', expect.anything())
   })
 
   it('ignores drags that carry no OS files', async () => {

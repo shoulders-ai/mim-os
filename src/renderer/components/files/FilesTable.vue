@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   IconAlertCircle,
   IconChevronDown,
@@ -10,6 +10,15 @@ import {
   IconFolders,
   IconLock,
 } from '@tabler/icons-vue'
+import {
+  WORKSPACE_DRAG_MIME,
+  encodeWorkspaceDragPayload,
+  isWorkspaceDragRow,
+  isWorkspaceDropDir,
+  parseWorkspaceDragPayload,
+  buildWorkspaceMovePlan,
+  type WorkspaceDragPayload,
+} from './fileMove.js'
 import {
   formatSize,
   formatTime,
@@ -43,6 +52,7 @@ const emit = defineEmits<{
   rowContextmenu: [row: FileRow, event: MouseEvent]
   emptyContextmenu: [event: MouseEvent]
   dropExternal: [files: File[], targetDir: string | null]
+  dropWorkspace: [source: WorkspaceDragPayload, targetDir: string | null]
   scrollToResources: [event: MouseEvent]
 }>()
 
@@ -58,64 +68,141 @@ function onContainerContextmenu(event: MouseEvent) {
 
 const dragDepth = ref(0)
 const dropTargetDir = ref<string | null>(null)
+const dragKind = ref<'external' | 'workspace' | null>(null)
+const draggedWorkspaceRow = ref<WorkspaceDragPayload | null>(null)
 
 function hasExternalFiles(event: DragEvent): boolean {
   const types = event.dataTransfer?.types
   return !!types && Array.from(types).includes('Files')
 }
 
-// Resource mounts are managed (and usually readonly); they are not drop targets.
-function isDropDir(row: FileRow): boolean {
-  return row.type === 'directory'
-    && !row.disabled
-    && !row.collection
-    && !row.path.startsWith('.mim/')
+function hasWorkspaceDrag(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types
+  return !!types && Array.from(types).includes(WORKSPACE_DRAG_MIME)
+}
+
+function eventDragKind(event: DragEvent): 'external' | 'workspace' | null {
+  if (hasExternalFiles(event)) return 'external'
+  if (hasWorkspaceDrag(event)) return 'workspace'
+  return null
 }
 
 function onZoneDragenter(event: DragEvent) {
-  if (!hasExternalFiles(event)) return
+  const kind = eventDragKind(event)
+  if (!kind) return
   event.preventDefault()
+  dragKind.value = kind
   dragDepth.value++
 }
 
 function onZoneDragover(event: DragEvent) {
-  if (!hasExternalFiles(event)) return
+  const kind = eventDragKind(event)
+  if (!kind) return
   event.preventDefault()
+  event.dataTransfer!.dropEffect = kind === 'workspace' ? 'move' : 'copy'
+  dragKind.value = kind
   dropTargetDir.value = null
 }
 
 function onZoneDragleave(event: DragEvent) {
-  if (!hasExternalFiles(event)) return
+  if (!eventDragKind(event)) return
   dragDepth.value = Math.max(0, dragDepth.value - 1)
-  if (dragDepth.value === 0) dropTargetDir.value = null
+  if (dragDepth.value === 0) resetDragState()
 }
 
 function onZoneDrop(event: DragEvent) {
-  if (!hasExternalFiles(event)) return
+  const kind = eventDragKind(event)
+  if (!kind) return
   event.preventDefault()
-  emitDrop(event, null)
+  if (kind === 'external') emitExternalDrop(event, null)
+  else emitWorkspaceDrop(event, null)
 }
 
 function onRowDragover(row: FileRow, event: DragEvent) {
-  if (!hasExternalFiles(event) || !isDropDir(row)) return
-  event.preventDefault()
+  if (hasExternalFiles(event)) {
+    if (!isWorkspaceDropDir(row)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer!.dropEffect = 'copy'
+    dragKind.value = 'external'
+    dropTargetDir.value = row.path
+    return
+  }
+  if (!hasWorkspaceDrag(event)) return
   event.stopPropagation()
+  if (!isWorkspaceDropDir(row)) return
+  const source = workspacePayloadFromEvent(event)
+  if (!source || !buildWorkspaceMovePlan(source, row.path).ok) return
+  event.preventDefault()
+  event.dataTransfer!.dropEffect = 'move'
+  dragKind.value = 'workspace'
   dropTargetDir.value = row.path
 }
 
 function onRowDrop(row: FileRow, event: DragEvent) {
-  if (!hasExternalFiles(event) || !isDropDir(row)) return
-  event.preventDefault()
+  if (hasExternalFiles(event)) {
+    if (!isWorkspaceDropDir(row)) return
+    event.preventDefault()
+    event.stopPropagation()
+    emitExternalDrop(event, row.path)
+    return
+  }
+  if (!hasWorkspaceDrag(event)) return
   event.stopPropagation()
-  emitDrop(event, row.path)
+  if (!isWorkspaceDropDir(row)) return
+  const source = workspacePayloadFromEvent(event)
+  if (!source || !buildWorkspaceMovePlan(source, row.path).ok) return
+  event.preventDefault()
+  emitWorkspaceDrop(event, row.path)
 }
 
-function emitDrop(event: DragEvent, targetDir: string | null) {
+function emitExternalDrop(event: DragEvent, targetDir: string | null) {
   const files = Array.from(event.dataTransfer?.files ?? [])
-  dragDepth.value = 0
-  dropTargetDir.value = null
+  resetDragState()
   if (files.length) emit('dropExternal', files, targetDir)
 }
+
+function emitWorkspaceDrop(event: DragEvent, targetDir: string | null) {
+  const source = workspacePayloadFromEvent(event)
+  resetDragState()
+  if (source) emit('dropWorkspace', source, targetDir)
+}
+
+function onRowDragstart(row: FileRow, event: DragEvent) {
+  if (!isWorkspaceDragRow(row) || !event.dataTransfer) {
+    event.preventDefault()
+    return
+  }
+  const payload = { path: row.path, type: row.type }
+  draggedWorkspaceRow.value = payload
+  dragKind.value = 'workspace'
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData(WORKSPACE_DRAG_MIME, encodeWorkspaceDragPayload(row))
+  event.dataTransfer.setData('text/plain', row.path)
+}
+
+function onRowDragend() {
+  resetDragState()
+}
+
+function workspacePayloadFromEvent(event: DragEvent): WorkspaceDragPayload | null {
+  const encoded = event.dataTransfer?.getData(WORKSPACE_DRAG_MIME) ?? ''
+  return parseWorkspaceDragPayload(encoded) ?? draggedWorkspaceRow.value
+}
+
+function resetDragState() {
+  dragDepth.value = 0
+  dropTargetDir.value = null
+  dragKind.value = null
+  draggedWorkspaceRow.value = null
+}
+
+const overlayText = computed(() => {
+  if (dragKind.value === 'workspace') {
+    return dropTargetDir.value ? `Drop to move into ${dropTargetDir.value}` : 'Drop to move here'
+  }
+  return dropTargetDir.value ? `Drop to import into ${dropTargetDir.value}` : 'Drop to import'
+})
 
 const gridClass = 'grid-cols-[minmax(0,1.34fr)_minmax(0,0.7fr)_minmax(42px,0.42fr)_minmax(58px,0.56fr)_minmax(58px,0.56fr)]'
 
@@ -176,11 +263,14 @@ function levelPaddingClass(level: number): string {
         class="grid w-full items-center gap-2 border-b border-rule-light/70 px-3 text-left font-sans text-[12px] text-ink-2"
         :class="[gridClass, row.searchSnippet ? 'h-[44px]' : 'h-[34px]', row.gi === selectedIndex || dropTargetDir === row.path ? 'bg-accent-tint text-ink' : '', row.disabled ? 'opacity-55' : 'hover:bg-chrome-high hover:text-ink']"
         :disabled="row.disabled"
+        :draggable="isWorkspaceDragRow(row)"
         :title="rowTitle(row)"
         @click="emit('rowClick', row)"
         @mouseenter="emit('rowMouseenter', row.gi)"
         @dblclick="emit('rowDblclick', row)"
         @contextmenu="emit('rowContextmenu', row, $event)"
+        @dragstart="onRowDragstart(row, $event)"
+        @dragend="onRowDragend"
         @dragover="onRowDragover(row, $event)"
         @drop="onRowDrop(row, $event)"
       >
@@ -273,7 +363,7 @@ function levelPaddingClass(level: number): string {
     class="pointer-events-none absolute inset-1 z-20 flex items-end justify-center rounded-[6px] border-2 border-dashed border-accent bg-accent-soft pb-5"
   >
     <span class="rounded-full bg-accent px-3 py-1 font-sans text-[11px] font-medium text-accent-ink shadow-md">
-      {{ dropTargetDir ? `Drop to import into ${dropTargetDir}` : 'Drop to import' }}
+      {{ overlayText }}
     </span>
   </div>
   </div>

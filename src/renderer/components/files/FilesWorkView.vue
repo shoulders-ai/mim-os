@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { rankFiles } from '../../services/fuzzy.js'
 import { useWorkspaceFileIndex, type IndexedFile } from '../../services/workspaceFileIndex.js'
 import { defaultOpenTargetForPath } from '../../services/fileOpenPolicy.js'
+import { useToastStore } from '../../stores/toasts.js'
 import FilesContextMenu from './FilesContextMenu.vue'
 import FilesTable from './FilesTable.vue'
 import FilesWorkToolbar from './FilesWorkToolbar.vue'
@@ -34,6 +35,7 @@ import type {
   SortKey,
   TableMode,
 } from './fileTypes.js'
+import { buildWorkspaceMovePlan, type WorkspaceDragPayload, type WorkspaceMoveResult } from './fileMove.js'
 
 const props = withDefaults(defineProps<{
   active?: boolean
@@ -51,6 +53,7 @@ const emit = defineEmits<{
   openFileHistory: [path: string]
   newFile: []
   openFileDialog: []
+  pathMoved: [move: WorkspaceMoveResult]
 }>()
 
 const DIRECTORY_LIMIT = 500
@@ -60,6 +63,7 @@ const CONTENT_SEARCH_LIMIT = 40
 const CONTENT_SEARCH_DELAY = 180
 
 const index = useWorkspaceFileIndex()
+const toastStore = useToastStore()
 const toolbarRef = ref<InstanceType<typeof FilesWorkToolbar> | null>(null)
 const query = ref('')
 const mode = ref<Mode>('browse')
@@ -782,6 +786,7 @@ function openEmptyContextMenu(event: MouseEvent) {
 async function handleExternalDrop(files: File[], targetDir: string | null) {
   const dest = targetDir ?? currentOpsDir()
   let imported = 0
+  let failed = 0
   for (const file of files) {
     try {
       const sourcePath = window.kernel.getPathForFile?.(file)
@@ -789,10 +794,40 @@ async function handleExternalDrop(files: File[], targetDir: string | null) {
       await window.kernel.call('fs.import', { source_path: sourcePath, dest_dir: dest })
       imported++
     } catch (err) {
+      failed++
       console.error('[files] import', err)
     }
   }
   if (imported > 0) await refresh()
+  if (failed > 0) {
+    toastStore.push({
+      kind: 'error',
+      message: 'Import failed',
+      detail: `${failed} item${failed === 1 ? '' : 's'} could not be imported.`,
+    })
+  }
+}
+
+async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: string | null) {
+  const plan = buildWorkspaceMovePlan(source, targetDir ?? currentOpsDir())
+  if (!plan.ok) {
+    if (plan.reason !== 'Already in this folder.') {
+      toastStore.push({ kind: 'info', message: 'Move skipped', detail: plan.reason })
+    }
+    return
+  }
+  try {
+    await window.kernel.call('fs.rename', {
+      old_path: plan.move.oldPath,
+      new_path: plan.move.newPath,
+    })
+    emit('pathMoved', plan.move)
+    await refresh()
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    toastStore.push({ kind: 'error', message: 'Move failed', detail: message })
+    console.error('[files] move', err)
+  }
 }
 </script>
 
@@ -836,6 +871,7 @@ async function handleExternalDrop(files: File[], targetDir: string | null) {
       @row-contextmenu="openContextMenu"
       @empty-contextmenu="openEmptyContextMenu"
       @drop-external="handleExternalDrop"
+      @drop-workspace="handleWorkspaceDrop"
       @scroll-to-resources="scrollToResources"
     />
 

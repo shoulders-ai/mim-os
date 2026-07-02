@@ -1,0 +1,70 @@
+import { describe, expect, it } from 'vitest'
+import {
+  WORKSPACE_DRAG_MIME,
+  buildWorkspaceMovePlan,
+  encodeWorkspaceDragPayload,
+  isWorkspaceDragRow,
+  isWorkspaceDropDir,
+  parseWorkspaceDragPayload,
+} from './fileMove.js'
+import type { FileRow } from './fileTypes.js'
+
+function row(path: string, type: 'directory' | 'file' = 'file', extra: Partial<FileRow> = {}): FileRow {
+  return {
+    path,
+    name: path.split('/').pop() ?? path,
+    dir: '',
+    type,
+    kind: type === 'directory' ? 'Folder' : 'Markdown',
+    positions: [],
+    level: 0,
+    gi: 0,
+    ...extra,
+  }
+}
+
+describe('fileMove', () => {
+  it('serializes a minimal workspace drag payload', () => {
+    const encoded = encodeWorkspaceDragPayload(row('README.md'))
+
+    expect(WORKSPACE_DRAG_MIME).toContain('mim')
+    expect(parseWorkspaceDragPayload(encoded)).toEqual({ path: 'README.md', type: 'file' })
+    expect(parseWorkspaceDragPayload('nope')).toBeNull()
+  })
+
+  it('builds a move target without changing the basename', () => {
+    expect(buildWorkspaceMovePlan({ path: 'README.md', type: 'file' }, 'docs')).toEqual({
+      ok: true,
+      move: { oldPath: 'README.md', newPath: 'docs/README.md', type: 'file' },
+    })
+  })
+
+  it('rejects no-op and recursive folder moves before touching disk', () => {
+    expect(buildWorkspaceMovePlan({ path: 'docs/a.md', type: 'file' }, 'docs')).toMatchObject({
+      ok: false,
+      reason: 'Already in this folder.',
+    })
+    expect(buildWorkspaceMovePlan({ path: 'docs', type: 'directory' }, 'docs/nested')).toMatchObject({
+      ok: false,
+      reason: 'A folder cannot be moved into itself.',
+    })
+  })
+
+  it('keeps managed Mim paths out of manual drag moves', () => {
+    expect(isWorkspaceDragRow(row('.mim/resources/templates/a.md'))).toBe(false)
+    expect(isWorkspaceDropDir(row('.mim/resources/templates', 'directory'))).toBe(false)
+    expect(buildWorkspaceMovePlan({ path: '.mim/resources/templates/a.md', type: 'file' }, '.')).toMatchObject({
+      ok: false,
+    })
+    expect(buildWorkspaceMovePlan({ path: 'README.md', type: 'file' }, '.mim/resources/templates')).toMatchObject({
+      ok: false,
+    })
+  })
+
+  it('allows normal workspace files and directories', () => {
+    expect(isWorkspaceDragRow(row('README.md'))).toBe(true)
+    expect(isWorkspaceDropDir(row('docs', 'directory'))).toBe(true)
+    expect(isWorkspaceDropDir(row('README.md'))).toBe(false)
+    expect(isWorkspaceDropDir(row('docs', 'directory', { disabled: true }))).toBe(false)
+  })
+})
