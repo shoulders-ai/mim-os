@@ -40,8 +40,10 @@ Capture is best-effort. A history failure must not make a successful file
 operation, watcher event, or tool call fail.
 
 Initial coverage comes from `history.baseline`, which scans eligible files and
-captures baseline versions. Electron schedules a baseline after boot and after
-workspace switch.
+captures baseline versions. Manual `history.baseline` runs a full scan. Electron
+schedules a delayed, bounded baseline after boot and after workspace switch so a
+large workspace cannot monopolize startup; the result reports `truncated` when
+it hits the automatic scan, capture, or time budget.
 
 Tool-call coverage is wired through the shared tool registry. The registry asks
 the history observer for before-snapshots, executes the tool, then persists the
@@ -49,9 +51,10 @@ before and after versions. Covered mutations include `fs.write`,
 `fs.writeBytes`, `fs.edit`, `fs.create`, `fs.delete`, `fs.trash`, `fs.rename`,
 `fs.copy`, `fs.import`, and `documents.importMarkdown`.
 
-External edits are captured from the workspace file watcher through
-`history.observeFileChange`. Adds and changes become `external` versions;
-unlinks become anchored delete versions.
+External edits are captured from the scoped workspace watcher for files that
+the editor explicitly registers, usually open writable text tabs. Adds and
+changes become `external` versions; unlinks become anchored delete versions.
+Bulk changes to unopened files are intentionally not watched recursively.
 
 Restore is also captured. `history.restore` writes a `before-restore` version
 for the current state, restores the selected version, then records a `restore`
@@ -90,7 +93,8 @@ The store also honors simple ignore patterns from `.gitignore` and
   visibility policy and garbage-collects unreferenced blobs.
 - `history.clear` clears local recovery storage for the current workspace.
 - `history.baseline` creates baseline versions for eligible files without
-  existing history requirements.
+  existing history requirements. Bounded callers can pass scan, capture, or time
+  limits and should check the `truncated` flag.
 
 `history.list`, `history.preview`, `history.openVersion`, and `history.stats`
 are read tools. `history.restore` is a write tool. `history.prune` and

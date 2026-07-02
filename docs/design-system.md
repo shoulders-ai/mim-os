@@ -427,8 +427,8 @@ header carries New chat).
 Session and package-run rows live together in the flat Activity list. The Chat
 row in the Work block is a draft-composer launcher, not a persisted session; it
 creates the real chat row only on first send. Active rows open Work. Dragging
-any Activity row persists the current mixed order, and new unordered chats or
-package runs appear above the manually ordered rows. Context menus expose
+any Activity row persists the current mixed order, and new unordered rows
+appear above the manually ordered rows. Context menus expose
 rename/archive/delete, and double-click starts inline rename for both chats and
 package runs. Active and archived sessions and package runs appear through the
 History row in the Work block.
@@ -456,9 +456,14 @@ Routine edits stay calm; irreversible actions (delete, terminal, outbound sends,
 sensitive or out-of-workspace paths) take a quiet caution treatment so they stand
 out. Actions: `Decline`, `Approve`, an optional `Always allow … in this chat`,
 and — for file changes — `Review change`, which opens the proposed before/after
-as a read-only diff in the Artifact editor beside the chat. A request for a
-conversation you are not viewing surfaces as the `Approve` status tag in the
-Navigator.
+as a read-only diff in the Artifact editor beside the chat. The diff review bar
+carries the same `Approve`/`Decline` pair, resolving the identical pending
+request through the approvals store — one decision, two doorways — so the person
+whose eyes are on the diff never travels back to the chat card. An edit whose
+`old_text` would not match exactly once previews as an empty diff, and the bar
+says why (`No match found — this edit will fail as written.`) so an empty diff
+is never read as a harmless one. A request for a conversation you are not
+viewing surfaces as the `Approve` status tag in the Navigator.
 
 ### 6.7 Chat Empty Landing
 

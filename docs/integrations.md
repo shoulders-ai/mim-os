@@ -12,7 +12,7 @@ Secrets use `src/main/integrations/secrets.ts`.
 - Slack token account: `slack:{account}`.
 - Google OAuth client account: `google-client:{account}`.
 - Google token bundle account: `google:{account}`.
-- Package secret account: `package:{packageId}:{name}` (see `src/main/packages/packageSecrets.ts` and [package-system-api.md](package-system-api.md)).
+- Package secret account: `package:{packageId}:{name}` (see `src/main/packages/packageSecrets.ts` and [app-system-api.md](app-system-api.md)).
 
 Never store Slack or Google tokens in `mim.yaml`, `.mim/settings.json`, `~/.mim/config.yaml`, or docs.
 
@@ -60,18 +60,20 @@ Tools:
 - `slack.history`, `slack.search`, `slack.replies`
 - `slack.send`
 
-### Connector Policy
+### Tool Policy
 
-Slack AI access is governed by a 4-boolean connector policy:
+Slack agent access is governed by Settings > Tools. The canonical workspace
+setting is `.mim/settings.json` under `tools.enabled` / `tools.disabled`.
+Legacy `connectors.slack` fields are still read when a workspace has no explicit
+`tools` policy:
 
 - `aiEnabled` — expose Slack tools to AI chat (default: false)
 - `sendEnabled` — expose `slack_send` to AI chat (default: false)
 - `privateChannels` — allow AI to read private channels (default: false)
 - `directMessages` — allow AI to read DMs (default: false)
 
-Policy resolves per-field: workspace `.mim/settings.json` → user-global `~/.mim/config.yaml` → defaults. Both locations use the `connectors.slack` key.
-
-Settings > Connections provides toggles for all four policy flags.
+Settings > Connections only manages connection lifecycle and account status.
+Settings > Tools owns capability toggles.
 
 ### AI Tool Exposure
 
@@ -82,11 +84,18 @@ Chat tools are conditionally included based on policy and connection state:
 
 When `privateChannels` is false, `slack.channels` excludes `private_channel` from the types parameter for AI calls. When `directMessages` is false, `slack.dms` is blocked for AI.
 
-Backend policy enforcement runs in the tool execution layer: even direct kernel/CLI/MCP calls respect the policy for the `ai` actor.
+Backend policy enforcement runs in the tool execution layer for the `ai` actor
+as defense in depth. MCP exposure and MCP execution are filtered by the same
+Settings > Tools policy before calls reach the registry.
 
 ### MCP Exposure
 
-`slack.status`, `slack.connect`, and `slack.disconnect` are always present in the MCP catalog so CLI agents can check status and manage the connection lifecycle. Data tools (`slack.channels`, `slack.users`, `slack.dms`, `slack.history`, `slack.replies`, `slack.search`, `slack.send`) appear conditionally when a token is configured. MCP calls use the `user` actor, so the AI connector policy toggles do not apply — the MCP allowlist is the security boundary, and CLI agents have their own permission gates.
+`slack.status`, `slack.connect`, and `slack.disconnect` are present unless
+disabled in Settings > Tools. Data tools (`slack.channels`, `slack.users`,
+`slack.dms`, `slack.history`, `slack.replies`, `slack.search`, `slack.send`)
+appear conditionally when a token is configured and the corresponding tool row
+is enabled. MCP calls use the `user` actor; the server-side MCP allowlist plus
+tool policy is the security boundary.
 
 ### Rate Limits
 
@@ -143,7 +152,7 @@ always-present tools in the chat profile:
 - `google_disconnect()` — remove tokens
 - `slack_connect(file?)` — store and verify a Slack token from file
 - `slack_disconnect()` — remove tokens
-- `connections_configure(integration, ...)` — set policy flags (aiEnabled, etc.)
+- `connections_configure(integration, ...)` — update Settings > Tools capability rows
 
 File-based credential ingestion reads secrets server-side in the main process —
 they never appear in the model context, session history, or trace logs. The
@@ -160,9 +169,12 @@ Drive, Docs, and Sheets tools:
 - `docs.read`
 - `sheets.meta`, `sheets.read`, `sheets.write`, `sheets.append`
 
-### Connector Policy
+### Tool Policy
 
-Google AI access is governed by a 7-boolean connector policy:
+Google agent access is governed by Settings > Tools. The canonical workspace
+setting is `.mim/settings.json` under `tools.enabled` / `tools.disabled`.
+Legacy `connectors.google` fields are still read when a workspace has no
+explicit `tools` policy:
 
 - `aiEnabled` — expose Google tools to AI chat (default: false)
 - `gmailEnabled` — expose `gmail_search` and `gmail_read` (default: false)
@@ -172,11 +184,9 @@ Google AI access is governed by a 7-boolean connector policy:
 - `driveEnabled` — expose Drive, Docs, and Sheets read tools (default: false)
 - `sheetsWriteEnabled` — expose `sheets_write` and `sheets_append` (default: false)
 
-Policy resolves per-field: workspace `.mim/settings.json` → user-global `~/.mim/config.yaml` → defaults. Both locations use the `connectors.google` key.
-
 Settings > Connections provides connection status, a browser-based Google sign-in
 button, an advanced manual token form for development/recovery, granted scope
-summaries, and policy toggles.
+summaries, and credential setup. Settings > Tools owns capability toggles.
 
 ### AI Tool Exposure
 
@@ -189,11 +199,22 @@ Chat tools are conditionally included based on policy, connection state, and gra
 - `drive_search`, `docs_read`, `sheets_meta`, `sheets_read` — visible when `driveEnabled` is true and the token grants Drive or Sheets read scope as appropriate
 - `sheets_write`, `sheets_append` — additionally require `sheetsWriteEnabled` and Sheets write scope
 
-Backend policy enforcement runs in the tool execution layer for the `ai` actor, so direct calls cannot bypass disabled policy flags. User and system actors are not filtered by connector policy.
+Backend policy enforcement runs in the tool execution layer for the `ai` actor,
+so direct AI calls cannot bypass disabled policy flags. MCP exposure and MCP
+execution are filtered by the same Settings > Tools policy before calls reach
+the registry.
 
 ### MCP Exposure
 
-`google.status`, `google.setOAuthClient`, `google.connect`, and `google.disconnect` are always present in the MCP catalog so CLI agents can check status and manage the full connection lifecycle (including browser OAuth). Data tools (`gmail.search`, `gmail.read`, `gmail.send`, `calendar.events`, `calendar.create`, `drive.search`, `drive.meta`, `docs.read`, `sheets.meta`, `sheets.read`, `sheets.write`, `sheets.append`) appear conditionally when a token is configured. MCP calls use the `user` actor, so the AI connector policy toggles do not apply. `settings.get`/`settings.set` are also in MCP so CLI agents can configure policy flags the same way the in-app chat agent does.
+`google.status`, `google.setOAuthClient`, `google.connect`, and
+`google.disconnect` are present unless disabled in Settings > Tools. Data tools
+(`gmail.search`, `gmail.read`, `gmail.send`, `calendar.events`,
+`calendar.create`, `drive.search`, `drive.meta`, `docs.read`, `sheets.meta`,
+`sheets.read`, `sheets.write`, `sheets.append`) appear conditionally when a
+token is configured and the corresponding tool row is enabled. MCP calls use
+the `user` actor; the server-side MCP allowlist plus tool policy is the
+security boundary. `settings.set` cannot modify `tools.enabled` or
+`tools.disabled` over MCP.
 
 ### Trace Capture
 

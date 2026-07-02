@@ -23,7 +23,7 @@ but not app-specific issue or knowledge models.
 - `security/` — permission gate and path classifier.
 - `trace/` — unified trace stream (spans, identity, payload blobs, sinks).
 - `server/` — Express/WebSocket server and AI endpoint tests.
-- `workspace/` — boot workspace resolution, `mim.yaml` contract, file watcher.
+- `workspace/` — boot workspace resolution, `mim.yaml` contract, scoped open-file watcher.
 - `tools/` — tool registry plus concrete tool modules.
 
 ## Import convention

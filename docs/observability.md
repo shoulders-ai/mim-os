@@ -66,7 +66,7 @@ Core emitters:
 
 - successful AI/app `fs.write`, `fs.edit`, and `fs.create` tool calls
 - subsequent user `fs.write`, `fs.edit`, and `fs.create` tool calls
-- workspace file watcher changes for edits made outside the kernel
+- scoped open-file watcher changes for edits made outside the kernel
 
 When a user edit follows an AI/app mutation within the correlation window, it emits `outcome.edit` with:
 

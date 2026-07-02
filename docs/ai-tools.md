@@ -7,7 +7,9 @@ Read this before changing chat tools.
 - AI-facing tools: `src/main/ai/aiRuntime.ts`
 - Inline editor tools: `src/main/ai/aiRuntime.ts`
 - Kernel tools: `src/main/tools/*.ts`, `src/main/sessions.ts`, `src/main/ai/ai.ts`, `src/main/pty.ts`
-- Prompt tool list: `src/main/ai/systemPrompt.ts`
+- Prompt tool list and template placeholders: `src/main/ai/systemPrompt.ts`
+- Workspace tree prompt context: `src/main/ai/workspaceTree.ts`
+- Attachment normalization: `src/main/attachments.ts`, `src/renderer/services/attachments.js`, `src/renderer/components/chat/composerLogic.ts`
 - Permission policy: `src/main/security/gate.ts`
 
 ## Rules
@@ -21,6 +23,14 @@ Read this before changing chat tools.
 - Main-process permission gate owns approval. Do not add renderer-side approval gates.
 - AI-facing tools must preserve the real kernel tool semantics. A tool named `fs_create` must call `fs.create` and create the file after the permission gate allows it; do not route real actions into a separate proposal state.
 - Tool descriptions are for the model. Describe constraints and non-obvious behavior only.
+
+## Prompt Context
+
+`AGENTS.md` template placeholders are resolved in `src/main/ai/systemPrompt.ts`. The standard template includes `{{TOOL_SET}}`, `{{SKILL_CATALOG}}`, `{{AGENT_CONTEXT}}`, `{{WORKSPACE_TREE}}`, and `{{PROJECT_LOG}}`.
+
+`{{WORKSPACE_TREE}}` is a content-free orientation map from `src/main/ai/workspaceTree.ts`. It shows up to 50 root entries and up to 10 entries inside each visible root folder. Special/generated folders such as `.mim/`, `.git/`, `knowledge/`, `issues/`, and `node_modules/` are listed but their contents are hidden. Root symlink directories are followed for that one visible child listing only; nested folders inside them are not expanded. The tree is context, not authority: use `fs_list` or `fs_read` before relying on a file's current contents.
+
+Attached text context is converted into model-visible `<attached-file>` blocks in `src/main/ai/aiRuntime.ts`. When the data context has a workspace-relative `path`, the block includes `path="..."`; agents should use that path with `fs_*` tools when they need to inspect or edit the source file. Direct external attachments may only have a `name`, so do not invent a workspace path for them.
 
 ## File Tools
 
@@ -40,14 +50,14 @@ Read this before changing chat tools.
 
 ## Comment Tools
 
-Chat exposes inline markdown review tools:
+Chat exposes inline review comment tools, routed by file type (`src/main/comments/dispatch.ts`): markdown files use `<comment>`/`<note>` tags, code and plain-text files use `@mim` line markers.
 
-- `comments_list` parses a markdown file and returns thread anchors, notes, raw offsets, and line numbers.
+- `comments_list` parses a file and returns thread anchors, notes, raw offsets, and line numbers.
 - `comments_add` anchors a new thread by exact `anchor_text`; it matches the human-visible stripped document first, then raw text, and refuses ambiguous or overlapping anchors.
 - `comments_reply` appends a note to an existing thread.
-- `comments_resolve` deletes the comment wrapper and notes while keeping the anchor text.
+- `comments_resolve` deletes the comment markup while keeping the anchor text. Pass `id` for one thread or `all: true` to resolve every thread in the file.
 
-The document on disk remains raw: `<comment>` and `<note>` tags are visible to `fs_read`. Prefer `comments_*` tools over direct `fs_edit` changes when adding, replying to, or resolving threads. Direct file edits may change prose around comments, but should not hand-edit tag markup unless the comments tools cannot express the operation.
+The document on disk remains raw: comment markup is visible to `fs_read`. Prefer `comments_*` tools over direct `fs_edit` changes when adding, replying to, or resolving threads. Direct file edits may change prose around comments, but should not hand-edit comment markup unless the comments tools cannot express the operation. See [comments.md](comments.md) for the full syntax and surface list.
 
 ## Integration Tools
 
@@ -65,16 +75,19 @@ Integration secrets stay in the OS keychain via `src/main/integrations/secrets.t
 
 ## Web Tools
 
-Chat exposes search plus one URL reader:
+Chat exposes search plus two web access modes:
 
 - `web_search` calls `web.search` and returns search results via the Exa API. Returns `query` and `results[]` with `title`, `url`, `snippet`. Requires `EXA_API_KEY` in env or `~/.mim/keys.env` (set via Settings → Models → Integrations). Category `network`, risk `medium`.
-- `web_read` calls `web.read`, the single model-facing reader. It returns cleaned content from selectable PDFs or Chromium-rendered web pages with `url`, `final_url`, `title`, `content`, `content_length`, `source`, `elapsed_ms`, and chunk continuation fields when truncated. PDF routing is mechanical: `.pdf` paths or successful `HEAD` responses with a PDF content type use local `pdfjs-dist` extraction. Other pages render in a stateless hidden Chromium session and flow through the shared HTML-to-Markdown parser; pages that expose no readable Markdown fail with `No readable content captured` instead of returning an empty successful result. Passing `stateful: true` uses approved Website Access (`persist:mim-browser-session`) after a domain grant exists; agents should ask before using sign-in, consent, cookies, or other site access already set up for that website, and should not treat stateful reads as a general fix for timeouts, bot detection, extraction bugs, or account-only walls. `web_read` does not return page-status verdicts, capture diagnostics, source health, hidden fallback attempts, or cache metadata. Only public `http`/`https` URLs are allowed; private/loopback initial URLs, redirect targets, and rendered subresource requests are blocked. Category `network`, risk `medium`.
+- `web_read` calls `web.read`, the simple stateless/PDF reader. It returns cleaned content from selectable PDFs or Chromium-rendered web pages with `url`, `final_url`, `title`, `content`, `content_length`, `source`, `elapsed_ms`, and chunk continuation fields when truncated. PDF routing is mechanical: `.pdf` paths or successful `HEAD` responses with a PDF content type use local `pdfjs-dist` extraction. Other pages render in a stateless hidden Chromium session and flow through the shared HTML-to-Markdown parser; pages that expose no readable Markdown fail with `No readable content captured` instead of returning an empty successful result. Passing `stateful: true` uses approved Website Access (`persist:mim-browser-session`) after a domain grant exists; agents should ask before using sign-in, consent, cookies, or other site access already set up for that website, and should not treat stateful reads as a general fix for timeouts, bot detection, extraction bugs, or account-only walls. `web_read` does not return page-status verdicts, capture diagnostics, source health, hidden fallback attempts, or cache metadata. Only public `http`/`https` URLs are allowed; private/loopback initial URLs, redirect targets, and rendered subresource requests are blocked. Category `network`, risk `medium`.
+- `browser_open` and `browser_act` call `web.live.open` and `web.live.act`, the Markanywhere-port live browser. `browser_open` opens an Electron browser session hidden by default, or visible with `visible: true`, and returns one bounded observation field plus compact action refs relevant to the returned chunk. `browser_act` runs `observe`, `click`, `type`, `scroll`, `wait`, `extract`, `show`, `hide`, or `close`; click/type/scroll return a fresh bounded observation after a short bounded wait. `show` and `hide` expose or hide the exact AI-controlled session with a Mim-owned URL bar and reload control for debugging or user-assisted auth/CAPTCHA/MFA/legal-consent handoff. Refs are regenerated on every observation; old refs fail with a stale-ref error. Links use Markanywhere's `ref:<id>:<href>` destination form and controls surface short `ref` attributes in the observation. `browser_open.timeout_ms` bounds navigation, page-idle detection, and first capture; follow-up actions also bound page-side JavaScript execution. `max_chars` defaults to 100000, and `start_from_char` continues through large cleaned page text. When a chat history estimate exceeds 100000 tokens, old completed `browser_open`/`browser_act` observation results are compacted in place: the tool result remains, but stale `observation` and `refs` payloads are replaced with a content-removed note while the newest two browser observations stay intact. Use this mode for interactive sites, lazy-loaded content, form input, buttons, and cookie banners that do not require legal/account consent.
+
+MCP exposes the same web tools as `web_search`, `web_read`, `browser_open`, and `browser_act`; the live browser still runs in the desktop Electron runtime.
 
 `web_read` has a main-process wrapper timeout of 45 seconds by default. If the caller supplies `timeout_ms`, the wrapper allows that render/fetch budget plus a small buffer, capped by the AI-runtime maximum for web reads.
 
-Website Access setup remains kernel/UI-only. `web.browser.status` returns `{ enabled, allowedDomains, profile_available }`; `web.browser.allowDomain`, `web.browser.removeDomain`, `web.browser.open`, and `web.browser.clearProfile` maintain grants and the stored website access data. For AI chat and headless approval-mode reads, an ungranted `stateful: true` domain is approved directly from the permission request and written to the allowlist before `web.read` executes.
+Website Access setup remains kernel/UI-only. `web.browser.status` returns `{ enabled, allowedDomains, profile_available }`; `web.browser.allowDomain`, `web.browser.removeDomain`, `web.browser.open`, and `web.browser.clearProfile` maintain grants and the stored website access data. For AI chat and headless approval-mode reads or live-browser opens, an ungranted `stateful: true` domain is approved directly from the permission request and written to the allowlist before `web.read` or `web.live.open` executes.
 
-Implementation: `src/main/web/webSearch.ts`, `src/main/web/readWebUrl.ts`, `src/main/web/readUrl.ts`, `src/main/web/readRenderedUrl.ts`, `src/main/web/readBrowserSessionUrl.ts`, `src/main/web/browserSession.ts`, `src/main/web/browserSessionSettings.ts`, `src/main/web/renderedBrowser.ts`, `src/main/web/renderedCapture.ts`. Tests: `src/main/web/webSearch.test.ts`, `src/main/web/readWebUrl.test.ts`, `src/main/web/readUrl.test.ts`, `src/main/web/webReadEvaluation.test.ts`, `src/main/web/readRenderedUrl.test.ts`, `src/main/web/readBrowserSessionUrl.test.ts`, `src/main/web/browserSession.test.ts`, `src/main/web/browserSessionSettings.test.ts`, `src/main/web/renderedBrowser.test.ts`, `src/main/web/renderedCapture.test.ts`, `src/main/tools/web.test.ts`.
+Implementation: `src/main/web/webSearch.ts`, `src/main/web/readWebUrl.ts`, `src/main/web/readUrl.ts`, `src/main/web/readRenderedUrl.ts`, `src/main/web/readBrowserSessionUrl.ts`, `src/main/web/browserSession.ts`, `src/main/web/browserSessionSettings.ts`, `src/main/web/renderedBrowser.ts`, `src/main/web/renderedCapture.ts`, `src/main/web/liveBrowser.ts`, `src/main/web/liveBrowserCapture.ts`. Tests: `src/main/web/webSearch.test.ts`, `src/main/web/readWebUrl.test.ts`, `src/main/web/readUrl.test.ts`, `src/main/web/webReadEvaluation.test.ts`, `src/main/web/readRenderedUrl.test.ts`, `src/main/web/readBrowserSessionUrl.test.ts`, `src/main/web/browserSession.test.ts`, `src/main/web/browserSessionSettings.test.ts`, `src/main/web/renderedBrowser.test.ts`, `src/main/web/renderedCapture.test.ts`, `src/main/web/liveBrowser.test.ts`, `src/main/web/liveBrowserCapture.test.ts`, `src/main/web/liveBrowserTools.test.ts`, `src/main/tools/web.test.ts`.
 
 ## Trace Tools
 

@@ -144,8 +144,18 @@ If chat does not know about the new capability:
 If the app validates but tools do not appear, compare `mim.provides.tools`
 names with backend `tool.name` fields. They must match the grant.
 
+## Distribution
+
+Workspace apps live in the workspace and are available to collaborators who
+open it. To distribute apps beyond a workspace:
+
+- **Public apps** go into `shoulders-ai/mim-apps`, one per `packages/<id>/`.
+- **Private apps** go into `mim-web/packages/<id>/` and are delivered through
+  the authenticated account registry. See [private-registry.md](private-registry.md).
+
 ## Implementation References
 
-- App contract and SDK details: [package-system-api.md](package-system-api.md)
+- App contract and SDK details: [app-system-api.md](app-system-api.md)
 - Skills format and activation: [skills.md](skills.md)
 - AI tool gating and wrappers: [ai-tools.md](ai-tools.md)
+- Private registry: [private-registry.md](private-registry.md)

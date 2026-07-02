@@ -222,7 +222,10 @@ file at `~/.mim/packages/<id>/<version>/.mim-install.json`:
 
 No tokens in provenance. Install rejects source URLs carrying credentials.
 Installs are side-by-side: updating to a newer version leaves older version
-directories on disk until `package.uninstall` removes them.
+directories on disk until `package.uninstall` removes them. Update checks compare
+the registry latest against the version selected for the active workspace
+(workspace `mim.yaml` pin when that version is installed, otherwise highest
+installed), so a newer side-by-side install does not hide a stale workspace pin.
 
 ### Multi-app repos (`path`)
 
@@ -990,6 +993,17 @@ function onWorkspaceChanged(event) {
 
 runtime.on('workspace:changed', onWorkspaceChanged)
 runtime.off('workspace:changed', onWorkspaceChanged)
+```
+
+#### Theme sync
+
+The host injects the active theme's CSS custom properties into the iframe via `postMessage` on load and whenever the user switches themes. Apps that use `var(--color-*)` from `tokens.css` respond automatically. To react programmatically:
+
+```js
+runtime.on('theme:changed', (tokens) => {
+  // tokens is a Record<string, string> of resolved CSS var values
+  console.log(tokens['--color-accent'])
+})
 ```
 
 ## Enablement and Registry Tools

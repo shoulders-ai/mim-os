@@ -113,6 +113,19 @@ Generic `mim tool` dispatch must stay on the `ai` actor and pass through the hea
 
 `TraceLog.append()` runs before tool execution in `ToolRegistry.call()`. It must never throw: if the active workspace was deleted while the app is running, a throw from `.mim/traces/` blocks `workspace.open` and leaves the user unable to switch folders. Only create `.mim/` when the workspace root still exists, swallow sink errors, and treat audit persistence as best-effort. The same applies to `writePayload` (returns `null` instead of throwing).
 
+## Automatic history baselines must be bounded
+
+Electron schedules local-history baselines after boot and workspace switches. Keep those automatic calls delayed and bounded; a full synchronous `history.baseline` over a broad workspace can block main-process startup before the window becomes usable. Manual `history.baseline` can remain full-scan, but startup/switch recovery should pass scan, capture, and time limits and tolerate a `truncated` result.
+
+## Do not reintroduce recursive workspace watchers
+
+The main workspace file watcher must stay scoped to explicit renderer
+registrations for open files. A broad Chokidar watch over a research workspace
+can consume thousands of file descriptors after copied-in data, then Chromium
+sandboxed iframes fail to launch. Package freshness uses separate shallow
+package and `mim.yaml` watchers; do not use the main watcher as a general
+workspace event bus.
+
 ## Theme attribute is data-theme, not a class
 
 Themes are applied via `<html data-theme="white">`, not CSS classes. The app default is White (`DEFAULTS.theme` in `stores/settings.ts` plus `data-theme="white"` on `<html>` in `index.html` so the first paint is correct before settings load). Tailwind `@theme` block is the unresolved-token fallback only. Each `[data-theme]` selector overrides the full token set.

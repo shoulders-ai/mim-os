@@ -163,7 +163,7 @@ Keep new layout state in the store, not in new standalone `App.vue` refs.
   package/agent ids — the catalogs cannot collide). The Apps header gear
   opens Settings > Apps.
 - Activity: flat mixed list of active chats, package jobs, and agent
-  sessions with status. The header carries two right-aligned icon actions:
+  sessions with status, sorted most-recently-updated first by default. The header carries two right-aligned icon actions:
   History (opens `work:archive`) and New chat (opens the draft composer).
 - footer: global settings/actions only
 

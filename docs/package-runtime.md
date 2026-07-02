@@ -255,7 +255,7 @@ Current runtime implements `package`, `job`, `inputs`, `data`, `files`,
 `ctx.documents.pdf`, `ctx.http`, and `ctx.secrets`. `ctx.http` enforces the manifest host allowlist and HTTPS
 (`src/main/packages/packageHttp.ts`); `ctx.secrets` reads and writes manifest-declared
 keychain secrets (`src/main/packages/packageSecrets.ts`). See
-[package-system-api.md](package-system-api.md) for the contract details.
+[app-system-api.md](app-system-api.md) for the contract details.
 
 Document helpers are intentionally under `ctx.documents`, not directly on the
 core context. They still call main-process tools, so path checks, app

@@ -2,10 +2,11 @@
 
 ## Context
 
-Mim currently has one model-facing web reader, `web_read`, backed by `web.read`.
-That reader is a useful cheap path: it fetches PDFs locally, renders normal web
-pages once in Chromium, captures the current DOM, and converts the HTML snapshot
-to Markdown.
+Mim has two model-facing web access modes. `web_read`, backed by `web.read`, is
+the useful cheap path: it fetches PDFs locally, renders normal web pages once in
+Chromium, captures the current DOM, and converts the HTML snapshot to Markdown.
+`browser_open` / `browser_act`, backed by `web.live.open` / `web.live.act`, is
+the live browser path for interactive pages.
 
 That is not enough for interactive websites. A one-shot parser cannot scroll,
 click a cookie banner, type into a search box, press "show more", wait after an
@@ -14,7 +15,7 @@ the parser as the final browser interface leads to brittle behavior: empty
 captures, unclear failures, and human handoff for tasks the agent should do
 itself.
 
-The target is two web access layers:
+The product shape is two web access layers:
 
 1. **Cheap reader**: fast, stateless, mostly one-shot, optimized for ordinary
    public pages, docs, articles, PDFs, and search-result follow-up.
@@ -26,7 +27,8 @@ The live browser is inspired by Markanywhere's architecture:
 `real browser -> semantic DOM/accessibility capture -> Markdown with refs -> agent action by ref -> recapture`
 
 Mim should implement this idea directly in TypeScript/Electron. Do not add a JVM
-sidecar for this. Do not route this through MCP. This is core product behavior.
+sidecar for this. The core product owns the browser runtime, and MCP exposes the
+same compact `browser_open` / `browser_act` surface to external agents.
 
 ## Motivation
 
@@ -87,18 +89,15 @@ Non-responsibilities:
 
 ### Live Browser
 
-Add a separate model-facing browser tool family for active browsing.
+Add a separate compact model-facing browser surface for active browsing.
 
 Initial tool surface:
 
-- `browser_open(url, stateful?)`
-- `browser_observe()`
-- `browser_click(ref)`
-- `browser_type(ref, text)`
-- `browser_scroll(direction?, amount?)`
-- `browser_wait(ms?)`
-- `browser_extract(max_chars?)`
-- `browser_close()`
+- `browser_open(url, stateful?, visible?, timeout_ms?, max_chars?, start_from_char?)`
+- `browser_act(action, ref?, text?, direction?, amount?, ms?, wait_ms?, max_chars?, start_from_char?)`
+
+`browser_act.action` is one of `observe`, `click`, `type`, `scroll`, `wait`,
+`extract`, `show`, `hide`, and `close`.
 
 The exact kernel names can use dots, but the model-facing names should stay
 short and action-oriented.
@@ -109,22 +108,26 @@ The browser keeps session state:
 - Current visible/semantic snapshot.
 - Ref registry mapping short refs to live DOM/backend node handles.
 - Profile mode: stateless or Website Access profile.
+- Visibility: hidden by default, visible when the user needs to watch or complete
+  auth/CAPTCHA/MFA/legal-consent steps in the exact AI-controlled session.
 - Last interaction and capture diagnostics.
 
 The agent loop is:
 
 1. `browser_open`
-2. `browser_observe`
+2. inspect returned observation
 3. decide action from visible refs
-4. `browser_click` / `browser_type` / `browser_scroll` / `browser_wait`
-5. `browser_observe`
+4. `browser_act` with `click`, `type`, `scroll`, or `wait`
+5. inspect the returned observation, or call `browser_act` with `observe`
 6. repeat until enough content is available
-7. `browser_extract` for final cleaned content
+7. `browser_act` with `extract` for final cleaned content
 
 ## Observation Format
 
 The observation should be optimized for agent reasoning, not for preserving the
-DOM.
+DOM. The tool result should expose one readable `observation` field; do not also
+return a duplicate `markdown` field. Action refs should be a compact sidecar
+capped to refs relevant to the returned text chunk.
 
 Include:
 
@@ -202,11 +205,14 @@ Ref behavior:
 
 Action behavior:
 
-- `browser_click(ref)` resolves the ref to the live element and performs a real
-  click.
-- `browser_type(ref, text)` focuses, clears when appropriate, and types.
-- `browser_scroll` scrolls the page or a focused scroll container.
-- `browser_wait` waits for DOM/network quiet with a hard cap, then returns.
+- `browser_act({ action: "click", ref })` resolves the ref to the live element
+  and performs a real click.
+- `browser_act({ action: "type", ref, text })` focuses, clears when
+  appropriate, and types.
+- `browser_act({ action: "scroll" })` scrolls the page or a focused scroll
+  container.
+- `browser_act({ action: "wait" })` waits for DOM/network quiet with a hard cap,
+  then returns.
 - Every action should report whether the page likely changed and whether the
   agent should observe again.
 
@@ -267,8 +273,7 @@ Build the smallest useful live-browser loop.
 
 - Add a browser session manager in main process.
 - Support one active AI browser session per chat/session initially.
-- Implement `browser_open`, `browser_observe`, `browser_click`, `browser_type`,
-  `browser_scroll`, `browser_wait`, `browser_close`.
+- Implement `browser_open` and `browser_act`.
 - Use Electron hidden or visible `BrowserWindow` / `webContents` with the same
   URL policy as `web.read`.
 - Build DOM capture script returning a semantic observation and ref registry.
@@ -318,8 +323,8 @@ Success criteria:
 ### Phase 4: Extraction And Auto-Escalation
 
 - Teach `web_read` to recommend/escalate to live browser when appropriate.
-- Add `browser_extract` to produce clean article/page content from the current
-  browser state.
+- Add `browser_act({ action: "extract" })` to produce clean article/page content
+  from the current browser state.
 - Add optional link/image extraction controls.
 - Add trace diagnostics for capture size, visible text chars, ref count, action
   count, final URL, and failure class.
@@ -380,9 +385,9 @@ Assertions:
 - Hidden vs visible browser as default. Hidden is less intrusive; visible may be
   better for trust and debugging. Either way the agent must drive it
   autonomously.
-- Whether `browser_observe` should be viewport-limited by default or whole-page
+- Whether `browser_act({ action: "observe" })` should be viewport-limited by default or whole-page
   summarized by default.
-- How much browser state to persist per chat after `browser_close`.
+- How much browser state to persist per chat after `browser_act({ action: "close" })`.
 - Whether to allow multiple concurrent browser sessions per chat.
 - Whether to add a later browser-extension bridge for hard anti-bot sites where
   only the user's existing browser context works.
@@ -400,4 +405,3 @@ Not:
 
 > Please open it yourself, copy the content, or go configure a domain in
 > Settings.
-

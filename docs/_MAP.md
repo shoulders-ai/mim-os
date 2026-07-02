@@ -26,7 +26,7 @@ Electron App
     ├─ agents/        CLI agent catalog, session lifecycle, pty status tracker
     ├─ ai/            model registry, runtime, agent context, system prompt
     ├─ packages/      loader, manifests, enablement, runtime, jobs, data, HTTP, secrets
-    ├─ comments/      inline markdown comment parser/model
+    ├─ comments/      inline comment models (markdown tags, code @mim markers) + path dispatch
     ├─ resources/     shared resource collection model
     ├─ search/        SQLite FTS, file content search, text matching
     ├─ security/      permission gate and path classifier
@@ -66,12 +66,12 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Tool registry.** Universal dispatch with actor context and trace logging. `src/main/tools/registry.ts`.
 - **Permission gate.** Approval policy for AI/app tool calls, keyed on effect (read/mutate/external). `src/main/security/gate.ts`, `gate-paths.ts`. Docs: [security.md](security.md).
 - **File tools.** read/write/edit/create/delete/list/rename/copy/trash, workspace-scoped, stale-write protection via content hashes. `src/main/tools/fs.ts`, `workspaceFileWatcher.ts`.
-- **Local file history.** Per-file recovery under `.mim/history/`, independent of git. `src/main/history/`, `tools/history.ts`. UI: `HistoryRail.vue`. Docs: [history.md](history.md).
+- **Local file history.** Per-file recovery under `.mim/history/`, independent of git, with bounded automatic baselines. `src/main/history/`, `tools/history.ts`. UI: `HistoryRail.vue`. Docs: [history.md](history.md).
 - **Sessions.** Chat session CRUD, atomic JSON in `.mim/sessions/`, manifest cache. `src/main/sessions.ts`, `sessionManifest.ts`.
-- **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
+- **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
 - **Git tools.** Status/diff/log/commit/pull/push and opt-in managed sync. `src/main/git.ts`, `tools/git.ts`, `tools/sync.ts`.
 - **User-global config.** `~/.mim/config.yaml` (identity, model defaults, skill sources). Never holds keys or tokens. `src/main/userConfig.ts`.
-- **Settings tools.** Workspace settings persistence in `.mim/settings.json`. `src/main/tools/settings.ts`.
+- **Settings tools.** Workspace settings persistence in `.mim/settings.json`; agent tool availability policy for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
 - **Headless CLI.** `mim` command over the shared tool registry; no Electron. `src/main/cli.ts`, `headless.ts`. Docs: [cli.md](cli.md).
 - **MCP bridge.** Stdio bridge from external CLI agents to the running desktop. `src/main/mcp/`. Docs: [mcp.md](mcp.md).
@@ -80,8 +80,8 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 ### Main Process — AI
 
 - **Model registry.** Model catalog, key resolution (env → `~/.mim/keys.env`), model-default cascade. `src/main/ai/ai.ts`, `resources/ai-models.json`.
-- **AI runtime.** Vercel AI SDK provider calls, ToolLoopAgent profiles, ghost generation, tool wrapping, usage tracking. `src/main/ai/aiRuntime.ts`.
-- **System prompt.** Template-based from `AGENTS.md` with `{{TOOL_SET}}`, `{{SKILL_CATALOG}}`, `{{PROJECT_LOG}}` etc. `src/main/ai/systemPrompt.ts`.
+- **AI runtime.** Vercel AI SDK provider calls, ToolLoopAgent profiles, ghost generation, tool wrapping, usage/context tracking, and browser-tool message compaction. `src/main/ai/aiRuntime.ts`, `src/main/ai/messageCompaction.ts`.
+- **System prompt.** Template-based from `AGENTS.md` with `{{TOOL_SET}}`, `{{SKILL_CATALOG}}`, `{{WORKSPACE_TREE}}`, `{{PROJECT_LOG}}` etc. `src/main/ai/systemPrompt.ts`, `workspaceTree.ts`.
 - **Agent context.** Deterministic `.mim/agent-context.md` digest with workspace/app/git health. `src/main/ai/agentContext.ts`, `packages/packageContributions.ts`.
 
 ### Main Process — Terminal & Agents
@@ -91,21 +91,21 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Main Process — Web & Content
 
-- **Web tools.** `web.search` (Exa) and `web.read` (single workhorse reader: PDF extraction, stateless Chromium, optional Website Access, explicit no-readable-content errors). Both exposed over MCP. `src/main/web/`, `tools/web.ts`. Docs: [web-reading.md](web-reading.md).
+- **Web tools.** `web.search` (Exa), `web.read` (simple stateless/PDF reader), `web.live.open`, and `web.live.act` (Markanywhere-port live browser with bounded observations and compact action refs). MCP exposes these as `web_search`, `web_read`, `browser_open`, and `browser_act`. `src/main/web/`, `tools/web.ts`. Docs: [web-reading.md](web-reading.md).
 - **HTML-to-Markdown.** Pure parser shared by web readers and DOCX extraction. `src/main/html/markdown.ts`. Docs: [html-markdown.md](html-markdown.md).
 - **Document import.** DOCX/XLSX/BibTeX/PDF → Markdown. `src/main/documents/importMarkdown.ts`, `tools/documents.ts`.
 - **Document export.** Markdown → PDF (Chromium `printToPDF`) and → DOCX (pure JS). `src/main/export/`, `tools/export.ts`. Docs: [export.md](export.md).
 - **Slides render.** `render.htmlToPdf` core tool with layout validation. `src/main/tools/render.ts`, `htmlPdf.ts`.
 - **DOCX review.** Main-process read/annotate tools plus .NET sidecar. `src/main/docx/`, `tools/documents.ts`, `sidecar/docx-worker/`. Docs: [docx-review-workflow.md](docx-review-workflow.md).
 - **References.** BibTeX parsing, bibliography resolution, citeproc export. `src/main/tools/references.ts`, `export/citations.ts`.
-- **Inline comments.** `<comment>`/`<note>` tags in markdown, parser/tools/CM6 extension/review rail. `src/main/comments/`, `tools/comments.ts`.
+- **Inline comments.** `<comment>`/`<note>` tags in markdown, `@mim` line markers in code files; parser/tools/CM6 extension/review rail. `src/main/comments/`, `tools/comments.ts`.
 - **Logbook.** Optional `.mim/log.md` activity log, `{{PROJECT_LOG}}` in system prompt. `src/main/logbook.ts`, `tools/logbook.ts`. Docs: [logbook.md](logbook.md).
 
 ### Main Process — App System
 
 - **App loader.** Workspace > global precedence, version pins, manifest validation. `src/main/packages/packages.ts`, `packageManifest.ts`, `packageEnablement.ts`.
-- **App runtime.** Backend jobs, app data, `ctx.http` (host allowlist), `ctx.secrets` (keychain), named tools. `src/main/packages/packageRuntime.ts`, `packageJobs.ts`, `packageData.ts`, `packageHttp.ts`, `packageSecrets.ts`, `namedPackageTools.ts`. Docs: [package-system-api.md](package-system-api.md).
-- **Registry & install.** Multi-source resolution with ownership rule, trust gating, archive/git/local installs. `src/main/packages/registrySources.ts`, `registryIndex.ts`, `tools/registryTools.ts`, `tools/install.ts`.
+- **App runtime.** Backend jobs, app data, `ctx.http` (host allowlist), `ctx.secrets` (keychain), named tools. `src/main/packages/packageRuntime.ts`, `packageJobs.ts`, `packageData.ts`, `packageHttp.ts`, `packageSecrets.ts`, `namedPackageTools.ts`. Docs: [app-system-api.md](app-system-api.md).
+- **Registry & install.** Multi-source resolution with ownership rule, trust gating, archive/git/local installs, and active-workspace package update checks. `src/main/packages/registrySources.ts`, `registryIndex.ts`, `updateCheck.ts`, `tools/registryTools.ts`, `tools/install.ts`. Docs: [private-registry.md](private-registry.md) for the authenticated account registry.
 - **Core-app tools.** `app.status/enable/disable/remove/trust` for personal enablement. `src/main/tools/coreApps.ts`.
 - **App authoring.** Starter templates, create/validate/reload authoring loop. `src/main/tools/packages.ts`, `templates/appTemplates.ts`.
 - **App server.** Express + WebSocket, SDK file serving, app/MCP tool dispatch. `src/main/server/server.ts`.
@@ -114,7 +114,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Main Process — Integrations
 
-- **Slack & Google.** Keychain-backed connectors, Google browser OAuth, kernel tools, AI tool builders, policy. Data tools exposed over MCP when connected. AI agent can manage connection lifecycle (connect, disconnect, configure policy) via `connections_status`, `google_set_oauth_client`, `google_connect`, `slack_connect`, `connections_configure` tools. File-based credential ingestion reads secrets server-side so they never enter model context. `src/main/integrations/`. Docs: [integrations.md](integrations.md).
+- **Slack & Google.** Keychain-backed connectors, Google browser OAuth, kernel tools, AI tool builders, and Settings > Tools availability policy. Data tools are exposed over MCP when connected and enabled. AI agent can manage connection lifecycle (connect, disconnect, configure policy) via `connections_status`, `google_set_oauth_client`, `google_connect`, `slack_connect`, `connections_configure` tools. File-based credential ingestion reads secrets server-side so they never enter model context. `src/main/integrations/`, `src/main/tools/toolPolicy.ts`. Docs: [integrations.md](integrations.md).
 - **Account tokens.** Org registry token management in `~/.mim/keys.env`. `src/main/tools/account.ts`.
 
 ### Main Process — Observability
@@ -126,10 +126,10 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 ### Renderer — Surfaces
 
 - **Chat.** AI SDK Chat + DefaultChatTransport, message rendering, composer with @mentions and context chips, inline approval cards. `src/renderer/components/chat/`, `services/ai/`, `stores/approvals.ts`.
-- **Editor / Document pane.** Unified tab host: CodeMirror text, PDF viewer, table grid (AG Grid), file cards. Autosave, conflict bar, inline AI (Cmd+K), diff review, comments rail, citations, ghost completions. `src/renderer/components/editor/`. Docs: [document-pane.md](document-pane.md), [comments.md](comments.md).
+- **Editor / Document pane.** Unified tab host: CodeMirror text, PDF viewer, table grid (AG Grid), file cards. Autosave, conflict bar, per-tab scroll restore, inline AI (Cmd+K), diff review, comments rail, citations, ghost completions. `src/renderer/components/editor/`. Docs: [document-pane.md](document-pane.md), [comments.md](comments.md).
 - **CodeMirror extensions.** Setup, formatting, citations, outline, ghost, live preview, inline anchor. `src/renderer/components/editor/codemirror/`.
 - **Terminal.** xterm.js multi-tab shells, TerminalSurface shared with agent sessions. `src/renderer/components/terminal/`.
-- **Files.** Work-side file browser: Browse/Recent/Changed, search, drag-drop import, context menus. `src/renderer/components/files/`, `services/fileOpenPolicy.ts`.
+- **Files.** Work-side file browser: Browse/Recent/Changed, search, drag-drop import/move, context menus. `src/renderer/components/files/`, `services/fileOpenPolicy.ts`.
 - **History.** Browse active/archived sessions, app runs, agent sessions. `src/renderer/components/archive/`.
 - **Agent sessions.** Work surface for live terminal or scrollback replay. `src/renderer/components/agents/AgentSessionView.vue`.
 
@@ -150,7 +150,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Renderer — Settings
 
-- **Settings dialog.** Section-routed dialog: Appearance, AI, Instructions, Connections, Apps, Skills, Workspace, About. `src/renderer/components/settings/`. Section ids in `sections.ts` are a stable protocol for deep links.
+- **Settings dialog.** Section-routed dialog: Appearance, AI, Instructions, Connections, Tools, Apps, Skills, Workspace, About. `src/renderer/components/settings/`. Section ids in `sections.ts` are a stable protocol for deep links.
 
 ### Renderer — Shared UI
 
@@ -174,6 +174,8 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 | Doc | What it covers |
 |---|---|
+| [ontology.md](ontology.md) | Canonical concepts and naming laws (draft, under review) |
+| [vocabulary.md](vocabulary.md) | Vocabulary migration decisions and execution waves (draft) |
 | [gotchas.md](gotchas.md) | Non-obvious constraints and lessons |
 | [security.md](security.md) | Permission gate, trust model, actor modes |
 | [design-system.md](design-system.md) | Visual language, tokens, interaction rules |
@@ -186,14 +188,16 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [git.md](git.md) | Git tools and managed sync |
 | [export.md](export.md) | PDF/DOCX export pipeline |
 | [document-pane.md](document-pane.md) | Editor surface architecture |
-| [comments.md](comments.md) | Inline markdown comments |
+| [comments.md](comments.md) | Inline review comments (markdown + code) |
 | [observability.md](observability.md) | Trace stream, audit, outcomes |
 | [telemetry.md](telemetry.md) | Anonymous usage telemetry |
 | [logbook.md](logbook.md) | Human-readable activity log |
 | [resources.md](resources.md) | Shared resource collections |
 | [skills.md](skills.md) | Filesystem skill system |
 | [custom-apps.md](custom-apps.md) | Building workspace apps/skills |
-| [package-system-api.md](package-system-api.md) | App system contract and author API |
+| [granola-private-app.md](granola-private-app.md) | Private Granola app rationale, implementation, and operations |
+| [private-registry.md](private-registry.md) | Private app registry (mim-web), client tokens, entitlements |
+| [app-system-api.md](app-system-api.md) | App system contract and author API |
 | [package-runtime.md](package-runtime.md) | App runtime architecture |
 | [docx-review-workflow.md](docx-review-workflow.md) | DOCX review workflow |
 | [auto-update.md](auto-update.md) | App auto-update and release builds |
@@ -205,8 +209,9 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 ### Proposals
 
-- [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with Markdown observations and action refs.
+- [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/side-by-side-editing.md](proposals/side-by-side-editing.md) — side-by-side editing workflow proposal.
+- [proposals/tools-settings-tab.md](proposals/tools-settings-tab.md) — Settings > Tools plan for unified AI/MCP tool availability policy.
 
 ## File Tree
 
@@ -240,6 +245,7 @@ src/
       aiRuntime.ts              # Central AI runtime + tools
       agentContext.ts           # Runtime workspace digest
       systemPrompt.ts           # Dynamic AI system prompt
+      workspaceTree.ts          # Bounded workspace tree prompt context
     packages/
       packages.ts               # App loader
       packageManifest.ts        # Manifest validation
@@ -276,7 +282,9 @@ src/
       http.ts                   # HTTP boundary
       slack/                    # Slack client, tools, AI tools, policy
       google/                   # Google client, tools, AI tools, policy
-    comments/model.ts           # Inline comment parser
+    comments/model.ts           # Markdown inline comment parser
+    comments/codeModel.ts       # @mim line-marker comments for code files
+    comments/dispatch.ts        # Path-aware routing between the two models
     html/markdown.ts            # HTML-to-Markdown parser
     documents/
       importMarkdown.ts         # DOCX/XLSX/BIB/PDF → Markdown
@@ -311,6 +319,7 @@ src/
       skills.ts                 # Skill tools
       logbook.ts                # Logbook tools
       trace.ts                  # Trace query tools
+      toolPolicy.ts             # Settings > Tools availability policy
       comments.ts               # Comment tools
       references.ts             # Bibliography tools
       resources.ts              # Resource collection tools
@@ -354,6 +363,7 @@ src/
         artifactReplacement.ts  # Dirty-state guard
       attachments.js            # Attachment normalization
       approvalDiff.ts           # Approval preview content
+      lineDelta.ts              # Added/removed line counts (LCS)
       currentDocument.js        # Active document bridge
       fileOpenPolicy.ts         # Editor vs native open
       fuzzy.ts                  # Fuzzy scorer
@@ -407,6 +417,7 @@ src/
         AppsSettingsPanel.vue   # Apps + CLI tools
         AiSettingsPanel.vue     # Keys + model defaults
         ConnectionsSettingsPanel.vue  # Integrations + website access
+        ToolsSettingsPanel.vue  # Agent tool availability policy
       ui/                       # MimDialog, MimSelect, MimMenu, MimContextMenu, etc.
       CommandPalette.vue        # Cmd/Ctrl+P palette
       AddProjectDialog.vue      # Open/New/Clone workspace

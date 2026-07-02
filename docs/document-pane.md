@@ -20,6 +20,11 @@ dirty, and close without confirmation. Table tabs read the full delimited text
 file through `fs.read({ full: true })`, can become dirty through cell edits,
 and save explicitly through `fs.write` with `expected_hash`.
 
+When a file or folder is moved from the Files Work surface, open document tabs
+whose paths match the old location are retargeted to the new workspace-relative
+paths. Text tab buffers, dirty state, and undo state stay in memory; PDF, table,
+and card tabs remount against the new path.
+
 ## Routing
 
 File open policy is decided before the document pane:
@@ -39,6 +44,7 @@ document transitions; the tab strip owns document switching.
 Text tabs are the rich text/code editing surface. They own:
 
 - CodeMirror state and per-tab undo history via `view.setState()`;
+- per-tab editor scroll snapshots while switching between open text tabs;
 - dirty tracking and dirty-count pushes to the main-process quit guard;
 - Save/Save As path assignment for untitled documents;
 - autosave and external-change conflict handling;
@@ -58,6 +64,27 @@ and conflict handling, inline AI diff review, formatting keymaps/actions,
 citation and bibliography resolution, inline comments, keyboard shortcuts,
 settings effects, status/dirty-tab labels, table-tab bookkeeping, tab
 persistence, shared types, and file metadata helpers.
+
+## Diff Review
+
+One review surface (`DiffReviewBar.vue` + `DiffView.vue`, state in
+`stores/diff.ts`) serves three flows, distinguished by `reviewMeta.type`:
+`inline-ai` (Cmd+K proposals, editable, Accept/Reject), `approval` (read-only
+preview of a pending gate request; the bar's Approve/Decline resolve the same
+request as the chat card), and `conflict` (buffer vs disk, labeled `Keep my
+version` / `Take disk version` so the discarded side is explicit).
+
+- The bar shows a `+N −N` line delta computed at activation (`services/lineDelta.ts`,
+  shared with the approval card summary); it hides past the LCS line cap.
+- Keyboard: `Esc` closes, `Mod+Enter` accepts/approves, `Alt+↑/↓` walks chunks.
+  The contract is pure in `diffKeyboard.ts`: keys typed into editable surfaces
+  outside `[data-diff-scope]` (chat composer, palette) and keys under an open
+  dialog are never captured.
+- Resolving a chunk via its gutter control auto-advances to the nearest pending
+  chunk (`nextChunkIndexFromPos` in `diffPresentation.ts`); draining the last
+  chunk announces "All changes resolved" and lets plain `Enter` apply.
+- An approval edit whose `old_text` does not match exactly once previews as an
+  empty diff with a notice explaining that the edit will fail as written.
 
 ## Table Tabs
 
@@ -141,6 +168,8 @@ Tab state is stored in `.mim/editor-tabs.json` through
 - PDF/table/card tabs persist `path`, `name`, and `kind`; they do not persist content.
 - Read-only tabs are filtered out entirely; they are never persisted.
 - Missing `kind` defaults to `text` for old persisted tab files.
+- CodeMirror undo history, selection, and scroll snapshots are runtime-only;
+  they are preserved while open tabs are switched, but are not written to disk.
 
 On restore, text tabs re-read disk content. PDF/table/card tabs restore from
 path. Table content is loaded by `TableArtifact` when the tab becomes active.

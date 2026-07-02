@@ -40,13 +40,14 @@ session exits, is killed, or fails during launch after token creation.
 ## Security Boundary
 
 MCP clients identify to the desktop WebSocket with `{ "type": "mcp", "token":
-"..." }`. The desktop binds the connection as `actor: "ai"` with the MCP
+"..." }`. The desktop binds the connection as `actor: "user"` with the MCP
 session id.
 
 The curated tool surface is enforced in `src/main/server/server.ts` before
-`tools.call()`. The stdio bridge also maps only curated MCP names, but that is
-not the security boundary because local processes can speak WebSocket directly
-if they have the bearer token.
+`tools.call()`. Settings > Tools filters both `__meta.tools` and direct MCP
+execution, so a cached/raw client cannot call a disabled tool. The stdio bridge
+also maps only curated MCP names, but that is not the security boundary because
+local processes can speak WebSocket directly if they have the bearer token.
 
 `packages.list` stays package-only. `__meta.tools` is MCP-only and requires
 successful MCP identification.
@@ -64,7 +65,7 @@ tool names.
 
 ### Static Tools
 
-Always present in the MCP catalog:
+Present in the MCP catalog when enabled in Settings > Tools:
 
 | MCP Tool | Mim Tool |
 |---|---|
@@ -90,6 +91,8 @@ Always present in the MCP catalog:
 | `system_prompt` | `system.prompt` |
 | `web_read` | `web.read` |
 | `web_search` | `web.search` |
+| `browser_open` | `web.live.open` |
+| `browser_act` | `web.live.act` |
 | `settings_get` | `settings.get` |
 | `settings_set` | `settings.set` |
 | `slack_status` | `slack.status` |
@@ -103,17 +106,22 @@ Always present in the MCP catalog:
 `log_append` is the MCP logbook surface; MCP does not expose `log.read`. The `system_prompt` tool resolves `{{PROJECT_LOG}}` for clients that request the full prompt.
 
 Connection management tools (`slack_connect`, `google_connect`, etc.) and
-`settings_get`/`settings_set` are always present so CLI agents can set up
-integrations and configure policy flags (`connectors.slack.aiEnabled`, etc.)
-the same way the in-app chat agent does.
+`settings_get`/`settings_set` are part of the curated MCP surface so CLI agents
+can set up integrations. `settings_set` cannot write `tools`, `tools.enabled`,
+or `tools.disabled`; tool availability is user-controlled through Settings >
+Tools.
+
+The live browser tools use the desktop Electron runtime. `browser_open` creates
+or reuses the MCP session's live browser context, and `browser_act` observes,
+clicks, types, scrolls, waits, extracts, shows, hides, or closes that same
+session.
 
 ### Conditional Integration Data Tools
 
 Slack and Google data tools appear in the MCP catalog only when the corresponding
-token is configured in the OS keychain. MCP calls use the `user` actor, so the
-AI connector policy toggles (aiEnabled, sendEnabled, etc.) do not apply — the
-MCP allowlist is the security boundary, and CLI agents have their own permission
-gates.
+token is configured in the OS keychain and the corresponding row is enabled in
+Settings > Tools. MCP calls use the `user` actor; the MCP allowlist plus tool
+policy is the security boundary, and CLI agents have their own permission gates.
 
 **Slack** (when token is configured):
 

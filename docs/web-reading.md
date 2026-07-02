@@ -1,12 +1,42 @@
 # Web Reading
 
-Mim exposes one model-facing web reader: `web_read`, backed by the kernel tool
-`web.read`.
+Mim exposes two model-facing web access modes:
+
+- `web_read`, backed by `web.read`, is the simple stateless reader for ordinary
+  pages, docs, articles, PDFs, and search-result follow-up.
+- `browser_open` and `browser_act`, backed by `web.live.open` and
+  `web.live.act`, are the Markanywhere-port live browser for interactive pages.
+
+Chat and MCP share this public naming: `web_read`, `web_search`,
+`browser_open`, and `browser_act`.
 
 `web.read` accepts an `http` or `https` URL, blocks private and loopback
 addresses, follows redirects manually so every hop is checked by the same URL
 policy, and returns a cleaned text payload for the agent to interpret. It does
 not classify pages as blocked, logged out, consent-gated, partial, or ready.
+
+The live browser opens a real Electron `BrowserWindow`, hidden by default unless
+`browser_open(..., visible: true)` is requested. The same window can be shown
+later with `browser_act({ action: "show" })`; visible sessions include a small
+Mim-owned URL bar and reload control above the AI-controlled page. The tool
+returns one bounded readable observation field plus a compact `refs` sidecar for
+actionable elements visible in that returned chunk. The capture/action contract
+is ported from Markanywhere: refs are dense and document-order, links encode refs
+as `ref:<id>:<href>`, controls surface a short `ref` attribute, and refs are
+valid only for the latest observation. `browser_open` applies the requested
+`timeout_ms` budget across
+navigation, page-idle detection, and first capture so sites with long-lived
+SPA/network activity still return a current observation or a bounded tool error
+instead of leaving the chat turn open indefinitely. `browser_act` accepts
+`observe`, `click`, `type`, `scroll`, `wait`, `extract`, `show`, `hide`, and
+`close`; click/type/scroll actions return a fresh bounded observation after a
+short bounded wait. `show` and `hide` toggle the exact AI-controlled browser
+session for debugging or user-assisted auth/CAPTCHA/MFA/legal-consent handoff.
+`max_chars` defaults to 100000 for observation/extract content, and
+`start_from_char` continues through large cleaned page text without reopening the
+session. `browser_open` and `browser_act({ action: "observe" })` do not return a
+separate `markdown` field; the observation already contains the readable page
+text with the page header and chunk continuation hint when needed.
 
 ## Routing
 
@@ -41,10 +71,11 @@ successful result.
 ## Website Access
 
 Website Access uses the persistent Electron partition
-`persist:mim-browser-session`. A `stateful: true` chat read for an ungranted
-domain creates an inline approval request; approving it grants the exact URL
-host before the read runs. The same approval-order contract is used by headless
-approval modes. Settings > Connections remains the management surface for
+`persist:mim-browser-session`. A `stateful: true` chat read or live-browser open
+for an ungranted domain creates an inline approval request; approving it grants
+the exact URL host before the read or live browser navigation runs. The same
+approval-order contract is used by headless approval modes. Settings >
+Connections remains the management surface for
 granting domains manually, opening a visible browser window for login or consent
 setup, removing grants, and clearing the profile.
 
@@ -68,7 +99,7 @@ that workspace. If a main-frame navigation or redirect reaches an unapproved
 host, the renderer reports that host as a Website Access approval problem rather
 than surfacing Electron's low-level blocked-client error.
 
-Package backends cannot call `web.read`, `web.search`, or website-access
+Package backends cannot call `web.read`, `web.search`, `web.live.*`, or website-access
 kernel tools in runtime v1. Packages use `ctx.http` with declared host
 permissions.
 
