@@ -145,6 +145,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Sessions store.** Session state, filtering, draft persistence, status tracking. `src/renderer/stores/sessions.ts`.
 - **Settings store.** Theme, editor prefs, model defaults, key status. `src/renderer/stores/settings.ts`.
 - **Runs store.** Aggregated chat/app/agent status for Navigator. `src/renderer/stores/runs.ts`.
+- **Pings store.** Per-row "ping when done" opt-in: watches run status transitions, plays a synthesized chime, tracks fired-ping state for row indicators. `src/renderer/stores/pings.ts`, `services/pingSound.ts`.
 - **Resolved apps store.** Per-app enabled/visible/installed state. `src/renderer/stores/coreApps.ts`.
 - **Model controls.** Chat/inline/ghost model selection. `src/renderer/services/ai/modelControls.js`.
 
@@ -335,6 +336,7 @@ src/
     App.vue                     # Composition shell
     main.ts                     # Vue app mount
     styles.css                  # Tailwind, tokens, themes
+    styles.contrast.test.ts     # WCAG contrast contract for all 8 themes
     stores/
       sessions.ts               # Session state + filtering
       settings.ts               # User preferences + theme
@@ -342,6 +344,7 @@ src/
       diff.ts                   # Editor diff review state
       approvals.ts              # Permission-request queue
       runs.ts                   # Aggregated run status
+      pings.ts                  # Ping-when-done chime + indicators
       agents.ts                 # CLI agent catalog mirror
       coreApps.ts               # Resolved per-app state
       toasts.ts                 # Toast notifications
@@ -362,6 +365,7 @@ src/
         landingDecision.ts      # Boot surface decision
         artifactReplacement.ts  # Dirty-state guard
       attachments.js            # Attachment normalization
+      pingSound.ts              # Web Audio completion chime
       approvalDiff.ts           # Approval preview content
       lineDelta.ts              # Added/removed line counts (LCS)
       currentDocument.js        # Active document bridge
