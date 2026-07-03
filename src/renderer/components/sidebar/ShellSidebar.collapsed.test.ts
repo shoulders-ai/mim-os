@@ -110,9 +110,8 @@ describe('ShellSidebar collapsed rail', () => {
     expect(aside?.getAttribute('data-collapsed')).toBe('true')
     expect(aside?.style.width).toBe(`${NAVIGATOR_SPINE_WIDTH}px`)
     expect(root.querySelector('[data-testid="navigator-bridge-cap"]')).toBeTruthy()
-    // No separate rail slab — the aside itself is the chrome-high surface.
     expect(root.querySelector('[data-testid="navigator-rail-surface"]')).toBeNull()
-    expect(aside?.className).toContain('bg-chrome-high')
+    expect(aside?.className).toContain('bg-chrome')
     expect(root.querySelector('[data-testid="workspace-row"]')).toBeNull()
     expect(root.textContent).not.toContain('Project Alpha')
   })
@@ -255,9 +254,8 @@ describe('ShellSidebar collapsed rail', () => {
     await flushUi()
 
     const aside = root.querySelector<HTMLElement>('aside.sb')
-    expect(aside?.className).toContain('bg-chrome-high')
+    expect(aside?.className).toContain('bg-chrome')
     expect(aside?.getAttribute('data-collapsed')).toBe('true')
-    // No separate slab element — the aside is the surface.
     expect(root.querySelector('[data-testid="navigator-rail-surface"]')).toBeNull()
   })
 

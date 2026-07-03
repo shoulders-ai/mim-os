@@ -10,15 +10,18 @@ withDefaults(defineProps<{
   y: number
   canStop?: boolean
   canDelete?: boolean
+  pingArmed?: boolean
 }>(), {
   canStop: false,
   canDelete: true,
+  pingArmed: false,
 })
 
 const emit = defineEmits<{
   close: []
   rename: []
   stop: []
+  'toggle-ping': []
   archive: []
   delete: []
 }>()
@@ -53,6 +56,13 @@ onUnmounted(() => {
           @click="emit('rename')"
         >
           <span>Rename</span>
+        </button>
+        <button
+          data-testid="run-context-ping"
+          class="flex w-full items-center gap-2 rounded px-[10px] py-[6px] text-left font-sans text-xs text-ink-2 hover:bg-chrome-high hover:text-ink"
+          @click="emit('toggle-ping')"
+        >
+          <span>{{ pingArmed ? 'Stop pinging' : 'Ping when done' }}</span>
         </button>
         <button
           v-if="canStop"

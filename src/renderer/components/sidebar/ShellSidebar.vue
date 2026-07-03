@@ -20,6 +20,7 @@ import { useAgentsStore, type DetectedAgent } from '../../stores/agents.js'
 import { useAppsStore } from '../../stores/coreApps.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useRunsStore, type NavigatorRun } from '../../stores/runs.js'
+import { usePingsStore } from '../../stores/pings.js'
 import {
   defaultWorkPackageView,
   packageWorkEntryId,
@@ -121,6 +122,9 @@ const agentsStore = useAgentsStore()
 const appsStore = useAppsStore()
 const settingsStore = useSettingsStore()
 const runsStore = useRunsStore()
+// Instantiated here so the ping watcher is live whenever the Navigator is —
+// the chime must fire even while the pinged row is off-screen.
+const pingsStore = usePingsStore()
 const HIDDEN_NAVIGATOR_PACKAGE_IDS = new Set(['hello', 'runtime-demo'])
 
 // A package is launchable iff it has a view AND the resolved state says it is
@@ -365,6 +369,10 @@ function activityCreatePackageAttrs(target: ActivityCreatePackageTarget): Record
 // A small status dot overlays the monogram so running/needs-attention items
 // remain legible without their label. Empty string = no dot.
 function activityDotClass(row: ActivityRow): string {
+  // A fired ping outranks the ordinary dot so the collapsed rail shows which
+  // monogram just finished.
+  const pinged = pingsStore.settledOutcome(row.key)
+  if (pinged) return pinged === 'error' ? 'bg-rem' : 'bg-accent'
   if (row.kind === 'run') return runStatusDotClass(row.run.status)
   return sessionDotClass(statusKind(row.session), sessionStore.isJustFinished(row.session.id))
 }
@@ -375,6 +383,9 @@ function activityRowWorking(row: ActivityRow): boolean {
 }
 
 function selectActivityRow(row: ActivityRow) {
+  // Opening the row acknowledges a fired ping; the bell returns to its quiet
+  // armed state.
+  if (!suppressActivityClick.value) pingsStore.clearSettled(row.key)
   if (row.kind === 'chat') selectSession(row.session.id)
   else selectRun(row.run)
 }
@@ -566,6 +577,23 @@ function closeRunContextMenu() {
 // until the pty has ended (stop first, then delete).
 const runCtxIsLiveAgent = computed(() => !!runCtxMenu.run && agentRunIsLive(runCtxMenu.run))
 
+const ctxPingArmed = computed(() =>
+  !!ctxMenu.session && pingsStore.isArmed(activityKeyForSession(ctxMenu.session.id)),
+)
+const runCtxPingArmed = computed(() => !!runCtxMenu.run && pingsStore.isArmed(runCtxMenu.run.id))
+
+function onCtxTogglePing() {
+  const session = ctxMenu.session
+  closeContextMenu()
+  if (session) pingsStore.toggle(activityKeyForSession(session.id))
+}
+
+function onRunCtxTogglePing() {
+  const run = runCtxMenu.run
+  closeRunContextMenu()
+  if (run) pingsStore.toggle(run.id)
+}
+
 function onRunCtxRename() {
   const run = runCtxMenu.run
   closeRunContextMenu()
@@ -727,18 +755,16 @@ onUnmounted(() => {
 
 <template>
   <aside
-    class="sb relative flex h-full flex-shrink-0 flex-col overflow-hidden bg-chrome-high"
+    class="sb relative flex h-full flex-shrink-0 flex-col overflow-hidden bg-chrome"
     :class="[draggingActive && 'select-none', collapsed ? 'border-r-0' : 'border-r border-rule-light']"
     :style="{ width: effectiveWidth + 'px' }"
     :data-collapsed="collapsed ? 'true' : 'false'"
     aria-label="Sidebar"
   >
-    <!-- The Navigator is one chrome-high column in both states — the same
-         tone as the pane headers it bridges to, so the collapsed rail + first
-         pane header read as one continuous chrome surface (the melt) and the
-         expanded tray sits in the same chrome region as the Work/Artifact
-         headers. Depth against surface content comes from the border-r
-         hairline + the chrome-high → surface step. No separate rail slab. -->
+    <!-- The Navigator sits one chrome step below pane headers (bg-chrome vs
+         bg-chrome-high), so the sidebar reads as a distinct surface from the
+         Work/Artifact content areas. Depth comes from the chrome → chrome-high →
+         surface gradient plus the border-r hairline. -->
     <!-- Top chrome: expanded owns collapse; collapsed is bridged by the first pane header. -->
     <div
       class="sb-drag-handle shrink-0"
@@ -1221,9 +1247,11 @@ onUnmounted(() => {
       v-if="ctxMenu.visible"
       :x="ctxMenu.x"
       :y="ctxMenu.y"
+      :ping-armed="ctxPingArmed"
       @close="closeContextMenu"
       @rename="onCtxRename"
       @export="onCtxExport"
+      @toggle-ping="onCtxTogglePing"
       @archive="onCtxArchive"
       @delete="onCtxDelete"
     />
@@ -1235,9 +1263,11 @@ onUnmounted(() => {
       :y="runCtxMenu.y"
       :can-stop="runCtxIsLiveAgent"
       :can-delete="!runCtxIsLiveAgent"
+      :ping-armed="runCtxPingArmed"
       @close="closeRunContextMenu"
       @rename="onRunCtxRename"
       @stop="onRunCtxStop"
+      @toggle-ping="onRunCtxTogglePing"
       @archive="onRunCtxArchive"
       @delete="onRunCtxDelete"
     />

@@ -5,12 +5,14 @@ import MimMenuItem from '../ui/MimMenuItem.vue'
 const props = defineProps<{
   x: number
   y: number
+  pingArmed?: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
   rename: []
   export: []
+  'toggle-ping': []
   archive: []
   delete: []
 }>()
@@ -21,7 +23,7 @@ const emit = defineEmits<{
     :x="x"
     :y="y"
     :width="190"
-    :height="180"
+    :height="206"
     panel-class="ctx-menu"
     @close="emit('close')"
   >
@@ -38,6 +40,13 @@ const emit = defineEmits<{
         <line x1="12" y1="15" x2="12" y2="3" />
       </svg>
       <span>Export</span>
+    </MimMenuItem>
+    <MimMenuItem :headless="false" item-class="px-[10px] py-[6px] text-xs" :button-attrs="{ 'data-testid': 'session-context-ping' }" @select="emit('toggle-ping')">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+        <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+      </svg>
+      <span>{{ pingArmed ? 'Stop pinging' : 'Ping when done' }}</span>
     </MimMenuItem>
     <div class="h-px bg-rule-light my-[3px] mx-1" />
     <MimMenuItem :headless="false" item-class="px-[10px] py-[6px] text-xs" @select="emit('archive')">

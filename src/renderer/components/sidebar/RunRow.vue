@@ -2,9 +2,11 @@
 // Expanded-tray row for a run (package run or agent session): monogram chip,
 // inline rename, status line. Mirrors SessionRow; rename persists through the
 // runs store, dispatched by run kind.
-import { ref, nextTick } from 'vue'
+import { computed, ref, nextTick } from 'vue'
+import { IconBell, IconBellRinging } from '@tabler/icons-vue'
 import { useRunsStore, type NavigatorRun } from '../../stores/runs.js'
-import { initialsFrom, runStatusTag } from './sidebarStatus.js'
+import { usePingsStore } from '../../stores/pings.js'
+import { initialsFrom, pingOutcomeClass, pingOutcomeLabel, runStatusTag } from './sidebarStatus.js'
 import WorkingIndicator from '../ui/WorkingIndicator.vue'
 
 const props = defineProps<{
@@ -21,6 +23,12 @@ const emit = defineEmits<{
 }>()
 
 const runsStore = useRunsStore()
+
+// "Ping when done" — armed shows a quiet bell; a fired ping shows a prominent
+// outcome tag until the row is opened (ShellSidebar clears it on select).
+const pingsStore = usePingsStore()
+const pingArmed = computed(() => pingsStore.isArmed(props.run.id))
+const pingSettled = computed(() => pingsStore.settledOutcome(props.run.id))
 
 // Inline rename
 const editing = ref(false)
@@ -118,8 +126,23 @@ defineExpose({ startRename })
         @pointerdown.stop
       />
       <span v-else class="truncate font-sans text-[12.5px] font-medium">{{ run.title }}</span>
-      <span class="ml-auto shrink-0 font-mono text-[10px] text-ink-4">
+      <span class="ml-auto flex shrink-0 items-center gap-[5px] font-mono text-[10px] text-ink-4">
+        <span
+          v-if="pingArmed"
+          data-testid="ping-indicator"
+          class="grid shrink-0 place-items-center"
+          :class="pingSettled ? pingOutcomeClass(pingSettled) : 'text-ink-4'"
+          :title="pingSettled ? 'Pinged' : 'Will ping when done'"
+        >
+          <component :is="pingSettled ? IconBellRinging : IconBell" :size="11" :stroke="1.8" />
+        </span>
         <WorkingIndicator v-if="run.status === 'working'" />
+        <span
+          v-else-if="pingSettled"
+          data-testid="ping-outcome"
+          class="font-medium"
+          :class="pingOutcomeClass(pingSettled)"
+        >{{ pingOutcomeLabel(pingSettled) }}</span>
         <template v-else-if="runStatusTag(run.status)">{{ runStatusTag(run.status) }}</template>
         <template v-else>{{ relativeTime(run.updatedAt) }}</template>
       </span>

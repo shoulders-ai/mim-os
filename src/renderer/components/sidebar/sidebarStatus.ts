@@ -3,6 +3,7 @@
 // components without prop-drilling store lookups.
 import type { SessionStatusKind } from '../../stores/sessions.js'
 import type { RunStatus } from '../../stores/runs.js'
+import type { PingOutcome } from '../../stores/pings.js'
 
 export function sessionStatusTag(kind: SessionStatusKind, justFinished: boolean): string | null {
   if (kind === 'working') return 'Working'
@@ -24,6 +25,18 @@ export function runStatusTag(status: RunStatus): string | null {
   if (status === 'stopped') return 'Stopped'
   if (status === 'missing') return 'Missing'
   return null
+}
+
+// A fired "ping when done" shows a prominent outcome tag until the row is
+// opened — this doubles as the row's strong done state.
+export function pingOutcomeLabel(outcome: PingOutcome): string {
+  if (outcome === 'error') return 'Error'
+  if (outcome === 'input') return 'Input'
+  return 'Done'
+}
+
+export function pingOutcomeClass(outcome: PingOutcome): string {
+  return outcome === 'error' ? 'text-rem' : 'text-accent'
 }
 
 export function runStatusDotClass(status: RunStatus): string {

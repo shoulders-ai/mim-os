@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { computed, ref, nextTick } from 'vue'
+import { IconBell, IconBellRinging } from '@tabler/icons-vue'
 import type { Session, SessionStatusKind } from '../../stores/sessions.js'
+import { usePingsStore } from '../../stores/pings.js'
+import { pingOutcomeClass, pingOutcomeLabel } from './sidebarStatus.js'
 import WorkingIndicator from '../ui/WorkingIndicator.vue'
 
 const props = defineProps<{
@@ -20,6 +23,13 @@ const emit = defineEmits<{
   'rename-commit': [session: Session]
   pointerdown: [event: PointerEvent, session: Session]
 }>()
+
+// "Ping when done" — armed shows a quiet bell; a fired ping shows a prominent
+// outcome tag until the row is opened (ShellSidebar clears it on select).
+const pingsStore = usePingsStore()
+const pingKey = computed(() => `chat:${props.session.id}`)
+const pingArmed = computed(() => pingsStore.isArmed(pingKey.value))
+const pingSettled = computed(() => pingsStore.settledOutcome(pingKey.value))
 
 // Inline rename
 const editing = ref(false)
@@ -112,7 +122,22 @@ defineExpose({ startRename })
         class="ml-auto flex shrink-0 items-center gap-[5px] text-[10px] font-mono whitespace-nowrap"
         :class="statusClass()"
       >
+        <span
+          v-if="pingArmed"
+          data-testid="ping-indicator"
+          class="grid shrink-0 place-items-center"
+          :class="pingSettled ? pingOutcomeClass(pingSettled) : 'text-ink-4'"
+          :title="pingSettled ? 'Pinged' : 'Will ping when done'"
+        >
+          <component :is="pingSettled ? IconBellRinging : IconBell" :size="11" :stroke="1.8" />
+        </span>
         <WorkingIndicator v-if="statusKind === 'working'" />
+        <span
+          v-else-if="pingSettled"
+          data-testid="ping-outcome"
+          class="font-medium"
+          :class="pingOutcomeClass(pingSettled)"
+        >{{ pingOutcomeLabel(pingSettled) }}</span>
         <template v-else-if="statusTag">{{ statusTag }}</template>
         <template v-else>{{ relativeTime(session.updatedAt || session.createdAt) }}</template>
       </span>
