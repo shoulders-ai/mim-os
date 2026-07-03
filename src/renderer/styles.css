@@ -50,17 +50,17 @@
 @theme {
   --color-ink:         #1a1a18;
   --color-ink-2:       #4a4a44;
-  --color-ink-3:       #78786f;
-  --color-ink-4:       #98988e;
-  --color-chrome:      #ebe9e3;
-  --color-chrome-mid:  #f3f1ec;
-  --color-chrome-high: #f9f8f5;
+  --color-ink-3:       #65655e;
+  --color-ink-4:       #7e7e75;
+  --color-chrome:      #e7e4dc;
+  --color-chrome-mid:  #f0ede7;
+  --color-chrome-high: #f8f6f2;
   --color-surface:     #ffffff;
   --color-accent:      #c05d3c;
   --color-accent-soft: rgba(192, 93, 60, 0.08);
   --color-accent-ink:  #ffffff;
-  --color-rule:        #cccbc4;
-  --color-rule-light:  #dfded8;
+  --color-rule:        #bcbbb5;
+  --color-rule-light:  #c7c6c1;
   --color-line-soft:   rgba(0, 0, 0, 0.04);
   --color-line-hl:     rgba(192, 93, 60, 0.06);
   --color-accent-2:    #a84830;
@@ -94,12 +94,12 @@
 
 /* Parchment — warm papery light, terracotta accent. */
 :root[data-theme="parchment"] {
-  --color-ink: #1a1a18; --color-ink-2: #4a4a44; --color-ink-3: #78786f; --color-ink-4: #98988e;
-  --color-chrome: #ebe9e3; --color-chrome-mid: #f3f1ec; --color-chrome-high: #f9f8f5; --color-surface: #ffffff;
+  --color-ink: #1a1a18; --color-ink-2: #4a4a44; --color-ink-3: #65655e; --color-ink-4: #7e7e75;
+  --color-chrome: #e7e4dc; --color-chrome-mid: #f0ede7; --color-chrome-high: #f8f6f2; --color-surface: #ffffff;
   --color-accent: #c05d3c; --color-accent-soft: rgba(192,93,60,0.12); --color-accent-ink: #ffffff;
   --color-accent-2: #a84830; --color-accent-tint: rgba(192,93,60,0.10);
   --color-add: #5e8b3e; --color-rem: #c05d3c;
-  --color-rule: #cccbc4; --color-rule-light: #dfded8;
+  --color-rule: #bcbbb5; --color-rule-light: #c7c6c1;
   --color-line-soft: rgba(0,0,0,0.04); --color-line-hl: rgba(192,93,60,0.06);
   --syntax-keyword: #7c4dff; --syntax-string: #2e7d32; --syntax-number: #e65100;
   --syntax-type: #0d7377; --syntax-function: #6f42c1; --syntax-property: #1a6b8a;
@@ -109,12 +109,12 @@
 }
 /* North (glacier) — cool blue-gray light, steel-blue accent. */
 :root[data-theme="glacier"] {
-  --color-ink: #1c1f24; --color-ink-2: #44494f; --color-ink-3: #6b7178; --color-ink-4: #90969d;
-  --color-chrome: #e4e8ec; --color-chrome-mid: #edf0f4; --color-chrome-high: #f4f6f8; --color-surface: #ffffff;
+  --color-ink: #1c1f24; --color-ink-2: #44494f; --color-ink-3: #5e646b; --color-ink-4: #787d84;
+  --color-chrome: #dde3e9; --color-chrome-mid: #eaeef2; --color-chrome-high: #f3f5f7; --color-surface: #ffffff;
   --color-accent: #4a7c9b; --color-accent-soft: rgba(74,124,155,0.12); --color-accent-ink: #ffffff;
   --color-accent-2: #3b6a86; --color-accent-tint: rgba(74,124,155,0.10);
   --color-add: #3a8a4a; --color-rem: #c05050;
-  --color-rule: #c4c9d0; --color-rule-light: #d6dae0;
+  --color-rule: #b5bac1; --color-rule-light: #c2c5cb;
   --color-line-soft: rgba(0,0,0,0.03); --color-line-hl: rgba(74,124,155,0.06);
   --syntax-keyword: #6e56cf; --syntax-string: #297a3a; --syntax-number: #b35c00;
   --syntax-type: #0b6e72; --syntax-function: #5746a5; --syntax-property: #1a6090;
@@ -124,27 +124,27 @@
 }
 /* Slate — neutral dark, muted teal accent. */
 :root[data-theme="slate"] {
-  --color-ink: #e0e0dc; --color-ink-2: #b0b0aa; --color-ink-3: #8a8a84; --color-ink-4: #4a4a44;
-  --color-chrome: #1e1e1e; --color-chrome-mid: #252525; --color-chrome-high: #292929; --color-surface: #2c2c2c;
+  --color-ink: #e0e0dc; --color-ink-2: #b8b8b2; --color-ink-3: #9a9a95; --color-ink-4: #7f7f79;
+  --color-chrome: #171717; --color-chrome-mid: #212121; --color-chrome-high: #262626; --color-surface: #313131;
   --color-accent: #5a9e8f; --color-accent-soft: rgba(90,158,143,0.08); --color-accent-ink: #ffffff;
   --color-accent-2: #4a887a; --color-accent-tint: rgba(90,158,143,0.10);
   --color-add: #7cc68a; --color-rem: #e07070;
-  --color-rule: #383838; --color-rule-light: #333333;
+  --color-rule: #515150; --color-rule-light: #464646;
   --color-line-soft: rgba(255,255,255,0.04); --color-line-hl: rgba(90,158,143,0.06);
   --syntax-keyword: #b39dff; --syntax-string: #7cc68a; --syntax-number: #e8a36d;
   --syntax-type: #66d9ef; --syntax-function: #dcc6e0; --syntax-property: #80cbc4;
   --syntax-operator: #89ddff; --syntax-meta: #a0a0a0;
   --selection: rgba(90,158,143,0.18);
-  --ink-strong: #f0f0ec; --quote: #b0b0aa; --code: #e0e0dc; --inline-code-bg: rgba(255,255,255,0.07);
+  --ink-strong: #f0f0ec; --quote: #b8b8b2; --code: #e0e0dc; --inline-code-bg: rgba(255,255,255,0.07);
 }
 /* Monokai — near-black surfaces, vibrant orange accent, saturated syntax. */
 :root[data-theme="monokai"] {
-  --color-ink: #f8f8f2; --color-ink-2: #d5d3cb; --color-ink-3: #928e7c; --color-ink-4: #555248;
-  --color-chrome: #1e1e1e; --color-chrome-mid: #252525; --color-chrome-high: #262624; --color-surface: #272822;
+  --color-ink: #f8f8f2; --color-ink-2: #d5d3cb; --color-ink-3: #9b9887; --color-ink-4: #7e7c73;
+  --color-chrome: #181815; --color-chrome-mid: #21211d; --color-chrome-high: #252520; --color-surface: #2e2f28;
   --color-accent: #f97316; --color-accent-soft: rgba(249,115,22,0.08); --color-accent-ink: #ffffff;
   --color-accent-2: #e06510; --color-accent-tint: rgba(249,115,22,0.10);
   --color-add: #a6e22e; --color-rem: #f92672;
-  --color-rule: #3e3d32; --color-rule-light: #353429;
+  --color-rule: #4e4f48; --color-rule-light: #42433c;
   --color-line-soft: rgba(255,255,255,0.04); --color-line-hl: rgba(249,115,22,0.06);
   --syntax-keyword: #ae81ff; --syntax-string: #a6e22e; --syntax-number: #fd971f;
   --syntax-type: #66d9ef; --syntax-function: #e6db74; --syntax-property: #a6e22e;
@@ -154,27 +154,27 @@
 }
 /* Nord — arctic cool-blue dark, frost-cyan accent. */
 :root[data-theme="nord"] {
-  --color-ink: #d8dee9; --color-ink-2: #a9b3c4; --color-ink-3: #6c7a92; --color-ink-4: #4c566a;
-  --color-chrome: #1e232c; --color-chrome-mid: #232936; --color-chrome-high: #29303d; --color-surface: #2e3440;
-  --color-accent: #88c0d0; --color-accent-soft: rgba(136,192,208,0.10); --color-accent-ink: #1e232c;
+  --color-ink: #d8dee9; --color-ink-2: #bec6d4; --color-ink-3: #9da7b9; --color-ink-4: #818a9a;
+  --color-chrome: #191e26; --color-chrome-mid: #222833; --color-chrome-high: #272e3a; --color-surface: #333b4a;
+  --color-accent: #88c0d0; --color-accent-soft: rgba(136,192,208,0.10); --color-accent-ink: #191e26;
   --color-accent-2: #81a1c1; --color-accent-tint: rgba(136,192,208,0.08);
   --color-add: #a3be8c; --color-rem: #bf616a;
-  --color-rule: #434c5e; --color-rule-light: #3b4252;
+  --color-rule: #525a68; --color-rule-light: #474f5d;
   --color-line-soft: rgba(255,255,255,0.04); --color-line-hl: rgba(136,192,208,0.06);
   --syntax-keyword: #81a1c1; --syntax-string: #a3be8c; --syntax-number: #b48ead;
   --syntax-type: #8fbcbb; --syntax-function: #88c0d0; --syntax-property: #d8dee9;
   --syntax-operator: #81a1c1; --syntax-meta: #5e81ac;
   --selection: rgba(136,192,208,0.20);
-  --ink-strong: #eceff4; --quote: #a9b3c4; --code: #d8dee9; --inline-code-bg: rgba(255,255,255,0.07);
+  --ink-strong: #eceff4; --quote: #bec6d4; --code: #d8dee9; --inline-code-bg: rgba(255,255,255,0.07);
 }
 /* Dracula — deep slate dark, violet accent, pink/lime syntax. */
 :root[data-theme="dracula"] {
-  --color-ink: #f8f8f2; --color-ink-2: #bfc1cd; --color-ink-3: #6272a4; --color-ink-4: #44475a;
-  --color-chrome: #12131a; --color-chrome-mid: #1b1c25; --color-chrome-high: #21222c; --color-surface: #282a36;
-  --color-accent: #bd93f9; --color-accent-soft: rgba(189,147,249,0.10); --color-accent-ink: #282a36;
+  --color-ink: #f8f8f2; --color-ink-2: #bfc1cd; --color-ink-3: #8b96b9; --color-ink-4: #7a7c88;
+  --color-chrome: #0f1016; --color-chrome-mid: #191a22; --color-chrome-high: #1e1f29; --color-surface: #2b2d3b;
+  --color-accent: #bd93f9; --color-accent-soft: rgba(189,147,249,0.10); --color-accent-ink: #2b2d3b;
   --color-accent-2: #ff79c6; --color-accent-tint: rgba(189,147,249,0.08);
   --color-add: #50fa7b; --color-rem: #ff5555;
-  --color-rule: #44475a; --color-rule-light: #343746;
+  --color-rule: #4c4d58; --color-rule-light: #40414d;
   --color-line-soft: rgba(255,255,255,0.04); --color-line-hl: rgba(189,147,249,0.06);
   --syntax-keyword: #ff79c6; --syntax-string: #f1fa8c; --syntax-number: #bd93f9;
   --syntax-type: #8be9fd; --syntax-function: #50fa7b; --syntax-property: #66d9ef;
@@ -184,12 +184,12 @@
 }
 /* White — ultra-clean neutral light, near-white chrome, near-black accent. */
 :root[data-theme="white"] {
-  --color-ink: #1d1d1f; --color-ink-2: #48484c; --color-ink-3: #76767a; --color-ink-4: #9e9ea4;
-  --color-chrome: #f0f0f2; --color-chrome-mid: #f5f5f7; --color-chrome-high: #fafafa; --color-surface: #ffffff;
+  --color-ink: #1d1d1f; --color-ink-2: #48484c; --color-ink-3: #66666a; --color-ink-4: #828287;
+  --color-chrome: #e4e4e8; --color-chrome-mid: #f1f1f4; --color-chrome-high: #f9f9fa; --color-surface: #ffffff;
   --color-accent: #2d2d2d; --color-accent-soft: rgba(45,45,45,0.12); --color-accent-ink: #ffffff;
   --color-accent-2: #1a1a1a; --color-accent-tint: rgba(45,45,45,0.10);
   --color-add: #248a3d; --color-rem: #d70015;
-  --color-rule: #cdcdd3; --color-rule-light: #dedee3;
+  --color-rule: #bfbfc5; --color-rule-light: #cbcbcf;
   --color-line-soft: rgba(0,0,0,0.04); --color-line-hl: rgba(45,45,45,0.04);
   --syntax-keyword: #9b2393; --syntax-string: #c41a16; --syntax-number: #1c00cf;
   --syntax-type: #0b4f79; --syntax-function: #326d74; --syntax-property: #3e6e74;
@@ -199,12 +199,12 @@
 }
 /* Sage — warm botanical light, muted forest-green accent. */
 :root[data-theme="sage"] {
-  --color-ink: #1f231f; --color-ink-2: #474d46; --color-ink-3: #6c736a; --color-ink-4: #939990;
-  --color-chrome: #e6e9e3; --color-chrome-mid: #eef0eb; --color-chrome-high: #f5f6f3; --color-surface: #fdfdfb;
+  --color-ink: #1f231f; --color-ink-2: #474d46; --color-ink-3: #5f655d; --color-ink-4: #787e76;
+  --color-chrome: #dfe4da; --color-chrome-mid: #ebeee6; --color-chrome-high: #f4f5f1; --color-surface: #fdfdfb;
   --color-accent: #5a8266; --color-accent-soft: rgba(90,130,102,0.14); --color-accent-ink: #ffffff;
   --color-accent-2: #466b51; --color-accent-tint: rgba(90,130,102,0.10);
   --color-add: #5e8b3e; --color-rem: #c0563c;
-  --color-rule: #c7ccc3; --color-rule-light: #d7dbd3;
+  --color-rule: #b6bbb3; --color-rule-light: #c3c7bf;
   --color-line-soft: rgba(0,0,0,0.04); --color-line-hl: rgba(90,130,102,0.06);
   --syntax-keyword: #8a4f9e; --syntax-string: #3f7d4f; --syntax-number: #b5651d;
   --syntax-type: #2e7d6f; --syntax-function: #6a5acd; --syntax-property: #4a7c5b;

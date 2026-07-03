@@ -6,18 +6,18 @@
 
   --color-ink:         #1a1a18;
   --color-ink-2:       #4a4a44;
-  --color-ink-3:       #78786f;
-  --color-ink-4:       #98988e;
-  --color-chrome:      #ebe9e3;
-  --color-chrome-mid:  #f3f1ec;
-  --color-chrome-high: #f9f8f5;
+  --color-ink-3:       #65655e;
+  --color-ink-4:       #7e7e75;
+  --color-chrome:      #e7e4dc;
+  --color-chrome-mid:  #f0ede7;
+  --color-chrome-high: #f8f6f2;
   --color-surface:     #ffffff;
   --color-accent:      #c05d3c;
   --color-accent-soft: rgba(192, 93, 60, 0.08);
   --color-accent-ink:  #ffffff;
   --color-accent-tint: rgba(192, 93, 60, 0.06);
-  --color-rule:        #cccbc4;
-  --color-rule-light:  #dfded8;
+  --color-rule:        #bcbbb5;
+  --color-rule-light:  #c7c6c1;
   --color-line-soft:   rgba(0, 0, 0, 0.04);
   --color-add:         #5e8b3e;
   --color-rem:         #c05d3c;

@@ -6,11 +6,11 @@ This document defines the visual language, layout architecture, and component sy
 
 ## 0. Principles
 
-- **Chrome gradient.** Surfaces lighten from shell to content center. Three levels: chrome, chrome-mid, surface. No shadows.
+- **Chrome gradient.** Surfaces lighten from shell to content center. Four levels: chrome, chrome-mid, chrome-high, surface. No shadows.
 - **Dense.** Compact controls. Tight rows. 8-hour tool. Every pixel earns it.
 - **Progressive disclosure.** Calm surface. Deep capabilities. One click from everything.
 - **One accent.** Single accent color per theme. Signal only: active states, citations, caret. Never background fill.
-- **Seven themes.** Light: White (clean neutral, default), Parchment (warm), Glacier (cool), Sage (botanical). Dark: Slate, Monokai, Nord, Dracula.
+- **Eight themes.** Light: White (clean neutral, default), Parchment (warm), Glacier (cool), Sage (botanical). Dark: Slate, Monokai, Nord, Dracula.
 - **Five font roles.** Sans (Satoshi) for chrome. Serif (Lora) for content. Mono (JetBrains Mono) for code/data. Slab (Zilla Slab) as editor option. Brand (Georgia) for display copy. The product logo itself is an outlined wordmark, not a runtime font (see `docs/brand/`).
 - **Discovered, not designed.** Should feel like an instrument, not a platform.
 - **Nielsen Checklist**:
@@ -78,20 +78,20 @@ Use the project's semantic token classes in templates: `text-ink-3`, `bg-chrome-
 
 Theme is stored in workspace `.mim/settings.json` under the `theme` key.
 
-### 2.1 Chrome Gradient (3 levels)
+### 2.1 Chrome Gradient (4 levels)
 
-The chrome system creates the outside-in depth gradient. Values shown are White (default) theme; each theme overrides them.
+The chrome system creates the outside-in depth gradient. Values shown are Parchment theme; each theme overrides them.
 
 ```
---chrome:      #ebe9e3    Darkest — header, sidebar edge, shell bg
---chrome-mid:  #f3f1ec    Middle  — sidebar body, hover states
---chrome-high: #f9f8f5    Near-surface — main toolbar
+--chrome:      #e7e4dc    Darkest — sidebar, shell bg, outer edge
+--chrome-mid:  #f0ede7    Middle  — hover states, input backgrounds
+--chrome-high: #f8f6f2    Near-surface — pane headers, status bars
 --surface:     #ffffff    Lightest — Work and Artifact content areas
 ```
 
-In dark themes (Slate, Monokai) the gradient inverts: chrome is near-black, surface is dark gray. The spatial relationship (outer = chrome, inner = surface) stays the same.
+In dark themes (Slate, Monokai, Nord, Dracula) the gradient inverts: chrome is near-black, surface is dark gray. The spatial relationship (outer = chrome, inner = surface) stays the same.
 
-**Rule:** Any element on the outer edge of the window uses `--chrome`. Mid-layer docked panels use `--chrome-mid`. Reading/writing surfaces use `--surface`. No additional background levels should be invented.
+**Rule:** The sidebar uses `--chrome`. Pane headers and status bars use `--chrome-high`. Reading/writing surfaces use `--surface`. Hover fills use `--chrome-mid`. No additional background levels should be invented.
 
 ### 2.2 Ink (text hierarchy)
 
@@ -100,11 +100,29 @@ Four ink values control all text contrast:
 ```
 --ink:   #1a1a18    Primary — headings, active labels, body text in content
 --ink-2: #4a4a44    Secondary — body text, hover states, sidebar labels
---ink-3: #8a8a80    Tertiary — toolbar icons, chrome labels, metadata
---ink-4: #b0b0a6    Quaternary — timestamps, disabled hints, inactive icons
+--ink-3: #65655e    Tertiary — toolbar icons, chrome labels, metadata
+--ink-4: #7e7e75    Quaternary — timestamps, disabled hints, inactive icons
 ```
 
 **Usage pattern:** `--ink` for things the user is reading. `--ink-2` for supporting text. `--ink-3` for UI chrome labels. `--ink-4` for metadata you glance at. Hover states typically shift one level darker (ink-4 -> ink-3, ink-3 -> ink-2, ink-2 -> ink).
+
+### 2.2.1 Contrast contract
+
+Every theme must satisfy WCAG-derived contrast floors, enforced by `src/renderer/styles.contrast.test.ts`:
+
+| Token | Background | Floor | Rationale |
+|---|---|---|---|
+| `ink` | all chrome + surface | 8.0:1 | Primary text, well above WCAG AAA |
+| `ink-2` | all chrome + surface | 5.5:1 | Secondary text, above WCAG AA |
+| `ink-3` | all chrome + surface | 4.5:1 | WCAG AA normal text |
+| `ink-4` | all chrome + surface | 3.0:1 | WCAG AA large text / UI components |
+| `accent` | all chrome + surface | 3.0:1 | Bold labels, icons (large text / UI) |
+| `chrome` vs `surface` | — | 1.25:1 | Structural separation |
+| `chrome` vs `chrome-high` | — | 1.10:1 | Step visibility |
+| `rule-light` | chrome, surface | 1.25:1 | Divider visibility |
+| `rule` | chrome, surface | 1.40:1 | Strong divider visibility |
+
+`text-accent` must only appear on interactive elements at ≥12px bold or with accompanying `bg-accent-tint`. Use `text-accent-ink` (not `text-white`) for text on `bg-accent` fills.
 
 ### 2.3 Accent
 
@@ -114,7 +132,7 @@ One accent color. No secondary accents.
 --accent:      #c05d3c               Terracotta — active states, primary actions, caret
 --accent-soft: rgba(192,93,60,.12)   Tinted bg — active mode buttons, selected items, banners
 --accent-tint: rgba(192,93,60,.10)   Lighter tint — active sidebar rows, selected list items
---accent-ink:  #ffffff               White text on accent fills
+--accent-ink:  #ffffff               Text on accent fills (use text-accent-ink, never text-white)
 ```
 
 **Where accent appears:** Active mode button. Resize handle on hover. Primary action buttons (filled). Caret color. Active icon buttons. Active sidebar/Navigator rows. Never as a large fill or background — only as a signal.
@@ -122,8 +140,8 @@ One accent color. No secondary accents.
 ### 2.4 Lines and Borders
 
 ```
---rule:        #d8d7d2               Structural — major region borders
---rule-light:  #eae9e5               Subtle — header bottom, toolbar bottom, row dividers
+--rule:        #bcbbb5               Structural — major region borders
+--rule-light:  #c7c6c1               Subtle — header bottom, toolbar bottom, row dividers
 --line-soft:   rgba(0,0,0,.04)       Ghost — chrome zone boundaries
 --line-hl:     rgba(192,93,60,.06)   Active line — editor cursor line highlight
 ```
