@@ -132,7 +132,7 @@ describe('WorkbenchShell panes', () => {
 
     const frame = root.querySelector('[data-pane="work"] > div') as HTMLElement
     const content = frame.lastElementChild as HTMLElement
-    expect(frame.className).toContain('bg-chrome-high')
+    expect(frame.className).toContain('bg-chrome')
     expect(frame.className).not.toContain('rounded')
     // The content carries only the left hairline (outlines it against the
     // rail); the header keeps its own border-b so the surface starts at the

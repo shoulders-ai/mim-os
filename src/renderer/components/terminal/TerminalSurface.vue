@@ -66,10 +66,36 @@ function containerSnapshot(el: HTMLElement) {
 }
 
 /* ── Theme (reads the active theme's CSS custom properties) ── */
+
+const ANSI_LIGHT = {
+  black: '#1a1a18',   red: '#b8432a',     green: '#4a7530',   yellow: '#a07018',
+  blue: '#3a6888',    magenta: '#6840cc',  cyan: '#488070',    white: '#c8c8c0',
+  brightBlack: '#6a6a64', brightRed: '#c85848', brightGreen: '#5a8a3e',
+  brightYellow: '#b88020', brightBlue: '#4a80a8', brightMagenta: '#7c5cd0',
+  brightCyan: '#5a9e8f',   brightWhite: '#e0e0dc',
+}
+const ANSI_DARK = {
+  black: '#505050',   red: '#e07070',     green: '#7cc68a',   yellow: '#f0c060',
+  blue: '#6ba0c0',    magenta: '#b39dff', cyan: '#7cc6b6',    white: '#d0d0c8',
+  brightBlack: '#888888', brightRed: '#f09090', brightGreen: '#98d8a0',
+  brightYellow: '#f8d888', brightBlue: '#88b8d8', brightMagenta: '#ccb8ff',
+  brightCyan: '#98dcd0',   brightWhite: '#f5f5f0',
+}
+
+function isDarkTheme(): boolean {
+  const surface = getComputedStyle(document.documentElement)
+    .getPropertyValue('--color-surface').trim()
+  if (!surface) return false
+  const c = surface.replace('#', '')
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(c.slice(i, i + 2), 16))
+  return (r + g + b) / 3 < 128
+}
+
 function getTheme() {
   const style = getComputedStyle(document.documentElement)
   const get = (v: string) => style.getPropertyValue(v).trim()
   const accent = get('--color-accent') || '#c05d3c'
+  const ansi = isDarkTheme() ? ANSI_DARK : ANSI_LIGHT
   return {
     background: get('--color-surface') || '#ffffff',
     foreground: get('--color-ink-2') || '#4a4a44',
@@ -77,22 +103,7 @@ function getTheme() {
     cursorAccent: get('--color-surface') || '#ffffff',
     selectionBackground: accent + '33',
     selectionForeground: undefined,
-    black: '#1a1a18',
-    red: '#c05d3c',
-    green: '#5e8b3e',
-    yellow: '#e0a030',
-    blue: '#4a7c9b',
-    magenta: '#7c4dff',
-    cyan: '#5a9e8f',
-    white: '#e0e0dc',
-    brightBlack: '#6a6a64',
-    brightRed: '#e07070',
-    brightGreen: '#7cc68a',
-    brightYellow: '#f0c060',
-    brightBlue: '#6ba0c0',
-    brightMagenta: '#b39dff',
-    brightCyan: '#7cc6b6',
-    brightWhite: '#f5f5f0',
+    ...ansi,
   }
 }
 

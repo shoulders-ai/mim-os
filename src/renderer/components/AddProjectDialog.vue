@@ -229,7 +229,7 @@ async function create() {
             @click="$emit('close')"
           >Cancel</button>
           <button
-            class="font-sans text-[11px] font-semibold text-white bg-accent px-[14px] h-[30px] rounded-[6px] flex items-center gap-1.5 hover:enabled:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
+            class="font-sans text-[11px] font-semibold text-accent-ink bg-accent px-[14px] h-[30px] rounded-[6px] flex items-center gap-1.5 hover:enabled:opacity-90 disabled:opacity-40 disabled:pointer-events-none"
             :disabled="!canCreate || creating"
             @click="create"
           >

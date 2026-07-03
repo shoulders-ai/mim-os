@@ -1234,7 +1234,7 @@ watch(inWorkspaceRows, (rows) => {
             <button
               type="button"
               data-testid="app-source-confirm"
-              class="h-8 rounded-[6px] bg-accent px-3 font-sans text-[12px] font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
+              class="h-8 rounded-[6px] bg-accent px-3 font-sans text-[12px] font-semibold text-accent-ink hover:bg-accent/90 disabled:opacity-50"
               :disabled="sourceBusy === 'add' || !sourceReview?.apps.length"
               @click="confirmAddSource"
             >

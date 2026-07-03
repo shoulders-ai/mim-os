@@ -458,12 +458,12 @@ onUnmounted(() => {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             <span>Using skill</span>
             <span class="font-medium text-ink-2">{{ skillPartName(entry.part) }}</span>
-            <span v-if="getToolState(entry.part) === 'output-available'" class="w-[5px] h-[5px] rounded-full bg-[var(--color-add)] shrink-0" />
+            <span v-if="getToolState(entry.part) === 'output-available'" class="w-[5px] h-[5px] rounded-full bg-add shrink-0" />
             <span v-else-if="getToolState(entry.part) !== 'error'" class="cm-tool-spinner shrink-0" />
-            <span v-if="entry.part.errorText" class="text-[10px] font-semibold text-[var(--color-rem)] uppercase">error</span>
+            <span v-if="entry.part.errorText" class="text-[10px] font-semibold text-rem uppercase">error</span>
           </button>
           <div v-if="expandedTools[entry.index]" class="mt-1 mb-1 ml-4 border-l-2 border-rule-light pl-2.5">
-            <div v-if="entry.part.errorText" class="font-sans text-[12px] text-[var(--color-rem)]">{{ entry.part.errorText }}</div>
+            <div v-if="entry.part.errorText" class="font-sans text-[12px] text-rem">{{ entry.part.errorText }}</div>
             <div v-else-if="skillPartBody(entry.part)" class="md-content font-sans text-[13px] leading-[1.5] text-ink-3" v-html="renderMarkdown(skillPartBody(entry.part))" />
           </div>
         </div>
@@ -474,9 +474,9 @@ onUnmounted(() => {
             <svg class="transition-transform" :class="{ 'rotate-90': expandedTools[entry.index] }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
             <span class="font-medium">{{ getToolName(entry.part) }}</span>
-            <span v-if="getToolState(entry.part) === 'output-available'" class="w-[5px] h-[5px] rounded-full bg-[var(--color-add)] shrink-0" />
+            <span v-if="getToolState(entry.part) === 'output-available'" class="w-[5px] h-[5px] rounded-full bg-add shrink-0" />
             <span v-else-if="getToolState(entry.part) !== 'output-available' && getToolState(entry.part) !== 'error'" class="cm-tool-spinner shrink-0" />
-            <span v-if="entry.part.errorText" class="text-[10px] font-semibold text-[var(--color-rem)] uppercase">error</span>
+            <span v-if="entry.part.errorText" class="text-[10px] font-semibold text-rem uppercase">error</span>
           </button>
           <div v-if="expandedTools[entry.index]" class="mt-1 mb-1 ml-4 border-l-2 border-rule-light pl-2.5">
             <div v-if="getToolInput(entry.part)" class="mb-1.5">
@@ -485,7 +485,7 @@ onUnmounted(() => {
             </div>
             <div v-if="getToolOutput(entry.part)" class="mb-1.5">
               <div class="font-sans text-[10px] font-semibold uppercase text-ink-3 mb-0.5">{{ entry.part.errorText ? 'Error' : 'Output' }}</div>
-              <pre class="font-mono text-[11px] leading-[1.4] bg-chrome border border-rule-light rounded-[4px] px-2 py-1.5 m-0 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all" :class="entry.part.errorText ? 'text-[var(--color-rem)]' : 'text-ink-2'">{{ getToolOutput(entry.part) }}</pre>
+              <pre class="font-mono text-[11px] leading-[1.4] bg-chrome border border-rule-light rounded-[4px] px-2 py-1.5 m-0 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all" :class="entry.part.errorText ? 'text-rem' : 'text-ink-2'">{{ getToolOutput(entry.part) }}</pre>
             </div>
           </div>
         </div>

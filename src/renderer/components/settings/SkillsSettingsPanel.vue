@@ -747,7 +747,7 @@ onBeforeUnmount(() => {
           <button
             type="submit"
             data-testid="skill-create"
-            class="flex h-8 items-center gap-1.5 rounded-[6px] bg-accent px-3 font-sans text-[12px] font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
+            class="flex h-8 items-center gap-1.5 rounded-[6px] bg-accent px-3 font-sans text-[12px] font-semibold text-accent-ink hover:bg-accent/90 disabled:opacity-50"
             :disabled="!canCreate || actionBusy === 'create'"
           >
             <IconPlus :size="14" :stroke-width="2" />
@@ -802,7 +802,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               data-testid="skill-import-confirm"
-              class="h-8 rounded-[6px] bg-accent px-3 font-sans text-[12px] font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
+              class="h-8 rounded-[6px] bg-accent px-3 font-sans text-[12px] font-semibold text-accent-ink hover:bg-accent/90 disabled:opacity-50"
               :disabled="Boolean(importReview.collision) || actionBusy === 'import'"
               @click="confirmImport"
             >
@@ -886,7 +886,7 @@ onBeforeUnmount(() => {
             <button
               type="button"
               data-testid="skill-source-confirm"
-              class="h-8 rounded-[6px] bg-accent px-3 font-sans text-[12px] font-semibold text-white hover:bg-accent/90 disabled:opacity-50"
+              class="h-8 rounded-[6px] bg-accent px-3 font-sans text-[12px] font-semibold text-accent-ink hover:bg-accent/90 disabled:opacity-50"
               :disabled="actionBusy === 'add-source'"
               @click="confirmSource"
             >

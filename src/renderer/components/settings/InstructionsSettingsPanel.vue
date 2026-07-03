@@ -125,7 +125,7 @@ onMounted(() => {
             v-if="isDirty"
             type="button"
             data-testid="save-btn"
-            class="rounded-[5px] bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white hover:bg-accent/90"
+            class="rounded-[5px] bg-accent px-3 py-1.5 text-[11.5px] font-medium text-accent-ink hover:bg-accent/90"
             @click="save"
           >
             Save
@@ -149,7 +149,7 @@ onMounted(() => {
           </button>
           <button
             type="button"
-            class="rounded-[5px] bg-accent px-3 py-1.5 text-[11.5px] font-medium text-white hover:bg-accent/90"
+            class="rounded-[5px] bg-accent px-3 py-1.5 text-[11.5px] font-medium text-accent-ink hover:bg-accent/90"
             @click="confirmRestore"
           >
             Restore
