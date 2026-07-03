@@ -46,9 +46,9 @@ export const CORE_TOOL_POLICY_ROWS: ToolPolicyRow[] = [
     label: 'Read workspace files',
     description: 'Read files, local history previews, and imported document text.',
     defaultEnabled: true,
-    toolIds: ['fs.read', 'history.preview', 'documents.pdf.extract', 'documents.docx.read', 'documents.docx.extract'],
-    aiToolKeys: ['fs_read', 'history_preview'],
-    mcpToolNames: ['fs_read', 'pdf_extract'],
+    toolIds: ['fs.read', 'fs.list', 'history.preview', 'history.list', 'comments.list', 'documents.pdf.extract', 'documents.docx.read', 'documents.docx.extract'],
+    aiToolKeys: ['fs_read', 'fs_list', 'history_preview', 'history_list', 'comments_list'],
+    mcpToolNames: ['fs_read', 'pdf_extract', 'history_list', 'comments_list'],
   },
   {
     id: 'files.search',
@@ -64,16 +64,16 @@ export const CORE_TOOL_POLICY_ROWS: ToolPolicyRow[] = [
     domain: 'files',
     label: 'Change files',
     defaultEnabled: true,
-    toolIds: ['fs.write', 'fs.edit', 'fs.create', 'fs.mkdir', 'fs.rename', 'comments.add', 'comments.reply', 'comments.resolve', 'documents.importMarkdown', 'export.pdf', 'export.docx', 'render.htmlToPdf'],
-    aiToolKeys: ['fs_write', 'fs_edit', 'fs_create', 'fs_mkdir', 'fs_rename', 'comments_add', 'comments_reply', 'comments_resolve'],
-    mcpToolNames: ['comments_add', 'comments_reply', 'comments_resolve', 'export_pdf', 'export_docx'],
+    toolIds: ['fs.write', 'fs.edit', 'fs.create', 'fs.mkdir', 'fs.rename', 'fs.copy', 'history.restore', 'comments.add', 'comments.reply', 'comments.resolve', 'documents.importMarkdown', 'export.pdf', 'export.docx', 'render.htmlToPdf'],
+    aiToolKeys: ['fs_write', 'fs_edit', 'fs_create', 'fs_mkdir', 'fs_rename', 'history_restore', 'comments_add', 'comments_reply', 'comments_resolve'],
+    mcpToolNames: ['comments_add', 'comments_reply', 'comments_resolve', 'export_pdf', 'export_docx', 'history_restore'],
   },
   {
     id: 'files.delete',
     domain: 'files',
     label: 'Delete files',
     defaultEnabled: true,
-    toolIds: ['fs.delete'],
+    toolIds: ['fs.delete', 'fs.trash', 'history.clear', 'history.prune'],
     aiToolKeys: ['fs_delete'],
   },
   {
@@ -253,9 +253,9 @@ export const CORE_TOOL_POLICY_ROWS: ToolPolicyRow[] = [
     domain: 'system',
     label: 'Open editor and chat UI',
     defaultEnabled: true,
-    toolIds: ['editor.open', 'chat.send', 'workspace.info', 'workspace.orient', 'log.append'],
+    toolIds: ['editor.open', 'chat.send', 'workspace.info', 'workspace.orient', 'log.append', 'skill.get'],
     aiToolKeys: ['editor_open', 'log_append'],
-    mcpToolNames: ['editor_open', 'chat_send', 'workspace_info', 'workspace_orient', 'log_append'],
+    mcpToolNames: ['editor_open', 'chat_send', 'workspace_info', 'workspace_orient', 'log_append', 'skill_get'],
   },
   {
     id: 'system.settings',
@@ -268,6 +268,17 @@ export const CORE_TOOL_POLICY_ROWS: ToolPolicyRow[] = [
     risk: 'sensitive',
   },
 ]
+
+const WRITE_IMPLIES_READ: Array<[string, string]> = [
+  ['slack.send', 'slack.public'],
+  ['slack.dms', 'slack.public'],
+  ['slack.private', 'slack.public'],
+  ['google.gmail.send', 'google.gmail.read'],
+  ['google.calendar.write', 'google.calendar.read'],
+  ['google.sheets.write', 'google.drive.read'],
+]
+
+const ROWS_BY_ID = new Map(CORE_TOOL_POLICY_ROWS.map(row => [row.id, row]))
 
 const AI_TOOL_IDS = buildKeyMap('aiToolKeys')
 const MCP_TOOL_IDS = buildKeyMap('mcpToolNames')
@@ -318,6 +329,7 @@ export function isToolPolicySettingWrite(params: Record<string, unknown> | undef
   if (!params) return false
   const key = params.key
   return key === 'tools' || key === 'tools.enabled' || key === 'tools.disabled'
+    || key === 'connectors' || (typeof key === 'string' && key.startsWith('connectors.'))
 }
 
 export function registerToolPolicyTools(tools: ToolRegistry): void {
@@ -392,7 +404,7 @@ export function connectorPolicyFromTools(workspacePath: string | null | undefine
     },
     google: {
       aiEnabled: googleGmail || googleSend || googleCalendar || googleCalendarWrite || googleDrive || googleSheetsWrite,
-      gmailEnabled: googleGmail,
+      gmailEnabled: googleGmail || googleSend,
       gmailSendEnabled: googleSend,
       calendarEnabled: googleCalendar || googleCalendarWrite,
       calendarWriteEnabled: googleCalendarWrite,
@@ -453,6 +465,15 @@ function nextRawPolicy(
   const enabled = new Set(current.enabled)
   const disabled = new Set(current.disabled)
 
+  if (!current.explicit) {
+    for (const row of CORE_TOOL_POLICY_ROWS) {
+      if (row.defaultEnabled) continue
+      for (const id of row.toolIds) {
+        if (current.isEnabled(id)) enabled.add(id)
+      }
+    }
+  }
+
   for (const id of toolIds) {
     if (enabledParam) {
       disabled.delete(id)
@@ -463,9 +484,40 @@ function nextRawPolicy(
     }
   }
 
+  applyCascade(toolIds, enabledParam, enabled, disabled)
+
   return {
     enabled: [...enabled].filter(id => knownIds.has(id)).sort(),
     disabled: [...disabled].filter(id => knownIds.has(id)).sort(),
+  }
+}
+
+function applyCascade(toolIds: string[], enabling: boolean, enabled: Set<string>, disabled: Set<string>): void {
+  const touchedRowIds = new Set<string>()
+  for (const row of CORE_TOOL_POLICY_ROWS) {
+    if (row.toolIds.some(id => toolIds.includes(id))) touchedRowIds.add(row.id)
+  }
+
+  if (enabling) {
+    for (const [writeRowId, readRowId] of WRITE_IMPLIES_READ) {
+      if (!touchedRowIds.has(writeRowId)) continue
+      const readRow = ROWS_BY_ID.get(readRowId)
+      if (!readRow) continue
+      for (const id of readRow.toolIds) {
+        disabled.delete(id)
+        if (!readRow.defaultEnabled) enabled.add(id)
+      }
+    }
+  } else {
+    for (const [writeRowId, readRowId] of WRITE_IMPLIES_READ) {
+      if (!touchedRowIds.has(readRowId)) continue
+      const writeRow = ROWS_BY_ID.get(writeRowId)
+      if (!writeRow) continue
+      for (const id of writeRow.toolIds) {
+        enabled.delete(id)
+        disabled.add(id)
+      }
+    }
   }
 }
 

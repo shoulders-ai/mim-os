@@ -103,6 +103,38 @@ describe('ToolsSettingsPanel', () => {
     expect(root.querySelector('[aria-label="Enable Push changes"]')).toBeTruthy()
   })
 
+  it('shows scope hint and disables toggle when Google scope is missing', async () => {
+    const scopeCall = vi.fn(async (tool: string, params?: Record<string, unknown>) => {
+      if (tool === 'toolPolicy.get') return policy([
+        {
+          id: 'google.gmail.send',
+          domain: 'google',
+          label: 'Send Gmail',
+          toolIds: ['gmail.send'],
+          enabled: false,
+        },
+      ])
+      if (tool === 'slack.status') return { configured: false }
+      if (tool === 'google.status') return {
+        configured: true,
+        auth: { email: 'test@example.com' },
+        grantedScopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+      }
+      return {}
+    })
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call: scopeCall, on: vi.fn(), off: vi.fn() },
+    })
+    app = createApp(ToolsSettingsPanel)
+    app.mount(root)
+    await flushUi()
+
+    expect(root.textContent).toContain('Reconnect required')
+    const toggle = root.querySelector<HTMLButtonElement>('[aria-label="Enable Send Gmail"]')
+    expect(toggle?.disabled).toBe(true)
+  })
+
   it('filters rows by label and tool id', async () => {
     app = createApp(ToolsSettingsPanel)
     app.mount(root)

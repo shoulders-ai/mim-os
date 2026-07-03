@@ -767,16 +767,23 @@ export async function createAiSdkTools({
         for (const [key, value] of Object.entries(flags)) {
           if (typeof value === 'boolean') boolFlags[key] = value
         }
-        const enableIds: string[] = []
+        let enableIds: string[] = []
         const disableIds: string[] = []
         for (const [key, value] of Object.entries(boolFlags)) {
           const ids = connectorFlagToolIds(integration, key, value)
           if (value) enableIds.push(...ids)
           else disableIds.push(...ids)
         }
+        const userDisabled = new Set(toolPolicy.disabled)
+        const blocked = enableIds.filter(id => userDisabled.has(id))
+        if (blocked.length) enableIds = enableIds.filter(id => !userDisabled.has(id))
         if (enableIds.length) await call('toolPolicy.set', { toolIds: uniqueStrings(enableIds), enabled: true })
         if (disableIds.length) await call('toolPolicy.set', { toolIds: uniqueStrings(disableIds), enabled: false })
-        return { integration, configured: boolFlags }
+        return {
+          integration,
+          configured: boolFlags,
+          ...(blocked.length ? { blocked, hint: 'Some tools are disabled in Settings > Tools' } : {}),
+        }
       },
     }),
 
@@ -805,7 +812,11 @@ function filterAiToolMap<T extends Record<string, ReturnType<typeof tool>>>(
 
 function connectorFlagToolIds(integration: 'google' | 'slack', key: string, enabled: boolean): string[] {
   if (integration === 'slack') {
-    if (key === 'aiEnabled') return ['slack.search', 'slack.history', 'slack.channels', 'slack.replies', 'slack.users']
+    if (key === 'aiEnabled') {
+      const readIds = ['slack.search', 'slack.history', 'slack.channels', 'slack.replies', 'slack.users']
+      if (!enabled) return [...readIds, 'slack.send', 'slack.dms', 'slack.directMessages', 'slack.privateChannels']
+      return readIds
+    }
     if (key === 'sendEnabled') return ['slack.send']
     if (key === 'privateChannels') return ['slack.privateChannels']
     if (key === 'directMessages') return ['slack.dms', 'slack.directMessages']

@@ -38,6 +38,7 @@ interface GoogleStatus {
   tokenConfigured?: boolean
   auth?: { email?: string; name?: string }
   account?: string
+  grantedScopes?: string[]
 }
 
 const DOMAIN_ORDER: ToolDomain[] = ['files', 'terminal', 'git', 'web', 'slack', 'google', 'apps', 'system']
@@ -52,12 +53,32 @@ const DOMAIN_LABELS: Record<ToolDomain, string> = {
   system: 'System',
 }
 
+const GOOGLE_SCOPES: Record<string, string> = {
+  gmailRead: 'https://www.googleapis.com/auth/gmail.readonly',
+  gmailSend: 'https://www.googleapis.com/auth/gmail.send',
+  calendarRead: 'https://www.googleapis.com/auth/calendar.events.readonly',
+  calendarWrite: 'https://www.googleapis.com/auth/calendar.events',
+  driveRead: 'https://www.googleapis.com/auth/drive.readonly',
+  drive: 'https://www.googleapis.com/auth/drive',
+  sheetsWrite: 'https://www.googleapis.com/auth/spreadsheets',
+}
+
+const SCOPE_REQUIREMENTS: Record<string, string[]> = {
+  'google.gmail.read': [GOOGLE_SCOPES.gmailRead],
+  'google.gmail.send': [GOOGLE_SCOPES.gmailSend],
+  'google.calendar.read': [GOOGLE_SCOPES.calendarRead, GOOGLE_SCOPES.calendarWrite],
+  'google.calendar.write': [GOOGLE_SCOPES.calendarWrite],
+  'google.drive.read': [GOOGLE_SCOPES.driveRead, GOOGLE_SCOPES.drive],
+  'google.sheets.write': [GOOGLE_SCOPES.sheetsWrite],
+}
+
 const rows = ref<ToolPolicyRow[]>([])
 const query = ref('')
 const loading = ref(false)
 const error = ref('')
 const busyRows = ref<Set<string>>(new Set())
 const connectionLabels = ref<Record<string, string>>({})
+const googleGrantedScopes = ref<Set<string>>(new Set())
 
 const filteredRows = computed(() => {
   const needle = query.value.trim().toLowerCase()
@@ -106,6 +127,20 @@ async function loadConnectionLabels() {
       ? google.auth?.email || google.account || 'Connected'
       : 'Not connected',
   }
+  googleGrantedScopes.value = new Set(
+    Array.isArray(google?.grantedScopes)
+      ? google.grantedScopes.filter((s): s is string => typeof s === 'string')
+      : [],
+  )
+}
+
+function rowScopeHint(row: ToolPolicyRow): string {
+  const required = SCOPE_REQUIREMENTS[row.id]
+  if (!required) return ''
+  if (!connectionLabels.value.google || connectionLabels.value.google === 'Not connected') return ''
+  if (googleGrantedScopes.value.size === 0) return ''
+  const hasScope = required.some(scope => googleGrantedScopes.value.has(scope))
+  return hasScope ? '' : 'Reconnect required'
 }
 
 async function setRow(row: ToolPolicyRow, enabled: boolean) {
@@ -194,12 +229,13 @@ function searchableText(row: ToolPolicyRow): string {
         <template #desc>
           <span class="block">{{ row.description || rowDetail(row) }}</span>
           <span v-if="row.description" class="block font-mono text-[9.5px] text-ink-4">{{ rowDetail(row) }}</span>
+          <span v-if="rowScopeHint(row)" class="block text-[10px] text-rem">{{ rowScopeHint(row) }}</span>
         </template>
         <MimToggle
           :model-value="row.enabled"
-          :disabled="busyRows.has(row.id)"
+          :disabled="busyRows.has(row.id) || !!rowScopeHint(row)"
           :aria-label="`${row.enabled ? 'Disable' : 'Enable'} ${row.label}`"
-          :title="rowDetail(row)"
+          :title="rowScopeHint(row) || rowDetail(row)"
           @update:model-value="setRow(row, $event)"
         />
       </SettingRow>

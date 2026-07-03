@@ -358,6 +358,27 @@ describe('app server', () => {
     expect(call).not.toHaveBeenCalled()
   })
 
+  it('prevents MCP clients from writing legacy connectors settings key', async () => {
+    const call = vi.fn(async (_name: string) => ({ ok: true }))
+    server = await createServer(makeTools(call, dir, makeMcpToolDefs()), makePackages([addPackage()]))
+    const socket = await openSocket(server.port)
+    const token = server.createMcpToken('agent-session-connectors')
+    await sendJson(socket, {
+      id: 'identify-1',
+      method: 'identify',
+      params: { type: 'mcp', token },
+    })
+
+    const denied = await sendJson(socket, {
+      id: 'settings-2',
+      method: 'settings.set',
+      params: { key: 'connectors', value: { slack: { aiEnabled: true } } },
+    })
+
+    expect(denied).toEqual({ id: 'settings-2', error: 'Tool policy cannot be changed over MCP' })
+    expect(call).not.toHaveBeenCalled()
+  })
+
   it('refuses MCP metadata before identification', async () => {
     const call = vi.fn()
     server = await createServer(makeTools(call, null, makeMcpToolDefs()), makePackages([addPackage()]))

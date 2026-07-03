@@ -1223,6 +1223,45 @@ describe('central AI runtime tools', () => {
     })
   })
 
+  it('connections_configure refuses to re-enable explicitly disabled tools', async () => {
+    const dir = withToolsPolicy({ enabled: [], disabled: ['slack.send'] })
+    try {
+      const { tools, calls } = mockRegistry(dir)
+      const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+      calls.length = 0
+
+      const result = await aiTools.connections_configure.execute?.({
+        integration: 'slack',
+        sendEnabled: true,
+      }, {}) as { blocked?: string[]; hint?: string }
+
+      expect(result.blocked).toEqual(['slack.send'])
+      expect(result.hint).toContain('Settings > Tools')
+      expect(calls.some(c => c.name === 'toolPolicy.set' && c.params.enabled === true)).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('connections_configure Slack aiEnabled:false disables all Slack tools including send', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    await aiTools.connections_configure.execute?.({
+      integration: 'slack',
+      aiEnabled: false,
+    }, {})
+
+    const setCall = calls.find(c => c.name === 'toolPolicy.set' && c.params.enabled === false)
+    expect(setCall).toBeDefined()
+    const ids = setCall!.params.toolIds as string[]
+    expect(ids).toContain('slack.send')
+    expect(ids).toContain('slack.dms')
+    expect(ids).toContain('slack.privateChannels')
+    expect(ids).toContain('slack.search')
+  })
+
   it('hides connection auth tools on inline and ghost profiles', async () => {
     const { tools } = mockRegistry()
     const inlineTools = await createAiSdkTools({ tools, profile: 'inline', sessionId: 's1' })

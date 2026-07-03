@@ -6,6 +6,7 @@ import { createTraceLog } from '@main/trace/trace.js'
 import { createToolRegistry, type ToolRegistry } from '@main/tools/registry.js'
 import {
   aiToolKeyEnabled,
+  connectorPolicyFromTools,
   isToolPolicySettingWrite,
   readToolsPolicy,
   registerToolPolicyTools,
@@ -116,5 +117,74 @@ describe('tool availability policy', () => {
     expect(isToolPolicySettingWrite({ key: 'tools', value: {} })).toBe(true)
     expect(isToolPolicySettingWrite({ key: 'tools.enabled', value: [] })).toBe(true)
     expect(isToolPolicySettingWrite({ key: 'theme', value: 'sage' })).toBe(false)
+  })
+
+  it('blocks connectors key as a tool policy write', () => {
+    expect(isToolPolicySettingWrite({ key: 'connectors', value: {} })).toBe(true)
+    expect(isToolPolicySettingWrite({ key: 'connectors.slack', value: {} })).toBe(true)
+  })
+
+  it('covers history.restore and fs.list in their respective rows', () => {
+    writeSettings({ tools: { disabled: ['history.restore', 'fs.list'] } })
+    const policy = readToolsPolicy(dir)
+    expect(policy.isEnabled('history.restore')).toBe(false)
+    expect(policy.isEnabled('fs.list')).toBe(false)
+    expect(aiToolKeyEnabled(policy, 'history_restore')).toBe(false)
+    expect(aiToolKeyEnabled(policy, 'fs_list')).toBe(false)
+  })
+
+  it('applies write-implies-read cascade: enabling send auto-enables read', async () => {
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+    registerToolPolicyTools(tools)
+
+    await tools.call('toolPolicy.set', { rowId: 'slack.send', enabled: true }, { actor: 'user' })
+
+    const policy = readToolsPolicy(dir)
+    expect(policy.isEnabled('slack.send')).toBe(true)
+    expect(policy.isEnabled('slack.search')).toBe(true)
+    expect(policy.isEnabled('slack.history')).toBe(true)
+  })
+
+  it('applies write-implies-read cascade: disabling read auto-disables send', async () => {
+    writeSettings({ tools: { enabled: ['slack.search', 'slack.history', 'slack.channels', 'slack.replies', 'slack.users', 'slack.send'], disabled: [] } })
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+    registerToolPolicyTools(tools)
+
+    await tools.call('toolPolicy.set', { rowId: 'slack.public', enabled: false }, { actor: 'user' })
+
+    const policy = readToolsPolicy(dir)
+    expect(policy.isEnabled('slack.search')).toBe(false)
+    expect(policy.isEnabled('slack.send')).toBe(false)
+  })
+
+  it('materializes legacy connector state on first explicit write', async () => {
+    writeSettings({
+      connectors: {
+        slack: { aiEnabled: true, sendEnabled: true },
+      },
+    })
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+    registerToolPolicyTools(tools)
+
+    const before = readToolsPolicy(dir)
+    expect(before.isEnabled('slack.search')).toBe(true)
+    expect(before.isEnabled('slack.send')).toBe(true)
+
+    await tools.call('toolPolicy.set', { rowId: 'git.push', enabled: false }, { actor: 'user' })
+
+    const after = readToolsPolicy(dir)
+    expect(after.isEnabled('slack.search')).toBe(true)
+    expect(after.isEnabled('slack.send')).toBe(true)
+    expect(after.isEnabled('git.push')).toBe(false)
+  })
+
+  it('derives gmailEnabled from read OR send tools', () => {
+    writeSettings({ tools: { enabled: ['gmail.send'], disabled: [] } })
+    const result = connectorPolicyFromTools(dir)
+    expect(result.google?.gmailEnabled).toBe(true)
+    expect(result.google?.gmailSendEnabled).toBe(true)
   })
 })
