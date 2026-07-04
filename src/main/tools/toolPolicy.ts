@@ -7,6 +7,7 @@ import type { ToolRegistry } from '@main/tools/registry.js'
 export type ToolPolicyDomain =
   | 'files'
   | 'terminal'
+  | 'code'
   | 'git'
   | 'web'
   | 'slack'
@@ -83,6 +84,16 @@ export const CORE_TOOL_POLICY_ROWS: ToolPolicyRow[] = [
     defaultEnabled: true,
     toolIds: ['terminal.run'],
     aiToolKeys: ['terminal_run'],
+    risk: 'sensitive',
+  },
+  {
+    id: 'code.run',
+    domain: 'code',
+    label: 'Run code interpreters',
+    description: 'Execute detected interpreters (Rscript, Quarto) on workspace files',
+    defaultEnabled: true,
+    toolIds: ['code.run'],
+    aiToolKeys: ['code_run'],
     risk: 'sensitive',
   },
   {

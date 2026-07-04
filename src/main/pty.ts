@@ -4,6 +4,16 @@ import type { ToolRegistry } from '@main/tools/registry.js'
 import { defaultShell, userHomeDir } from '@main/platform.js'
 import { normalizePtySpawnCommand } from '@main/ptyCommand.js'
 import { preparePtyShellIntegration } from '@main/ptyShellIntegration.js'
+import { resolveInterpreter } from '@main/toolchain/toolchain.js'
+
+/**
+ * Default args appended main-side when spawning a program pty by catalog id.
+ * These live on the main side so the renderer never needs to know interpreter
+ * CLI conventions.
+ */
+export const PROGRAM_DEFAULT_ARGS: Record<string, string[]> = {
+  r: ['--no-save'],
+}
 
 // Shared pty spawn helper. Scratch terminals (terminal.spawn) and agent
 // sessions (agents/agentSessions.ts) both go through spawnPtyProcess, so every
@@ -91,11 +101,26 @@ export function registerPtyTools(tools: ToolRegistry): void {
     name: 'terminal.spawn',
     description: 'Spawn a new terminal process',
     execute: async (params) => {
-      const shell = params.shell as string || defaultShell()
+      const program = params.program as string | undefined
+      const extraArgs = (params.args as string[] | undefined) ?? []
       const cwd = params.cwd as string || tools.getWorkspacePath() || userHomeDir()
       const cols = (params.cols as number) || 80
       const rows = (params.rows as number) || 24
 
+      if (program) {
+        // Program mode: resolve via toolchain catalog
+        const entry = await resolveInterpreter(program)
+        if (!entry || !entry.binPath) {
+          throw new Error(`Program "${program}" not detected in toolchain`)
+        }
+        const defaultArgs = PROGRAM_DEFAULT_ARGS[entry.id] ?? []
+        const args = [...defaultArgs, ...extraArgs]
+        const handle = spawnPtyProcess({ file: entry.binPath, args, cwd, cols, rows })
+        return { id: handle.ptyId, program: entry.id }
+      }
+
+      // Default shell mode
+      const shell = params.shell as string || defaultShell()
       const handle = spawnPtyProcess({ file: shell, args: [], cwd, cols, rows, shellIntegration: true })
 
       return { id: handle.ptyId, shellIntegration: handle.shellIntegration }

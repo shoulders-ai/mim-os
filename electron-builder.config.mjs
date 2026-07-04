@@ -47,6 +47,7 @@ export default {
     'node_modules/better-sqlite3/**',
     'node_modules/keytar/**',
     'node_modules/sharp/**',
+    'resources/r/**',
   ],
 
   mac: {

@@ -35,6 +35,8 @@ import { DEFAULT_CACHE_ROOT } from '@main/packages/cacheLayout.js'
 import { registerBridgeTools } from '@main/tools/bridge.js'
 import { readTraceCaptureContent, readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
 import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
+import { registerToolchainTools } from '@main/tools/toolchain.js'
+import { registerCodeTools } from '@main/tools/code.js'
 import { registerSessionTools } from '@main/sessions.js'
 import { registerArchiveTools } from '@main/tools/archive.js'
 import { registerAiTools } from '@main/ai/ai.js'
@@ -404,6 +406,8 @@ async function boot(): Promise<void> {
   registerBridgeTools(tools)
   registerSettingsTools(tools)
   registerToolPolicyTools(tools)
+  registerToolchainTools(tools)
+  registerCodeTools(tools)
   // Registered here (not a tools/ module) because it needs the Electron app
   // handle; the headless server never has these versions to report.
   tools.register({
@@ -704,6 +708,10 @@ async function boot(): Promise<void> {
     emit: (event, data) => {
       server?.broadcast(event, data)
       mainWindow?.webContents.send(event, data)
+    },
+    generateTitle: (scrollbackText) => {
+      if (!server) return Promise.resolve(null)
+      return server.generateTaskLabel(scrollbackText)
     },
   })
   agentSessions.reconcileStaleSessions()

@@ -97,4 +97,22 @@ describe('main settings tools', () => {
 
     expect(readTraceRetentionDays(dir)).toBeUndefined()
   })
+
+  it('defaults codeInterpreters to rscript, r, quarto', async () => {
+    const result = await tools.call('settings.get', {}, ctx) as {
+      settings: Record<string, unknown>
+    }
+
+    expect(result.settings.codeInterpreters).toEqual(['rscript', 'r', 'quarto'])
+  })
+
+  it('persists custom codeInterpreters list', async () => {
+    await tools.call('settings.set', { key: 'codeInterpreters', value: ['rscript', 'python3'] }, ctx)
+
+    const result = await tools.call('settings.get', { key: 'codeInterpreters' }, ctx) as {
+      value: string[]
+    }
+
+    expect(result.value).toEqual(['rscript', 'python3'])
+  })
 })

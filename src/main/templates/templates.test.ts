@@ -39,7 +39,7 @@ describe('starter templates', () => {
 
   it('renders skill templates with override-safe frontmatter', () => {
     const listed = listSkillTemplates()
-    expect(listed.templates.map(template => template.id)).toEqual(['review-checklist', 'house-style'])
+    expect(listed.templates.map(template => template.id)).toEqual(['review-checklist', 'house-style', 'r-modelling'])
 
     const rendered = renderSkillTemplate('review-checklist', {
       name: 'clinical-review',
@@ -51,6 +51,19 @@ describe('starter templates', () => {
     expect(meta.description).toBe('Use when reviewing CRO documents against the clinical checklist.')
     expect(meta.tools).toEqual(['fs_read', 'fs_write'])
     expect(meta.unlocks).toEqual([])
+  })
+
+  it('renders the r-modelling skill template with correct frontmatter and body', () => {
+    const rendered = renderSkillTemplate('r-modelling')
+    const meta = frontmatterOf(rendered.content)
+
+    expect(meta.name).toBe('r-modelling')
+    expect(meta.description).toBe('Use when running R analyses, fitting models, or rendering R Markdown/Quarto reports.')
+    expect(meta.tools).toEqual(['code_run', 'editor_open', 'fs_read', 'fs_write'])
+    expect(meta.unlocks).toEqual([])
+    expect(rendered.content).toContain('# R Modelling')
+    expect(rendered.content.length).toBeGreaterThan(200)
+    expect(rendered.files).toBeUndefined()
   })
 
   it('renders house style with bundled relative reference files', () => {

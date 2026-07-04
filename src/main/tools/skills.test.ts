@@ -234,7 +234,7 @@ describe('skill tools', () => {
     const list = await tools.call('skill.templateList', {}, ctx) as {
       templates: Array<{ id: string; defaultName: string; defaultDescription: string }>
     }
-    expect(list.templates.map(template => template.id)).toEqual(['review-checklist', 'house-style'])
+    expect(list.templates.map(template => template.id)).toEqual(['review-checklist', 'house-style', 'r-modelling'])
 
     const rendered = await tools.call('skill.templateContent', {
       templateId: 'review-checklist',

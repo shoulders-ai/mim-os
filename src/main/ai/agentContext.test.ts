@@ -229,6 +229,47 @@ describe('renderAgentContext', () => {
     // no emoji (rough check for surrogate pairs / pictographs)
     expect(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(out)).toBe(false)
   })
+
+  it('renders a Toolchain section when toolchain entries are present', () => {
+    const out = renderAgentContext(
+      baseData({
+        toolchain: [
+          'R 4.4.1 - /opt/homebrew/bin/R',
+          'Rscript 4.4.1 - /opt/homebrew/bin/Rscript',
+          'pandoc - not found',
+          'renv.lock present',
+        ],
+      }),
+    )
+    expect(out).toContain('## Toolchain')
+    expect(out).toContain('R 4.4.1 - /opt/homebrew/bin/R')
+    expect(out).toContain('pandoc - not found')
+    expect(out).toContain('renv.lock present')
+  })
+
+  it('omits the Toolchain section when the array is empty', () => {
+    const out = renderAgentContext(baseData({ toolchain: [] }))
+    expect(out).not.toContain('## Toolchain')
+  })
+
+  it('omits the Toolchain section when the field is undefined', () => {
+    const out = renderAgentContext(baseData())
+    expect(out).not.toContain('## Toolchain')
+  })
+
+  it('places the Toolchain section after the workspace header and before app sections', () => {
+    const out = renderAgentContext(
+      baseData({
+        toolchain: ['R 4.4.1 - /usr/bin/R'],
+        appSections: [{ appId: 'test', title: 'Test Section', body: 'Body.' }],
+      }),
+    )
+    const headerPos = out.indexOf('Apps enabled:')
+    const toolchainPos = out.indexOf('## Toolchain')
+    const appSectionPos = out.indexOf('## Test Section')
+    expect(headerPos).toBeLessThan(toolchainPos)
+    expect(toolchainPos).toBeLessThan(appSectionPos)
+  })
 })
 
 describe('gatherAgentContext', () => {
@@ -486,6 +527,60 @@ describe('writeAgentContext', () => {
 
   it('throws when no workspace path is given', async () => {
     await expect(writeAgentContext('', { now: () => NOW_MS })).rejects.toThrow('No workspace open')
+  })
+
+  it('includes toolchain lines from detection', async () => {
+    const result = await writeAgentContext(dir, {
+      now: () => NOW_MS,
+      readRecentChanges: () => [],
+      readTraceHealth: () => [],
+      readToolchain: () => Promise.resolve([
+        { id: 'r' as const, bin: 'R', installed: true, binPath: '/usr/bin/R', version: '4.4.1' },
+        { id: 'rscript' as const, bin: 'Rscript', installed: true, binPath: '/usr/bin/Rscript' },
+        { id: 'quarto' as const, bin: 'quarto', installed: false },
+        { id: 'pandoc' as const, bin: 'pandoc', installed: false },
+        { id: 'python3' as const, bin: 'python3', installed: false },
+      ]),
+    })
+    expect(result.content).toContain('## Toolchain')
+    expect(result.content).toContain('R 4.4.1 - /usr/bin/R')
+    expect(result.content).toContain('Rscript - /usr/bin/Rscript')
+    expect(result.content).toContain('quarto - not found')
+  })
+
+  it('includes renv.lock present line when the file exists', async () => {
+    writeFileSync(join(dir, 'renv.lock'), '{}')
+    const result = await writeAgentContext(dir, {
+      now: () => NOW_MS,
+      readRecentChanges: () => [],
+      readTraceHealth: () => [],
+      readToolchain: () => Promise.resolve([
+        { id: 'r' as const, bin: 'R', installed: true, binPath: '/usr/bin/R', version: '4.4.1' },
+        { id: 'rscript' as const, bin: 'Rscript', installed: false },
+        { id: 'quarto' as const, bin: 'quarto', installed: false },
+        { id: 'pandoc' as const, bin: 'pandoc', installed: false },
+        { id: 'python3' as const, bin: 'python3', installed: false },
+      ]),
+    })
+    expect(result.content).toContain('renv.lock present')
+  })
+
+  it('omits toolchain section when no tools are detected', async () => {
+    const result = await writeAgentContext(dir, {
+      now: () => NOW_MS,
+      readRecentChanges: () => [],
+      readTraceHealth: () => [],
+      readToolchain: () => Promise.resolve([
+        { id: 'r' as const, bin: 'R', installed: false },
+        { id: 'rscript' as const, bin: 'Rscript', installed: false },
+        { id: 'quarto' as const, bin: 'quarto', installed: false },
+        { id: 'pandoc' as const, bin: 'pandoc', installed: false },
+        { id: 'python3' as const, bin: 'python3', installed: false },
+      ]),
+    })
+    // All "not found" lines still constitute content
+    expect(result.content).toContain('## Toolchain')
+    expect(result.content).toContain('not found')
   })
 })
 

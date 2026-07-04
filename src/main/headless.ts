@@ -41,6 +41,8 @@ import { createHistoryStore } from '@main/history/history.js'
 import { registerHistoryTools } from '@main/tools/history.js'
 import { readTraceCaptureContent, readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
 import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
+import { registerToolchainTools } from '@main/tools/toolchain.js'
+import { registerCodeTools } from '@main/tools/code.js'
 import { registerSlackTools } from '@main/integrations/slack/tools.js'
 import { registerGoogleTools } from '@main/integrations/google/tools.js'
 import { registerWebTools } from '@main/tools/web.js'
@@ -129,6 +131,8 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   registerWorkspaceTools(tools)
   registerSettingsTools(tools)
   registerToolPolicyTools(tools)
+  registerToolchainTools(tools)
+  registerCodeTools(tools)
   registerSessionTools(tools)
   registerArchiveTools(tools)
   registerAiTools(tools)

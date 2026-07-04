@@ -120,6 +120,17 @@ describe('File tools', () => {
     })
   })
 
+  it('fs.readImageDataUrl serves SVG with its own media type', async () => {
+    writeFileSync(join(dir, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
+
+    const result = await tools.call('fs.readImageDataUrl', {
+      path: 'logo.svg',
+    }, ctx) as { mediaType: string; dataUrl: string }
+
+    expect(result.mediaType).toBe('image/svg+xml')
+    expect(result.dataUrl.startsWith('data:image/svg+xml;base64,')).toBe(true)
+  })
+
   it('fs.readImageDataUrl rejects non-image files', async () => {
     writeFileSync(join(dir, 'notes.txt'), 'hello')
 

@@ -187,4 +187,33 @@ describe('tool availability policy', () => {
     expect(result.google?.gmailEnabled).toBe(true)
     expect(result.google?.gmailSendEnabled).toBe(true)
   })
+
+  it('cascade + connectorPolicyFromTools: enabling gmail send also enables gmail read', async () => {
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+    registerToolPolicyTools(tools)
+
+    await tools.call('toolPolicy.set', { rowId: 'google.gmail.send', enabled: true }, { actor: 'user' })
+
+    const result = connectorPolicyFromTools(dir)
+    expect(result.google?.gmailEnabled).toBe(true)
+    expect(result.google?.gmailSendEnabled).toBe(true)
+    const policy = readToolsPolicy(dir)
+    expect(policy.isEnabled('gmail.search')).toBe(true)
+    expect(policy.isEnabled('gmail.read')).toBe(true)
+    expect(policy.isEnabled('gmail.send')).toBe(true)
+  })
+
+  it('includes code.run in a code domain row with sensitive risk', () => {
+    const policy = readToolsPolicy(dir)
+    expect(policy.isEnabled('code.run')).toBe(true)
+    expect(aiToolKeyEnabled(policy, 'code_run')).toBe(true)
+  })
+
+  it('disabling code.run blocks the code_run AI tool key', () => {
+    writeSettings({ tools: { disabled: ['code.run'] } })
+    const policy = readToolsPolicy(dir)
+    expect(policy.isEnabled('code.run')).toBe(false)
+    expect(aiToolKeyEnabled(policy, 'code_run')).toBe(false)
+  })
 })

@@ -23,6 +23,7 @@ interface ServerHandle {
   createPackageLaunchUrl(packageId: string, viewId?: string): string
   createMcpToken(sessionId?: string): string
   revokeMcpToken(token: string): void
+  generateTaskLabel(userText: string): Promise<string | null>
 }
 
 interface WsRequest {
@@ -533,6 +534,14 @@ export async function createServer(
         if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
           try { socket.close(1008, 'MCP token revoked') } catch { /* already closing */ }
         }
+      }
+    },
+    generateTaskLabel: async (userText: string) => {
+      try {
+        const result = await aiRuntime.generateTaskLabel({ userText })
+        return result.label || null
+      } catch {
+        return null
       }
     },
   }

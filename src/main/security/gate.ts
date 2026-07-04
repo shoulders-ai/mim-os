@@ -207,6 +207,8 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   // Regenerates the gitignored .mim/agent-context.md from existing workspace
   // state. Benign, low-risk; no approval prompt for user/AI/app.
   'workspace.orient': { category: 'general', risk: 'low' },
+  'toolchain.status': { category: 'read', risk: 'low' },
+  'code.run': { category: 'system', risk: 'high', targetParam: 'argv' },
   'log.append': { category: 'write', risk: 'low', targetParam: 'message' },
   'log.read': { category: 'read', risk: 'low' },
   'slack.setToken': { category: 'secrets', risk: 'high', targetParam: 'account' },

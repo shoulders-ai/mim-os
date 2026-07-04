@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { detectToolchain, type ToolchainEntry } from '@main/toolchain/toolchain.js'
 import { spawnSync } from 'child_process'
 import { basename, join } from 'path'
 import { classifyWorkspace, parseMimYaml, type CollectionWritePolicy } from '@main/workspace/workspaceContract.js'
@@ -46,6 +47,7 @@ export interface AgentContextData {
   resources?: AgentContextResource[]
   appSections?: AgentContextAppSection[]
   localPackages?: AgentContextLocalPackage[]
+  toolchain?: string[]
   traceHealth?: string[]
   recentChanges: string[]
 }
@@ -56,6 +58,7 @@ export interface AgentContextDeps {
   readResources?: (workspacePath: string) => AgentContextResource[]
   resolveApps?: (workspacePath: string) => AgentContextApp[]
   readTraceHealth?: (workspacePath: string) => string[]
+  readToolchain?: () => Promise<ToolchainEntry[]>
 }
 
 let defaultReadResources: ((workspacePath: string) => AgentContextResource[]) | null = null
@@ -114,6 +117,14 @@ export function renderAgentContext(data: AgentContextData): string {
     .map(a => a.id)
     .sort()
   lines.push(`Apps enabled: ${enabled.length > 0 ? enabled.join(', ') : 'none'}`)
+
+  if (data.toolchain && data.toolchain.length > 0) {
+    lines.push('')
+    lines.push('## Toolchain')
+    for (const entry of data.toolchain) {
+      lines.push(`- ${entry}`)
+    }
+  }
 
   if (data.appSections && data.appSections.length > 0) {
     const sorted = [...data.appSections].sort((a, b) => a.appId.localeCompare(b.appId))
@@ -332,6 +343,32 @@ export async function writeAgentContext(
     } finally {
       clearTimeout(timer)
     }
+  }
+
+  // Populate toolchain detection lines (promise-cached, cheap after first call).
+  try {
+    const readToolchain = deps.readToolchain ?? (() => detectToolchain())
+    const entries = await readToolchain()
+    const lines: string[] = []
+    for (const entry of entries) {
+      if (entry.installed) {
+        if (entry.version) {
+          lines.push(`${entry.bin} ${entry.version} - ${entry.binPath}`)
+        } else {
+          lines.push(`${entry.bin} - ${entry.binPath}`)
+        }
+      } else {
+        lines.push(`${entry.bin} - not found`)
+      }
+    }
+    if (existsSync(join(workspacePath, 'renv.lock'))) {
+      lines.push('renv.lock present')
+    }
+    if (lines.length > 0) {
+      data.toolchain = lines
+    }
+  } catch {
+    // best-effort: proceed without toolchain section
   }
 
   const content = renderAgentContext(data)

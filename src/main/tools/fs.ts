@@ -77,7 +77,11 @@ export function registerFileTools(tools: ToolRegistry, options: FileToolOptions 
       const stat = statSync(path)
       if (!stat.isFile()) throw new Error(`Not a file: ${params.path}`)
       if (stat.size > MAX_ATTACHMENT_BYTES) throw new Error(`Image too large: ${params.path}`)
-      const mediaType = mediaTypeFromPath(path)
+      // SVG previews fine in <img> but stays out of the shared attachment media
+      // map: model providers reject SVG as an image attachment.
+      const mediaType = path.toLowerCase().endsWith('.svg')
+        ? 'image/svg+xml'
+        : mediaTypeFromPath(path)
       if (!mediaType || !isImageMediaType(mediaType)) {
         throw new Error(`File is not a supported image: ${params.path}`)
       }

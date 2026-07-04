@@ -568,6 +568,23 @@ export async function createAiSdkTools({
       execute: async ({ command }) => call('terminal.run', { command }),
     }),
 
+    code_run: tool({
+      description:
+        'Run a script with a detected interpreter (Rscript, R, quarto) in the workspace. ' +
+        'Write code to a real file first, then run it — do not pass code inline. ' +
+        'Returns exit code, output tails, and files the run created or changed (products). ' +
+        'After a successful run that produced a figure, PDF, or table, open the most ' +
+        'relevant product with editor_open so the user sees it. ' +
+        'If the run fails, read the stderr tail, fix the script, and re-run. ' +
+        'To render an R Markdown or Quarto document, run quarto render (or rmarkdown::render) on the file, then open the produced PDF.',
+      inputSchema: z.object({
+        argv: z.array(z.string()).min(1),
+        timeout_ms: z.number().optional(),
+        capture_plots: z.boolean().optional(),
+      }),
+      execute: async (params) => call('code.run', params),
+    }),
+
     package_create: tool({
       description: 'Create a new workspace package, including headless packages with backend tools/jobs and optional package skills. html is optional; omit it for tools-only packages.',
       inputSchema: packageCreateInputSchema,
@@ -1489,6 +1506,7 @@ export function aiToolTimeoutMs(name: string, params: Record<string, unknown> = 
     if (requested == null) return WEB_READ_TOOL_DEFAULT_TIMEOUT_MS
     return Math.min(Math.max(requested + WEB_READ_TOOL_TIMEOUT_BUFFER_MS, WEB_READ_TOOL_DEFAULT_TIMEOUT_MS), WEB_READ_TOOL_MAX_TIMEOUT_MS)
   }
+  if (name === 'code.run') return 510_000
   return DEFAULT_AI_TOOL_TIMEOUT_MS
 }
 

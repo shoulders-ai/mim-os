@@ -31,6 +31,7 @@ interface Settings {
   enabledAgents: string[]
   agentFlags: Record<string, string>
   'references.bibPath': string
+  codeInterpreters: string[]
 }
 
 const DEFAULTS: Settings = {
@@ -51,6 +52,7 @@ const DEFAULTS: Settings = {
   enabledAgents: [],
   agentFlags: {},
   'references.bibPath': DEFAULT_REFERENCES_BIB_PATH,
+  codeInterpreters: ['rscript', 'r', 'quarto'],
 }
 
 function settingsPath(tools: ToolRegistry): string {
