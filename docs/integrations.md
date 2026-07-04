@@ -80,7 +80,8 @@ Settings > Tools owns capability toggles.
 Chat tools are conditionally included based on policy and connection state:
 
 - `slack_search`, `slack_history`, `slack_channels`, `slack_replies` — visible when `aiEnabled` is true
-- `slack_send` — visible when `aiEnabled` AND `sendEnabled` are true
+- `slack_send` — visible when `sendEnabled` is true
+- Setting `aiEnabled` to false acts as a master kill switch: it disables ALL Slack tools including send, DMs, and private channels
 
 When `privateChannels` is false, `slack.channels` excludes `private_channel` from the types parameter for AI calls. When `directMessages` is false, `slack.dms` is blocked for AI.
 
@@ -213,8 +214,8 @@ the registry.
 `sheets.read`, `sheets.write`, `sheets.append`) appear conditionally when a
 token is configured and the corresponding tool row is enabled. MCP calls use
 the `user` actor; the server-side MCP allowlist plus tool policy is the
-security boundary. `settings.set` cannot modify `tools.enabled` or
-`tools.disabled` over MCP.
+security boundary. `settings.set` cannot modify `tools.enabled`,
+`tools.disabled`, or `connectors` over MCP.
 
 ### Trace Capture
 

@@ -7,23 +7,68 @@ inside `ArtifactHost.vue`.
 ## Tab Kinds
 
 `EditorPanel` owns a local `TabState[]` with
-`kind: 'text' | 'pdf' | 'table' | 'card'`.
+`kind: 'text' | 'pdf' | 'table' | 'card' | 'image'`.
 
 - `text` tabs use one shared CodeMirror view. Markdown, plain text, and code
-  files all route here.
+  files all route here. R (`.R`), R Markdown (`.rmd`), and Quarto (`.qmd`)
+  are editor-native text tabs.
 - `pdf` tabs embed `PdfArtifact.vue` and point at the workspace file server.
 - `table` tabs embed `TableArtifact.vue` for CSV/TSV/TAB files.
+- `image` tabs embed `ImageArtifact.vue` for PNG/JPEG/GIF/WebP/SVG. The viewer
+  loads via `fs.readImageDataUrl`, displays fit-to-pane by default (click
+  toggles 100% size), and shows filename plus pixel dimensions in a footer.
+  HEIC/TIF/TIFF stay native (Chromium cannot render them).
 - `card` tabs embed `FileCardArtifact.vue` for native or unsupported formats.
 
-PDF and card tabs are path-only views. They never call `fs.read`, never become
-dirty, and close without confirmation. Table tabs read the full delimited text
-file through `fs.read({ full: true })`, can become dirty through cell edits,
+PDF, image, and card tabs are path-only views. They never call `fs.read`, never
+become dirty, and close without confirmation. Table tabs read the full delimited
+text file through `fs.read({ full: true })`, can become dirty through cell edits,
 and save explicitly through `fs.write` with `expected_hash`.
 
 When a file or folder is moved from the Files Work surface, open document tabs
 whose paths match the old location are retargeted to the new workspace-relative
-paths. Text tab buffers, dirty state, and undo state stay in memory; PDF, table,
-and card tabs remount against the new path.
+paths. Text tab buffers, dirty state, and undo state stay in memory; PDF, image,
+table, and card tabs remount against the new path.
+
+## Non-Text Tab Refresh
+
+Image and PDF tabs refresh in place when the underlying file changes on disk.
+`useEditorFileSync` watches open image and pdf tab paths; on a workspace
+file-change event, the tab's `id` is reassigned with a timestamp suffix
+(`${kind}:${path}-${Date.now()}`), which forces a Vue `:key` remount and
+re-fetches the content. These tabs are never marked dirty and show no conflict
+bar. This enables the "re-run a script, see the updated plot" workflow.
+
+## R Markdown and Quarto
+
+`.rmd` and `.qmd` files open as text tabs with markdown status. They receive
+the full markdown experience: live preview, formatting toolbar, view modes,
+export dialog, inline comments, and citations.
+
+Fence-language chunk highlighting is handled by `resolveFenceLanguage` in
+`codemirror/language.js`: knitr-style info strings (`{r, echo=FALSE}`) are
+normalized by stripping braces, splitting on whitespace/comma, and matching
+the first token against `@codemirror/language-data`. This gives R and Python
+chunks proper syntax highlighting inside markdown.
+
+### Render Button
+
+The editor toolbar shows a Render button when the active tab is `.rmd` or
+`.qmd` and the `toolchainStatus` service reports that quarto or Rscript is
+detected. Clicking it invokes `code.run` with the appropriate argv (see
+[code-execution.md](code-execution.md) for the engine decision matrix) and
+`capture_plots: false`. On success, the best product (PDF preferred) opens
+in the Artifact pane. On failure, a toast shows the stderr tail.
+
+### Cmd+Enter and Chunk Execution
+
+In code-file text tabs, Cmd/Ctrl+Enter sends the selection or current line to
+the terminal and advances the cursor. In `.rmd`/`.qmd` files, Cmd+Enter is
+active only inside recognized `{r}` or `{python}` chunks (outside chunks it
+does nothing). Cmd+Shift+Enter sends the entire chunk body (fences excluded).
+
+The logic lives in `codemirror/sendToTerminal.js`; keymaps are registered at
+`Prec.highest` in `useEditorFormatting.ts`.
 
 ## Routing
 
@@ -32,12 +77,18 @@ File open policy is decided before the document pane:
 - text-like files open with `EditorPanel.openDocument(path, 'text')`;
 - CSV/TSV/TAB files open with `openDocument(path, 'table')`;
 - PDFs open with `openDocument(path, 'pdf')`;
+- images (png/jpg/jpeg/gif/webp/svg) open with `openDocument(path, 'image')`;
 - native/unsupported formats open with `openDocument(path, 'card')`;
 - absolute paths outside the workspace still open in the OS app.
 
-Text/PDF/table/card opens add or activate a document tab. They do not create separate
-Artifact history entries. The pane header history therefore tracks fewer
+Text/PDF/table/image/card opens add or activate a document tab. They do not create
+separate Artifact history entries. The pane header history therefore tracks fewer
 document transitions; the tab strip owns document switching.
+
+The Files Work surface receives the active document tab path as a passive
+active-file marker. If that path is visible in Files, only the file icon and
+filename are emphasized; Files selection, hover background, scrolling, folder
+expansion, and context-menu focus remain owned by Files itself.
 
 ## Text Tabs
 
@@ -165,26 +216,27 @@ Tab state is stored in `.mim/editor-tabs.json` through
 `src/renderer/services/editorTabPersistence.ts`.
 
 - Text tabs persist `path`, `name`, `kind`, and only untitled draft content.
-- PDF/table/card tabs persist `path`, `name`, and `kind`; they do not persist content.
+- PDF/table/card/image tabs persist `path`, `name`, and `kind`; they do not persist content.
 - Read-only tabs are filtered out entirely; they are never persisted.
 - Missing `kind` defaults to `text` for old persisted tab files.
 - CodeMirror undo history, selection, and scroll snapshots are runtime-only;
   they are preserved while open tabs are switched, but are not written to disk.
 
-On restore, text tabs re-read disk content. PDF/table/card tabs restore from
-path. Table content is loaded by `TableArtifact` when the tab becomes active.
+On restore, text tabs re-read disk content. PDF/table/card/image tabs restore
+from path. Table content is loaded by `TableArtifact` when the tab becomes
+active. Image content is loaded by `ImageArtifact` via `fs.readImageDataUrl`.
 
 ## Test Coverage
 
 Primary tests:
 
-- `EditorPanel.documentTabs.test.ts` covers mixed text/PDF/table/card tabs,
-  table save integration, persisted table restore, empty state, close-last
+- `EditorPanel.documentTabs.test.ts` covers mixed text/PDF/table/card/image
+  tabs, table save integration, persisted table restore, empty state, close-last
   behavior, and reopening after close-last.
 - `EditorTabStrip.test.ts` covers tab kind icons, dirty-dot rules, and
   close-on-single-tab.
 - `editorTabPersistence.test.ts` covers serialized `kind` and path-only
-  PDF/table/card persistence.
+  PDF/table/card/image persistence.
 - `TableArtifact.smoke.test.ts` and `tableArtifactModel.test.ts` cover table
   loading, serialization, dirty events, duplicate headers, ragged rows, TSV, and
   newline preservation.

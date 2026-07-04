@@ -166,7 +166,7 @@ In `mcpToolMetadata()`, filter static MCP specs, connected Slack/Google specs, a
 
 Filtering metadata is not enough. `isMcpAllowed()` must also reject disabled registry ids so a cached/raw MCP client cannot call a hidden tool directly.
 
-Special case: MCP `settings.set` must reject writes to `tools`, `tools.enabled`, or `tools.disabled`. MCP must also never expose `toolPolicy.set`. Otherwise an agent could re-enable a tool policy that was meant to constrain it.
+Special case: MCP `settings.set` must reject writes to `tools`, `tools.enabled`, `tools.disabled`, or `connectors` (including `connectors.*` sub-keys). MCP must also never expose `toolPolicy.set`. Otherwise an agent could re-enable a tool policy that was meant to constrain it.
 
 ### 4. Connector Tool Guards
 

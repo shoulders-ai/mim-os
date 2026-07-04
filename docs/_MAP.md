@@ -84,9 +84,11 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **System prompt.** Template-based from `AGENTS.md` with `{{TOOL_SET}}`, `{{SKILL_CATALOG}}`, `{{WORKSPACE_TREE}}`, `{{PROJECT_LOG}}` etc. `src/main/ai/systemPrompt.ts`, `workspaceTree.ts`.
 - **Agent context.** Deterministic `.mim/agent-context.md` digest with workspace/app/git health. `src/main/ai/agentContext.ts`, `packages/packageContributions.ts`.
 
-### Main Process — Terminal & Agents
+### Main Process — Execution & Terminal
 
-- **Terminal (PTY).** node-pty spawning, shell integration, keybinding profiles. `src/main/pty.ts`, `ptyCommand.ts`, `ptyShellIntegration.ts`.
+- **Toolchain detection.** Catalog of R/Rscript/Quarto/pandoc/python3 with login-shell binary resolution, version capture, and promise cache. `src/main/toolchain/toolchain.ts`. Docs: [code-execution.md](code-execution.md).
+- **Code execution.** `code.run` tool: allowlisted interpreter spawn, output tail caps, product scan, run records, plot-capture harness. `src/main/tools/code.ts`, `resources/r/mim-run.R`. Docs: [code-execution.md](code-execution.md).
+- **Terminal (PTY).** node-pty spawning, shell integration, keybinding profiles, program tabs (toolchain-validated). `src/main/pty.ts`, `ptyCommand.ts`, `ptyShellIntegration.ts`.
 - **Agent sessions.** CLI coding agents (Claude Code, Codex, Gemini CLI) as first-class runs with status tracking. `src/main/agents/`. Docs: [agent-sessions.md](agent-sessions.md).
 
 ### Main Process — Web & Content
@@ -125,11 +127,11 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Renderer — Surfaces
 
-- **Chat.** AI SDK Chat + DefaultChatTransport, message rendering, composer with @mentions and context chips, inline approval cards. `src/renderer/components/chat/`, `services/ai/`, `stores/approvals.ts`.
+- **Chat.** AI SDK Chat + DefaultChatTransport, message rendering, composer with @mentions and context chips, inline approval cards, code-run card. `src/renderer/components/chat/`, `services/ai/`, `stores/approvals.ts`, `components/chat/ChatCodeRunCard.vue`.
 - **Editor / Document pane.** Unified tab host: CodeMirror text, PDF viewer, table grid (AG Grid), file cards. Autosave, conflict bar, per-tab scroll restore, inline AI (Cmd+K), diff review, comments rail, citations, ghost completions. `src/renderer/components/editor/`. Docs: [document-pane.md](document-pane.md), [comments.md](comments.md).
-- **CodeMirror extensions.** Setup, formatting, citations, outline, ghost, live preview, inline anchor. `src/renderer/components/editor/codemirror/`.
+- **CodeMirror extensions.** Setup, formatting, citations, outline, ghost, live preview, inline anchor, send-to-terminal (Cmd+Enter / chunk send). `src/renderer/components/editor/codemirror/`.
 - **Terminal.** xterm.js multi-tab shells, TerminalSurface shared with agent sessions. `src/renderer/components/terminal/`.
-- **Files.** Work-side file browser: Browse/Recent/Changed, search, drag-drop import/move, context menus. `src/renderer/components/files/`, `services/fileOpenPolicy.ts`.
+- **Files.** Work-side file browser: Browse/Recent/Changed, search, drag-drop import/move, context menus, passive active-document marker, image artifact viewer. `src/renderer/components/files/`, `services/fileOpenPolicy.ts`, `components/files/ImageArtifact.vue`.
 - **History.** Browse active/archived sessions, app runs, agent sessions. `src/renderer/components/archive/`.
 - **Agent sessions.** Work surface for live terminal or scrollback replay. `src/renderer/components/agents/AgentSessionView.vue`.
 
@@ -178,6 +180,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [ontology.md](ontology.md) | Canonical concepts and naming laws (draft, under review) |
 | [vocabulary.md](vocabulary.md) | Vocabulary migration decisions and execution waves (draft) |
 | [gotchas.md](gotchas.md) | Non-obvious constraints and lessons |
+| [code-execution.md](code-execution.md) | Code execution, toolchain detection, interpreter allowlist |
 | [security.md](security.md) | Permission gate, trust model, actor modes |
 | [design-system.md](design-system.md) | Visual language, tokens, interaction rules |
 | [cli.md](cli.md) | Headless CLI commands |
@@ -210,6 +213,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 ### Proposals
 
+- [proposals/r-first-class.md](proposals/r-first-class.md) — **implemented** (phases 1-5; phase 6 deferred). First-class R/Rmd/Quarto: `code.run` execution primitive, plot/artifact viewing, Cmd+Enter send-to-terminal, render loop, R modelling skill.
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/side-by-side-editing.md](proposals/side-by-side-editing.md) — side-by-side editing workflow proposal.
 - [proposals/tools-settings-tab.md](proposals/tools-settings-tab.md) — Settings > Tools plan for unified AI/MCP tool availability policy.
@@ -237,6 +241,8 @@ src/
     closeGuard.ts               # Quit guard decision
     atomicJson.ts               # Atomic JSON file writes
     history/history.ts          # Local per-file recovery store
+    toolchain/
+      toolchain.ts              # Binary detection, version, promise cache
     agents/
       agentCatalog.ts           # CLI agent detection
       agentSessions.ts          # Session lifecycle + persistence
@@ -321,6 +327,8 @@ src/
       logbook.ts                # Logbook tools
       trace.ts                  # Trace query tools
       toolPolicy.ts             # Settings > Tools availability policy
+      toolchain.ts              # toolchain.status tool
+      code.ts                   # code.run execution tool
       comments.ts               # Comment tools
       references.ts             # Bibliography tools
       resources.ts              # Resource collection tools
@@ -370,6 +378,8 @@ src/
       lineDelta.ts              # Added/removed line counts (LCS)
       currentDocument.js        # Active document bridge
       fileOpenPolicy.ts         # Editor vs native open
+      renderDocument.ts         # Rmd/qmd render engine matrix
+      toolchainStatus.ts        # Cached toolchain status (renderer)
       fuzzy.ts                  # Fuzzy scorer
       commandPalette.ts         # Palette sources + ranking
       shortcutLabels.ts         # Platform shortcut labels
@@ -381,6 +391,8 @@ src/
       chat/
         ChatView.vue            # Main chat surface
         ChatMessage.vue         # Message rendering
+        ChatCodeRunCard.vue     # code_run result card
+        chatCodeRunCard.ts      # Run card view-model
         ChatComposer.vue        # Input + context chips
         InlineApproval.vue      # Inline permission card
         ModelPicker.vue         # Model dropdown
@@ -395,12 +407,15 @@ src/
         PreviewPane.vue         # Live markdown preview
         comments/               # Comment rail + cards
         codemirror/             # CM6 extensions
+          sendToTerminal.js     # Cmd+Enter / chunk send logic
       terminal/
-        TerminalPanel.vue       # Multi-tab shells
+        TerminalPanel.vue       # Multi-tab shells + program tabs
         TerminalSurface.vue     # Single xterm ↔ pty
+        terminalSendText.ts     # Line-joining for terminal send
       files/
         FilesWorkView.vue       # File browser orchestrator
         FilesTable.vue          # File rows
+        ImageArtifact.vue       # Image viewer tab
         TableArtifact.vue       # CSV/TSV grid
       sidebar/
         ShellSidebar.vue        # Navigator orchestrator
@@ -422,6 +437,7 @@ src/
         AiSettingsPanel.vue     # Keys + model defaults
         ConnectionsSettingsPanel.vue  # Integrations + website access
         ToolsSettingsPanel.vue  # Agent tool availability policy
+        codeInterpreterRows.ts  # Interpreter toggle row logic
       ui/                       # MimDialog, MimSelect, MimMenu, MimContextMenu, etc.
       CommandPalette.vue        # Cmd/Ctrl+P palette
       AddProjectDialog.vue      # Open/New/Clone workspace
@@ -434,6 +450,7 @@ sdk/
 
 resources/
   ai-models.json                # Model catalog
+  r/mim-run.R                   # Plot-capture harness for code.run
   icon.png                      # macOS dev dock icon
 
 docs/                           # Implementation docs (see Docs Index above)

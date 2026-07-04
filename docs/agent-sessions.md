@@ -58,7 +58,7 @@ Records live at `.mim/agent-sessions/<sessionId>.json`, written via
 interface AgentSessionRecord {
   sessionId: string
   agentId: string
-  title: string          // defaultTitle: agent name, then "Name 2", "Name 3", ...
+  title: string          // auto-assigned from task description (see below)
   command: string        // absolute binPath + args
   cwd: string            // workspace root
   status: 'running' | 'done' | 'error' | 'stopped' | 'interrupted'
@@ -69,6 +69,35 @@ interface AgentSessionRecord {
   titleHint?: string     // last OSC 0/1/2 title; persisted on change
 }
 ```
+
+### Auto-title
+
+Sessions start with a default name ("Claude Code", "Codex 2", …). When the
+agent begins working on a task, `attemptAutoTitle` fires and assigns a
+descriptive title. The trigger is agent-agnostic:
+
+**Primary trigger:** first `titleHint` change with a spinner prefix (Braille
+or ✦). The trigger retries on each subsequent spinner-prefixed hint until a
+non-trivial title is found (the first spinner often still carries just the
+agent name, e.g. `⠂ Claude Code`, before the task description appears).
+
+**Timer fallback:** 15 seconds after launch. Catches agents that never emit
+spinner titles (some Gemini CLI versions).
+
+Title extraction priority:
+1. **titleHint** — strip indicator chars (✳, ◇, ✦, Braille), use if the
+   cleaned text is a real task description (not the agent name, cwd basename,
+   or generic status). Works for Claude Code.
+2. **Scrollback heuristic** — strip ANSI from the scrollback file and search
+   for prompt markers: `›` (Codex prompt lines with model/dir suffix stripped)
+   or `>` with keystroke accumulation (Gemini). Works for Codex and Gemini CLI.
+3. **LLM fallback** — if neither titleHint nor scrollback heuristic produces a
+   result, the last 800 chars of cleaned scrollback are sent to
+   `generateTaskLabel` (same cheap model call used for chat session labels).
+
+Guards: auto-title fires at most once (`autoTitleAttempted` flag). Manual
+rename blocks auto-title (`isDefaultAgentTitle` returns false). Resume does
+not re-title (the flag is pre-set if the title is already non-default).
 
 `AgentSessionRuntime` = record merged with live-only overlay fields for the
 renderer: `ptyId` (attach xterm to the running pty), `runtimeStatus`

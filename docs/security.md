@@ -113,6 +113,26 @@ Classification → `workspace` | `sensitive` | `outside-workspace` | `invalid`.
   `gate.decision` trace event parented under the gated tool-call span. Params
   stay redacted. Logging is best-effort and never blocks.
 
+## Code Execution Gate
+
+`code.run` is gated with `{ category: 'system', risk: 'high', targetParam: 'argv' }`.
+This means:
+
+- Effect is `mutate` (system category maps to mutate effect).
+- Prompts in both Normal and Strict modes.
+- The approval card shows "run a script" plus the joined argv array as the target
+  display (e.g. "Rscript analysis/fit.R").
+- Session "always allow" applies (the checkbox appears on the approval card),
+  subject to the sensitive-path floor.
+
+The `code` tool-policy domain (`src/main/tools/toolPolicy.ts`) governs the
+`code_run` AI tool key with risk `sensitive` and `defaultEnabled: true`. Users
+disable it in Settings > Tools to remove `code_run` from the AI tool set entirely.
+
+Interpreter resolution enforces decision D6: only absolute paths detected by the
+login shell are spawnable. The `codeInterpreters` setting (default: `['rscript',
+'r', 'quarto']`) further restricts which detected interpreters the tool accepts.
+
 ## Session "Always allow"
 
 The checkbox sets `sessionToolAllows` key `${sessionId}:${tool.name}` — a full

@@ -254,3 +254,19 @@ Headless UI v1's Dialog stack counter does not properly decrement when a nested 
 ## Nothing synchronous on main that scales with workspace or history size
 
 Never add synchronous I/O to the main process that grows with the number of workspace files, sessions, or history entries. Use `fs/promises` or `child_process` async variants for anything that walks directories or reads multiple files. Synchronous reads that block the event loop freeze the entire app — streaming, IPC, window rendering, everything. The FTS reindex, file content search, and git-log author lookup were all converted from sync to async for this reason. New features that touch workspace-sized data must be async from the start.
+
+## resources/ ships inside asar — spawned processes cannot read it
+
+Electron packages `resources/` inside `app.asar`. External processes (Rscript, quarto) cannot read files from inside the archive. Anything spawned as a child process must be listed in `electron-builder.config.mjs` `asarUnpack` and the resolved path must map `app.asar` to `app.asar.unpacked` at runtime. `resources/r/**` is asarUnpack'd for the plot-capture harness (`mim-run.R`).
+
+## Knitr fence info strings need normalization before language matching
+
+`@codemirror/language-data` expects plain language names (`r`, `python`). Knitr/Quarto fence info strings like `{r, echo=FALSE}` must be normalized: strip surrounding `{}`, split on whitespace or comma, take the first token. Language names from `@codemirror/language-data` are case-insensitive but conventionally lowercase. The `resolveFenceLanguage` function in `codemirror/language.js` handles this normalization.
+
+## POSIX timeout kill must signal the process group
+
+When killing a timed-out child process on POSIX, signal the process group (`process.kill(-pid, signal)`) not just the pid. R and quarto spawn their own child processes; killing only the parent leaves orphans consuming resources. `code.run` spawns with `detached: true` and kills via `-pid`. Windows uses `taskkill /pid <pid> /T /F` (the `/T` flag kills the tree).
+
+## SVG is intentionally NOT in the shared attachment MEDIA_TYPE_MAP
+
+`src/renderer/services/attachments.js` defines `MEDIA_TYPE_MAP` for model-facing attachments. SVG is deliberately excluded: model providers reject SVG as an image attachment type. The in-app image viewer handles SVG fine (it renders in `<img>` tags), and `fs.readImageDataUrl` special-cases `.svg` by returning `image/svg+xml` as the media type for local preview. Do not add SVG to the attachment map.
