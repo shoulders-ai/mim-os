@@ -3,8 +3,9 @@ import { computed, onMounted, ref } from 'vue'
 import MimToggle from '../ui/MimToggle.vue'
 import SettingsGroup from './SettingsGroup.vue'
 import SettingRow from './SettingRow.vue'
+import { buildInterpreterRows, type InterpreterRowVM, type ToolchainEntry } from './codeInterpreterRows'
 
-type ToolDomain = 'files' | 'terminal' | 'git' | 'web' | 'slack' | 'google' | 'apps' | 'system'
+type ToolDomain = 'files' | 'terminal' | 'code' | 'git' | 'web' | 'slack' | 'google' | 'apps' | 'system'
 
 interface ToolPolicyRow {
   id: string
@@ -41,10 +42,11 @@ interface GoogleStatus {
   grantedScopes?: string[]
 }
 
-const DOMAIN_ORDER: ToolDomain[] = ['files', 'terminal', 'git', 'web', 'slack', 'google', 'apps', 'system']
+const DOMAIN_ORDER: ToolDomain[] = ['files', 'terminal', 'code', 'git', 'web', 'slack', 'google', 'apps', 'system']
 const DOMAIN_LABELS: Record<ToolDomain, string> = {
   files: 'Files',
   terminal: 'Terminal',
+  code: 'Code execution',
   git: 'Git',
   web: 'Web',
   slack: 'Slack',
@@ -79,6 +81,8 @@ const error = ref('')
 const busyRows = ref<Set<string>>(new Set())
 const connectionLabels = ref<Record<string, string>>({})
 const googleGrantedScopes = ref<Set<string>>(new Set())
+const interpreterRows = ref<InterpreterRowVM[]>([])
+const interpreterBusy = ref<Set<string>>(new Set())
 
 const filteredRows = computed(() => {
   const needle = query.value.trim().toLowerCase()
@@ -105,12 +109,64 @@ async function load() {
     const [policyResult] = await Promise.all([
       window.kernel.call('toolPolicy.get') as Promise<ToolPolicyResponse>,
       loadConnectionLabels(),
+      loadInterpreters(),
     ])
     rows.value = normalizeRows(policyResult.policy?.rows)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadInterpreters() {
+  try {
+    const [toolchain, settings] = await Promise.all([
+      window.kernel.call('toolchain.status', {}) as Promise<{ entries?: ToolchainEntry[] }>,
+      window.kernel.call('settings.get') as Promise<{ settings: Record<string, unknown> }>,
+    ])
+    const entries: ToolchainEntry[] = Array.isArray(toolchain?.entries) ? toolchain.entries : []
+    const allowlist: string[] = Array.isArray(settings?.settings?.codeInterpreters)
+      ? settings.settings.codeInterpreters as string[]
+      : ['rscript', 'r', 'quarto']
+    interpreterRows.value = buildInterpreterRows(entries, allowlist)
+  } catch {
+    interpreterRows.value = []
+  }
+}
+
+async function toggleInterpreter(row: InterpreterRowVM, enabled: boolean) {
+  const next = new Set(interpreterBusy.value)
+  next.add(row.id)
+  interpreterBusy.value = next
+  error.value = ''
+  try {
+    // Read current allowlist, update, write back
+    const settings = await window.kernel.call('settings.get') as { settings: Record<string, unknown> }
+    const current: string[] = Array.isArray(settings?.settings?.codeInterpreters)
+      ? settings.settings.codeInterpreters as string[]
+      : ['rscript', 'r', 'quarto']
+    const updated = enabled
+      ? [...current, row.id]
+      : current.filter(id => id !== row.id)
+    await window.kernel.call('settings.set', { key: 'codeInterpreters', value: updated })
+    // Refresh interpreter rows with new allowlist
+    interpreterRows.value = buildInterpreterRows(
+      interpreterRows.value.map(r => ({
+        id: r.id,
+        name: r.label,
+        bin: r.id,
+        installed: r.installed,
+        version: r.versionLabel === 'not found' ? undefined : r.versionLabel,
+      })),
+      updated,
+    )
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    const after = new Set(interpreterBusy.value)
+    after.delete(row.id)
+    interpreterBusy.value = after
   }
 }
 
@@ -239,6 +295,31 @@ function searchableText(row: ToolPolicyRow): string {
           @update:model-value="setRow(row, $event)"
         />
       </SettingRow>
+
+      <!-- Interpreter allowlist rows beneath the code domain group -->
+      <template v-if="group.domain === 'code' && interpreterRows.length > 0">
+        <div class="mt-2 mb-1 text-[9px] font-semibold uppercase tracking-[1.8px] text-ink-3">
+          Interpreters
+        </div>
+        <SettingRow
+          v-for="interp in interpreterRows"
+          :key="'interp-' + interp.id"
+          :label="interp.label"
+        >
+          <template #desc>
+            <span :class="interp.installed ? 'block text-[10px] text-ink-3' : 'block text-[10px] text-ink-3'">
+              {{ interp.versionLabel }}
+            </span>
+          </template>
+          <MimToggle
+            :model-value="interp.enabled"
+            :disabled="!interp.canToggle || interpreterBusy.has(interp.id)"
+            :aria-label="`${interp.enabled ? 'Disable' : 'Enable'} ${interp.label} interpreter`"
+            :title="interp.canToggle ? interp.id : 'Not installed'"
+            @update:model-value="toggleInterpreter(interp, $event)"
+          />
+        </SettingRow>
+      </template>
     </SettingsGroup>
 
     <p v-if="!loading && groupedRows.length === 0" class="m-0 text-[11px] text-ink-3">

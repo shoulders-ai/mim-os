@@ -135,6 +135,38 @@ describe('ToolsSettingsPanel', () => {
     expect(toggle?.disabled).toBe(true)
   })
 
+  it('does not show scope hint when Google scope is granted', async () => {
+    const scopeCall = vi.fn(async (tool: string) => {
+      if (tool === 'toolPolicy.get') return policy([
+        {
+          id: 'google.gmail.send',
+          domain: 'google',
+          label: 'Send Gmail',
+          toolIds: ['gmail.send'],
+          enabled: false,
+        },
+      ])
+      if (tool === 'slack.status') return { configured: false }
+      if (tool === 'google.status') return {
+        configured: true,
+        auth: { email: 'test@example.com' },
+        grantedScopes: ['https://www.googleapis.com/auth/gmail.send'],
+      }
+      return {}
+    })
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call: scopeCall, on: vi.fn(), off: vi.fn() },
+    })
+    app = createApp(ToolsSettingsPanel)
+    app.mount(root)
+    await flushUi()
+
+    expect(root.textContent).not.toContain('Reconnect required')
+    const toggle = root.querySelector<HTMLButtonElement>('[aria-label="Enable Send Gmail"]')
+    expect(toggle?.disabled).toBe(false)
+  })
+
   it('filters rows by label and tool id', async () => {
     app = createApp(ToolsSettingsPanel)
     app.mount(root)
@@ -147,5 +179,109 @@ describe('ToolsSettingsPanel', () => {
 
     expect(root.textContent).toContain('Read and search public channels')
     expect(root.textContent).not.toContain('Push changes')
+  })
+
+  it('renders interpreter rows beneath the code domain group', async () => {
+    const interpreterCall = vi.fn(async (tool: string) => {
+      if (tool === 'toolPolicy.get') return policy([
+        {
+          id: 'code.run',
+          domain: 'code',
+          label: 'Run code interpreters',
+          description: 'Execute detected interpreters',
+          toolIds: ['code.run'],
+          enabled: true,
+        },
+      ])
+      if (tool === 'toolchain.status') return {
+        entries: [
+          { id: 'r', name: 'R', bin: 'R', installed: true, binPath: '/usr/bin/R', version: '4.4.1' },
+          { id: 'rscript', name: 'Rscript', bin: 'Rscript', installed: true, binPath: '/usr/bin/Rscript', version: '4.4.1' },
+          { id: 'quarto', name: 'Quarto', bin: 'quarto', installed: false },
+          { id: 'pandoc', name: 'pandoc', bin: 'pandoc', installed: true, binPath: '/usr/bin/pandoc', version: '3.1' },
+          { id: 'python3', name: 'Python', bin: 'python3', installed: true, binPath: '/usr/bin/python3', version: '3.12.0' },
+        ],
+      }
+      if (tool === 'settings.get') return {
+        settings: { codeInterpreters: ['rscript', 'r', 'quarto'] },
+      }
+      if (tool === 'slack.status') return { configured: false }
+      if (tool === 'google.status') return { configured: false }
+      return {}
+    })
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call: interpreterCall, on: vi.fn(), off: vi.fn() },
+    })
+    app = createApp(ToolsSettingsPanel)
+    app.mount(root)
+    await flushUi()
+
+    // Interpreter section header
+    expect(root.textContent).toContain('Interpreters')
+    // Installed interpreters show version
+    expect(root.textContent).toContain('R')
+    expect(root.textContent).toContain('4.4.1')
+    // Not-installed shows "not found"
+    expect(root.textContent).toContain('Quarto')
+    expect(root.textContent).toContain('not found')
+    // pandoc excluded
+    expect(root.querySelector('[aria-label*="pandoc"]')).toBeNull()
+    // Python shown but not enabled (not in allowlist)
+    const pythonToggle = root.querySelector<HTMLButtonElement>('[aria-label="Enable Python interpreter"]')
+    expect(pythonToggle).toBeTruthy()
+    expect(pythonToggle!.disabled).toBe(false)
+    // Quarto toggle is disabled (not installed) — it's in the allowlist so label says "Disable"
+    const quartoToggle = root.querySelector<HTMLButtonElement>('[aria-label="Disable Quarto interpreter"]')
+    expect(quartoToggle?.disabled).toBe(true)
+  })
+
+  it('persists interpreter toggle via settings.set', async () => {
+    const interpreterCall = vi.fn(async (tool: string, params?: Record<string, unknown>) => {
+      if (tool === 'toolPolicy.get') return policy([
+        {
+          id: 'code.run',
+          domain: 'code',
+          label: 'Run code interpreters',
+          toolIds: ['code.run'],
+          enabled: true,
+        },
+      ])
+      if (tool === 'toolchain.status') return {
+        entries: [
+          { id: 'r', name: 'R', bin: 'R', installed: true, binPath: '/usr/bin/R', version: '4.4.1' },
+          { id: 'rscript', name: 'Rscript', bin: 'Rscript', installed: true, binPath: '/usr/bin/Rscript', version: '4.4.1' },
+          { id: 'quarto', name: 'Quarto', bin: 'quarto', installed: false },
+          { id: 'pandoc', name: 'pandoc', bin: 'pandoc', installed: true, binPath: '/usr/bin/pandoc', version: '3.1' },
+          { id: 'python3', name: 'Python', bin: 'python3', installed: true, binPath: '/usr/bin/python3', version: '3.12.0' },
+        ],
+      }
+      if (tool === 'settings.get') return {
+        settings: { codeInterpreters: ['rscript', 'r', 'quarto'] },
+      }
+      if (tool === 'settings.set') {
+        // Should remove 'rscript' from allowlist
+        expect(params).toEqual({ key: 'codeInterpreters', value: ['r', 'quarto'] })
+        return {}
+      }
+      if (tool === 'slack.status') return { configured: false }
+      if (tool === 'google.status') return { configured: false }
+      return {}
+    })
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call: interpreterCall, on: vi.fn(), off: vi.fn() },
+    })
+    app = createApp(ToolsSettingsPanel)
+    app.mount(root)
+    await flushUi()
+
+    // Toggle off Rscript (currently enabled)
+    const rscriptToggle = root.querySelector<HTMLButtonElement>('[aria-label="Disable Rscript interpreter"]')
+    expect(rscriptToggle).toBeTruthy()
+    rscriptToggle!.click()
+    await flushUi()
+
+    expect(interpreterCall).toHaveBeenCalledWith('settings.set', { key: 'codeInterpreters', value: ['r', 'quarto'] })
   })
 })
