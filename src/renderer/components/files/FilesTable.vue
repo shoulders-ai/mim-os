@@ -35,6 +35,7 @@ const props = defineProps<{
   showLocationColumn: boolean
   selectedIndex: number
   query: string
+  activeFilePath?: string
   resourceRootCount: number
   emptyText: string
   directoryError: string
@@ -204,7 +205,7 @@ const overlayText = computed(() => {
   return dropTargetDir.value ? `Drop to import into ${dropTargetDir.value}` : 'Drop to import'
 })
 
-const gridClass = 'grid-cols-[minmax(0,1.34fr)_minmax(0,0.7fr)_minmax(42px,0.42fr)_minmax(58px,0.56fr)_minmax(58px,0.56fr)]'
+const gridClass = 'grid-cols-[minmax(0,2fr)_minmax(0,0.62fr)_minmax(38px,0.3fr)_minmax(52px,0.42fr)_minmax(52px,0.42fr)]'
 
 function sortIndicator(key: SortKey): string {
   if (props.sortKey !== key) return ''
@@ -215,6 +216,14 @@ const levelPaddingClasses = ['', 'pl-4', 'pl-8', 'pl-12', 'pl-16', 'pl-20', 'pl-
 
 function levelPaddingClass(level: number): string {
   return levelPaddingClasses[Math.min(Math.max(0, level), levelPaddingClasses.length - 1)]
+}
+
+function isActiveFile(row: FileRow): boolean {
+  return row.type === 'file' && !!props.activeFilePath && row.path === props.activeFilePath
+}
+
+function fileIconClass(row: FileRow): string {
+  return isActiveFile(row) ? 'shrink-0 text-accent' : 'shrink-0 text-ink-3'
 }
 </script>
 
@@ -232,7 +241,8 @@ function levelPaddingClass(level: number): string {
     @contextmenu="onContainerContextmenu"
   >
     <div
-      class="grid h-8 items-center gap-2 border-b border-rule-light px-3 font-sans text-[10px] font-[650] uppercase tracking-normal text-ink-4"
+      data-testid="files-column-header"
+      class="sticky top-0 z-10 grid h-8 items-center gap-2 border-b border-rule-light bg-surface px-3 font-sans text-[10px] font-[650] uppercase tracking-normal text-ink-4"
       :class="gridClass"
     >
       <button type="button" class="truncate text-left hover:text-ink" @click="emit('setSort', 'name')">Name {{ sortIndicator('name') }}</button>
@@ -260,6 +270,8 @@ function levelPaddingClass(level: number): string {
       <button
         type="button"
         data-testid="files-row"
+        :data-active-file="isActiveFile(row) ? 'true' : undefined"
+        :aria-current="isActiveFile(row) ? 'true' : undefined"
         class="grid w-full items-center gap-2 border-b border-rule-light/70 px-3 text-left font-sans text-[12px] text-ink-2"
         :class="[gridClass, row.searchSnippet ? 'h-[44px]' : 'h-[34px]', row.gi === selectedIndex || dropTargetDir === row.path ? 'bg-accent-tint text-ink' : '', row.disabled ? 'opacity-55' : 'hover:bg-chrome-high hover:text-ink']"
         :disabled="row.disabled"
@@ -296,15 +308,17 @@ function levelPaddingClass(level: number): string {
           />
           <IconFileText
             v-else-if="row.kind === 'Markdown' || row.kind === 'Text'"
+            data-testid="files-row-kind-icon"
             :size="15"
             :stroke-width="1.9"
-            class="shrink-0 text-ink-3"
+            :class="fileIconClass(row)"
           />
           <IconFile
             v-else
+            data-testid="files-row-kind-icon"
             :size="15"
             :stroke-width="1.9"
-            class="shrink-0 text-ink-3"
+            :class="fileIconClass(row)"
           />
           <IconLock
             v-if="row.readonly"
@@ -314,7 +328,11 @@ function levelPaddingClass(level: number): string {
             title="Read-only resource"
           />
           <span class="min-w-0 truncate leading-tight">
-            <span class="block truncate">
+            <span
+              data-testid="files-row-name"
+              class="block truncate"
+              :class="isActiveFile(row) ? 'font-[650] text-ink' : ''"
+            >
               <template v-for="(part, indexPart) in highlight(row.name, row.positions)" :key="indexPart">
                 <span :class="part.hl ? 'font-[700] text-accent' : ''">{{ part.text }}</span>
               </template>

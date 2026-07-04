@@ -9,7 +9,7 @@ import {
 import { isAbsoluteFilePath, resolveSniffTarget } from '../fileOpenPolicy.js'
 
 export interface DocumentArtifactHost {
-  openDocument?: (path: string, kind: 'text' | 'pdf' | 'card' | 'table') => Promise<void> | void
+  openDocument?: (path: string, kind: 'text' | 'pdf' | 'card' | 'table' | 'image') => Promise<void> | void
   openHistoryForPath?: (path: string) => void
   newUntitledTab?: () => void
   saveActiveFile?: () => Promise<boolean> | boolean
@@ -57,6 +57,13 @@ export function createDocumentActions(deps: DocumentActionsDeps) {
     if (target === 'table') {
       if (await ensureDocumentHostVisible()) {
         await deps.artifactHost()?.openDocument?.(path, 'table')
+      }
+      return
+    }
+
+    if (target === 'image') {
+      if (await ensureDocumentHostVisible()) {
+        await deps.artifactHost()?.openDocument?.(path, 'image')
       }
       return
     }

@@ -3,7 +3,7 @@
  * Stored as `.mim/editor-tabs.json` via kernel tools.
  */
 
-export type PersistedTabKind = 'text' | 'pdf' | 'card' | 'table'
+export type PersistedTabKind = 'text' | 'pdf' | 'card' | 'table' | 'image'
 
 export interface PersistedTab {
   /** Workspace-relative path, empty for untitled */
@@ -87,7 +87,7 @@ export function deserializeTabState(raw: unknown): PersistedTabState | null {
 
 function parseTabKind(kind: unknown): PersistedTabKind | null {
   if (kind === undefined) return 'text'
-  if (kind === 'text' || kind === 'pdf' || kind === 'card' || kind === 'table') return kind
+  if (kind === 'text' || kind === 'pdf' || kind === 'card' || kind === 'table' || kind === 'image') return kind
   return null
 }
 

@@ -25,9 +25,11 @@ const emit = defineEmits<{
   openSession: [id: string]
   openPackageRun: [packageId: string, runId: string]
   artifactActivated: [entry: ArtifactEntry]
+  activeFileChanged: [path: string]
   allTabsClosed: []
   openFileDialog: []
   prepareChatDraft: [payload: { targetSessionId?: string | null; text: string; attachments: unknown[]; contextChips?: unknown[] }]
+  sendToTerminal: [payload: { text: string; language: string | null }]
 }>()
 
 const editorRef = ref<InstanceType<typeof EditorPanel> | null>(null)
@@ -122,9 +124,11 @@ defineExpose({
         ref="editorRef"
         :port="port"
         @artifact-activated="emit('artifactActivated', $event)"
+        @active-file-changed="emit('activeFileChanged', $event)"
         @all-tabs-closed="emit('allTabsClosed')"
         @open-file-dialog-requested="emit('openFileDialog')"
         @prepare-chat-draft="emit('prepareChatDraft', $event)"
+        @send-to-terminal="emit('sendToTerminal', $event)"
       />
 
       <div v-if="unsupportedArtifact" class="flex h-full flex-col">

@@ -35,11 +35,12 @@ describe('editorTabPersistence', () => {
       expect(result.tabs[0]).toEqual({ path: '', name: 'Untitled', kind: 'text' })
     })
 
-    it('serializes pdf, card, and table tabs with kind but without buffer content', () => {
+    it('serializes pdf, card, table, and image tabs with kind but without buffer content', () => {
       const tabs: LiveTab[] = [
         { path: 'reports/brief.pdf', name: 'brief.pdf', kind: 'pdf', content: '%PDF...' },
         { path: 'inputs/source.docx', name: 'source.docx', kind: 'card', content: 'binary-ish' },
         { path: 'data/input.csv', name: 'input.csv', kind: 'table', content: 'A,B\n1,2' },
+        { path: 'outputs/plot.png', name: 'plot.png', kind: 'image', content: '' },
       ]
 
       const result = serializeTabState(tabs, 0)
@@ -48,7 +49,24 @@ describe('editorTabPersistence', () => {
         { path: 'reports/brief.pdf', name: 'brief.pdf', kind: 'pdf' },
         { path: 'inputs/source.docx', name: 'source.docx', kind: 'card' },
         { path: 'data/input.csv', name: 'input.csv', kind: 'table' },
+        { path: 'outputs/plot.png', name: 'plot.png', kind: 'image' },
       ])
+    })
+
+    it('round-trips image tabs and still rejects unknown kinds', () => {
+      const serialized = serializeTabState(
+        [{ path: 'outputs/plot.png', name: 'plot.png', kind: 'image', content: '' }],
+        0,
+      )
+      const restored = deserializeTabState(JSON.parse(JSON.stringify(serialized)))
+      expect(restored!.tabs).toEqual([{ path: 'outputs/plot.png', name: 'plot.png', kind: 'image' }])
+
+      const rejected = deserializeTabState({
+        version: 1,
+        tabs: [{ path: 'a.bin', name: 'a.bin', kind: 'hologram' }],
+        activeIndex: 0,
+      })
+      expect(rejected).toBeNull()
     })
 
     it('filters read-only tabs and remaps the active index', () => {

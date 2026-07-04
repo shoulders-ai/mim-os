@@ -117,6 +117,7 @@ const workHostRef = ref<{
   sendExternalMessage?: (message: string) => Promise<void> | void
   prepareChatDraft?: (payload: { text?: string; attachments?: unknown[]; contextChips?: unknown[] }) => Promise<void> | void
   runTerminalCommand?: (command: string) => Promise<void> | void
+  sendTerminalText?: (text: string, opts?: { spawn?: { program: string } }) => Promise<void> | void
   addTerminalTab?: () => Promise<void> | void
   closeTerminalTab?: () => void
 } | null>(null)
@@ -167,6 +168,7 @@ const activeWorkPackage = computed(() =>
 const activeWorkPackageHasReadme = computed(() => activeWorkPackage.value?.hasReadme === true)
 const activeArtifact = computed(() => workbenchStore.activeArtifact)
 const activeArtifactHostId = computed(() => resolveArtifactHostId(activeArtifact.value))
+const activeFilePath = ref('')
 const workCanBack = computed(() => workbenchStore.workHistory.backStack.length > 0)
 const workCanForward = computed(() => workbenchStore.workHistory.forwardStack.length > 0)
 const artifactCanBack = computed(() => workbenchStore.artifactHistory.backStack.length > 0)
@@ -489,12 +491,17 @@ async function recordMountedArtifactActivation(entry: ArtifactEntry) {
   await workbenchActions.recordMountedArtifactActivation(entry)
 }
 
+function handleActiveFileChanged(path: string) {
+  activeFilePath.value = path
+}
+
 async function dispatchWorkbenchCommand(command: WorkbenchCommand) {
   try {
     await routeWorkbenchCommand(command, {
       openWork: openWorkEntry,
       openArtifact: openArtifactEntry,
       runTerminal: runTerminalCommand,
+      sendTerminal: sendTerminalText,
       sendChat: sendChatMessage,
     })
   } catch (err) {
@@ -576,6 +583,15 @@ function toggleArtifactExpanded() {
 async function runTerminalCommand(command: string) {
   await nextTick()
   await workHostRef.value?.runTerminalCommand?.(command)
+}
+
+async function sendTerminalText(text: string, opts?: { spawn?: { program: string } }) {
+  await nextTick()
+  await workHostRef.value?.sendTerminalText?.(text, opts)
+}
+
+function handleSendToTerminal(payload: { text: string; language: string | null }) {
+  dispatchWorkbenchCommand({ type: 'terminal.send', text: payload.text, language: payload.language })
 }
 
 async function sendChatMessage(payload: { sessionId: string; message: string }) {
@@ -791,6 +807,7 @@ function handleCloseTab() {
 }
 
 function handleAllDocumentTabsClosed() {
+  activeFilePath.value = ''
   documentActions.handleAllDocumentTabsClosed()
 }
 
@@ -1231,6 +1248,7 @@ onBeforeUnmount(() => {
             :packages="packages"
             :port="port"
             :recent-files="settingsStore.recentFiles.map(path => ({ path, name: workspaceLabel(path) }))"
+            :active-file-path="activeFilePath"
             :files-refresh-key="filesRefreshKey"
             :archive-refresh-key="archiveRefreshKey"
             @open-file="openFileInEditor"
@@ -1307,9 +1325,11 @@ onBeforeUnmount(() => {
           @open-session="onArchiveOpenSession"
           @open-package-run="openPackageRunWork"
           @artifact-activated="recordMountedArtifactActivation"
+          @active-file-changed="handleActiveFileChanged"
           @all-tabs-closed="handleAllDocumentTabsClosed"
           @open-file-dialog="openFileViaDialog"
           @prepare-chat-draft="prepareChatDraft"
+          @send-to-terminal="handleSendToTerminal"
         >
           <template #pane-header>
             <PaneHeader

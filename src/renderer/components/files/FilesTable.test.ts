@@ -35,6 +35,7 @@ function mountRows(rows: FileRow[], listeners: Record<string, unknown> = {}) {
     sortDirection: 'asc',
     expandedPaths: new Set<string>(),
     expandedLoading: new Set<string>(),
+    activeFilePath: '',
     ...listeners,
   })
   app.mount(appRoot)
@@ -72,6 +73,16 @@ describe('FilesTable', () => {
     mounted = null
   })
 
+  it('pins the column header to the top of the scroll pane', () => {
+    mounted = mountRows([row('README.md', 'README.md', 0)])
+
+    const header = mounted.root.querySelector<HTMLElement>('[data-testid="files-column-header"]')!
+    expect(header.textContent).toContain('Name')
+    expect(header.className).toContain('sticky')
+    expect(header.className).toContain('top-0')
+    expect(header.className).toContain('bg-surface')
+  })
+
   it('increases indentation for every nested browse level', () => {
     mounted = mountRows([
       row('README.md', 'README.md', 0),
@@ -85,6 +96,25 @@ describe('FilesTable', () => {
     expect(cells[1].className).toContain('pl-4')
     expect(cells[2].className).toContain('pl-8')
     expect(cells[3].className).toContain('pl-12')
+  })
+
+  it('marks the active editor file without reusing hover or selection styling', () => {
+    mounted = mountRows([
+      row('README.md', 'README.md', 0),
+      row('docs/design-system.md', 'design-system.md', 1),
+    ], {
+      activeFilePath: 'docs/design-system.md',
+      selectedIndex: 0,
+    })
+
+    const rows = Array.from(mounted.root.querySelectorAll<HTMLButtonElement>('[data-testid="files-row"]'))
+    expect(rows[0].className).toContain('bg-accent-tint')
+    expect(rows[1].dataset.activeFile).toBe('true')
+    expect(rows[1].className).not.toContain('bg-accent-tint')
+    expect(rows[1].className).not.toMatch(/(?:^|\s)bg-chrome-high(?:\s|$)/)
+    expect(rows[1].className).toContain('hover:bg-chrome-high')
+    expect(rows[1].querySelector('[data-testid="files-row-kind-icon"]')?.className).toContain('text-accent')
+    expect(rows[1].querySelector('[data-testid="files-row-name"]')?.className).toContain('font-[650]')
   })
 
   it('emits workspace moves when a row is dragged onto a folder row', async () => {

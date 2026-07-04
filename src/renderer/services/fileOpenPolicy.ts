@@ -1,12 +1,14 @@
 // 'sniff' = unknown format; resolve by content via resolveSniffTarget.
-export type FileOpenTarget = 'editor' | 'pdf' | 'table' | 'native' | 'sniff'
+export type FileOpenTarget = 'editor' | 'pdf' | 'table' | 'image' | 'native' | 'sniff'
 export type ResolvedFileOpenTarget = Exclude<FileOpenTarget, 'sniff'>
 
 const WORD_EXTENSIONS = new Set(['doc', 'docx', 'docm', 'dot', 'dotx', 'dotm'])
 const TABLE_EXTENSIONS = new Set(['csv', 'tsv', 'tab'])
 const SPREADSHEET_EXTENSIONS = new Set(['xls', 'xlsx', 'xlsm', 'xlsb'])
 const PRESENTATION_EXTENSIONS = new Set(['ppt', 'pptx', 'pptm', 'key'])
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'heic', 'tif', 'tiff'])
+// Formats Chromium renders in <img>; heic/tif/tiff stay native.
+const VIEWER_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'])
+const IMAGE_EXTENSIONS = new Set([...VIEWER_IMAGE_EXTENSIONS, 'heic', 'tif', 'tiff'])
 const ARCHIVE_EXTENSIONS = new Set(['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar'])
 const MEDIA_EXTENSIONS = new Set(['mp3', 'mp4', 'mov', 'wav', 'm4a', 'webm'])
 const BINARY_NATIVE_EXTENSIONS = new Set([
@@ -16,10 +18,12 @@ const BINARY_NATIVE_EXTENSIONS = new Set([
   'db',
   'dmg',
   'pkg',
+  'heic',
+  'tif',
+  'tiff',
   ...WORD_EXTENSIONS,
   ...SPREADSHEET_EXTENSIONS,
   ...PRESENTATION_EXTENSIONS,
-  ...IMAGE_EXTENSIONS,
   ...ARCHIVE_EXTENSIONS,
   ...MEDIA_EXTENSIONS,
 ])
@@ -28,6 +32,9 @@ const EDITOR_EXTENSIONS = new Set([
   'md',
   'markdown',
   'mdx',
+  'r',
+  'rmd',
+  'qmd',
   'txt',
   'rtf',
   'json',
@@ -90,6 +97,7 @@ export function defaultOpenTargetForPath(path: string): FileOpenTarget {
   const ext = extensionOf(path)
   if (ext === 'pdf') return 'pdf'
   if (TABLE_EXTENSIONS.has(ext)) return 'table'
+  if (VIEWER_IMAGE_EXTENSIONS.has(ext)) return 'image'
   if (BINARY_NATIVE_EXTENSIONS.has(ext)) return 'native'
   if (EDITOR_EXTENSIONS.has(ext)) return 'editor'
   return 'sniff'
@@ -119,13 +127,13 @@ export async function resolveSniffTarget(
 
 export function isEditorOpenablePath(path: string): boolean {
   const target = defaultOpenTargetForPath(path)
-  return target === 'editor' || target === 'table'
+  return target === 'editor' || target === 'table' || target === 'image'
 }
 
 export function defaultOpenLabelForPath(path: string): string {
   if (WORD_EXTENSIONS.has(extensionOf(path))) return 'Open in Microsoft Word'
   const target = defaultOpenTargetForPath(path)
-  if (target === 'editor' || target === 'pdf' || target === 'table') return 'Open in Editor'
+  if (target === 'editor' || target === 'pdf' || target === 'table' || target === 'image') return 'Open in Editor'
   if (target === 'sniff') return 'Open'
   return 'Open in default app'
 }
@@ -135,6 +143,9 @@ export function fileKindForPath(path: string): string {
   const ext = extensionOf(path)
   if (basename === 'package.json') return 'JSON'
   if (ext === 'md' || ext === 'markdown' || ext === 'mdx') return 'Markdown'
+  if (ext === 'r') return 'R'
+  if (ext === 'rmd') return 'R Markdown'
+  if (ext === 'qmd') return 'Quarto'
   if (ext === 'json' || ext === 'jsonl') return 'JSON'
   if (ext === 'yaml' || ext === 'yml') return 'YAML'
   if (ext === 'ts' || ext === 'tsx') return 'TypeScript'

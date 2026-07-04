@@ -10,12 +10,14 @@ import {
 export type WorkbenchCommand =
   | { type: 'editor.open'; path: string }
   | { type: 'terminal.run'; command: string; reveal?: boolean }
+  | { type: 'terminal.send'; text: string; language?: string | null }
   | { type: 'chat.send'; sessionId: string; message: string }
 
 export interface WorkbenchCommandDeps {
-  openWork(entry: WorkEntry): Promise<unknown> | unknown
+  openWork(entry: WorkEntry, options?: { preserveArtifact?: boolean }): Promise<unknown> | unknown
   openArtifact(entry: ArtifactEntry): Promise<unknown> | unknown
   runTerminal(command: string): Promise<unknown> | unknown
+  sendTerminal?(text: string, opts?: { spawn?: { program: string } }): Promise<unknown> | unknown
   sendChat(payload: { sessionId: string; message: string }): Promise<unknown> | unknown
 }
 
@@ -42,6 +44,15 @@ export async function routeWorkbenchCommand(
     const result = await deps.openWork(terminalWorkEntry())
     if (!navigationDidOpen(result)) return
     await deps.runTerminal(command.command)
+    return
+  }
+
+  if (command.type === 'terminal.send') {
+    // Open terminal in Work but preserve the Artifact pane (editor stays
+    // visible) so the user can Cmd+Enter repeatedly without losing focus.
+    await deps.openWork(terminalWorkEntry(), { preserveArtifact: true })
+    const spawnOpts = command.language === 'r' ? { spawn: { program: 'r' } } : undefined
+    await deps.sendTerminal?.(command.text, spawnOpts)
     return
   }
 

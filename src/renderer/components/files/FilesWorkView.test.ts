@@ -260,6 +260,32 @@ describe('FilesWorkView', () => {
     expect(mounted.root.querySelector('.tabler-icon-dots-vertical')).toBeNull()
   })
 
+  it('shows breadcrumbs in the path bar for Browse and a mode label for other modes', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const pathBar = () => mounted!.root.querySelector<HTMLElement>('[data-testid="files-path-bar"]')!
+    expect(pathBar().textContent).toContain('workspace')
+
+    const docsRow = rowButtons(mounted.root).find(row => row.textContent?.includes('docs'))!
+    docsRow.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    await flushUi()
+    expect(pathBar().textContent).toContain('docs')
+
+    modeButton(mounted.root, 'Recent').click()
+    await flushUi()
+    expect(pathBar().textContent).toContain('Recent files')
+    expect(pathBar().textContent).not.toContain('workspace')
+
+    modeButton(mounted.root, 'Changed').click()
+    await flushUi()
+    expect(pathBar().textContent).toContain('Recently changed')
+
+    modeButton(mounted.root, 'Browse').click()
+    await type(mounted.root, 'design')
+    expect(pathBar().textContent).toContain('Search results')
+  })
+
   it('refreshes the current directory and workspace index when it becomes active again', async () => {
     const active = ref(false)
     mounted = mountReactiveFiles({ active })
@@ -303,6 +329,14 @@ describe('FilesWorkView', () => {
 
     expect(mounted.root.textContent).toContain('proposal.docx')
     expect(mounted.root.textContent).toContain('workspace')
+  })
+
+  it('marks the visible row for the active editor file', async () => {
+    mounted = mountFiles({ activeFilePath: 'README.md' })
+    await flushUi()
+
+    const readme = rowButtons(mounted.root).find(row => row.textContent?.includes('README.md'))
+    expect(readme?.dataset.activeFile).toBe('true')
   })
 
   it('opens every file on one click and routes native formats to the OS app on double click', async () => {

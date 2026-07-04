@@ -144,6 +144,42 @@ describe('workbench command router', () => {
     expect(deps.createUntitled).not.toHaveBeenCalled()
   })
 
+  it('opens terminal with preserveArtifact so the editor keeps focus', async () => {
+    const deps = {
+      openWork: vi.fn(async () => ({ opened: true as const })),
+      openArtifact: vi.fn(),
+      sendChat: vi.fn(),
+      runTerminal: vi.fn(),
+      sendTerminal: vi.fn(),
+    }
+
+    await routeWorkbenchCommand({ type: 'terminal.send', text: 'x <- 1', language: 'r' }, deps)
+
+    expect(deps.openWork).toHaveBeenCalledWith(
+      { id: 'work:terminal', kind: 'terminal', title: 'Terminal' },
+      { preserveArtifact: true },
+    )
+    expect(deps.sendTerminal).toHaveBeenCalledWith('x <- 1', { spawn: { program: 'r' } })
+  })
+
+  it('routes terminal.send without spawn opts for non-R languages', async () => {
+    const deps = {
+      openWork: vi.fn(async () => ({ opened: true as const })),
+      openArtifact: vi.fn(),
+      sendChat: vi.fn(),
+      runTerminal: vi.fn(),
+      sendTerminal: vi.fn(),
+    }
+
+    await routeWorkbenchCommand({ type: 'terminal.send', text: 'print(1)', language: 'python' }, deps)
+
+    expect(deps.openWork).toHaveBeenCalledWith(
+      { id: 'work:terminal', kind: 'terminal', title: 'Terminal' },
+      { preserveArtifact: true },
+    )
+    expect(deps.sendTerminal).toHaveBeenCalledWith('print(1)', undefined)
+  })
+
   it('treats non-navigation command results as open for compatibility', () => {
     expect(navigationDidOpen(undefined)).toBe(true)
     expect(navigationDidOpen({ opened: true })).toBe(true)

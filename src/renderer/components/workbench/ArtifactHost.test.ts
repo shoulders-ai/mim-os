@@ -19,7 +19,7 @@ vi.mock('../editor/EditorPanel.vue', async () => {
   return {
     default: defineComponent({
       name: 'EditorPanelStub',
-      emits: ['artifactActivated', 'allTabsClosed', 'openFileDialogRequested'],
+      emits: ['artifactActivated', 'activeFileChanged', 'allTabsClosed', 'openFileDialogRequested'],
       setup(_props, { emit, expose }) {
         expose({
           openFile: editorCalls.openFile,
@@ -33,12 +33,15 @@ vi.mock('../editor/EditorPanel.vue', async () => {
         return () => h('section', { 'data-testid': 'editor-panel' }, [
           h('button', {
             'data-testid': 'activate-artifact',
-            onClick: () => emit('artifactActivated', {
-              id: 'file:notes.md',
-              kind: 'file',
-              title: 'notes.md',
-              path: 'notes.md',
-            }),
+            onClick: () => {
+              emit('activeFileChanged', 'notes.md')
+              emit('artifactActivated', {
+                id: 'file:notes.md',
+                kind: 'file',
+                title: 'notes.md',
+                path: 'notes.md',
+              })
+            },
           }, 'Activate'),
           h('button', {
             'data-testid': 'all-tabs-closed',
@@ -148,6 +151,7 @@ describe('ArtifactHost', () => {
 
   it('forwards editor Artifact activation upward', () => {
     const onArtifactActivated = vi.fn()
+    const onActiveFileChanged = vi.fn()
     app = createApp({
       setup() {
         return () => h(ArtifactHost, {
@@ -156,6 +160,7 @@ describe('ArtifactHost', () => {
           port: 1234,
           packages: [],
           onArtifactActivated,
+          onActiveFileChanged,
         })
       },
     })
@@ -169,6 +174,7 @@ describe('ArtifactHost', () => {
       title: 'notes.md',
       path: 'notes.md',
     })
+    expect(onActiveFileChanged).toHaveBeenCalledWith('notes.md')
   })
 
   it('forwards editor empty-state events upward', async () => {

@@ -11,6 +11,7 @@ const childCalls = vi.hoisted(() => ({
   addTab: vi.fn(),
   closeActiveTab: vi.fn(),
   runCommand: vi.fn(),
+  sendText: vi.fn(),
 }))
 
 vi.mock('../chat/ChatView.vue', async () => {
@@ -54,6 +55,7 @@ vi.mock('../terminal/TerminalPanel.vue', async () => {
           addTab: childCalls.addTab,
           closeActiveTab: childCalls.closeActiveTab,
           runCommand: childCalls.runCommand,
+          sendText: childCalls.sendText,
         })
         return () => h('div', {
           'data-testid': 'terminal-panel',
@@ -69,7 +71,7 @@ vi.mock('../files/FilesWorkView.vue', async () => {
   return {
     default: defineComponent({
       name: 'FilesWorkViewStub',
-      props: ['active', 'refreshKey', 'recentFiles'],
+      props: ['active', 'refreshKey', 'recentFiles', 'activeFilePath'],
       emits: ['openFile', 'newFile', 'openFileDialog', 'pathMoved'],
       setup(props, { emit }) {
         return () => h('div', {
@@ -77,6 +79,7 @@ vi.mock('../files/FilesWorkView.vue', async () => {
           'data-active': props.active ? 'true' : 'false',
           'data-refresh-key': String(props.refreshKey ?? ''),
           'data-recent-path': Array.isArray(props.recentFiles) ? props.recentFiles[0]?.path : '',
+          'data-active-file-path': props.activeFilePath ?? '',
         }, [
           h('button', {
             'data-testid': 'files-view',
@@ -392,6 +395,7 @@ describe('WorkHost', () => {
           port: 1234,
           filesRefreshKey: 7,
           recentFiles: [{ path: 'notes.md', name: 'notes.md' }],
+          activeFilePath: 'notes.md',
         })
       },
     })
@@ -402,6 +406,7 @@ describe('WorkHost', () => {
     expect(files?.dataset.active).toBe('true')
     expect(files?.dataset.refreshKey).toBe('7')
     expect(files?.dataset.recentPath).toBe('notes.md')
+    expect(files?.dataset.activeFilePath).toBe('notes.md')
 
     activeHost.value = 'terminal'
     activeWork.value = { id: 'work:terminal', kind: 'terminal', title: 'Terminal' }
@@ -569,5 +574,13 @@ describe('WorkHost', () => {
     await flushUi()
 
     expect(root.querySelector('[data-testid="package-run-view"]')?.textContent).toBe('demo:run-1:1')
+  })
+
+  it('exposes sendTerminalText that delegates to terminal sendText', async () => {
+    mountHost('terminal', { id: 'work:terminal', kind: 'terminal', title: 'Terminal' })
+    await flushUi()
+
+    await hostRef.value.sendTerminalText('x <- 1', { spawn: { program: 'r' } })
+    expect(childCalls.sendText).toHaveBeenCalledWith('x <- 1', { spawn: { program: 'r' } })
   })
 })

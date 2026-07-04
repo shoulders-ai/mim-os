@@ -44,6 +44,15 @@ const searchValue = computed({
   set: value => emit('update:query', value),
 })
 
+// The path bar shows breadcrumbs only while browsing; the other table modes
+// list workspace-wide results where a directory path would be misleading.
+const modeLabel = computed(() => {
+  if (props.tableMode === 'recent') return 'Recent files'
+  if (props.tableMode === 'changed') return 'Recently changed'
+  if (props.tableMode === 'search') return 'Search results'
+  return ''
+})
+
 defineExpose({
   focusSearch: () => inputRef.value?.focus(),
 })
@@ -51,7 +60,7 @@ defineExpose({
 
 <template>
   <div
-    class="grid h-[38px] min-h-[38px] grid-cols-[auto_minmax(0,1fr)_minmax(96px,180px)_auto] items-center gap-2 border-b border-rule-light bg-chrome-high px-2"
+    class="flex h-[38px] min-h-[38px] items-center gap-2 border-b border-rule-light bg-chrome-high px-2"
     data-testid="files-browser-bar"
   >
     <div class="flex h-6 shrink-0 items-center rounded-[6px] border border-rule-light bg-chrome p-0.5" aria-label="Files view">
@@ -87,35 +96,7 @@ defineExpose({
       </button>
     </div>
 
-    <nav class="flex min-w-0 items-center gap-1 overflow-hidden font-sans text-[12px]" aria-label="File breadcrumb">
-      <button
-        type="button"
-        class="flex h-6 w-6 shrink-0 items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-35"
-        :disabled="currentDir === '.'"
-        title="Up"
-        @click="emit('navigateUp')"
-      >
-        <IconArrowUp :size="13" :stroke-width="2" />
-      </button>
-      <template v-for="(crumb, indexCrumb) in breadcrumbItems" :key="crumb.path">
-        <button
-          type="button"
-          class="min-w-0 shrink truncate rounded-[5px] px-1.5 py-1 text-ink-3 hover:bg-chrome-mid hover:text-ink"
-          :class="indexCrumb === breadcrumbItems.length - 1 ? 'text-ink' : ''"
-          @click="emit('navigateTo', crumb.path)"
-        >
-          {{ crumb.label }}
-        </button>
-        <IconChevronRight
-          v-if="indexCrumb < breadcrumbItems.length - 1"
-          :size="12"
-          :stroke-width="2"
-          class="shrink-0 text-ink-4"
-        />
-      </template>
-    </nav>
-
-    <label class="flex h-6 min-w-0 items-center gap-1.5 rounded-[6px] border border-rule-light bg-surface px-1.5 text-ink-4 focus-within:border-accent/40">
+    <label class="ml-auto flex h-6 w-full min-w-0 max-w-[240px] items-center gap-1.5 rounded-[6px] border border-rule-light bg-surface px-1.5 text-ink-4 focus-within:border-accent/40">
       <IconSearch :size="13" :stroke-width="2" class="shrink-0" />
       <input
         ref="inputRef"
@@ -171,5 +152,42 @@ defineExpose({
         </MimMenuItem>
       </MimMenu>
     </div>
+  </div>
+
+  <div
+    class="flex h-7 min-h-7 items-center gap-1 border-b border-rule-light bg-chrome-high px-2 font-sans text-[12px]"
+    data-testid="files-path-bar"
+  >
+    <template v-if="tableMode === 'browse'">
+      <button
+        type="button"
+        class="flex h-[22px] w-6 shrink-0 items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
+        :disabled="currentDir === '.'"
+        aria-label="Up one folder"
+        title="Up one folder"
+        @click="emit('navigateUp')"
+      >
+        <IconArrowUp :size="13" :stroke-width="2" />
+      </button>
+      <nav class="flex min-w-0 items-center gap-0.5 overflow-hidden" aria-label="File breadcrumb">
+        <template v-for="(crumb, indexCrumb) in breadcrumbItems" :key="crumb.path">
+          <button
+            type="button"
+            class="min-w-0 shrink truncate rounded-[5px] px-1.5 py-0.5 hover:bg-chrome-mid hover:text-ink"
+            :class="indexCrumb === breadcrumbItems.length - 1 ? 'font-medium text-ink' : 'text-ink-3'"
+            @click="emit('navigateTo', crumb.path)"
+          >
+            {{ crumb.label }}
+          </button>
+          <IconChevronRight
+            v-if="indexCrumb < breadcrumbItems.length - 1"
+            :size="12"
+            :stroke-width="2"
+            class="shrink-0 text-ink-4"
+          />
+        </template>
+      </nav>
+    </template>
+    <span v-else class="truncate px-1.5 text-ink-3">{{ modeLabel }}</span>
   </div>
 </template>

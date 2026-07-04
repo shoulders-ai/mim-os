@@ -37,6 +37,33 @@ describe('file open policy', () => {
     expect(isEditorOpenablePath('data/input.tsv')).toBe(true)
   })
 
+  it('routes renderable images to the in-app image viewer', () => {
+    expect(defaultOpenTargetForPath('outputs/plot.png')).toBe('image')
+    expect(defaultOpenTargetForPath('assets/logo.svg')).toBe('image')
+    expect(defaultOpenTargetForPath('shots/photo.JPG')).toBe('image')
+    expect(defaultOpenTargetForPath('anim.gif')).toBe('image')
+    expect(defaultOpenTargetForPath('pic.webp')).toBe('image')
+    expect(defaultOpenLabelForPath('outputs/plot.png')).toBe('Open in Editor')
+    expect(isEditorOpenablePath('a/plot.png')).toBe(true)
+  })
+
+  it('keeps Chromium-unrenderable image formats native', () => {
+    expect(defaultOpenTargetForPath('shots/photo.heic')).toBe('native')
+    expect(defaultOpenTargetForPath('scans/page.tif')).toBe('native')
+    expect(defaultOpenTargetForPath('scans/page.tiff')).toBe('native')
+    expect(isEditorOpenablePath('shots/photo.heic')).toBe(false)
+  })
+
+  it('routes R, R Markdown, and Quarto files to the editor with kind labels', () => {
+    expect(defaultOpenTargetForPath('analysis/fit.R')).toBe('editor')
+    expect(defaultOpenTargetForPath('analysis/fit.r')).toBe('editor')
+    expect(defaultOpenTargetForPath('report.Rmd')).toBe('editor')
+    expect(defaultOpenTargetForPath('report.qmd')).toBe('editor')
+    expect(fileKindForPath('analysis/fit.R')).toBe('R')
+    expect(fileKindForPath('report.Rmd')).toBe('R Markdown')
+    expect(fileKindForPath('report.qmd')).toBe('Quarto')
+  })
+
   it('labels common workspace object kinds', () => {
     expect(fileKindForPath('docs')).toBe('File')
     expect(fileKindForPath('notes.md')).toBe('Markdown')
@@ -69,7 +96,7 @@ describe('file open policy edge cases', () => {
 
   it('matches extensions case-insensitively', () => {
     expect(defaultOpenTargetForPath('NOTES.MD')).toBe('editor')
-    expect(defaultOpenTargetForPath('PHOTO.PNG')).toBe('native')
+    expect(defaultOpenTargetForPath('PHOTO.HEIC')).toBe('native')
     expect(fileKindForPath('NOTES.MD')).toBe('Markdown')
   })
 
@@ -128,7 +155,8 @@ describe('resolveSniffTarget', () => {
     await expect(resolveSniffTarget('notes.md', read)).resolves.toBe('editor')
     await expect(resolveSniffTarget('deck.pdf', read)).resolves.toBe('pdf')
     await expect(resolveSniffTarget('data.csv', read)).resolves.toBe('table')
-    await expect(resolveSniffTarget('img.png', read)).resolves.toBe('native')
+    await expect(resolveSniffTarget('img.png', read)).resolves.toBe('image')
+    await expect(resolveSniffTarget('img.heic', read)).resolves.toBe('native')
     expect(reads).toBe(0)
   })
 })

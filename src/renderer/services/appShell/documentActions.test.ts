@@ -78,6 +78,18 @@ describe('app shell document actions', () => {
     expect(artifactHost.openDocument).toHaveBeenNthCalledWith(3, 'docs/report.docx', 'card')
   })
 
+  it('opens renderable images as image document-host tabs', async () => {
+    const { deps, artifactHost } = makeDeps()
+    const actions = createDocumentActions(deps)
+
+    await actions.openFileInEditor('outputs/plot.png')
+    await actions.openFileInEditor('assets/logo.svg')
+
+    expect(artifactHost.openDocument).toHaveBeenNthCalledWith(1, 'outputs/plot.png', 'image')
+    expect(artifactHost.openDocument).toHaveBeenNthCalledWith(2, 'assets/logo.svg', 'image')
+    expect(deps.openEditorFileArtifact).not.toHaveBeenCalled()
+  })
+
   it('opens the editor Artifact before adding document-host tabs when needed', async () => {
     const { deps, artifactHost } = makeDeps({
       activeArtifactHostId: vi.fn(() => 'package-artifact'),

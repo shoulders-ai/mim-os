@@ -29,9 +29,9 @@ const emit = defineEmits<{
 
 const isDirectory = computed(() => props.row.type === 'directory')
 
-// PDFs and table files open in Artifact by default; offer the OS app explicitly.
+// PDFs, tables, and images open in Artifact by default; offer the OS app explicitly.
 const showOpenNative = computed(() =>
-  !isDirectory.value && ['pdf', 'table'].includes(defaultOpenTargetForPath(props.row.path)),
+  !isDirectory.value && ['pdf', 'table', 'image'].includes(defaultOpenTargetForPath(props.row.path)),
 )
 
 const itemCount = computed(() => {

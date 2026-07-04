@@ -32,6 +32,7 @@ const props = defineProps<{
   packages: LoadedPackage[]
   port: number
   recentFiles: Array<{ path: string; name: string }>
+  activeFilePath?: string
   filesRefreshKey?: number
   archiveRefreshKey?: number
 }>()
@@ -117,6 +118,19 @@ async function runTerminalCommand(command: string) {
   }
 }
 
+async function sendTerminalText(text: string, opts?: { spawn?: { program: string } }) {
+  if (!terminalMounted.value) {
+    terminalMounted.value = true
+  }
+  await nextTick()
+  const terminal = terminalRef.value as any
+  if (!terminal) return
+
+  if (typeof terminal.sendText === 'function') {
+    await terminal.sendText(text, opts)
+  }
+}
+
 async function addTerminalTab() {
   await nextTick()
   await terminalRef.value?.addTab?.()
@@ -130,6 +144,7 @@ defineExpose({
   sendExternalMessage,
   prepareChatDraft,
   runTerminalCommand,
+  sendTerminalText,
   addTerminalTab,
   closeTerminalTab,
 })
@@ -161,6 +176,7 @@ defineExpose({
     :active="activeHost === 'files'"
     :refresh-key="filesRefreshKey"
     :recent-files="recentFiles"
+    :active-file-path="activeFilePath"
     @open-file="emit('openFile', $event)"
     @open-file-native="emit('openFileNative', $event)"
     @open-file-history="emit('openFileHistory', $event)"

@@ -41,10 +41,12 @@ const props = withDefaults(defineProps<{
   active?: boolean
   refreshKey?: number
   recentFiles?: Array<{ path: string; name: string }>
+  activeFilePath?: string
 }>(), {
   active: true,
   refreshKey: 0,
   recentFiles: () => [],
+  activeFilePath: '',
 })
 
 const emit = defineEmits<{
@@ -857,6 +859,7 @@ async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: stri
       :show-location-column="showLocationColumn"
       :selected-index="selectedIndex"
       :query="query"
+      :active-file-path="activeFilePath"
       :resource-root-count="resourceRoots.length"
       :empty-text="emptyText"
       :directory-error="directoryError"
