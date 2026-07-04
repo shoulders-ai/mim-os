@@ -61,6 +61,7 @@ const ACTION_PHRASES: Record<string, string> = {
   'app.enable': 'turn on an app',
   'app.disable': 'turn off an app',
   'web.read': 'read a web page',
+  'code.run': 'run a script',
 }
 
 const CATEGORY_PHRASES: Record<string, string> = {
@@ -97,6 +98,11 @@ function asString(value: unknown): string {
 export function targetDisplay(approval: ApprovalLike): string {
   const params = approval.params ?? {}
   if (approval.toolName === 'web.read' || approval.toolName === 'web.live.open') return asString(params.url) || asString(approval.target)
+  if (approval.toolName === 'code.run') {
+    const argv = params.argv
+    if (Array.isArray(argv) && argv.length > 0) return argv.join(' ')
+    return asString(approval.target)
+  }
   if (approval.toolName === 'fs.rename') {
     const from = asString(params.old_path)
     const to = asString(params.new_path)
@@ -114,6 +120,7 @@ export function targetIsCommand(approval: ApprovalLike): boolean {
   return approval.toolName === 'terminal.run'
     || approval.toolName === 'terminal.write'
     || approval.toolName === 'terminal.spawn'
+    || approval.toolName === 'code.run'
 }
 
 // For actions with no diff but a payload worth seeing — chiefly outbound sends —

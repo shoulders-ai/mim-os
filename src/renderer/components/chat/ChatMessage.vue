@@ -31,6 +31,7 @@ import latex from 'highlight.js/lib/languages/latex'
 import { contextPartFilename, isAttachmentPlaceholder, isContextUIPart, isImageType } from '../../services/attachments.js'
 import { buildAssistantTurnView, getAssistantTurnElapsedMs } from './assistantTurn.js'
 import { sanitizeHtml } from '../../services/sanitize.js'
+import ChatCodeRunCard from './ChatCodeRunCard.vue'
 
 hljs.registerLanguage('javascript', javascript)
 hljs.registerLanguage('js', javascript)
@@ -139,6 +140,10 @@ function getToolOutput(part) {
   try {
     return typeof part.output === 'string' ? part.output : JSON.stringify(part.output, null, 2)
   } catch { return String(part.output) }
+}
+
+function isCodeRunPart(part) {
+  return part.type === 'tool-code_run'
 }
 
 function skillPartName(part) {
@@ -468,7 +473,10 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Tool call -->
+        <!-- code_run card -->
+        <ChatCodeRunCard v-else-if="isCodeRunPart(entry.part)" :part="entry.part" @open-file="openFile" />
+
+        <!-- Tool call (generic) -->
         <div v-else-if="isToolPart(entry.part)" class="my-0.5">
           <button class="flex items-center gap-[5px] rounded-[4px] bg-transparent px-1 py-[3px] font-mono text-[11px] text-ink-3 hover:bg-chrome-mid hover:text-ink-2" @click="toggleTool(entry.index)" title="Show tool details">
             <svg class="transition-transform" :class="{ 'rotate-90': expandedTools[entry.index] }" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>

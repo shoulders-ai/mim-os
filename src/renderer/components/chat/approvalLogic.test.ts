@@ -121,4 +121,21 @@ describe('approval logic', () => {
         { key: 'content', value: '[redacted]' },
       ])
   })
+
+  it('phrases code.run as "run a script"', () => {
+    expect(approvalQuestion({ toolName: 'code.run', category: 'system' })).toBe('Allow Mim to run a script?')
+  })
+
+  it('displays code.run target as joined argv', () => {
+    expect(targetDisplay({ toolName: 'code.run', params: { argv: ['Rscript', 'analysis/demo.R'] } }))
+      .toBe('Rscript analysis/demo.R')
+  })
+
+  it('renders code.run as a command block', () => {
+    expect(targetIsCommand({ toolName: 'code.run' })).toBe(true)
+  })
+
+  it('offers remember for code.run with a session', () => {
+    expect(canRemember({ toolName: 'code.run', sessionId: 's1' })).toBe(true)
+  })
 })
