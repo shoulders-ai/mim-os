@@ -51,7 +51,7 @@ function isCsiFinalByte(ch: string): boolean {
 // Characters that agents use as "I'm working" title prefixes.
 // Braille block = animated spinners (Claude Code, Codex).
 // ✦ U+2726 = Gemini CLI static working indicator.
-function isSpinnerPrefix(ch: string): boolean {
+export function isSpinnerPrefix(ch: string): boolean {
   const code = ch.codePointAt(0) ?? 0
   if (code >= 0x2800 && code <= 0x28FF) return true
   if (code === 0x2726) return true

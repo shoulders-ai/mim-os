@@ -9,11 +9,11 @@
 // tests never touch node-pty or Electron.
 
 import { existsSync, appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs'
-import { dirname, join } from 'path'
+import { basename, dirname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { atomicWriteJson } from '@main/atomicJson.js'
-import { createAgentStatusTracker, type AgentRuntimeStatus, type AgentStatusTracker } from '@main/agents/agentStatus.js'
-import { resumeArgs as catalogResumeArgs, cliSessionsDir, extractCodexSessionId } from '@main/agents/agentCatalog.js'
+import { createAgentStatusTracker, isSpinnerPrefix, type AgentRuntimeStatus, type AgentStatusTracker } from '@main/agents/agentStatus.js'
+import { AGENT_CATALOG, resumeArgs as catalogResumeArgs, cliSessionsDir, extractCodexSessionId } from '@main/agents/agentCatalog.js'
 import type { DetectedAgent } from '@main/agents/agentCatalog.js'
 import type { PtyHandle, PtySpawnOptions } from '@main/pty.js'
 
@@ -23,6 +23,127 @@ import type { PtyHandle, PtySpawnOptions } from '@main/pty.js'
 // resynchronises on the next escape sequence.
 export const SCROLLBACK_MAX_BYTES = 2 * 1024 * 1024
 export const SCROLLBACK_KEEP_BYTES = 1024 * 1024
+
+// ── Auto-title extraction ──
+// When an agent session starts working (spinner prefix appears in titleHint),
+// we attempt to assign a descriptive title. For Claude Code the titleHint
+// itself carries the task description; for Codex and Gemini CLI we extract
+// the user's prompt from the scrollback.
+
+export function stripAnsi(text: string): string {
+  return text
+    .replace(/\x1b\[[0-9;?<>=]*[A-Za-z]/g, '')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    .replace(/\x1b[PX^_][^\x1b]*\x1b\\/g, '')
+    .replace(/\x1b[^[\]PX^_\x1b]/g, '')
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+}
+
+function isAgentIndicatorChar(ch: string): boolean {
+  const code = ch.codePointAt(0) ?? 0
+  if (code >= 0x2800 && code <= 0x28FF) return true
+  if (code === 0x2726) return true
+  if (code === 0x2733) return true
+  if (code === 0x25C7) return true
+  return false
+}
+
+export function cleanTitleHint(hint: string | undefined): string {
+  if (!hint) return ''
+  let text = hint
+  while (text.length > 0 && isAgentIndicatorChar(text.charAt(0))) text = text.slice(1)
+  return text.trim()
+}
+
+const AGENT_NAMES_LC = new Set(['claude code', 'codex', 'gemini cli'])
+
+export function isTrivialTitle(cleaned: string, cwd?: string): boolean {
+  if (!cleaned || cleaned.length < 3) return true
+  const lc = cleaned.toLowerCase()
+  if (AGENT_NAMES_LC.has(lc)) return true
+  if (cwd) {
+    const cwdBase = basename(cwd)
+    if (cleaned === cwdBase) return true
+    if (cleaned.includes(`(${cwdBase})`)) return true
+  }
+  if (/^(ready|working|working…|idle|done|loading)(\s|$)/i.test(cleaned)) return true
+  return false
+}
+
+function isCleanTaskText(text: string): boolean {
+  if (!text || text.length < 3) return false
+  if (!/\w{2,}/.test(text)) return false
+  const alphaCount = (text.match(/[a-zA-Z]/g) || []).length
+  if (alphaCount < text.length * 0.4) return false
+  if (/^[╭╮╰╯│─┌┐└┘▄▀█▐▛▜▝▘▟▗■□●○◇✳✦❯►▶]/.test(text)) return false
+  if (/^[─═╔╗╚╝║╠╣╬]/.test(text)) return false
+  if (/^\??\s*for\s+shortcuts/i.test(text)) return false
+  if (/^(Shift\+Tab|Checking for updates|Welcome back)/i.test(text)) return false
+  if (/^(OpenAI|Gemini CLI|Claude Code)\s*v?\d/i.test(text)) return false
+  if (/^#[0-9a-f]{3,6}\s/i.test(text)) return false
+  if (/Update available/i.test(text)) return false
+  if (/^(model|directory|workspace|sandbox|branch):/i.test(text)) return false
+  return true
+}
+
+export function extractCodexPrompt(stripped: string): string | null {
+  const parts = stripped.split('›')
+  if (parts.length < 2) return null
+  for (let i = 1; i < parts.length; i++) {
+    let text = parts[i].trim()
+    if (!text) continue
+    text = text.replace(/\s+(?:gpt-\S+|o[134]-\S*|claude\S*)\s+(?:default|low|medium|high|xhigh)\s+[·•].*$/, '')
+    text = text.replace(/\[0 q.*$/, '').trim()
+    if (!text || text.length < 3) continue
+    if (/^[0-9]+\.\s/.test(text)) continue
+    if (/^(Skip|Press enter|Update|Yes|No|Do you trust|Working with|Trusting)/i.test(text)) continue
+    if (!isCleanTaskText(text)) continue
+    return text
+  }
+  return null
+}
+
+export function extractGeminiPrompt(stripped: string): string | null {
+  const lines = stripped.split('\n')
+  let best = ''
+  for (const line of lines) {
+    const matches = line.matchAll(/(?:^|\s)>\s{1,4}(\S[^>]*?)(?=\s*>\s|\s*[▄▀│╭╮╰╯─┌┐└┘]|\s*$)/g)
+    for (const m of matches) {
+      const text = m[1].trim()
+      if (!text || text.length < 2) continue
+      if (text.startsWith('Type your message')) continue
+      if (text.startsWith('Select Theme')) continue
+      if (text.startsWith('_')) continue
+      if (/^[0-9]+ GEMINI/i.test(text)) continue
+      if (!isCleanTaskText(text)) continue
+      if (text.length > best.length) best = text
+    }
+  }
+  return best || null
+}
+
+function extractPromptFromScrollback(stripped: string): string | null {
+  return extractCodexPrompt(stripped) || extractGeminiPrompt(stripped) || null
+}
+
+function isDefaultAgentTitle(title: string, agentId: string): boolean {
+  const name = AGENT_CATALOG.find(d => d.id === agentId)?.name
+  if (!name) return false
+  if (title === name) return true
+  const match = title.match(/^(.+) (\d+)$/)
+  return match !== null && match[1] === name
+}
+
+const MAX_TITLE_CHARS = 40
+
+function truncateTitle(text: string): string {
+  if (text.length <= MAX_TITLE_CHARS) return text
+  const truncated = text.slice(0, MAX_TITLE_CHARS)
+  const lastSpace = truncated.lastIndexOf(' ')
+  return lastSpace > MAX_TITLE_CHARS * 0.5 ? truncated.slice(0, lastSpace) : truncated
+}
 
 export type AgentSessionStatus = 'running' | 'done' | 'error' | 'stopped' | 'interrupted'
 
@@ -67,6 +188,7 @@ export interface AgentSessionsOptions {
   scrollbackMaxBytes?: number
   scrollbackKeepBytes?: number
   idleThresholdMs?: number
+  generateTitle?: (scrollbackText: string) => Promise<string | null>
 }
 
 export interface AgentSessions {
@@ -92,8 +214,10 @@ interface LiveSession {
   // 'stopped' regardless of the (non-zero) exit code the stop produces.
   stopRequested: boolean
   idleTimer?: ReturnType<typeof setTimeout>
+  autoTitleTimer?: ReturnType<typeof setTimeout>
   lastStatus: AgentRuntimeStatus
   lastTitleHint: string | undefined
+  autoTitleAttempted: boolean
   mcpToken?: string
   preSpawnSessions?: Set<string>
   preSpawnDir?: string
@@ -229,6 +353,65 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     }
   }
 
+  const AUTO_TITLE_DELAY_MS = 15000
+
+  function clearAutoTitleTimer(live: LiveSession): void {
+    if (live.autoTitleTimer != null) {
+      clearTimeout(live.autoTitleTimer)
+      live.autoTitleTimer = undefined
+    }
+  }
+
+  function startAutoTitleTimer(live: LiveSession): void {
+    live.autoTitleTimer = setTimeout(() => {
+      live.autoTitleTimer = undefined
+      if (live.autoTitleAttempted) return
+      if (!isDefaultAgentTitle(live.record.title, live.record.agentId)) return
+      if (attemptAutoTitle(live)) live.autoTitleAttempted = true
+    }, AUTO_TITLE_DELAY_MS)
+  }
+
+  function setAutoTitle(live: LiveSession, title: string): void {
+    clearAutoTitleTimer(live)
+    live.record.title = title
+    persist(live.record)
+    emitEvent('session.changed', withRuntime(live.record))
+  }
+
+  function attemptAutoTitle(live: LiveSession): boolean {
+    const { cwd } = live.record
+    const cleaned = cleanTitleHint(live.record.titleHint)
+    if (!isTrivialTitle(cleaned, cwd)) {
+      setAutoTitle(live, truncateTitle(cleaned))
+      return true
+    }
+
+    let stripped: string | undefined
+    try {
+      stripped = stripAnsi(readFileSync(live.scrollbackPath, 'utf-8'))
+    } catch { return false }
+
+    const prompt = extractPromptFromScrollback(stripped)
+    if (prompt && !isTrivialTitle(prompt, cwd)) {
+      setAutoTitle(live, truncateTitle(prompt))
+      return true
+    }
+
+    if (options.generateTitle) {
+      const llmInput = stripped.slice(-800)
+      const agentId = live.record.agentId
+      live.autoTitleAttempted = true
+      options.generateTitle(llmInput).then(title => {
+        if (!title) return
+        if (!isDefaultAgentTitle(live.record.title, agentId)) return
+        setAutoTitle(live, truncateTitle(title))
+      }).catch(() => {})
+      return true
+    }
+
+    return false
+  }
+
   function onData(live: LiveSession, chunk: string): void {
     appendScrollback(live, chunk)
     if (live.preSpawnSessions) detectCliSessionId(live)
@@ -245,10 +428,12 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     if (hintChanged) {
       live.lastTitleHint = hint
       live.record.titleHint = hint
-      // titleHint changes are rare (one OSC per agent phase), so persisting
-      // each one is the cheap way to survive a restart; runtime status
-      // (working/needs-input/idle) is intentionally never persisted.
       persist(live.record)
+
+      if (!live.autoTitleAttempted && hint && isSpinnerPrefix(hint.charAt(0))
+          && isDefaultAgentTitle(live.record.title, live.record.agentId)) {
+        if (attemptAutoTitle(live)) live.autoTitleAttempted = true
+      }
     }
     emitEvent('session.status', withRuntime(live.record))
 
@@ -259,6 +444,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
 
   function onExit(live: LiveSession, exitCode: number): void {
     clearIdleTimer(live)
+    clearAutoTitleTimer(live)
     active.delete(live.record.sessionId)
     revokeLiveMcpToken(live)
     live.record.status = live.stopRequested ? 'stopped' : exitCode === 0 ? 'done' : 'error'
@@ -311,6 +497,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
       stopRequested: false,
       lastStatus: tracker.status(),
       lastTitleHint: tracker.titleHint(),
+      autoTitleAttempted: false,
       mcpToken,
       preSpawnSessions: snapshot?.ids,
       preSpawnDir: snapshot?.dir,
@@ -333,6 +520,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     }
     active.set(sessionId, live)
     persist(record)
+    startAutoTitleTimer(live)
     const merged = withRuntime(record)
     emitEvent('session.started', merged)
     return { record: merged, ptyId: live.handle.ptyId }
@@ -366,6 +554,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
       stopRequested: false,
       lastStatus: tracker.status(),
       lastTitleHint: record.titleHint,
+      autoTitleAttempted: !isDefaultAgentTitle(record.title, record.agentId),
       mcpToken,
     }
 
@@ -388,6 +577,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
 
     active.set(sessionId, live)
     persist(record)
+    if (!live.autoTitleAttempted) startAutoTitleTimer(live)
     const merged = withRuntime(record)
     emitEvent('session.started', merged)
     return { record: merged, ptyId: live.handle.ptyId }
@@ -409,6 +599,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     }
     live.stopRequested = true
     clearIdleTimer(live)
+    clearAutoTitleTimer(live)
     revokeLiveMcpToken(live)
     live.handle.kill()
     return withRuntime(live.record)

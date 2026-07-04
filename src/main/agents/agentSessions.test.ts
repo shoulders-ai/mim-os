@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { basename, join } from 'path'
 import { tmpdir } from 'os'
 import { randomUUID } from 'crypto'
 import { atomicWriteJson } from '@main/atomicJson.js'
@@ -8,6 +8,11 @@ import {
   createAgentSessions,
   SCROLLBACK_MAX_BYTES,
   SCROLLBACK_KEEP_BYTES,
+  cleanTitleHint,
+  isTrivialTitle,
+  extractCodexPrompt,
+  extractGeminiPrompt,
+  stripAnsi,
   type AgentSessionRecord,
   type AgentSessionsOptions,
 } from '@main/agents/agentSessions.js'
@@ -786,6 +791,289 @@ describe('agent sessions', () => {
 
       const uninstalled: DetectedAgent = { ...claude, installed: false, binPath: undefined }
       expect(() => sessions.resume(record.sessionId, uninstalled)).toThrow('Agent not installed')
+    })
+  })
+
+  describe('auto-title', () => {
+    it('assigns title from Claude Code titleHint when first spinner prefix appears', () => {
+      const { sessions, events, ptys } = makeHarness()
+      const { record } = sessions.launch(claude)
+      events.length = 0
+
+      // Boot title (no spinner) — title stays default
+      ptys[0].data('\x1b]0;✳ Claude Code\x07')
+      expect(sessions.get(record.sessionId)!.title).toBe('Claude Code')
+
+      // Working title with Braille spinner — triggers auto-title
+      ptys[0].data('\x1b]0;⠂ Refactoring the auth module\x07')
+      expect(sessions.get(record.sessionId)!.title).toBe('Refactoring the auth module')
+
+      const changed = events.find(e => e.type === 'session.changed')
+      expect(changed).toBeTruthy()
+      expect(changed!.session.title).toBe('Refactoring the auth module')
+
+      ptys[0].exit(0)
+    })
+
+    it('extracts title from Codex scrollback when titleHint is just the cwd', () => {
+      const { sessions, events, ptys } = makeHarness()
+      const { record } = sessions.launch(codex)
+      const cwdBase = basename(dir)
+      events.length = 0
+
+      // Boot output with Codex prompt
+      ptys[0].data('╭──────╮\n│ Codex │\n╰──────╯\n')
+      ptys[0].data('› Improve documentation in @filename gpt-5.5 xhigh · ~/project\n')
+
+      // Spinner title with cwd basename triggers auto-title; titleHint is
+      // trivial (matches cwd), so scrollback extraction kicks in
+      ptys[0].data(`\x1b]0;⠴ ${cwdBase}\x07`)
+
+      const session = sessions.get(record.sessionId)!
+      expect(session.title).toBe('Improve documentation in @filename')
+
+      ptys[0].exit(0)
+    })
+
+    it('extracts title from Gemini CLI scrollback keystroke accumulation', () => {
+      const { sessions, ptys } = makeHarness()
+      const { record } = sessions.launch(gemini)
+
+      // Boot
+      ptys[0].data('\x1b]0;◇  Ready (project)\x07')
+      ptys[0].data('> Type your message or @path/to/file\n')
+
+      // User types (keystroke redraws)
+      ptys[0].data('> f\n> fi\n> fix\n> fix t\n> fix the\n> fix the login bug\n')
+
+      // Working spinner triggers auto-title
+      ptys[0].data('\x1b]0;✦  Working… (project)\x07')
+
+      expect(sessions.get(record.sessionId)!.title).toBe('fix the login bug')
+
+      ptys[0].exit(0)
+    })
+
+    it('does not auto-title when the user has manually renamed', () => {
+      const { sessions, ptys } = makeHarness()
+      const { record } = sessions.launch(claude)
+
+      sessions.rename(record.sessionId, 'My Custom Name')
+
+      // Spinner title arrives — but title was manually set
+      ptys[0].data('\x1b]0;⠂ Refactoring auth\x07')
+
+      expect(sessions.get(record.sessionId)!.title).toBe('My Custom Name')
+
+      ptys[0].exit(0)
+    })
+
+    it('does not re-title on resume when title was already set', () => {
+      const { sessions, ptys } = makeHarness()
+      const { record } = sessions.launch(claude)
+
+      // First run: auto-title fires
+      ptys[0].data('\x1b]0;⠂ Fix the auth bug\x07')
+      expect(sessions.get(record.sessionId)!.title).toBe('Fix the auth bug')
+      ptys[0].exit(0)
+
+      // Resume: new spinner arrives but title is already non-default
+      sessions.resume(record.sessionId, claude)
+      ptys[1].data('\x1b]0;⠂ Continuing work\x07')
+      expect(sessions.get(record.sessionId)!.title).toBe('Fix the auth bug')
+
+      ptys[1].exit(0)
+    })
+
+    it('keeps default title when agent boots but user never gives a task', () => {
+      const { sessions, ptys } = makeHarness()
+      const { record } = sessions.launch(claude)
+
+      // Only boot title (✳ prefix is NOT a spinner)
+      ptys[0].data('\x1b]0;✳ Claude Code\x07')
+      ptys[0].data('\x1b]9;4;0;\x07')
+      ptys[0].data('Welcome to Claude Code\n')
+
+      expect(sessions.get(record.sessionId)!.title).toBe('Claude Code')
+
+      ptys[0].exit(0)
+    })
+
+    it('fires only once per session even with multiple spinner titles', () => {
+      const { sessions, events, ptys } = makeHarness()
+      const { record } = sessions.launch(claude)
+      events.length = 0
+
+      ptys[0].data('\x1b]0;⠂ First task\x07')
+      expect(sessions.get(record.sessionId)!.title).toBe('First task')
+
+      // Second spinner title — should NOT overwrite
+      ptys[0].data('\x1b]0;⠂ Second task\x07')
+      expect(sessions.get(record.sessionId)!.title).toBe('First task')
+
+      ptys[0].exit(0)
+    })
+
+    it('assigns title from timer fallback when no spinner appears', () => {
+      vi.useFakeTimers()
+      try {
+        const { sessions, ptys } = makeHarness()
+        const { record } = sessions.launch(gemini)
+
+        // Boot — no spinner, just ◇ Ready
+        ptys[0].data('\x1b]0;◇  Ready (project)\x07')
+        ptys[0].data('> Type your message or @path/to/file\n')
+        ptys[0].data('> f\n> fi\n> fix\n> fix the\n> fix the login bug\n')
+        // Gemini responds without ever emitting ✦ spinner
+        ptys[0].data('Looking at the login flow...\n')
+
+        expect(sessions.get(record.sessionId)!.title).toBe('Gemini CLI')
+
+        // After 15s, timer fires and extracts from scrollback
+        vi.advanceTimersByTime(15100)
+        expect(sessions.get(record.sessionId)!.title).toBe('fix the login bug')
+
+        ptys[0].exit(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('cancels auto-title timer when spinner-based title succeeds first', () => {
+      vi.useFakeTimers()
+      try {
+        const { sessions, ptys } = makeHarness()
+        const { record } = sessions.launch(claude)
+
+        // Spinner title succeeds at 2s
+        vi.advanceTimersByTime(2000)
+        ptys[0].data('\x1b]0;⠂ Fix auth\x07')
+        expect(sessions.get(record.sessionId)!.title).toBe('Fix auth')
+
+        // Timer at 15s should NOT overwrite
+        vi.advanceTimersByTime(14000)
+        expect(sessions.get(record.sessionId)!.title).toBe('Fix auth')
+
+        ptys[0].exit(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('retries when the first spinner title is just the agent name', () => {
+      const { sessions, ptys } = makeHarness()
+      const { record } = sessions.launch(claude)
+
+      // First spinner: just "Claude Code" (trivial) — should NOT set title yet
+      ptys[0].data('\x1b]0;⠂ Claude Code\x07')
+      expect(sessions.get(record.sessionId)!.title).toBe('Claude Code')
+
+      // Second spinner: real task description — NOW it sets the title
+      ptys[0].data('\x1b]0;⠐ Fix the auth module\x07')
+      expect(sessions.get(record.sessionId)!.title).toBe('Fix the auth module')
+
+      ptys[0].exit(0)
+    })
+
+    it('calls generateTitle callback when heuristic extraction fails', async () => {
+      const generateTitle = vi.fn().mockResolvedValue('LLM Generated Title')
+      const { sessions, ptys } = makeHarness({ generateTitle })
+      const { record } = sessions.launch(codex)
+      const cwdBase = basename(dir)
+
+      // Boot noise only — no › prompt in scrollback
+      ptys[0].data('boot noise without any prompt marker\n')
+
+      // Spinner with cwd basename triggers auto-title; titleHint is trivial,
+      // scrollback has no prompt → falls through to generateTitle
+      ptys[0].data(`\x1b]0;⠴ ${cwdBase}\x07`)
+
+      expect(generateTitle).toHaveBeenCalledTimes(1)
+      expect(typeof generateTitle.mock.calls[0][0]).toBe('string')
+
+      // Wait for the async LLM callback
+      await vi.waitFor(() => {
+        expect(sessions.get(record.sessionId)!.title).toBe('LLM Generated Title')
+      })
+
+      ptys[0].exit(0)
+    })
+
+    it('does not update title from LLM if user renamed during the async call', async () => {
+      let resolveTitle: (v: string | null) => void
+      const generateTitle = vi.fn().mockReturnValue(new Promise<string | null>(r => { resolveTitle = r }))
+      const { sessions, ptys } = makeHarness({ generateTitle })
+      const { record } = sessions.launch(codex)
+      const cwdBase = basename(dir)
+
+      ptys[0].data('no prompt\n')
+      ptys[0].data(`\x1b]0;⠴ ${cwdBase}\x07`)
+
+      expect(generateTitle).toHaveBeenCalledTimes(1)
+
+      // User renames while LLM is in flight
+      sessions.rename(record.sessionId, 'User Renamed')
+
+      // LLM resolves — but should NOT overwrite user's rename
+      resolveTitle!('LLM Title')
+      await new Promise(r => setTimeout(r, 10))
+
+      expect(sessions.get(record.sessionId)!.title).toBe('User Renamed')
+
+      ptys[0].exit(0)
+    })
+  })
+
+  describe('auto-title extraction functions', () => {
+    it('cleanTitleHint strips indicator chars', () => {
+      expect(cleanTitleHint('✳ Claude Code')).toBe('Claude Code')
+      expect(cleanTitleHint('⠂ Refactoring auth')).toBe('Refactoring auth')
+      expect(cleanTitleHint('◇  Ready (tmp)')).toBe('Ready (tmp)')
+      expect(cleanTitleHint('✦  Working… (tmp)')).toBe('Working… (tmp)')
+      expect(cleanTitleHint('⠴⠦⠧ spinning')).toBe('spinning')
+      expect(cleanTitleHint('')).toBe('')
+      expect(cleanTitleHint(undefined)).toBe('')
+      expect(cleanTitleHint('plain text')).toBe('plain text')
+    })
+
+    it('isTrivialTitle rejects agent names, cwd basenames, and generic status', () => {
+      expect(isTrivialTitle('Claude Code')).toBe(true)
+      expect(isTrivialTitle('Codex')).toBe(true)
+      expect(isTrivialTitle('Gemini CLI')).toBe(true)
+      expect(isTrivialTitle('tmp', '/Users/test/tmp')).toBe(true)
+      expect(isTrivialTitle('mim-apps', '/Users/test/mim-apps')).toBe(true)
+      expect(isTrivialTitle('Ready (mim-packages)', '/Users/test/mim-packages')).toBe(true)
+      expect(isTrivialTitle('Working… (project)', '/Users/test/project')).toBe(true)
+      expect(isTrivialTitle('Ready')).toBe(true)
+      expect(isTrivialTitle('')).toBe(true)
+      expect(isTrivialTitle('ab')).toBe(true)
+      expect(isTrivialTitle('Refactoring auth')).toBe(false)
+      expect(isTrivialTitle('Fix the login button')).toBe(false)
+    })
+
+    it('extractCodexPrompt finds the prompt and strips model/dir suffix', () => {
+      expect(extractCodexPrompt('› Improve docs gpt-5.5 xhigh · ~/app')).toBe('Improve docs')
+      expect(extractCodexPrompt('› fix the bug')).toBe('fix the bug')
+      expect(extractCodexPrompt('› Fix auth gpt-5.5 xhigh · ~/f› Fix auth gpt-5.5 xhigh · ~/f')).toBe('Fix auth')
+      expect(extractCodexPrompt('› 1. Update now› 2. Skip› Fix it gpt-5.5 default · ~/f')).toBe('Fix it')
+      expect(extractCodexPrompt('no marker at all')).toBeNull()
+      expect(extractCodexPrompt('╭── boot chrome ──╮')).toBeNull()
+    })
+
+    it('extractGeminiPrompt finds the longest typed prompt', () => {
+      expect(extractGeminiPrompt('> s\n> sa\n> say\n> say hi')).toBe('say hi')
+      expect(extractGeminiPrompt('> Type your message\n> hello world')).toBe('hello world')
+      expect(extractGeminiPrompt('> Type your message or @path/to/file')).toBeNull()
+      expect(extractGeminiPrompt('no prompt markers')).toBeNull()
+    })
+
+    it('stripAnsi removes CSI, OSC, and DEC private mode sequences', () => {
+      expect(stripAnsi('\x1b[32mgreen\x1b[0m')).toBe('green')
+      expect(stripAnsi('\x1b]0;title\x07')).toBe('')
+      expect(stripAnsi('\x1b[>4;2m\x1b[>0q')).toBe('')
+      expect(stripAnsi('\x1b[?25lhidden\x1b[?25h')).toBe('hidden')
+      expect(stripAnsi('plain text')).toBe('plain text')
+      expect(stripAnsi('\x1b]777;notify;Agent;msg\x07')).toBe('')
     })
   })
 })
