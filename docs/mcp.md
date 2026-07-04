@@ -70,6 +70,7 @@ Present in the MCP catalog when enabled in Settings > Tools:
 | MCP Tool | Mim Tool |
 |---|---|
 | `editor_open` | `editor.open` |
+| `editor_state` | `editor.state` |
 | `chat_send` | `chat.send` |
 | `comments_list` | `comments.list` |
 | `comments_add` | `comments.add` |
@@ -104,6 +105,13 @@ Present in the MCP catalog when enabled in Settings > Tools:
 | `google_disconnect` | `google.disconnect` |
 
 `log_append` is the MCP logbook surface; MCP does not expose `log.read`. The `system_prompt` tool resolves `{{PROJECT_LOG}}` for clients that request the full prompt.
+
+`editor_state` reports what the user has open in the desktop editor: open tabs
+and the active document, with workspace-relative paths and unsaved (dirty)
+flags. The renderer pushes tab snapshots to the main process whenever they
+change; the tool serves the cached snapshot and returns `available: false` when
+no editor is reporting. A dirty tab means the file on disk may be behind the
+buffer the user sees.
 
 Connection management tools (`slack_connect`, `google_connect`, etc.) and
 `settings_get`/`settings_set` are part of the curated MCP surface so CLI agents

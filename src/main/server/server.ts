@@ -60,6 +60,7 @@ export interface McpToolSpec {
 
 export const MCP_TOOL_SPECS: McpToolSpec[] = [
   { name: 'editor_open', mimName: 'editor.open', description: 'Open a file in the editor' },
+  { name: 'editor_state', mimName: 'editor.state', description: 'See open editor tabs and the active document, including unsaved (dirty) status' },
   { name: 'chat_send', mimName: 'chat.send', description: 'Send a message to chat' },
   { name: 'comments_list', mimName: 'comments.list', description: 'List inline review comment threads in a file (markdown or code)' },
   { name: 'comments_add', mimName: 'comments.add', description: 'Add an inline review comment anchored to a short exact passage of visible text; never hand-edit <comment> tags or @mim marker lines with file tools' },

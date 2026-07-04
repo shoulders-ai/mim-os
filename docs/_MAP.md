@@ -73,6 +73,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **User-global config.** `~/.mim/config.yaml` (identity, model defaults, skill sources). Never holds keys or tokens. `src/main/userConfig.ts`.
 - **Settings tools.** Workspace settings persistence in `.mim/settings.json`; agent tool availability policy for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
+- **Editor state tool.** `editor.state` (MCP: `editor_state`): open tabs + active document snapshot, pushed by the renderer and cached in main. `src/main/tools/editorState.ts`.
 - **Headless CLI.** `mim` command over the shared tool registry; no Electron. `src/main/cli.ts`, `headless.ts`. Docs: [cli.md](cli.md).
 - **MCP bridge.** Stdio bridge from external CLI agents to the running desktop. `src/main/mcp/`. Docs: [mcp.md](mcp.md).
 - **Preload bridge.** `window.kernel` IPC gateway. `src/preload/index.ts`.
@@ -311,6 +312,7 @@ src/
       sync.ts                   # Managed sync tools
       workspace.ts              # Workspace tools
       bridge.ts                 # Cross-surface messaging
+      editorState.ts            # editor.state open-tab snapshot
       packages.ts               # App authoring tools
       coreApps.ts               # App enablement tools
       registryTools.ts          # Registry list/trust

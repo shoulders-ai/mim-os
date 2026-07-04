@@ -33,6 +33,7 @@ import { lookupRegistryEntry, setAccountRegistryDev } from '@main/packages/regis
 import { registerInstallTools } from '@main/tools/install.js'
 import { DEFAULT_CACHE_ROOT } from '@main/packages/cacheLayout.js'
 import { registerBridgeTools } from '@main/tools/bridge.js'
+import { clearEditorState, registerEditorStateTools, updateEditorState } from '@main/tools/editorState.js'
 import { readTraceCaptureContent, readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
 import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
 import { registerToolchainTools } from '@main/tools/toolchain.js'
@@ -404,6 +405,7 @@ async function boot(): Promise<void> {
   })
   registerWorkspaceTools(tools)
   registerBridgeTools(tools)
+  registerEditorStateTools(tools)
   registerSettingsTools(tools)
   registerToolPolicyTools(tools)
   registerToolchainTools(tools)
@@ -767,6 +769,8 @@ async function boot(): Promise<void> {
   async function openWorkspacePath(path: string): Promise<string> {
     await tools.call('workspace.open', { path }, { actor: 'user' })
     telemetry.track('workspace_open')
+    // Drop the previous workspace's tab snapshot; the remounted editor re-pushes.
+    clearEditorState()
     await workspaceFileWatcher?.setWorkspace(path)
     scheduleAutoHistoryBaseline(history)
     syncWorkspaceMounts(path)
@@ -1002,6 +1006,13 @@ async function boot(): Promise<void> {
         ? state.paths.filter((path): path is string => typeof path === 'string' && path.length > 0)
         : [],
     )
+  })
+
+  // ── Editor tab snapshot ──
+  // The renderer pushes open tabs + active document whenever they change; the
+  // editor.state tool (MCP: editor_state) serves the cached snapshot.
+  ipcMain.handle('editor:state', (_event, state: unknown) => {
+    updateEditorState(state)
   })
 
   mainWindow.on('close', (e) => {

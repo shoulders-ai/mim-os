@@ -254,6 +254,7 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'session.delete': { category: 'ui', risk: 'medium', targetParam: 'id' },
   'chat.send': { category: 'ui', risk: 'low' },
   'editor.open': { category: 'ui', risk: 'low', pathParam: 'path' },
+  'editor.state': { category: 'read', risk: 'low' },
   'ai.registry': { category: 'ai', risk: 'low' },
   'ai.keyStatus': { category: 'ai', risk: 'low' },
   'ai.setKey': { category: 'settings', risk: 'medium', targetParam: 'provider' },

@@ -63,6 +63,10 @@ contextBridge.exposeInMainWorld('kernel', {
   pushDirtyTabCount: (state: number | { count?: number; paths?: string[] }) =>
     ipcRenderer.invoke('editor:dirty-state', state),
 
+  // Editor tab-snapshot push — read back by the editor.state tool (MCP: editor_state).
+  pushEditorState: (state: Record<string, unknown>) =>
+    ipcRenderer.invoke('editor:state', state),
+
   // Local attachments. File bytes are read in main; renderer only passes
   // user-selected paths from dialogs or drag/drop.
   pickAttachments: (options: { kind?: string } = {}) =>

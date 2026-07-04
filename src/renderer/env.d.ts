@@ -47,6 +47,10 @@ interface Window {
     openNativeFile(path: string): Promise<{ opened: string }>
     setRecentFiles(files: string[]): Promise<{ ok: boolean }>
     pushDirtyTabCount(state: number | { count?: number; paths?: string[] }): Promise<void>
+    pushEditorState(state: {
+      activeDocument: { path: string | null; name: string; kind: string; dirty: boolean } | null
+      openTabs: Array<{ path: string | null; name: string; kind: string; dirty: boolean; active: boolean }>
+    }): Promise<void>
     openFolderDialog(): Promise<string | null>
     createDirectory(path: string): Promise<{ created: string }>
     gitClone(url: string, target: string, token?: string): Promise<{ cloned: string }>

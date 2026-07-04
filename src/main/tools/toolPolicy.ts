@@ -262,11 +262,11 @@ export const CORE_TOOL_POLICY_ROWS: ToolPolicyRow[] = [
   {
     id: 'system.ui',
     domain: 'system',
-    label: 'Open editor and chat UI',
+    label: 'See and open editor and chat UI',
     defaultEnabled: true,
-    toolIds: ['editor.open', 'chat.send', 'workspace.info', 'workspace.orient', 'log.append', 'skill.get'],
+    toolIds: ['editor.open', 'editor.state', 'chat.send', 'workspace.info', 'workspace.orient', 'log.append', 'skill.get'],
     aiToolKeys: ['editor_open', 'log_append'],
-    mcpToolNames: ['editor_open', 'chat_send', 'workspace_info', 'workspace_orient', 'log_append', 'skill_get'],
+    mcpToolNames: ['editor_open', 'editor_state', 'chat_send', 'workspace_info', 'workspace_orient', 'log_append', 'skill_get'],
   },
   {
     id: 'system.settings',
