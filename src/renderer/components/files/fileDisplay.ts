@@ -123,7 +123,7 @@ export function formatTime(value?: string): string {
   const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
   const day = 24 * 60 * 60 * 1000
   if (startDate === startToday) {
-    return `Today ${date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   }
   if (startDate === startToday - day) return 'Yesterday'
   return date.toLocaleDateString([], {

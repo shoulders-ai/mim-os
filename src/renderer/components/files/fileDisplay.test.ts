@@ -246,11 +246,15 @@ describe('formatTime', () => {
     expect(formatTime('not a date')).toBe('-')
   })
 
-  it('labels same-day timestamps as Today with a time', () => {
+  it('shows same-day timestamps as a bare time', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(2026, 5, 11, 12, 0, 0))
-    expect(formatTime(new Date(2026, 5, 11, 0, 0, 1).toISOString())).toMatch(/^Today /)
-    expect(formatTime(new Date(2026, 5, 11, 23, 59, 59).toISOString())).toMatch(/^Today /)
+    const early = formatTime(new Date(2026, 5, 11, 0, 0, 1).toISOString())
+    const late = formatTime(new Date(2026, 5, 11, 23, 59, 59).toISOString())
+    expect(early).not.toContain('Today')
+    expect(late).not.toContain('Today')
+    expect(early).toBe(new Date(2026, 5, 11, 0, 0, 1).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
+    expect(late).toBe(new Date(2026, 5, 11, 23, 59, 59).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }))
   })
 
   it('labels the previous local day as Yesterday, including the midnight boundary', () => {
