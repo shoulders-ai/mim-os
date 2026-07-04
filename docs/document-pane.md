@@ -97,6 +97,8 @@ Text tabs are the rich text/code editing surface. They own:
 - CodeMirror state and per-tab undo history via `view.setState()`;
 - per-tab editor scroll snapshots while switching between open text tabs;
 - dirty tracking and dirty-count pushes to the main-process quit guard;
+- tab-snapshot pushes (open tabs + active document) to the main-process cache
+  behind the `editor.state` tool (MCP: `editor_state`);
 - Save/Save As path assignment for untitled documents;
 - autosave and external-change conflict handling;
 - markdown preview, comments, citations, export, word stats, and current-document

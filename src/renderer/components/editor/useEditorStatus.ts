@@ -20,6 +20,12 @@ interface UseEditorStatusOptions {
   activeReferencePath: Ref<string>
 }
 
+function tabDirty(tab: TabState): boolean {
+  if (tab.readOnly) return false
+  if (tab.dirty) return true
+  return tab.kind === 'text' && !tab.path && tab.content.length > 0
+}
+
 export function useEditorStatus(options: UseEditorStatusOptions) {
   const showWordStats = computed(() => {
     if (!options.activeIsText.value) return false
@@ -53,6 +59,30 @@ export function useEditorStatus(options: UseEditorStatusOptions) {
       count: dirtyTabCount.value,
       paths: dirtyTabPaths.value,
     })
+  }, { immediate: true })
+
+  // Tab snapshot for the editor.state tool (MCP: editor_state) — main caches
+  // the last push so external agents can see what is open in the editor.
+  const editorStateSnapshot = computed(() => {
+    const active = options.activeTab.value
+    const openTabs = options.tabs.map(tab => ({
+      path: tab.path || null,
+      name: tab.name,
+      kind: tab.kind,
+      dirty: tabDirty(tab),
+      active: tab === active,
+    }))
+    const activeEntry = openTabs.find(tab => tab.active) ?? null
+    return {
+      activeDocument: activeEntry
+        ? { path: activeEntry.path, name: activeEntry.name, kind: activeEntry.kind, dirty: activeEntry.dirty }
+        : null,
+      openTabs,
+    }
+  })
+
+  watch(() => JSON.stringify(editorStateSnapshot.value), () => {
+    window.kernel.pushEditorState?.(editorStateSnapshot.value)
   }, { immediate: true })
 
   const wordStatsLabel = computed(() => {
