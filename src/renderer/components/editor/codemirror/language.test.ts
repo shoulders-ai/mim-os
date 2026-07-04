@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isMarkdownPath, languageExtensionForPath } from './language.js'
+import { isMarkdownPath, languageExtensionForPath, resolveFenceLanguage } from './language.js'
 
 function languageNameOf(extension: unknown): string | undefined {
   // A LanguageSupport instance carries its language; bare arrays do not.
@@ -37,5 +37,37 @@ describe('editor language selection', () => {
     const unknown = await languageExtensionForPath('blob.xyz')
     expect(languageNameOf(unknown)).toBeUndefined()
     expect(unknown).toEqual([])
+  })
+
+  it('treats R Markdown and Quarto documents as markdown', async () => {
+    expect(isMarkdownPath('report.rmd')).toBe(true)
+    expect(isMarkdownPath('analysis/report.Rmd')).toBe(true)
+    expect(isMarkdownPath('report.qmd')).toBe(true)
+    const rmd = await languageExtensionForPath('report.Rmd')
+    expect(languageNameOf(rmd)).toBe('markdown')
+  })
+
+  it('keeps plain .R as a code file, not markdown', () => {
+    expect(isMarkdownPath('analysis/fit.R')).toBe(false)
+  })
+})
+
+describe('resolveFenceLanguage', () => {
+  it('normalizes knitr-style fence info strings', () => {
+    expect(resolveFenceLanguage('{r}')?.name).toBe('R')
+    expect(resolveFenceLanguage('{r, echo=FALSE}')?.name).toBe('R')
+    expect(resolveFenceLanguage('{r setup, include=FALSE}')?.name).toBe('R')
+    expect(resolveFenceLanguage('{python}')?.name).toBe('Python')
+  })
+
+  it('matches plain fence info strings', () => {
+    expect(resolveFenceLanguage('r')?.name).toBe('R')
+    expect(resolveFenceLanguage('js')?.name).toBe('JavaScript')
+  })
+
+  it('returns null for unknown or empty info strings without throwing', () => {
+    expect(resolveFenceLanguage('{foo}')).toBeNull()
+    expect(resolveFenceLanguage('')).toBeNull()
+    expect(resolveFenceLanguage('{}')).toBeNull()
   })
 })

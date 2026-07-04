@@ -3,7 +3,7 @@ import { LanguageDescription } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
 import { Strikethrough } from '@lezer/markdown'
 
-const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdx'])
+const MARKDOWN_EXTENSIONS = new Set(['md', 'markdown', 'mdx', 'rmd', 'qmd'])
 
 // Pathless drafts (untitled tabs) are markdown: that is the editor's default
 // authoring surface and what Save suggests as the extension.
@@ -14,7 +14,23 @@ export function isMarkdownPath(path) {
 }
 
 export function markdownLanguageExtension() {
-  return markdown({ base: markdownLanguage, extensions: [Strikethrough] })
+  return markdown({
+    base: markdownLanguage,
+    extensions: [Strikethrough],
+    codeLanguages: resolveFenceLanguage,
+  })
+}
+
+// Resolve a fenced-code info string to a language for chunk highlighting.
+// Handles knitr/Quarto chunk headers: `{r, echo=FALSE}` → r, `{python}` →
+// python, plus plain info strings like `js`.
+export function resolveFenceLanguage(info) {
+  if (!info) return null
+  let token = String(info).trim()
+  if (token.startsWith('{') && token.endsWith('}')) token = token.slice(1, -1).trim()
+  token = token.split(/[\s,]/, 1)[0] || ''
+  if (!token) return null
+  return LanguageDescription.matchLanguageName(languages, token, true) || null
 }
 
 // Resolve the CodeMirror language extension for a file path. Markdown is

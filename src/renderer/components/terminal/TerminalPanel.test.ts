@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, defineComponent, h, nextTick } from 'vue'
+import { createPinia } from 'pinia'
 import TerminalPanel from './TerminalPanel.vue'
 
 vi.mock('./TerminalSurface.vue', async () => {
@@ -72,6 +73,7 @@ describe('TerminalPanel', () => {
 
   it('pushes the spawned pty id through to the active surface immediately', async () => {
     app = createApp(TerminalPanel, { active: true })
+    app.use(createPinia())
     app.mount(root)
 
     await flushUi()

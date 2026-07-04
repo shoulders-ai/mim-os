@@ -16,6 +16,7 @@ import ConflictBar from './ConflictBar.vue'
 import CommentsMargin from './comments/CommentsMargin.vue'
 import PdfArtifact from '../files/PdfArtifact.vue'
 import FileCardArtifact from '../files/FileCardArtifact.vue'
+import ImageArtifact from '../files/ImageArtifact.vue'
 import TableArtifact from '../files/TableArtifact.vue'
 import MimContextMenu from '../ui/MimContextMenu.vue'
 import MimMenuItem from '../ui/MimMenuItem.vue'
@@ -66,14 +67,18 @@ import { useEditorSettingsEffects } from './useEditorSettingsEffects.js'
 import { useEditorStatus } from './useEditorStatus.js'
 import { useEditorTabPersistence } from './useEditorTabPersistence.js'
 import { useEditorTableTab } from './useEditorTableTab.js'
+import { getToolchainStatus, resetToolchainCache } from '../../services/toolchainStatus.js'
+import { renderArgv, pickBestProduct, missingPdfEngineGuidance, type RenderProduct } from '../../services/renderDocument.js'
 
 const viewModes = VIEW_MODES
 
 const emit = defineEmits<{
   artifactActivated: [entry: ArtifactEntry]
+  activeFileChanged: [path: string]
   allTabsClosed: []
   openFileDialogRequested: []
   prepareChatDraft: [payload: { targetSessionId?: string | null; text: string; attachments: unknown[]; contextChips?: unknown[] }]
+  sendToTerminal: [payload: { text: string; language: string | null }]
 }>()
 
 const props = withDefaults(defineProps<{
@@ -273,6 +278,83 @@ function closeCommentRail() {
   commentRailCollapsed.value = true
   commentRailOpenedEmpty.value = false
 }
+
+// ── Render document (R4.1 / R4.2) ──
+const renderBusy = ref(false)
+const renderAvailable = ref(false)
+
+// Check whether a render engine is available for the active file.
+const activeIsRenderable = computed(() => {
+  if (!activeIsMarkdown.value) return false
+  const path = activeTab.value?.path ?? ''
+  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  return ext === 'rmd' || ext === 'qmd'
+})
+
+// When the active file becomes renderable, check toolchain availability.
+watch(activeIsRenderable, async (renderable) => {
+  if (!renderable) {
+    renderAvailable.value = false
+    return
+  }
+  const status = await getToolchainStatus()
+  renderAvailable.value = status.canRender
+}, { immediate: true })
+
+async function onRenderDocument() {
+  const path = activeTab.value?.path
+  if (!path || renderBusy.value) return
+
+  const status = await getToolchainStatus()
+  const argv = renderArgv(path, { quarto: status.hasQuarto, rscript: status.hasRscript })
+  if (!argv) {
+    toastStore.push({ kind: 'error', message: 'No render engine available. Install Quarto or R.' })
+    return
+  }
+
+  renderBusy.value = true
+  try {
+    const result = await window.kernel.call('code.run', {
+      argv,
+      capture_plots: false,
+      timeout_ms: 480000,
+    }) as {
+      exitCode: number | null
+      timedOut: boolean
+      stdout: string
+      stderr: string
+      products: RenderProduct[]
+    }
+
+    if (result.exitCode === 0) {
+      const best = pickBestProduct(result.products ?? [])
+      if (best && best.kind === 'pdf') {
+        openDocument(best.path, 'pdf')
+      } else if (best && best.kind === 'html') {
+        await window.kernel.call('fs.openNative', { path: best.path })
+      } else if (best) {
+        openDocument(best.path, best.kind === 'image' ? 'image' : 'text')
+      } else {
+        toastStore.push({ kind: 'info', message: 'Render completed but no output file detected.' })
+      }
+    } else {
+      const stderr = result.stderr ?? ''
+      const guidance = missingPdfEngineGuidance(stderr)
+      if (guidance) {
+        toastStore.push({ kind: 'error', message: guidance, durationMs: 10000 })
+      } else {
+        const tail = stderr.length > 300 ? stderr.slice(-300) : stderr
+        toastStore.push({ kind: 'error', message: `Render failed`, detail: tail || 'Unknown error', durationMs: 10000 })
+      }
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Render failed'
+    toastStore.push({ kind: 'error', message: msg })
+  } finally {
+    renderBusy.value = false
+  }
+}
+
 const showHistoryRail = computed(() => Boolean(historyRailOpen.value && activeTab.value?.path))
 const activeHistoryText = computed(() => activeTab.value?.kind === 'text' ? currentTextForHistory() : '')
 
@@ -412,6 +494,7 @@ function artifactEntryForTab(tab: TabState | null): ArtifactEntry {
 
 function notifyActiveEditorArtifactChanged() {
   notifyCurrentDocumentChanged()
+  emit('activeFileChanged', activeTab.value?.path || '')
   if (activeTab.value?.kind !== 'text') return
   emit('artifactActivated', artifactEntryForTab(activeTab.value))
 }
@@ -609,6 +692,8 @@ async function conflictCompare(): Promise<void> {
   await editorFileSync?.conflictCompare()
 }
 
+const activeFilePath = computed(() => activeTab.value?.path || '')
+
 const {
   editorKeymaps,
   onFormat,
@@ -616,8 +701,15 @@ const {
   activeIsMarkdown,
   activeTabReadOnly,
   historyPreviewActive,
+  activeFilePath,
   getEditorView: () => editorView,
   saveActiveFile,
+  sendToTerminal: (text, language) => {
+    emit('sendToTerminal', { text, language })
+    // The async send chain mounts xterm which steals focus. Reclaim it
+    // so the user can Cmd+Enter repeatedly to step through a file.
+    setTimeout(() => editorView?.focus(), 150)
+  },
 })
 
 // ── Conflict diff resolution ──
@@ -861,6 +953,7 @@ function onCloseTab(index: number) {
     activeTableStats.value = { rows: 0, cols: 0 }
     commentThreads.value = []
     activeCommentId.value = null
+    emit('activeFileChanged', '')
     notifyCurrentDocumentChanged()
     emit('allTabsClosed')
     return
@@ -1075,6 +1168,7 @@ function closeTabForPath(path: string) {
     activeTableStats.value = { rows: 0, cols: 0 }
     commentThreads.value = []
     activeCommentId.value = null
+    emit('activeFileChanged', '')
     notifyCurrentDocumentChanged()
     emit('allTabsClosed')
     return
@@ -1121,15 +1215,19 @@ function retargetedTabPath(path: string, oldPath: string, newPath: string, type:
   return `${newPath}/${path.slice(prefix.length)}`
 }
 
-function watchedTextTabPaths(): string[] {
+// Text tabs watch for conflict/reload handling; image and pdf tabs watch so
+// re-generated files (plots, rendered documents) refresh in place.
+const WATCHED_TAB_KINDS = new Set<TabKind>(['text', 'image', 'pdf'])
+
+function watchedTabPaths(): string[] {
   return [...new Set(tabs
-    .filter(tab => tab.kind === 'text' && !tab.readOnly && tab.path)
+    .filter(tab => WATCHED_TAB_KINDS.has(tab.kind) && !tab.readOnly && tab.path)
     .map(tab => tab.path)
     .filter((path): path is string => Boolean(path)))]
 }
 
 function syncWatchedWorkspaceFiles(): void {
-  const next = new Set(watchedTextTabPaths())
+  const next = new Set(watchedTabPaths())
   for (const path of watchedWorkspaceFiles) {
     if (next.has(path)) continue
     watchedWorkspaceFiles.delete(path)
@@ -1149,7 +1247,7 @@ function unwatchAllWorkspaceFiles(): void {
 }
 
 watch(
-  () => watchedTextTabPaths().sort().join('\0'),
+  () => watchedTabPaths().sort().join('\0'),
   () => { syncWatchedWorkspaceFiles() },
 )
 
@@ -1343,9 +1441,12 @@ onBeforeUnmount(() => {
       :can-comment="canAddComment"
       :comment-count="commentThreads.length"
       :comment-rail-open="showCommentsMargin"
+      :render-available="renderAvailable"
+      :render-busy="renderBusy"
       @format="onFormat"
       @comment="onToolbarComment"
       @export="openExportDialog"
+      @render="onRenderDocument"
     />
 
     <ExportDialog
@@ -1484,6 +1585,13 @@ onBeforeUnmount(() => {
 
       <FileCardArtifact
         v-if="activeTab?.kind === 'card'"
+        :key="activeTab.id"
+        class="min-w-0 flex-1"
+        :path="activeTab.path"
+      />
+
+      <ImageArtifact
+        v-if="activeTab?.kind === 'image'"
         :key="activeTab.id"
         class="min-w-0 flex-1"
         :path="activeTab.path"

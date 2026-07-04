@@ -320,6 +320,21 @@ describe('EditorPanel document tabs', () => {
     expect(mounted.root.textContent).toContain('report.pdf')
   })
 
+  it('emits the active document path for text and non-text tabs', async () => {
+    const activeFileChanged = vi.fn()
+    mounted = mountPanel({ onActiveFileChanged: activeFileChanged })
+    await flushUi()
+
+    await mounted.panelRef.value.openDocument('docs/a.md', 'text')
+    await mounted.panelRef.value.openDocument('docs/report.pdf', 'pdf')
+    await mounted.panelRef.value.openDocument('inputs/source.docx', 'card')
+    await flushUi()
+
+    expect(activeFileChanged).toHaveBeenCalledWith('docs/a.md')
+    expect(activeFileChanged).toHaveBeenCalledWith('docs/report.pdf')
+    expect(activeFileChanged).toHaveBeenCalledWith('inputs/source.docx')
+  })
+
   it('switches between text, pdf, and card tabs while preserving the text editor view', async () => {
     mounted = mountPanel()
     await flushUi()

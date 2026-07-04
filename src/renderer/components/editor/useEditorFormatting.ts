@@ -7,13 +7,16 @@ import {
   toggleBlockquote, insertLink, insertImage, insertHorizontalRule,
   insertCitation,
 } from './codemirror/formatting.js'
+import { computeSendSelection, languageFromPath, computeChunkSend } from './codemirror/sendToTerminal.js'
 
 interface UseEditorFormattingOptions {
   activeIsMarkdown: ComputedRef<boolean>
   activeTabReadOnly: ComputedRef<boolean>
   historyPreviewActive: ComputedRef<boolean>
+  activeFilePath: ComputedRef<string>
   getEditorView: () => any
   saveActiveFile: () => Promise<boolean> | boolean
+  sendToTerminal?: (text: string, language: string | null) => void
 }
 
 export function useEditorFormatting(options: UseEditorFormattingOptions) {
@@ -27,6 +30,55 @@ export function useEditorFormatting(options: UseEditorFormattingOptions) {
     }
   }
 
+  function sendToTerminalCommand(view: any) {
+    if (options.historyPreviewActive.value) return false
+    if (options.activeTabReadOnly.value) return false
+    if (!options.sendToTerminal) return false
+
+    const filePath = options.activeFilePath.value
+    const isMarkdown = options.activeIsMarkdown.value
+
+    if (isMarkdown) {
+      // In markdown files, Mod-Enter only works inside R/python chunks
+      const result = computeChunkSend(view.state, 'line')
+      if (!result) return false
+      options.sendToTerminal(result.text, result.language)
+      // Move cursor to next position
+      view.dispatch({ selection: { anchor: result.nextPos } })
+      return true
+    }
+
+    // Non-markdown: send current line/selection
+    const result = computeSendSelection(view.state)
+    if (!result) {
+      // Blank line: just advance cursor to next line
+      const line = view.state.doc.lineAt(view.state.selection.main.head)
+      if (line.number < view.state.doc.lines) {
+        const next = view.state.doc.line(line.number + 1)
+        view.dispatch({ selection: { anchor: next.from } })
+      }
+      return true
+    }
+
+    const lang = languageFromPath(filePath)
+    options.sendToTerminal(result.text, lang)
+    view.dispatch({ selection: { anchor: result.nextPos } })
+    return true
+  }
+
+  function sendChunkCommand(view: any) {
+    if (options.historyPreviewActive.value) return false
+    if (options.activeTabReadOnly.value) return false
+    if (!options.sendToTerminal) return false
+    if (!options.activeIsMarkdown.value) return false
+
+    const result = computeChunkSend(view.state, 'chunk')
+    if (!result) return false
+    options.sendToTerminal(result.text, result.language)
+    view.dispatch({ selection: { anchor: result.nextPos } })
+    return true
+  }
+
   function editorKeymaps() {
     return Prec.highest(keymap.of([
       {
@@ -35,6 +87,14 @@ export function useEditorFormatting(options: UseEditorFormattingOptions) {
           options.saveActiveFile()
           return true
         },
+      },
+      {
+        key: 'Mod-Enter',
+        run: sendToTerminalCommand,
+      },
+      {
+        key: 'Mod-Shift-Enter',
+        run: sendChunkCommand,
       },
       { key: 'Mod-b', run: markdownCommand(toggleBold) },
       { key: 'Mod-i', run: markdownCommand(toggleItalic) },

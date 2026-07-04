@@ -7,6 +7,10 @@ import TerminalSurface from './TerminalSurface.vue'
 import MimContextMenu from '../ui/MimContextMenu.vue'
 import MimMenuItem from '../ui/MimMenuItem.vue'
 import { shortcutLabel } from '../../services/shortcutLabels.js'
+import { joinForTerminal } from './terminalSendText.js'
+import { useToastStore } from '../../stores/toasts.js'
+
+const toastStore = useToastStore()
 
 const props = withDefaults(defineProps<{
   active?: boolean
@@ -193,26 +197,37 @@ function onTabClick(tabId: number) {
 }
 
 /* ── PTY spawn ── */
-async function spawnPty(tabId: number) {
+async function spawnPty(tabId: number, opts?: { program?: string; args?: string[] }): Promise<boolean> {
   const tab = tabs.value.find(t => t.id === tabId)
-  if (!tab) return
-  if (tab.ptyId !== null) return
+  if (!tab) return false
+  if (tab.ptyId !== null) return true
   const surface = surfaces.get(tab.id)
 
   try {
     const dims = surface?.dimensions() ?? { cols: 80, rows: 24 }
-    const result = await window.kernel.call('terminal.spawn', {
+    const spawnParams: Record<string, unknown> = {
       cols: dims.cols,
       rows: dims.rows,
-    }) as { id: number, shellIntegration?: 'zsh' }
+    }
+    if (opts?.program) {
+      spawnParams.program = opts.program
+      if (opts.args?.length) spawnParams.args = opts.args
+    }
+    const result = await window.kernel.call('terminal.spawn', spawnParams) as {
+      id: number
+      shellIntegration?: 'zsh'
+      program?: string
+    }
 
     const liveTab = tabs.value.find(t => t.id === tab.id)
-    if (!liveTab) return
+    if (!liveTab) return false
     liveTab.ptyId = result.id
     liveTab.exited = false
-    liveTab.keybindingProfile = result.shellIntegration === 'zsh' ? 'terminal-zsh' : 'terminal'
+    liveTab.keybindingProfile = result.program ? 'terminal' : (result.shellIntegration === 'zsh' ? 'terminal-zsh' : 'terminal')
+    return true
   } catch (err) {
     surface?.write(`\x1b[31mFailed to spawn terminal: ${err}\x1b[0m\r\n`)
+    return false
   }
 }
 
@@ -326,6 +341,63 @@ async function runCommand(command: string) {
   }
 }
 
+/* ── Program tab + sendText ── */
+async function addProgramTab(opts: { program: string; args?: string[]; label?: string }) {
+  const id = nextTabId++
+  const label = opts.label ?? opts.program.toUpperCase()
+  const tab: TermTab = { id, label, ptyId: null, exited: false, keybindingProfile: 'terminal' }
+  tabs.value.push(tab)
+  activeTabId.value = id
+
+  await nextTick()
+
+  const surface = surfaces.get(id)
+  surface?.fit()
+  await spawnPty(id, { program: opts.program, args: opts.args })
+  await nextTick()
+  surfaceFor(id)?.fit()
+}
+
+async function sendText(text: string, opts?: { spawn?: { program: string } }) {
+  const wantProgram = opts?.spawn?.program
+
+  // Ensure a tab exists; program-label tabs are preferred when spawning R etc.
+  if (tabs.value.length === 0) {
+    const id = nextTabId++
+    const label = wantProgram ? wantProgram.toUpperCase() : `Tab ${id}`
+    const tab: TermTab = { id, label, ptyId: null, exited: false, keybindingProfile: 'terminal' }
+    tabs.value.push(tab)
+    activeTabId.value = id
+    await nextTick()
+    surfaces.get(id)?.fit()
+  }
+  await nextTick()
+
+  let tab = tabs.value.find(item => item.id === activeTabId.value)
+  if (!tab) return
+
+  if (tab.ptyId === null && !tab.exited) {
+    let spawned = false
+    if (wantProgram) {
+      spawned = await spawnPty(tab.id, { program: wantProgram })
+      if (!spawned) {
+        // Program not available — fall back to default shell + toast
+        toastStore.push({ kind: 'info', message: `${wantProgram.toUpperCase()} not found — sent to shell` })
+        spawned = await spawnPty(tab.id)
+      }
+    } else {
+      spawned = await spawnPty(tab.id)
+    }
+    await nextTick()
+    tab = tabs.value.find(item => item.id === activeTabId.value)
+  }
+
+  if (tab?.ptyId != null) {
+    const payload = joinForTerminal(text)
+    await window.kernel.call('terminal.write', { id: tab.ptyId, data: payload })
+  }
+}
+
 /* ── Clear active terminal (Cmd+K) ── */
 function clearActiveTerminal() {
   surfaceFor(activeTabId.value)?.clear()
@@ -390,7 +462,7 @@ onBeforeUnmount(() => {
   }
 })
 
-defineExpose({ addTab, closeActiveTab, clearActiveTerminal, activate, runCommand, tabs, activeTabId })
+defineExpose({ addTab, addProgramTab, closeActiveTab, clearActiveTerminal, activate, runCommand, sendText, tabs, activeTabId })
 </script>
 
 <template>

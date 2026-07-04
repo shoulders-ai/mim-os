@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { IconDownload, IconMessageCirclePlus, IconQuote } from '@tabler/icons-vue'
+import { IconDownload, IconMessageCirclePlus, IconQuote, IconPlayerPlay } from '@tabler/icons-vue'
 import { shortcutLabel } from '../../services/shortcutLabels.js'
 
 const props = defineProps<{
@@ -8,12 +8,15 @@ const props = defineProps<{
   canComment?: boolean
   commentCount?: number
   commentRailOpen?: boolean
+  renderAvailable?: boolean
+  renderBusy?: boolean
 }>()
 
 const emit = defineEmits<{
   format: [action: string]
   comment: []
   export: []
+  render: []
 }>()
 
 const TB_BASE = 'inline-flex h-[22px] min-w-[22px] items-center justify-center px-1.5 font-sans text-[12px] font-normal text-ink-3 hover:rounded-[3px] hover:bg-chrome-high hover:text-ink'
@@ -114,6 +117,24 @@ watch(() => props.commentCount, () => nextTick(checkOverflow))
       >{{ commentCount }}</span>
     </button>
     <div class="min-w-2 flex-1"></div>
+    <button
+      v-if="renderAvailable"
+      :class="TB_BASE"
+      class="shrink-0 gap-1 px-2 text-[11px]"
+      :disabled="renderBusy"
+      title="Render document"
+      aria-label="Render document"
+      data-testid="editor-render-button"
+      @mousedown.prevent
+      @click="emit('render')"
+    >
+      <svg v-if="renderBusy" class="h-[13px] w-[13px] animate-spin text-ink-3" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="2" opacity="0.3" />
+        <path d="M14 8a6 6 0 00-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+      </svg>
+      <IconPlayerPlay v-else :size="13" stroke-width="2" />
+      <span v-show="!compact">Render</span>
+    </button>
     <button
       :class="TB_BASE"
       class="shrink-0 gap-1 px-2 text-[11px]"

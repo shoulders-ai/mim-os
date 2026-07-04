@@ -350,14 +350,25 @@ export function useEditorFileSync(options: UseEditorFileSyncOptions) {
     for (const [path, kind] of changes) {
       const index = options.tabs.findIndex(tab => tab.path === path)
       if (index < 0) continue
-      if (options.tabs[index]?.readOnly) continue
-      if (options.tabs[index]?.kind !== 'text') continue
+      const tab = options.tabs[index]
+      if (tab?.readOnly) continue
+      if (tab && (tab.kind === 'image' || tab.kind === 'pdf')) {
+        // Binary viewers refresh by forced remount; they are never dirty and
+        // never show the conflict bar. Deletions keep the last rendered state.
+        if (kind !== 'unlink' && kind !== 'unlinkDir') refreshBinaryTabFromDisk(tab)
+        continue
+      }
+      if (tab?.kind !== 'text') continue
       if (kind === 'unlink' || kind === 'unlinkDir') {
         markOpenTabChangedOnDisk(index, 'deleted')
         continue
       }
       await reloadCleanOpenTabFromDisk(index)
     }
+  }
+
+  function refreshBinaryTabFromDisk(tab: TabState) {
+    tab.id = `${tab.kind}:${tab.path}-${Date.now()}`
   }
 
   async function reloadCleanOpenTabFromDisk(index: number) {
