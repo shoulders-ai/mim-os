@@ -58,6 +58,58 @@ export function isManageableApp(app: ResolvedApp): boolean {
   )
 }
 
+// ---- Registry grouping ----
+
+export interface RegistryGroup {
+  registryId: string
+  label: string
+  origin: RegistryInfo['origin']
+  entries: RegistryEntry[]
+}
+
+const ORIGIN_PRECEDENCE: Record<RegistryInfo['origin'], number> = {
+  workspace: 0,
+  machine: 1,
+  account: 2,
+  user: 3,
+  default: 4,
+}
+
+export function groupEntriesByRegistry(
+  entries: RegistryEntry[],
+  registries: RegistryInfo[],
+): RegistryGroup[] {
+  const buckets = new Map<string, RegistryEntry[]>()
+  for (const entry of entries) {
+    const list = buckets.get(entry.registryId)
+    if (list) list.push(entry)
+    else buckets.set(entry.registryId, [entry])
+  }
+
+  const groups: RegistryGroup[] = []
+  for (const [registryId, groupEntries] of buckets) {
+    const reg = registries.find(r => r.id === registryId)
+    groups.push({
+      registryId,
+      label: reg?.name || registryId,
+      origin: reg?.origin ?? 'default',
+      entries: groupEntries,
+    })
+  }
+
+  const regIndex = new Map(registries.map((r, i) => [r.id, i]))
+  groups.sort((a, b) => {
+    const pa = ORIGIN_PRECEDENCE[a.origin] ?? 5
+    const pb = ORIGIN_PRECEDENCE[b.origin] ?? 5
+    if (pa !== pb) return pa - pb
+    const ia = regIndex.get(a.registryId) ?? Infinity
+    const ib = regIndex.get(b.registryId) ?? Infinity
+    return ia - ib
+  })
+
+  return groups
+}
+
 // ---- Browse entries (registry entries NOT already installed/manageable) ----
 
 export function availableEntries(

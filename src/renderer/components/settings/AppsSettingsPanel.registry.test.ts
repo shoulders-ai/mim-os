@@ -312,9 +312,9 @@ describe('AppsSettingsPanel registry UI', () => {
     expect(root.textContent).not.toContain('GitHub Monitor (default)')
   })
 
-  // ---- Source tags ----
+  // ---- Browse groups ----
 
-  it('shows source tag per entry when more than one registry is configured', async () => {
+  it('groups Browse entries by registry with group headers', async () => {
     registrySources = [
       makeRegistry(),
       makeRegistry({ id: 'acme', kind: 'git', location: 'https://github.com/acme/registry', name: 'Acme Apps', origin: 'workspace', status: 'ok' }),
@@ -326,21 +326,57 @@ describe('AppsSettingsPanel registry UI', () => {
     mount()
     await flushUi()
 
-    const defaultTag = root.querySelector('[data-testid="registry-source-tag-github-monitor"]')
-    expect(defaultTag).toBeTruthy()
-    expect(defaultTag!.textContent).toContain('default')
+    const defaultGroup = root.querySelector('[data-testid="browse-group-default"]')
+    expect(defaultGroup).toBeTruthy()
+    expect(defaultGroup!.textContent).toContain('GitHub Monitor')
 
-    const acmeTag = root.querySelector('[data-testid="registry-source-tag-docx-review"]')
-    expect(acmeTag).toBeTruthy()
-    expect(acmeTag!.textContent).toContain('Acme Apps')
+    const acmeGroup = root.querySelector('[data-testid="browse-group-acme"]')
+    expect(acmeGroup).toBeTruthy()
+    expect(acmeGroup!.textContent).toContain('DOCX Review')
+    expect(acmeGroup!.textContent).toContain('Acme Apps')
   })
 
-  it('does NOT show source tag when only one registry exists', async () => {
+  it('orders Browse groups by origin precedence (workspace before default)', async () => {
+    registrySources = [
+      makeRegistry(),
+      makeRegistry({ id: 'acme', kind: 'git', location: 'https://github.com/acme/registry', name: 'Acme Apps', origin: 'workspace', status: 'ok' }),
+    ]
+    registryEntries = [
+      makeRegistryEntry({ registryId: 'default' }),
+      makeRegistryEntry({ id: 'docx-review', name: 'DOCX Review', registryId: 'acme' }),
+    ]
+    mount()
+    await flushUi()
+
+    const groups = root.querySelectorAll('[data-testid^="browse-group-"]')
+    expect(groups).toHaveLength(2)
+    expect(groups[0].getAttribute('data-testid')).toBe('browse-group-acme')
+    expect(groups[1].getAttribute('data-testid')).toBe('browse-group-default')
+  })
+
+  it('shows group header even with single registry', async () => {
     registrySources = [makeRegistry()]
     registryEntries = [makeRegistryEntry()]
     mount()
     await flushUi()
 
+    const group = root.querySelector('[data-testid="browse-group-default"]')
+    expect(group).toBeTruthy()
+  })
+
+  it('does not render per-entry source tags', async () => {
+    registrySources = [
+      makeRegistry(),
+      makeRegistry({ id: 'acme', kind: 'git', location: 'https://github.com/acme/registry', name: 'Acme Apps', origin: 'workspace', status: 'ok' }),
+    ]
+    registryEntries = [
+      makeRegistryEntry({ registryId: 'default' }),
+      makeRegistryEntry({ id: 'docx-review', name: 'DOCX Review', registryId: 'acme' }),
+    ]
+    mount()
+    await flushUi()
+
     expect(root.querySelector('[data-testid="registry-source-tag-github-monitor"]')).toBeNull()
+    expect(root.querySelector('[data-testid="registry-source-tag-docx-review"]')).toBeNull()
   })
 })

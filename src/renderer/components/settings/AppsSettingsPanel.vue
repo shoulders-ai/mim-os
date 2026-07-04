@@ -12,9 +12,9 @@ import type {
 import {
   availableEntries,
   filterByText,
+  groupEntriesByRegistry,
   isManageableApp,
   nonOkRegistries as getNonOkRegistries,
-  registryDisplayName,
   registryEntryAction,
   visibleEntries,
 } from '../apps/appsSurfaceLogic.js'
@@ -207,7 +207,10 @@ const availableRegistryEntries = computed(() =>
   availableEntries(visibleEntries(registryEntries.value), inWorkspaceIds.value),
 )
 
-const multipleRegistries = computed(() => registries.value.length > 1)
+const browseGroups = computed(() =>
+  groupEntriesByRegistry(availableRegistryEntries.value, registries.value),
+)
+
 const nonOkRegistries = computed(() => getNonOkRegistries(registries.value))
 const machineSources = computed(() => registries.value.filter(r => r.origin === 'machine'))
 const confirmingAddEntry = computed(() =>
@@ -963,31 +966,7 @@ watch(inWorkspaceRows, (rows) => {
           </button>
         </div>
 
-        <div
-          v-for="src in machineSources"
-          :key="`machine-${src.id}`"
-          :data-testid="`app-source-${src.id}`"
-          class="mb-1.5 flex min-h-8 items-center justify-between gap-2 rounded-[6px] bg-chrome-high px-2.5 py-1.5"
-        >
-          <span class="min-w-0">
-            <span class="block truncate text-[11.5px] font-medium text-ink-2">{{ src.name || src.id }}</span>
-            <span class="block truncate text-[10px] text-ink-3">{{ src.location }}</span>
-          </span>
-          <div class="flex shrink-0 items-center gap-1">
-            <span v-if="src.status === 'error'" class="text-[10px] text-rem">error</span>
-            <button
-              type="button"
-              :data-testid="`app-source-remove-${src.id}`"
-              class="inline-flex h-[22px] items-center gap-1 rounded-[5px] px-1.5 text-[10.5px] font-medium text-rem hover:bg-rem/5"
-              :disabled="sourceBusy === `remove:${src.id}`"
-              @click="removeAppSource(src.id)"
-            >
-              {{ confirmingSourceRemove === src.id ? 'Confirm' : 'Remove' }}
-            </button>
-          </div>
-        </div>
-
-        <template v-for="reg in nonOkRegistries" :key="`reg-${reg.id}`">
+        <template v-for="reg in nonOkRegistries.filter(r => !browseGroups.some(g => g.registryId === r.id))" :key="`orphan-reg-${reg.id}`">
           <div
             v-if="reg.status === 'needs-trust'"
             :data-testid="`registry-trust-${reg.id}`"
@@ -1015,53 +994,113 @@ watch(inWorkspaceRows, (rows) => {
           </div>
         </template>
 
-        <div class="overflow-hidden rounded-[8px] border border-rule-light bg-surface">
-          <div v-if="!availableRegistryEntries.length && !loading" class="px-3 py-4 text-center text-[10.5px] text-ink-4">
-            No available apps in registry
-          </div>
+        <div v-if="!browseGroups.length && !loading" class="px-3 py-4 text-center text-[10.5px] text-ink-4">
+          No available apps in registry
+        </div>
 
-          <div
-            v-for="entry in availableRegistryEntries"
-            :key="entry.id"
-            class="border-b border-rule-light px-3 py-2 last:border-b-0"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <div class="min-w-0">
-                <span class="flex min-w-0 items-center gap-1.5 text-[11.5px] font-medium text-ink">
-                  <span class="truncate">{{ entry.name }}</span>
-                  <span v-if="multipleRegistries" class="shrink-0 text-[9px] font-normal text-ink-4" :data-testid="`registry-source-tag-${entry.id}`">{{ registryDisplayName(registries, entry.registryId) }}</span>
-                </span>
-                <span v-if="entry.description" class="mt-0.5 block text-[10px] leading-4 text-ink-3">{{ entry.description }}</span>
+        <div
+          v-for="group in browseGroups"
+          :key="group.registryId"
+          :data-testid="`browse-group-${group.registryId}`"
+          class="mt-3 first:mt-0"
+        >
+          <div class="mb-1.5 text-[9px] font-semibold uppercase tracking-[1.8px] text-ink-3">{{ group.label }}</div>
+
+          <template v-for="src in machineSources.filter(s => s.id === group.registryId)" :key="`machine-${src.id}`">
+            <div
+              :data-testid="`app-source-${src.id}`"
+              class="mb-1.5 flex min-h-8 items-center justify-between gap-2 rounded-[6px] bg-chrome-high px-2.5 py-1.5"
+            >
+              <span class="min-w-0">
+                <span class="block truncate text-[11.5px] font-medium text-ink-2">{{ src.name || src.id }}</span>
+                <span class="block truncate text-[10px] text-ink-3">{{ src.location }}</span>
+              </span>
+              <div class="flex shrink-0 items-center gap-1">
+                <span v-if="src.status === 'error'" class="text-[10px] text-rem">error</span>
+                <button
+                  type="button"
+                  :data-testid="`app-source-remove-${src.id}`"
+                  class="inline-flex h-[22px] items-center gap-1 rounded-[5px] px-1.5 text-[10.5px] font-medium text-rem hover:bg-rem/5"
+                  :disabled="sourceBusy === `remove:${src.id}`"
+                  @click="removeAppSource(src.id)"
+                >
+                  {{ confirmingSourceRemove === src.id ? 'Confirm' : 'Remove' }}
+                </button>
               </div>
-              <div class="flex shrink-0 items-center gap-1.5">
-                <span class="font-mono text-[10px] text-ink-4">{{ entry.version }}</span>
-                <button
-                  v-if="registryEntryAction(entry) === 'add'"
-                  type="button"
-                  :data-testid="`registry-add-${entry.id}`"
-                  :class="primaryButtonClass"
-                  :disabled="registryBusy === `add:${entry.id}`"
-                  @click="toggleAddConfirm(entry)"
-                >
-                  Add
-                </button>
-                <button
-                  v-else-if="registryEntryAction(entry) === 'update'"
-                  type="button"
-                  :data-testid="`registry-update-${entry.id}`"
-                  :class="smallButtonClass"
-                  :disabled="registryBusy === `update:${entry.id}`"
-                  @click="registryUpdate(entry)"
-                >
-                  Update
-                </button>
-                <span
-                  v-else
-                  :data-testid="`registry-added-${entry.id}`"
-                  class="text-[10px] font-medium text-add"
-                >
-                  In sidebar
-                </span>
+            </div>
+          </template>
+
+          <template v-for="reg in nonOkRegistries.filter(r => r.id === group.registryId)" :key="`reg-${reg.id}`">
+            <div
+              v-if="reg.status === 'needs-trust'"
+              :data-testid="`registry-trust-${reg.id}`"
+              class="mb-1.5 flex min-h-8 items-center justify-between gap-2 rounded-[6px] bg-chrome-high px-2.5 py-1.5"
+            >
+              <span class="min-w-0">
+                <span class="block truncate text-[11.5px] font-medium text-ink-2">{{ reg.name || reg.location }}</span>
+                <span class="block text-[10px] text-ink-3">This workspace uses this registry</span>
+              </span>
+              <button type="button" :class="primaryButtonClass" :disabled="registryBusy === `trust-registry:${reg.id}`" @click="trustRegistry(reg.id)">Use this registry</button>
+            </div>
+            <div
+              v-else-if="reg.status === 'stale'"
+              :data-testid="`registry-stale-${reg.id}`"
+              class="mb-1.5 text-[10px] text-ink-3"
+            >
+              Couldn't refresh {{ reg.name || reg.id }} - showing cached entries{{ reg.error ? `: ${reg.error}` : '' }}
+            </div>
+            <div
+              v-else-if="reg.status === 'error'"
+              :data-testid="`registry-error-${reg.id}`"
+              class="mb-1.5 text-[10px] text-rem"
+            >
+              Registry {{ reg.name || reg.id }} failed{{ reg.error ? `: ${reg.error}` : '' }}
+            </div>
+          </template>
+
+          <div class="overflow-hidden rounded-[8px] border border-rule-light bg-surface">
+            <div
+              v-for="entry in group.entries"
+              :key="entry.id"
+              class="border-b border-rule-light px-3 py-2 last:border-b-0"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <span class="flex min-w-0 items-center gap-1.5 text-[11.5px] font-medium text-ink">
+                    <span class="truncate">{{ entry.name }}</span>
+                  </span>
+                  <span v-if="entry.description" class="mt-0.5 block text-[10px] leading-4 text-ink-3">{{ entry.description }}</span>
+                </div>
+                <div class="flex shrink-0 items-center gap-1.5">
+                  <span class="font-mono text-[10px] text-ink-4">{{ entry.version }}</span>
+                  <button
+                    v-if="registryEntryAction(entry) === 'add'"
+                    type="button"
+                    :data-testid="`registry-add-${entry.id}`"
+                    :class="primaryButtonClass"
+                    :disabled="registryBusy === `add:${entry.id}`"
+                    @click="toggleAddConfirm(entry)"
+                  >
+                    Add
+                  </button>
+                  <button
+                    v-else-if="registryEntryAction(entry) === 'update'"
+                    type="button"
+                    :data-testid="`registry-update-${entry.id}`"
+                    :class="smallButtonClass"
+                    :disabled="registryBusy === `update:${entry.id}`"
+                    @click="registryUpdate(entry)"
+                  >
+                    Update
+                  </button>
+                  <span
+                    v-else
+                    :data-testid="`registry-added-${entry.id}`"
+                    class="text-[10px] font-medium text-add"
+                  >
+                    In sidebar
+                  </span>
+                </div>
               </div>
             </div>
           </div>

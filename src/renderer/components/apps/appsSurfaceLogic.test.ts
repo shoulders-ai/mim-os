@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   availableEntries,
   filterByText,
+  groupEntriesByRegistry,
   hasUpdate,
   isManageableApp,
   nonOkRegistries,
@@ -224,5 +225,117 @@ describe('hasUpdate', () => {
 
   it('returns false when no update', () => {
     expect(hasUpdate(updates, 'board')).toBe(false)
+  })
+})
+
+// ---- groupEntriesByRegistry ----
+
+describe('groupEntriesByRegistry', () => {
+  it('groups entries by registryId', () => {
+    const regs = [
+      makeRegistry({ id: 'default', origin: 'default' }),
+      makeRegistry({ id: 'acme', origin: 'workspace' }),
+    ]
+    const entries = [
+      makeEntry({ id: 'a', registryId: 'default' }),
+      makeEntry({ id: 'b', registryId: 'acme' }),
+      makeEntry({ id: 'c', registryId: 'default' }),
+    ]
+    const groups = groupEntriesByRegistry(entries, regs)
+    expect(groups).toHaveLength(2)
+    const defaultGroup = groups.find(g => g.registryId === 'default')!
+    const acmeGroup = groups.find(g => g.registryId === 'acme')!
+    expect(defaultGroup.entries.map(e => e.id)).toEqual(['a', 'c'])
+    expect(acmeGroup.entries.map(e => e.id)).toEqual(['b'])
+  })
+
+  it('orders groups by origin precedence (workspace > machine > account > user > default)', () => {
+    const regs = [
+      makeRegistry({ id: 'default', origin: 'default' }),
+      makeRegistry({ id: 'acme', origin: 'workspace' }),
+      makeRegistry({ id: 'account', origin: 'account' }),
+    ]
+    const entries = [
+      makeEntry({ id: 'a', registryId: 'default' }),
+      makeEntry({ id: 'b', registryId: 'acme' }),
+      makeEntry({ id: 'c', registryId: 'account' }),
+    ]
+    const groups = groupEntriesByRegistry(entries, regs)
+    expect(groups.map(g => g.registryId)).toEqual(['acme', 'account', 'default'])
+  })
+
+  it('uses registry display name for group labels', () => {
+    const regs = [
+      makeRegistry({ id: 'acme', origin: 'workspace', name: 'Acme Apps' }),
+    ]
+    const entries = [makeEntry({ id: 'a', registryId: 'acme' })]
+    const groups = groupEntriesByRegistry(entries, regs)
+    expect(groups[0].label).toBe('Acme Apps')
+  })
+
+  it('falls back to registryId when no name', () => {
+    const regs = [makeRegistry({ id: 'default', origin: 'default' })]
+    const entries = [makeEntry({ id: 'a', registryId: 'default' })]
+    const groups = groupEntriesByRegistry(entries, regs)
+    expect(groups[0].label).toBe('default')
+  })
+
+  it('omits groups with zero entries', () => {
+    const regs = [
+      makeRegistry({ id: 'default', origin: 'default' }),
+      makeRegistry({ id: 'acme', origin: 'workspace' }),
+    ]
+    const entries = [makeEntry({ id: 'a', registryId: 'default' })]
+    const groups = groupEntriesByRegistry(entries, regs)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].registryId).toBe('default')
+  })
+
+  it('handles entries with unknown registryId by sorting them last', () => {
+    const regs = [makeRegistry({ id: 'default', origin: 'default' })]
+    const entries = [
+      makeEntry({ id: 'a', registryId: 'default' }),
+      makeEntry({ id: 'b', registryId: 'gone' }),
+    ]
+    const groups = groupEntriesByRegistry(entries, regs)
+    expect(groups).toHaveLength(2)
+    expect(groups[0].registryId).toBe('default')
+    expect(groups[1].registryId).toBe('gone')
+    expect(groups[1].label).toBe('gone')
+  })
+
+  it('preserves entry order within groups', () => {
+    const regs = [makeRegistry({ id: 'default', origin: 'default' })]
+    const entries = [
+      makeEntry({ id: 'z', registryId: 'default' }),
+      makeEntry({ id: 'a', registryId: 'default' }),
+      makeEntry({ id: 'm', registryId: 'default' }),
+    ]
+    const groups = groupEntriesByRegistry(entries, regs)
+    expect(groups[0].entries.map(e => e.id)).toEqual(['z', 'a', 'm'])
+  })
+
+  it('single registry produces one group', () => {
+    const regs = [makeRegistry({ id: 'default', origin: 'default' })]
+    const entries = [
+      makeEntry({ id: 'a', registryId: 'default' }),
+      makeEntry({ id: 'b', registryId: 'default' }),
+    ]
+    const groups = groupEntriesByRegistry(entries, regs)
+    expect(groups).toHaveLength(1)
+    expect(groups[0].entries).toHaveLength(2)
+  })
+
+  it('preserves registries array order for same-origin registries', () => {
+    const regs = [
+      makeRegistry({ id: 'team-a', origin: 'workspace' }),
+      makeRegistry({ id: 'team-b', origin: 'workspace' }),
+    ]
+    const entries = [
+      makeEntry({ id: 'x', registryId: 'team-b' }),
+      makeEntry({ id: 'y', registryId: 'team-a' }),
+    ]
+    const groups = groupEntriesByRegistry(entries, regs)
+    expect(groups.map(g => g.registryId)).toEqual(['team-a', 'team-b'])
   })
 })
