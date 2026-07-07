@@ -35,10 +35,21 @@ export interface PackageToolDescriptor {
   execute: (ctx: PackageRuntimeContext, input: Record<string, unknown>) => Promise<unknown> | unknown
 }
 
+export interface PackageAgentDescriptor {
+  key: string
+  name: string
+  icon?: string
+  model?: string
+  tools?: string[]
+  skills?: string[]
+  instructions: (ctx: unknown) => Promise<unknown> | unknown
+}
+
 export interface PackageCapabilities {
   packageId: string
   jobs: PackageJobDescriptor[]
   tools: PackageToolDescriptor[]
+  agents: PackageAgentDescriptor[]
   agentContext?: (ctx: PackageRuntimeContext) => Promise<unknown> | unknown
   diagnostics: string[]
 }
@@ -178,6 +189,7 @@ interface CreatePackageContextOptions {
 interface RawBackendModule {
   jobs?: Record<string, unknown>
   tools?: Record<string, unknown>
+  agents?: unknown
   agentContext?: unknown
 }
 
@@ -196,10 +208,10 @@ export function createPackageRuntime(options: PackageRuntimeOptions): PackageRun
     const pkg = options.packages.get(packageId)
     if (!pkg) throw new Error(`Package not found: ${packageId}`)
     if (!options.enablement.isEnabled(pkg)) {
-      return { packageId, jobs: [], tools: [], diagnostics: [`Package is disabled: ${packageId}`] }
+      return { packageId, jobs: [], tools: [], agents: [], diagnostics: [`Package is disabled: ${packageId}`] }
     }
     if (!pkg.manifest.backend) {
-      return { packageId, jobs: [], tools: [], diagnostics: [] }
+      return { packageId, jobs: [], tools: [], agents: [], diagnostics: [] }
     }
     if (!cache.has(packageId)) {
       cache.set(packageId, importCapabilities(pkg))
@@ -211,7 +223,7 @@ export function createPackageRuntime(options: PackageRuntimeOptions): PackageRun
     const diagnostics: string[] = []
     const backendPath = resolveInsidePackage(pkg.dir, pkg.manifest.backend!)
     if (!backendPath) {
-      return { packageId: pkg.manifest.id, jobs: [], tools: [], diagnostics: ['Backend path escapes package directory'] }
+      return { packageId: pkg.manifest.id, jobs: [], tools: [], agents: [], diagnostics: ['Backend path escapes package directory'] }
     }
 
     let mod: RawBackendModule
@@ -222,15 +234,17 @@ export function createPackageRuntime(options: PackageRuntimeOptions): PackageRun
         packageId: pkg.manifest.id,
         jobs: [],
         tools: [],
+        agents: [],
         diagnostics: [`Failed to import backend: ${(err as Error).message}`],
       }
     }
 
     const jobs = parseJobs(pkg, mod.jobs, diagnostics)
     const tools = parseTools(pkg, mod.tools, diagnostics)
+    const agents = parseAgents(pkg, mod.agents, diagnostics)
     const agentContext = parseAgentContext(mod.agentContext, diagnostics)
 
-    return { packageId: pkg.manifest.id, jobs, tools, agentContext, diagnostics }
+    return { packageId: pkg.manifest.id, jobs, tools, agents, agentContext, diagnostics }
   }
 
   async function listCapabilities(): Promise<PackageCapabilities[]> {
@@ -425,6 +439,103 @@ function parseAgentContext(
   }
   diagnostics.push('backend export "agentContext" must be a function')
   return undefined
+}
+
+function parseAgents(pkg: LoadedPackage, raw: unknown, diagnostics: string[]): PackageAgentDescriptor[] {
+  if (raw == null) return []
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    diagnostics.push('backend export "agents" must be an object')
+    return []
+  }
+
+  const agents: PackageAgentDescriptor[] = []
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isValidCapabilityId(key)) {
+      diagnostics.push(`Invalid agent key: ${key}`)
+      continue
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      diagnostics.push(`Agent ${key} must be an object`)
+      continue
+    }
+    const agent = value as Record<string, unknown>
+    if (typeof agent.instructions !== 'function') {
+      diagnostics.push(`Agent ${key} must export instructions(ctx)`)
+      continue
+    }
+
+    let name = key
+    if ('name' in agent) {
+      if (typeof agent.name === 'string') {
+        name = agent.name
+      } else {
+        diagnostics.push(`Agent ${key}: name must be a string`)
+      }
+    }
+
+    let icon: string | undefined
+    if ('icon' in agent) {
+      if (typeof agent.icon === 'string') {
+        icon = agent.icon
+      } else {
+        diagnostics.push(`Agent ${key}: icon must be a string`)
+      }
+    }
+
+    let model: string | undefined
+    if ('model' in agent) {
+      if (typeof agent.model === 'string') {
+        model = agent.model
+      } else {
+        diagnostics.push(`Agent ${key}: model must be a string`)
+      }
+    }
+
+    let tools: string[] | undefined
+    if ('tools' in agent) {
+      if (Array.isArray(agent.tools)) {
+        const filtered: string[] = []
+        for (const entry of agent.tools) {
+          if (typeof entry === 'string') {
+            filtered.push(entry)
+          } else {
+            diagnostics.push(`Agent ${key}: tools entries must be strings`)
+          }
+        }
+        tools = filtered
+      } else {
+        diagnostics.push(`Agent ${key}: tools must be an array of strings`)
+      }
+    }
+
+    let skills: string[] | undefined
+    if ('skills' in agent) {
+      if (Array.isArray(agent.skills)) {
+        const filtered: string[] = []
+        for (const entry of agent.skills) {
+          if (typeof entry === 'string') {
+            filtered.push(entry)
+          } else {
+            diagnostics.push(`Agent ${key}: skills entries must be strings`)
+          }
+        }
+        skills = filtered
+      } else {
+        diagnostics.push(`Agent ${key}: skills must be an array of strings`)
+      }
+    }
+
+    agents.push({
+      key,
+      name,
+      ...(icon !== undefined ? { icon } : {}),
+      ...(model !== undefined ? { model } : {}),
+      ...(tools !== undefined ? { tools } : {}),
+      ...(skills !== undefined ? { skills } : {}),
+      instructions: agent.instructions as PackageAgentDescriptor['instructions'],
+    })
+  }
+  return agents
 }
 
 function createRuntimeContext(options: PackageRuntimeOptions, contextOptions: CreatePackageContextOptions): PackageRuntimeContext {

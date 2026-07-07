@@ -26,6 +26,7 @@ export interface WorkSurfaceActionsDeps {
   openWorkEntry(entry: WorkEntry, options?: OpenWorkEntryOptions): Promise<unknown> | unknown
   incrementFilesRefresh(): void
   incrementArchiveRefresh(): void
+  visibleSessions?(): Array<{ id: string; agentId?: string }>
 }
 
 export function createWorkSurfaceActions(deps: WorkSurfaceActionsDeps) {
@@ -33,8 +34,8 @@ export function createWorkSurfaceActions(deps: WorkSurfaceActionsDeps) {
     return chatWorkEntry(sessionId, deps.sessionLabel(sessionId) ?? 'Chat')
   }
 
-  async function openDraftChatWork() {
-    await deps.openWorkEntry(chatDraftWorkEntry())
+  async function openDraftChatWork(options?: { agentId?: string }) {
+    await deps.openWorkEntry(chatDraftWorkEntry(options?.agentId ? { agentId: options.agentId } : undefined))
   }
 
   async function openChatWork(sessionId: string) {
@@ -85,6 +86,19 @@ export function createWorkSurfaceActions(deps: WorkSurfaceActionsDeps) {
     await deps.openWorkEntry(packageViewWorkEntry(packageId, view.label || pkg.manifest.name, view.id))
   }
 
+  async function openAgentChatOrDraft(agentId: string, agentName: string) {
+    // Find the most recent non-archived session with the matching agentId.
+    // visibleSessions is sorted by the store so the first match is the most
+    // recently active.
+    const sessions = deps.visibleSessions?.() ?? []
+    const existing = sessions.find(s => s.agentId === agentId)
+    if (existing) {
+      await openChatWork(existing.id)
+      return
+    }
+    await deps.openWorkEntry(chatDraftWorkEntry({ agentId, title: agentName }))
+  }
+
   return {
     sessionWorkEntry,
     openDraftChatWork,
@@ -96,5 +110,6 @@ export function createWorkSurfaceActions(deps: WorkSurfaceActionsDeps) {
     openFilesWorkPreservingArtifact,
     openArchiveWork,
     openPackageViewWork,
+    openAgentChatOrDraft,
   }
 }

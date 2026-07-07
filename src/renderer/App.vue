@@ -43,6 +43,7 @@ import {
   type PackageRunRecord,
 } from './stores/runs.js'
 import { useAgentsStore } from './stores/agents.js'
+import { useAppAgentsStore } from './stores/appAgents.js'
 import {
   routeWorkbenchCommand,
   type WorkbenchCommand,
@@ -109,6 +110,7 @@ const settingsStore = useSettingsStore()
 const workbenchStore = useWorkbenchStore()
 const runsStore = useRunsStore()
 const agentsStore = useAgentsStore()
+const appAgentsStore = useAppAgentsStore()
 const appsStore = useAppsStore()
 const approvalsStore = useApprovalsStore()
 const diffStore = useDiffStore()
@@ -385,8 +387,10 @@ const workSurfaceActions = createWorkSurfaceActions({
   openWorkEntry,
   incrementFilesRefresh: () => { filesRefreshKey.value += 1 },
   incrementArchiveRefresh: () => { archiveRefreshKey.value += 1 },
+  visibleSessions: () => sessionStore.visibleSessions,
 })
 const openDraftChatWork = workSurfaceActions.openDraftChatWork
+const openAgentChatOrDraft = workSurfaceActions.openAgentChatOrDraft
 const openChatWork = workSurfaceActions.openChatWork
 const openTerminalWork = workSurfaceActions.openTerminalWork
 const openFilesWork = workSurfaceActions.openFilesWork
@@ -428,6 +432,12 @@ async function archivePackageRun(packageId: string, runId: string) {
 
 async function deletePackageRun(packageId: string, runId: string) {
   await runActions.deletePackageRun(packageId, runId)
+}
+
+async function selectPackageAgent(agentId: string) {
+  const mount = appAgentsStore.byId(agentId)
+  const name = mount?.name ?? agentId
+  await openAgentChatOrDraft(agentId, name)
 }
 
 async function launchAgentSession(agentId: string) {
@@ -1076,6 +1086,7 @@ const appLifecycleActions = createAppLifecycleActions({
   refreshAgentSessions,
   refreshApps: () => appsStore.refresh(),
   refreshAgents: () => agentsStore.refresh(),
+  refreshAppAgents: () => appAgentsStore.refresh(),
   restoreInitialWork,
   loadFileIndex: () => fileIndex.load(),
   welcomeDismissed: () => !!localStorage.getItem(WELCOME_KEY),
@@ -1096,6 +1107,7 @@ onMounted(async () => {
   unregisterKernelEvents = registerAppKernelEvents(window.kernel, {
     setPackages: pkgs => { packages.value = pkgs },
     refreshApps: () => appsStore.refresh(),
+    refreshAppAgents: () => appAgentsStore.refresh(),
     handleWorkspaceChanged,
     setAppUpdates: updates => appsStore.setUpdates(updates),
     refreshKeyStatuses: () => settingsStore.refreshKeyStatuses(),
@@ -1157,6 +1169,7 @@ onBeforeUnmount(() => {
           @archive-package-run="archivePackageRun"
           @delete-package-run="deletePackageRun"
           @launch-agent="launchAgentSession"
+          @select-package-agent="selectPackageAgent"
           @select-agent-session="openAgentSessionWork"
           @archive-agent-session="archiveAgentSession"
           @delete-agent-session="deleteAgentSession"
@@ -1397,6 +1410,7 @@ onBeforeUnmount(() => {
         v-if="paletteOpen"
         :files="fileIndex.files.value.map(f => ({ path: f.path, name: f.name }))"
         :sessions="sessionStore.visibleSessions.map(s => ({ id: s.id, label: s.label }))"
+        :agents="appAgentsStore.agents.map(a => ({ id: a.id, name: a.name }))"
         :has-active-editor-tab="paletteEditorTabActive"
         @select="handlePaletteSelect"
         @close="paletteOpen = false"

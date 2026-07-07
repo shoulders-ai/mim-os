@@ -578,6 +578,98 @@ Return a string (section titled with the app name) or `{ title, body }`.
 Budgets are enforced by core: title 80 chars, body 1,500 chars, at most 8
 sections across all apps, 3-second total timeout. Errors skip the section.
 
+### Agents
+
+A backend may export an `agents` object to mount specialised agents. Each key
+becomes an agent scoped to the app's identity (`package:<packageId>/<key>`).
+
+```js
+export const agents = {
+  referee: {
+    name: 'Lancet Referee',
+    icon: 'LR',
+    model: 'claude-opus-4-8',
+    tools: ['fs.read', 'search.files', 'stats.check'],
+    skills: ['review-methods'],
+    async instructions(ctx) {
+      const prior = await ctx.data.collection('reviews').list()
+      return `You are a statistics referee... {{WORKSPACE_TREE}}`
+    }
+  }
+}
+```
+
+Agent id format: `package:<packageId>/<key>`.
+
+Descriptor fields:
+
+| Field | Required | Notes |
+|---|---:|---|
+| `instructions(ctx)` | Yes | Returns the system prompt string. See instructions context below. |
+| `name` | No | Defaults to the object key. Sidebar label and session identity. |
+| `icon` | No | Short text token, same rules as app icons. |
+| `model` | No | Default model id. The user's model picker still wins. |
+| `tools` | No | Canonical tool id allowlist. Present means scoped; absent means full chat tools. |
+| `skills` | No | App skill names (not qualified ids) pre-activated each turn. |
+
+Shape validation happens at parse time (`packageRuntime.ts`); semantic
+validation (tool id resolution, model lookup, skill existence) happens at mount
+time in `agentMounts.ts`.
+
+#### Instructions context
+
+`instructions(ctx)` receives a constrained `AgentInstructionsContext`, not the
+full app runtime ctx. It is a read hook, not an execution hook.
+
+| `ctx` field | Shape |
+|---|---|
+| `ctx.package` | `{ id, name, version, source }` |
+| `ctx.data.kv` | `get(key)`, `keys()` — read-only |
+| `ctx.data.collection(name)` | `get(id)`, `list()` — read-only |
+| `ctx.files.readPackageText(path)` | Reads files inside the app directory |
+| `ctx.abort` | `{ signal, aborted, throwIfAborted() }` |
+
+Not available: `tools.call`, `http`, `secrets`, `ai`, workspace reads, writes.
+
+The function runs under a 3-second budget (same as `agentContext`) and is
+audited as an `agent.instructions` span under the turn trace. Failure or
+timeout fails the turn with an error naming the app and agent — no silent
+fallback prompt.
+
+The returned string passes through `resolveTemplateVars` with the same
+variables as `AGENTS.md` (`{{TOOL_SET}}`, `{{WORKSPACE_TREE}}`,
+`{{SKILL_CATALOG}}`, `{{PROJECT_LOG}}`, etc.). The rule for richer context:
+**compute at action time, read at prompt time** — the app's tools and jobs
+(which run with full ctx, permissions, and audit) persist state into
+`ctx.data`; `instructions` reads it back.
+
+#### Tool allowlist
+
+`tools` narrows: the visible set is the allowlist intersected with the
+Settings > Tools policy. Omitted means the full chat tool set. The `skill`
+activation tool is always present when the agent has skills; skill `unlocks`
+gating still applies within the allowlist.
+
+Entries must be canonical registry tool ids (core dotted names or the app's
+own granted named tools). Unknown ids are load-time diagnostics, not silent
+no-ops. An allowlisted tool that is missing at runtime (e.g. a disabled
+dependency app) is a diagnostic and omitted. An agent can never see a tool
+the user's policy disabled.
+
+Settings > Apps shows the scope: "Full chat tools" vs "Scoped: N tools".
+
+#### Trust
+
+Agents are backend exports, and backends already require the workspace trust
+ack — an installed prompt steers the AI as surely as code. App-mounted agents
+run as actor `ai` through the normal permission gate. Agent sessions are
+ordinary chat sessions carrying the app's identity.
+
+#### Sessions
+
+Agents run in the native chat surface. Sessions carry the agent id and show
+the agent name and icon. History shows the app name, not "agent session".
+
 ### Skills
 
 Backend modules do not export skills. App skills are filesystem skills:

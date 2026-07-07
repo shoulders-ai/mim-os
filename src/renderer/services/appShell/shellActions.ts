@@ -2,7 +2,7 @@ import type { SettingsSection } from '../../components/settings/sections.js'
 import type { ShellAction } from './routing.js'
 
 export interface ShellActionDeps {
-  openDraftChatWork(): Promise<unknown> | unknown
+  openDraftChatWork(options?: { agentId?: string }): Promise<unknown> | unknown
   openFilesWork(): Promise<unknown> | unknown
   openActivityTrustWork(): Promise<unknown> | unknown
   openTerminalWork(): Promise<unknown> | unknown
@@ -21,7 +21,7 @@ export interface ShellActionDeps {
 export async function runShellAction(action: ShellAction, deps: ShellActionDeps): Promise<void> {
   switch (action.type) {
     case 'open-draft-chat':
-      await deps.openDraftChatWork()
+      await deps.openDraftChatWork(action.agentId ? { agentId: action.agentId } : undefined)
       break
     case 'open-files':
       await deps.openFilesWork()

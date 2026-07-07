@@ -5,6 +5,7 @@ import {
   rankPaletteItems,
   coreActions,
   coreSurfaces,
+  agentActions,
   type PaletteItem,
   type RankedPaletteItem,
 } from '../services/commandPalette.js'
@@ -12,6 +13,7 @@ import {
 const props = defineProps<{
   files: Array<{ path: string; name: string }>
   sessions: Array<{ id: string; label: string }>
+  agents?: Array<{ id: string; name: string }>
   hasActiveEditorTab?: boolean
 }>()
 
@@ -30,6 +32,7 @@ const allItems = computed<PaletteItem[]>(() => {
   const items: PaletteItem[] = [
     ...coreSurfaces(),
     ...coreActions(undefined, { hasActiveEditorTab: props.hasActiveEditorTab }),
+    ...agentActions(props.agents ?? []),
   ]
   for (const session of props.sessions) {
     items.push({

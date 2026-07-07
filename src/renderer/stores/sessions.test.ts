@@ -493,4 +493,67 @@ describe('renderer session store', () => {
     expect(store.sessions.find(s => s.id === 'b')?.sortOrder).toBeUndefined()
     expect(call).toHaveBeenCalledWith('session.reorder', { ids: ['c', 'a'] })
   })
+
+  it('create() passes agentId to session.create when provided', async () => {
+    const call = stubKernel((tool, params) => {
+      if (tool === 'session.create') {
+        return makeSession({
+          id: 'agent-session',
+          label: String(params?.label),
+          modelId: String(params?.modelId),
+          agentId: params?.agentId as string,
+        })
+      }
+      if (tool === 'session.reorder') return { ok: true }
+      throw new Error(`Unexpected tool: ${tool}`)
+    })
+    const store = useSessionStore()
+    store.sessions = [makeSession({ id: 'existing', messages: [{ id: 'm1', role: 'user', content: 'hi' }] })]
+
+    const result = await store.create('model-x', { agentId: 'package:research/default' })
+
+    expect(call).toHaveBeenCalledWith('session.create', {
+      label: 'New task',
+      modelId: 'model-x',
+      agentId: 'package:research/default',
+    })
+    expect(result.agentId).toBe('package:research/default')
+  })
+
+  it('create() reuses an empty session only when agentId matches', async () => {
+    const call = stubKernel((tool, params) => {
+      if (tool === 'session.create') {
+        return makeSession({
+          id: 'created',
+          label: String(params?.label),
+          agentId: params?.agentId as string | undefined,
+        })
+      }
+      if (tool === 'session.reorder') return { ok: true }
+      throw new Error(`Unexpected tool: ${tool}`)
+    })
+    const store = useSessionStore()
+    store.sessions = [
+      makeSession({ id: 'empty-plain', messages: [] }),
+      makeSession({ id: 'empty-agent', messages: [], agentId: 'package:research/default' }),
+    ]
+
+    // Requesting an agent session must NOT reuse the plain empty session
+    const agentResult = await store.create('', { agentId: 'package:research/default' })
+    expect(agentResult.id).toBe('empty-agent')
+    expect(call).not.toHaveBeenCalledWith('session.create', expect.anything())
+  })
+
+  it('create() does not reuse an agent session when no agentId requested', async () => {
+    const call = stubKernel()
+    const store = useSessionStore()
+    store.sessions = [
+      makeSession({ id: 'empty-agent', messages: [], agentId: 'package:research/default' }),
+    ]
+
+    // Plain create should not reuse an agent-bound empty session
+    const result = await store.create('')
+    // No plain empty session exists, so it creates a new one
+    expect(result.id).not.toBe('empty-agent')
+  })
 })

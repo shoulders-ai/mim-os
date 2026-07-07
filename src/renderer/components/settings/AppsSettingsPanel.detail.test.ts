@@ -60,6 +60,7 @@ describe('AppsSettingsPanel detail expansion', () => {
             packageId: 'runtime-demo',
             jobs: [{ id: 'inspectWorkspace', label: 'Inspect workspace' }],
             tools: [{ id: 'summarize', name: 'pkg_runtime__summarizeWorkspace', label: 'Summarize workspace' }],
+            agents: [{ key: 'reviewer', name: 'Code Reviewer', scoped: true, toolCount: 3 }],
             skills: [{ id: 'runtime-skill', label: 'Runtime skill' }],
             diagnostics: capabilityDiagnostics,
           }],
@@ -189,6 +190,8 @@ describe('AppsSettingsPanel detail expansion', () => {
     expect(root.textContent).not.toContain('Inspect workspace')
     expect(root.textContent).not.toContain('Tools')
     expect(root.textContent).not.toContain('Summarize workspace')
+    expect(root.textContent).not.toContain('Provides an agent')
+    expect(root.textContent).not.toContain('Code Reviewer')
     expect(root.textContent).not.toContain('Teaches the agent')
     expect(root.textContent).not.toContain('Runtime skill')
 
@@ -200,6 +203,9 @@ describe('AppsSettingsPanel detail expansion', () => {
     expect(root.textContent).toContain('Inspect workspace')
     expect(root.textContent).toContain('Tools')
     expect(root.textContent).toContain('Summarize workspace')
+    expect(root.textContent).toContain('Provides an agent')
+    expect(root.textContent).toContain('Code Reviewer')
+    expect(root.textContent).toContain('Scoped: 3 tools')
     expect(root.textContent).toContain('Teaches the agent')
     expect(root.textContent).toContain('Runtime skill')
   })

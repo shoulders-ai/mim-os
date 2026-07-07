@@ -9,6 +9,7 @@ import {
 import { useSessionStore } from '../../stores/sessions.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useApprovalsStore } from '../../stores/approvals.js'
+import { useAppAgentsStore } from '../../stores/appAgents.js'
 import { controlForModel, resolveConcreteModel, modelMenuItems } from '../../services/ai/modelControls.js'
 import { chatErrorActions, readableError } from './chatErrorActions.js'
 import { isTextType, mediaTypeFromFilename, toUserMessageParts } from '../../services/attachments.js'
@@ -23,15 +24,18 @@ import { useToastStore } from '../../stores/toasts.js'
 import { useChatEngines } from './useChatEngines.js'
 import { withLastAssistantTurnElapsed } from './assistantTurn.js'
 import { requestSummary, lastUserMessageText, buildSeedMessage } from '../../services/ai/summary.js'
+import { aiApiBase, aiFetch } from '../../services/ai/aiApi.js'
 
 const sessionStore = useSessionStore()
 const settingsStore = useSettingsStore()
 const approvalsStore = useApprovalsStore()
+const appAgentsStore = useAppAgentsStore()
 const toastStore = useToastStore()
 const NEW_CHAT_DRAFT_ID = '__new_chat_draft__'
 const props = defineProps({
   sessionId: { type: String, default: null },
   draft: { type: Boolean, default: false },
+  agentId: { type: String, default: undefined },
 })
 const emit = defineEmits(['openFile', 'archiveSession', 'sessionCreated', 'reviewApproval', 'openSettings'])
 
@@ -46,7 +50,6 @@ const projectFiles = ref([])
 const composerSkills = ref([])
 const packageTools = ref([])
 const currentDocumentSummary = ref(null)
-let aiBaseUrlPromise = null
 let unsubscribeCurrentDocument = null
 // Track sessions that hit the 25-step cap so we can show a Continue button.
 const stepCapHitSessionIds = new Set()
@@ -106,6 +109,10 @@ const session = computed(() =>
     ? sessionStore.sessions.find(s => s.id === activeSessionId.value) ?? null
     : null
 )
+
+// The effective agent: a persisted session's agentId takes precedence over the
+// draft-time prop (once a session is created, the record is the source of truth).
+const effectiveAgentId = computed(() => session.value?.agentId ?? props.agentId ?? undefined)
 
 const activeDraftId = computed(() =>
   props.draft ? NEW_CHAT_DRAFT_ID : (session.value?.id ?? null)
@@ -167,7 +174,7 @@ const selectableModels = computed(() =>
 )
 
 const currentModelId = computed(() => {
-  return session.value?.modelId || settingsStore.lastChatModel || ''
+  return session.value?.modelId || appAgentsStore.byId(effectiveAgentId.value ?? '')?.model || settingsStore.lastChatModel || ''
 })
 
 const concreteModel = computed(() =>
@@ -243,13 +250,6 @@ const canMarkDone = computed(() => {
   const kind = sessionStore.sessionStatusKind(s)
   return kind !== 'ready' && kind !== 'working'
 })
-
-async function aiApi(path) {
-  if (!aiBaseUrlPromise) {
-    aiBaseUrlPromise = window.kernel.getPort().then(port => `http://127.0.0.1:${port}`)
-  }
-  return `${await aiBaseUrlPromise}${path}`
-}
 
 // --- Scroll management ---
 
@@ -352,7 +352,8 @@ watch(activeDraftId, (newId, oldId) => {
 // hydrate-before-construct ordering are handled by useChatEngines; this factory
 // only builds the engine from already-loaded messages.
 async function buildChatEngine(sessionId, initialMessages, sess) {
-  const api = await aiApi('/api/ai/chat')
+  const base = await aiApiBase()
+  const api = `${base}/api/ai/chat`
 
   const chat = new Chat({
     id: sessionId,
@@ -363,7 +364,7 @@ async function buildChatEngine(sessionId, initialMessages, sess) {
         const started = performance.now()
         logChatAi('debug', 'request:start', { sessionId, api: String(input) })
         try {
-          const response = await fetch(input, init)
+          const response = await aiFetch(input, init)
           const durationMs = Math.round(performance.now() - started)
           if (!response.ok) {
             const body = await response.clone().text().catch(() => '')
@@ -391,7 +392,9 @@ async function buildChatEngine(sessionId, initialMessages, sess) {
       },
       prepareSendMessagesRequest: ({ id, messages, trigger, messageId, body }) => {
         const currentSession = sessionStore.sessions.find(s => s.id === sessionId) || sess
-        const model = resolveConcreteModel(registry.value, settingsStore.keyStatuses, currentSession.modelId || settingsStore.lastChatModel, 'chat')
+        const resolvedAgentId = currentSession.agentId || effectiveAgentId.value
+        const agentModel = resolvedAgentId ? appAgentsStore.byId(resolvedAgentId)?.model : undefined
+        const model = resolveConcreteModel(registry.value, settingsStore.keyStatuses, currentSession.modelId || agentModel || settingsStore.lastChatModel, 'chat')
         if (!model) throw new Error('No AI model available. Check your API keys in Settings.')
         const selectedControl = controlForModel(model, currentSession.controlId)
         return {
@@ -402,6 +405,7 @@ async function buildChatEngine(sessionId, initialMessages, sess) {
             messageId,
             modelId: model.id,
             controlId: currentSession.controlId || selectedControl.id,
+            ...(resolvedAgentId ? { agentId: resolvedAgentId } : {}),
             ...(Array.isArray(body?.skills) && body.skills.length ? { skills: body.skills } : {}),
           },
         }
@@ -559,7 +563,7 @@ defineExpose({ sendExternalMessage, prepareDraft })
 async function maybeGenerateTaskLabel({ sessionId, shouldRequest, text, contextLabels, replaceableLabel }) {
   if (!shouldRequest) return
   try {
-    const label = await requestTaskLabel(await aiApi(''), {
+    const label = await requestTaskLabel({
       userText: text,
       contextLabels,
     })
@@ -590,7 +594,10 @@ async function ensureTargetSession() {
     : null
 
   if (!sessionId || !sess) {
-    sess = await sessionStore.create(currentModelId.value, { reuseEmpty: false })
+    sess = await sessionStore.create(currentModelId.value, {
+      reuseEmpty: false,
+      ...(effectiveAgentId.value ? { agentId: effectiveAgentId.value } : {}),
+    })
     sessionId = sess.id
     created = true
     emit('sessionCreated', sessionId)
@@ -730,16 +737,18 @@ async function handleStartFresh() {
     const currentChips = composerRef.value?.contextChips ?? []
     let summary = ''
     try {
-      const baseUrl = await aiApi('')
-      summary = await requestSummary(baseUrl, { messages: currentMessages })
+      summary = await requestSummary({ messages: currentMessages })
     } catch {
       // summary generation failed; fall back to last user message
     }
     const fallback = lastUserMessageText(currentMessages)
     const seedText = buildSeedMessage(summary, fallback)
 
-    // Create a new session
-    const newSession = await sessionStore.create(currentModelId.value, { reuseEmpty: false })
+    // Create a new session, preserving the agent binding
+    const newSession = await sessionStore.create(currentModelId.value, {
+      reuseEmpty: false,
+      ...(effectiveAgentId.value ? { agentId: effectiveAgentId.value } : {}),
+    })
     emit('sessionCreated', newSession.id)
     await nextTick()
 

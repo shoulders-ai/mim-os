@@ -1,9 +1,12 @@
+import { aiApiBase, aiFetch } from './aiApi.js'
+
 /**
  * Generate a conversation summary via the cheap extract model.
  * Falls back to the last user message if generation fails.
  */
-export async function requestSummary(baseUrl, { messages }) {
-  const response = await fetch(`${baseUrl}/api/ai/summary`, {
+export async function requestSummary({ messages }) {
+  const base = await aiApiBase()
+  const response = await aiFetch(`${base}/api/ai/summary`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages }),

@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('kernel', {
 
   // Shell-specific
   getPort: () => ipcRenderer.invoke('kernel:port'),
+  getAiToken: () => ipcRenderer.invoke('kernel:ai-token'),
   getPackages: () => ipcRenderer.invoke('kernel:packages'),
   getWorkspace: () => ipcRenderer.invoke('kernel:workspace'),
   getPackageLaunchUrl: (packageId: string, viewId?: string) =>

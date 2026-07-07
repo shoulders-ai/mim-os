@@ -445,4 +445,44 @@ describe('app tools (status / enable / disable / trust)', () => {
     await expect(detached.call('app.trust', { id: 'board' }, ctx)).rejects.toThrow('No workspace open')
     await expect(detached.call('app.remove', { id: 'board' }, ctx)).rejects.toThrow('No workspace open')
   })
+
+  describe('app.agents.list', () => {
+    it('declares inputSchema', () => {
+      register([])
+      const def = tools.get('app.agents.list')
+      expect(def).toBeDefined()
+      expect(def!.inputSchema).toBeDefined()
+      expect((def as Record<string, unknown>).parameters).toBeUndefined()
+    })
+
+    it('returns empty agents array when agentMounts is not wired', async () => {
+      register([])
+      const result = await tools.call('app.agents.list', {}, ctx) as { agents: unknown[] }
+      expect(result.agents).toEqual([])
+    })
+
+    it('returns agents from agentMounts.list()', async () => {
+      const summaries = [
+        {
+          id: 'package:review-app/referee',
+          packageId: 'review-app',
+          key: 'referee',
+          name: 'Lancet Referee',
+          scoped: true,
+          toolCount: 3,
+          skills: ['review-methods'],
+          diagnostics: [],
+        },
+      ]
+      registerCoreAppTools(tools, {
+        packages: makeLoader([]),
+        enablement,
+        emit,
+        invalidate,
+        agentMounts: { list: vi.fn().mockResolvedValue(summaries) },
+      })
+      const result = await tools.call('app.agents.list', {}, ctx) as { agents: typeof summaries }
+      expect(result.agents).toEqual(summaries)
+    })
+  })
 })

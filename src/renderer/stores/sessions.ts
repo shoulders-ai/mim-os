@@ -15,6 +15,7 @@ export interface Session {
   label: string
   modelId: string
   controlId: string
+  agentId?: string
   messages: SessionMessage[]
   usage: { inputTokens: number; outputTokens: number; estimatedCost: number }
   lastContextTokens: number
@@ -181,8 +182,10 @@ export const useSessionStore = defineStore('sessions', () => {
     delete turnStartedAt[sessionId]
   }
 
-  function findEmptySession(): Session | null {
-    return visibleSessions.value.find(s => !s.messages || s.messages.length === 0) ?? null
+  function findEmptySession(agentId?: string): Session | null {
+    return visibleSessions.value.find(s =>
+      (!s.messages || s.messages.length === 0) && s.agentId === agentId,
+    ) ?? null
   }
 
   function promoteToTop(id: string) {
@@ -232,9 +235,9 @@ export const useSessionStore = defineStore('sessions', () => {
     }
   }
 
-  async function create(modelId = '', options: { reuseEmpty?: boolean } = {}) {
+  async function create(modelId = '', options: { reuseEmpty?: boolean; agentId?: string } = {}) {
     if (options.reuseEmpty !== false) {
-      const empty = findEmptySession()
+      const empty = findEmptySession(options.agentId)
       if (empty) {
         activeSessionId.value = empty.id
         promoteToTop(empty.id)
@@ -247,6 +250,7 @@ export const useSessionStore = defineStore('sessions', () => {
     const session = await window.kernel.call('session.create', {
       label: 'New task',
       modelId,
+      ...(options.agentId ? { agentId: options.agentId } : {}),
     }) as Session
     sessions.value.unshift(session)
     activeSessionId.value = session.id

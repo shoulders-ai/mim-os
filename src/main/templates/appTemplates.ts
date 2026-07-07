@@ -45,6 +45,14 @@ const APP_TEMPLATES: AppTemplateDefinition[] = [
     defaultName: 'Summarize',
     render: renderSummarize,
   },
+  {
+    id: 'agent',
+    label: 'Agent',
+    summary: 'Headless app that mounts a specialised agent with its own prompt and skills.',
+    defaultId: 'reviewer',
+    defaultName: 'Reviewer',
+    render: renderAgent,
+  },
 ]
 
 export function listAppTemplates(): { templates: AppTemplateSummary[] } {
@@ -157,6 +165,89 @@ function renderSummarize(input: { id: string; name: string }): PackageCreateTemp
       '- `ctx.ai.generateObject()` with manifest permission `ai: true`',
     ].join('\n'),
   }
+}
+
+function renderAgent(input: { id: string; name: string }): PackageCreateTemplateParams {
+  const skillName = skillNameForApp(input.id)
+  return {
+    id: input.id,
+    name: input.name,
+    description: `${input.name} — a specialised agent with its own prompt and skills.`,
+    icon: input.name.slice(0, 1).toUpperCase(),
+    backend: agentBackend(input.id, input.name, skillName),
+    skills: [{
+      name: skillName,
+      content: appSkillContent({
+        name: skillName,
+        description: `Activated automatically for the ${input.name} agent. Guides how the agent approaches its task.`,
+        unlocks: [],
+        title: input.name,
+        body: [
+          `You are ${input.name}. Follow these guidelines when responding:`,
+          '',
+          '- Be thorough and precise.',
+          '- Cite specific files and locations when referencing workspace content.',
+          '- Ask clarifying questions before making assumptions.',
+        ].join('\n'),
+      }),
+    }],
+    readme: [
+      `# ${input.name}`,
+      '',
+      `A headless agent app. ${input.name} appears as a row in the sidebar`,
+      'and runs in its own chat sessions with a dedicated prompt and skills.',
+      '',
+      '## How it works',
+      '',
+      '- `backend/index.mjs` exports an `agents` object with one agent descriptor.',
+      `- \`skills/${skillName}/SKILL.md\` is pre-activated each turn.`,
+      '- The agent reads app data in `instructions(ctx)` to carry state across sessions.',
+      '',
+      '## Iterating',
+      '',
+      '1. Edit the backend or skill.',
+      '2. Run `package.validate` to check for errors.',
+      '3. Run `package.reload` so the changes take effect.',
+      '4. The agent row in the sidebar reflects the updated agent.',
+    ].join('\n'),
+  }
+}
+
+function agentBackend(id: string, name: string, skillName: string): string {
+  return [
+    'export const agents = {',
+    `  ${camelCase(id)}: {`,
+    `    name: '${escapeSingleQuote(name)}',`,
+    `    // icon: '${name.slice(0, 1).toUpperCase()}',`,
+    '',
+    '    // Optional: set a default model (user picker still wins)',
+    "    // model: 'claude-opus-4-8',",
+    '',
+    '    // Optional: narrow visible tools to a canonical id allowlist',
+    "    // tools: ['search', 'web.read'],",
+    '',
+    `    skills: ['${skillName}'],`,
+    '',
+    '    async instructions(ctx) {',
+    "      const notes = ctx.data.kv.get('notes')",
+    "      const notesSection = notes ? `\\nPrior notes:\\n${notes}` : ''",
+    `      return \`You are ${escapeSingleQuote(name)}.`,
+    '',
+    'Workspace: {{WORKSPACE_TREE}}',
+    '',
+    `\${notesSection}\``,
+    '    },',
+    '  },',
+    '}',
+  ].join('\n')
+}
+
+function camelCase(id: string): string {
+  return id.replace(/-([a-z])/g, (_, c) => c.toUpperCase())
+}
+
+function escapeSingleQuote(value: string): string {
+  return value.replace(/'/g, "\\'")
 }
 
 function wordCountBackend(publicToolName: string): string {

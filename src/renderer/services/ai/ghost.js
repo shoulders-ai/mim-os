@@ -1,17 +1,10 @@
 import { mapAiError } from './errors.js'
-
-let aiBaseUrlPromise = null
-
-async function aiApi(path) {
-  if (!aiBaseUrlPromise) {
-    aiBaseUrlPromise = window.kernel.getPort().then(port => `http://127.0.0.1:${port}`)
-  }
-  return `${await aiBaseUrlPromise}${path}`
-}
+import { aiApiBase, aiFetch } from './aiApi.js'
 
 export async function requestGhostSuggestions({ before, after, modelId = '' }) {
   try {
-    const response = await fetch(await aiApi('/api/ai/ghost'), {
+    const base = await aiApiBase()
+    const response = await aiFetch(`${base}/api/ai/ghost`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ before, after, ...(modelId ? { modelId } : {}) }),

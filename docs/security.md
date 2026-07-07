@@ -24,6 +24,10 @@ nothing.
 - **`package`** → declared-permission check only (`packagePermissionViolation`);
   pass → allowed silently, fail → throw. Apps never get an interactive prompt.
 
+App-mounted agents (`export const agents` in a backend) execute as actor `ai`
+through the same gate. Agents are backend exports, so the workspace trust ack
+already applies — no separate exemption.
+
 Consequence: the gate defends against the agent's autonomous actions and app
 automation. The renderer cannot escalate because IPC is hardcoded to `user`.
 
@@ -65,7 +69,7 @@ Agent sessions are interactive ptys carrying the user's full shell authority
 (see [agent-sessions.md](agent-sessions.md)), so the gate treats the surface
 specially:
 
-- **`agent.launch` / `agent.kill` are user-only.** The `ai` actor is
+- **`agent.launch` / `agent.stop` are user-only.** The `ai` actor is
   **hard-denied** before any approval flow or developer-mode bypass — the same
   pattern as `app.trust`. AI already has `terminal.run` for command execution;
   it cannot start or stop agent sessions.
@@ -76,7 +80,7 @@ specially:
   `agent.sessions.list`, and `agent.sessions.get` are `read` (no prompt in
   Normal, prompt in Strict). `agent.sessions.rename`/`archive` (category
   `ui`) and `agent.sessions.delete` (category `ui`, risk `medium`) are
-  `mutate`, so they prompt in Normal and Strict. `agent.launch`/`agent.kill`
+  `mutate`, so they prompt in Normal and Strict. `agent.launch`/`agent.stop`
   are policy-listed (`general`/`medium`) but unreachable for `ai` because of
   the hard deny.
 
@@ -186,7 +190,10 @@ clears the approval store queue so inline cards disappear immediately.
 - No durable app permission manifest or policy engine (README tech debt).
 - `BrowserWindow` uses `sandbox: false`; enabling sandbox is a future hardening step.
 - App iframes use `allow-same-origin` (required for SDK WebSocket); full
-  origin isolation is an architectural follow-up.
+  origin isolation is an architectural follow-up. A per-boot shell token
+  (`x-mim-shell-token`) guards `/api/ai/*` routes so iframes cannot drive the
+  AI runtime directly — only the trusted renderer shell (via preload bridge)
+  obtains the token.
 - Local images must go through `fs.readImageDataUrl`, not `file://`.
 
 ## Tests
@@ -196,7 +203,7 @@ clears the approval store queue so inline cards disappear immediately.
   event stays redacted), the `log.append` Normal-exemption-but-Strict-prompt,
   sensitive-path floor vs session always-allow (Fix 1), durable audit events
   (Fix 2), cancelSession resolves pending approvals as denied (Fix 4), agent
-  session tool policies and the user-only `agent.launch`/`agent.kill` denial.
+  session tool policies and the user-only `agent.launch`/`agent.stop` denial.
 - `src/main/tools/registry.test.ts` — registry runs the gate before execute, suspends until
   it resolves, blocks execution on denial, and redacts event summaries.
 - `src/main/tools/fs.test.ts` — symlink escape prevention: rejects symlinks

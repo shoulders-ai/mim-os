@@ -147,7 +147,7 @@ describe('App tools', () => {
     const list = await tools.call('app.templateList', {}, ctx) as {
       templates: Array<{ id: string; defaultId: string; defaultName: string }>
     }
-    expect(list.templates.map(template => template.id)).toEqual(['word-count', 'summarize'])
+    expect(list.templates.map(template => template.id)).toEqual(['word-count', 'summarize', 'agent'])
 
     const params = await tools.call('app.templateContent', {
       templateId: 'word-count',
@@ -206,7 +206,7 @@ describe('App tools', () => {
     expect(result.valid).toBe(true)
     expect(result.errors).toEqual([])
     expect(result.warnings).toEqual([])
-    expect(result.summary).toEqual({ tools: 1, jobs: 0, skills: 1, namedTools: 1 })
+    expect(result.summary).toEqual({ tools: 1, jobs: 0, skills: 1, namedTools: 1, agents: 0 })
   })
 
   it('package.validate catches backend and skill diagnostics without requiring the app loader', async () => {

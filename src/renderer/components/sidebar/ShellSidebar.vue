@@ -17,6 +17,7 @@ import { NAVIGATOR_SPINE_WIDTH } from '../../services/workbench/entries.js'
 import { shortcutLabel } from '../../services/shortcutLabels.js'
 import { useSessionStore, type Session, type SessionStatusKind } from '../../stores/sessions.js'
 import { useAgentsStore, type DetectedAgent } from '../../stores/agents.js'
+import { useAppAgentsStore, type AppAgent } from '../../stores/appAgents.js'
 import { useAppsStore } from '../../stores/coreApps.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useRunsStore, type NavigatorRun } from '../../stores/runs.js'
@@ -65,9 +66,11 @@ interface SurfaceRow {
 
 // Package rows are destinations (their package view lights up as active);
 // agent rows are pure launchers — every click spawns a new session.
+// package-agent rows are app-mounted agents from installed packages.
 type AppRow =
   | { key: string; kind: 'package'; pkg: LoadedPackage }
   | { key: string; kind: 'agent'; agent: DetectedAgent }
+  | { key: string; kind: 'package-agent'; mount: AppAgent }
 
 type ActivityCreateAgentTarget = {
   key: string
@@ -102,6 +105,7 @@ const emit = defineEmits<{
   archivePackageRun: [packageId: string, runId: string]
   deletePackageRun: [packageId: string, runId: string]
   launchAgent: [agentId: string]
+  selectPackageAgent: [agentId: string]
   selectAgentSession: [agentId: string, sessionId: string]
   archiveAgentSession: [sessionId: string]
   deleteAgentSession: [sessionId: string]
@@ -119,6 +123,7 @@ const effectiveWidth = computed(() => (props.collapsed ? NAVIGATOR_SPINE_WIDTH :
 
 const sessionStore = useSessionStore()
 const agentsStore = useAgentsStore()
+const appAgentsStore = useAppAgentsStore()
 const appsStore = useAppsStore()
 const settingsStore = useSettingsStore()
 const runsStore = useRunsStore()
@@ -169,16 +174,23 @@ const SURFACE_ROWS: SurfaceRow[] = [
   },
 ]
 
-// Launchable packages keep loader order, detected CLI agents come last. Manual
-// order (plain package/agent ids — the catalogs cannot collide: agent ids are
-// fixed catalog ids) overrides the whole sequence.
+// Launchable packages keep loader order, detected CLI agents come last,
+// app-mounted agents follow. Manual order (plain package/agent ids — the
+// catalogs cannot collide: agent ids are fixed catalog ids, app agent ids
+// are package-namespaced) overrides the whole sequence.
 const appRows = computed<AppRow[]>(() => {
   const visible = launchablePackages.value
     .filter(pkg => !HIDDEN_NAVIGATOR_PACKAGE_IDS.has(pkg.manifest.id))
+  // Every mounted agent gets a row: the app row opens the app's UI, the agent
+  // row opens its chat. For headless agent-only apps the agent row is the
+  // app's only presence.
+  const packageAgentRows = appAgentsStore.agents
+    .map(mount => ({ key: mount.id, kind: 'package-agent' as const, mount }))
   return applyManualOrder(
     [
       ...visible.map(pkg => ({ key: pkg.manifest.id, kind: 'package' as const, pkg })),
       ...agentsStore.enabledAgents.map(agent => ({ key: agent.id, kind: 'agent' as const, agent })),
+      ...packageAgentRows,
     ],
     settingsStore.navigatorAppOrder,
   )
@@ -262,7 +274,16 @@ function agentRunIsLive(run: NavigatorRun): boolean {
 const workspaceMonogram = computed(() => initialsFrom(props.workspaceName ?? ''))
 
 function activityMonogram(row: ActivityRow): string {
-  return row.kind === 'chat' ? initialsFrom(row.session.label) : initialsFrom(row.run.title)
+  if (row.kind === 'chat') {
+    // Sessions bound to an app agent show the agent's name monogram so the
+    // collapsed rail groups all conversations with the same agent visually.
+    if (row.session.agentId) {
+      const mount = appAgentsStore.byId(row.session.agentId)
+      if (mount) return initialsFrom(mount.name)
+    }
+    return initialsFrom(row.session.label)
+  }
+  return initialsFrom(row.run.title)
 }
 
 function activityRowTitle(row: ActivityRow): string {
@@ -442,9 +463,9 @@ function selectRun(run: NavigatorRun) {
 }
 
 function appRowActive(row: AppRow): boolean {
-  // Agent rows are launchers, not destinations — never active. The launched
-  // session's Activity row carries the active state instead.
-  if (row.kind === 'agent') return false
+  // Agent rows (CLI and package-agent) are launchers, not destinations —
+  // never active. The launched session's Activity row carries the active state.
+  if (row.kind === 'agent' || row.kind === 'package-agent') return false
   return props.activeWorkId === packageWorkEntryId(row.pkg)
 }
 
@@ -459,12 +480,15 @@ function surfaceActive(row: SurfaceRow): boolean {
 }
 
 function appRowName(row: AppRow): string {
-  return row.kind === 'package' ? row.pkg.manifest.name : row.agent.name
+  if (row.kind === 'package') return row.pkg.manifest.name
+  if (row.kind === 'agent') return row.agent.name
+  return row.mount.name
 }
 
 function selectAppRow(row: AppRow) {
   if (suppressAppClick.value) return
   if (row.kind === 'agent') emit('launchAgent', row.agent.id)
+  else if (row.kind === 'package-agent') emit('selectPackageAgent', row.mount.id)
   else emit('selectWork', row.pkg.manifest.id)
 }
 
@@ -938,8 +962,8 @@ onUnmounted(() => {
                 appDrag?.key === row.key && appDrag?.active ? 'opacity-35' : '',
               ]"
               :data-app-key="row.key"
-              :data-package-id="row.kind === 'package' ? row.pkg.manifest.id : undefined"
-              :data-agent-id="row.kind === 'agent' ? row.agent.id : undefined"
+              :data-package-id="row.kind === 'package' ? row.pkg.manifest.id : (row.kind === 'package-agent' ? row.mount.packageId : undefined)"
+              :data-agent-id="row.kind === 'agent' ? row.agent.id : (row.kind === 'package-agent' ? row.mount.id : undefined)"
               :title="appRowName(row)"
               :aria-label="appRowName(row)"
               @pointerdown="collapsed ? undefined : onAppPointerDown($event, row.key)"
@@ -963,11 +987,19 @@ onUnmounted(() => {
                   :style="{ '--icon-url': `url('${packageIconUrl(row.pkg.manifest.icon!, row.pkg.manifest.id, port)}')` }"
                   :aria-hidden="true"
                 />
-                <template v-else>{{ row.pkg.manifest.icon ?? '◻' }}</template>
+                <span
+                  v-else-if="row.kind === 'package-agent' && row.mount.icon && isImageIcon(row.mount.icon) && port"
+                  class="package-icon-img"
+                  :style="{ '--icon-url': `url('${packageIconUrl(row.mount.icon, row.mount.packageId, port)}')` }"
+                  :aria-hidden="true"
+                />
+                <template v-else-if="row.kind === 'package-agent'">{{ row.mount.icon && !isImageIcon(row.mount.icon) ? row.mount.icon : initialsFrom(row.mount.name).slice(0, 1) || '◻' }}</template>
+                <template v-else-if="row.kind === 'package'">{{ row.pkg.manifest.icon ?? '◻' }}</template>
+                <template v-else>◻</template>
               </span>
               <span v-if="!collapsed" class="ml-1 min-w-0 flex-1 truncate pr-2 text-left">{{ appRowName(row) }}</span>
               <IconPlus
-                v-if="!collapsed && row.kind === 'agent'"
+                v-if="!collapsed && (row.kind === 'agent' || row.kind === 'package-agent')"
                 :size="11"
                 :stroke-width="2"
                 class="shrink-0 mr-1.5 text-ink-4"

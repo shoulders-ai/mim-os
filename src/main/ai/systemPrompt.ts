@@ -175,11 +175,27 @@ ${TOOL_CATALOG}
 ${PACKAGES_SECTION}`
 }
 
-export function getSystemPrompt(workspacePath?: string, options: SystemPromptOptions = {}): string {
+export function buildPromptTemplateVars(
+  workspacePath: string | undefined,
+  options: { skillCatalog?: string } = {},
+): Record<string, string> {
   const now = new Date()
   const weekday = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()]
   const date = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+  const agentContext = workspacePath
+    ? readFileSafe(join(workspacePath, '.mim', 'agent-context.md')) ?? ''
+    : ''
+  return {
+    DATE_TODAY: `${weekday}, ${date}`,
+    TOOL_SET: TOOL_CATALOG,
+    SKILL_CATALOG: options.skillCatalog ?? '',
+    AGENT_CONTEXT: agentContext,
+    WORKSPACE_TREE: workspaceTreeContext(workspacePath),
+    PROJECT_LOG: projectLogContext(workspacePath),
+  }
+}
 
+export function getSystemPrompt(workspacePath?: string, options: SystemPromptOptions = {}): string {
   const agentsContent = workspacePath
     ? readFileSafe(join(workspacePath, 'AGENTS.md'))
     : null
@@ -193,19 +209,13 @@ export function getSystemPrompt(workspacePath?: string, options: SystemPromptOpt
     const skillCatalogValue = options.skillCatalog
       ?? (options.includeSkillCatalog !== false ? skillCatalogSection(workspacePath) : null)
       ?? ''
-    const agentContext = workspacePath
-      ? readFileSafe(join(workspacePath, '.mim', 'agent-context.md')) ?? ''
-      : ''
-    const vars: Record<string, string> = {
-      DATE_TODAY: `${weekday}, ${date}`,
-      TOOL_SET: TOOL_CATALOG,
-      SKILL_CATALOG: skillCatalogValue,
-      AGENT_CONTEXT: agentContext,
-      WORKSPACE_TREE: workspaceTreeContext(workspacePath),
-      PROJECT_LOG: projectLogContext(workspacePath),
-    }
+    const vars = buildPromptTemplateVars(workspacePath, { skillCatalog: skillCatalogValue })
     return resolveTemplateVars(template, vars)
   }
+
+  const now = new Date()
+  const weekday = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()]
+  const date = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 
   const preamble = buildLegacyPreamble(weekday, date)
   const sections: string[] = [preamble]

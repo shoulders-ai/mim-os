@@ -24,6 +24,7 @@ export interface AppShellToast {
 export interface AppKernelEventDeps {
   setPackages(packages: LoadedPackage[]): void
   refreshApps(): Promise<unknown> | unknown
+  refreshAppAgents(): Promise<unknown> | unknown
   handleWorkspaceChanged(path: unknown): Promise<unknown> | unknown
   setAppUpdates(updates: Record<string, { installed: string; latest: string; registryId: string }>): void
   refreshKeyStatuses(): Promise<unknown> | unknown
@@ -60,12 +61,14 @@ export function registerAppKernelEvents(
     ['packages:changed', (pkgs: unknown) => {
       deps.setPackages(pkgs as LoadedPackage[])
       void deps.refreshApps()
+      void deps.refreshAppAgents()
     }],
     ['workspace:changed', (path: unknown) => {
       void deps.handleWorkspaceChanged(path)
     }],
     ['apps:changed', () => {
       void deps.refreshApps()
+      void deps.refreshAppAgents()
     }],
     ['apps:updates', (payload: unknown) => {
       deps.setAppUpdates(appUpdatesMap(payload))

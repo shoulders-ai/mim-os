@@ -18,6 +18,7 @@ import {
 
 interface ServerHandle {
   port: number
+  shellToken: string
   close(): void
   broadcast(event: string, data?: unknown): void
   createPackageLaunchUrl(packageId: string, viewId?: string): string
@@ -124,6 +125,7 @@ const MCP_ALLOWED_TOOLS = new Set(MCP_TOOL_SPECS.map(tool => tool.mimName))
 
 export interface McpServerOptions {
   getNamedMcpTools?: () => McpToolSpec[]
+  agentMounts?: { resolveProfile(agentId: string): Promise<import('@main/ai/aiRuntime.js').AgentProfile> }
 }
 
 export async function createServer(
@@ -137,8 +139,9 @@ export async function createServer(
   const launchTokens = new Map<string, LaunchToken>()
   const mcpTokens = new Map<string, McpToken>()
   const mcpConnections = new Map<string, Set<WebSocket>>()
-  const aiRuntime = createAiRuntime({ tools })
+  const aiRuntime = createAiRuntime({ tools, agentMounts: options?.agentMounts })
   const getNamedMcpTools = options?.getNamedMcpTools ?? (() => [])
+  const shellToken = randomUUID()
 
   for (const spec of MCP_TOOL_SPECS) {
     const tool = tools.get(spec.mimName)
@@ -171,7 +174,7 @@ export async function createServer(
     // headers, so the browser blocks the response from foreign web pages.
     if (!origin || origin === 'null' || allowedOrigins.has(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin || 'null')
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-mim-shell-token')
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     }
     if (req.method === 'OPTIONS') {
@@ -181,6 +184,19 @@ export async function createServer(
     next()
   })
   app.use(express.json({ limit: '25mb' }))
+
+  // Shell token guard: every /api/ai/* request must carry the per-boot
+  // token that only the trusted renderer shell (via preload bridge) can
+  // obtain. Sandboxed app iframes cannot reach preload, so they are
+  // blocked. OPTIONS preflight is handled by the CORS middleware above
+  // (returns 204 before this middleware runs).
+  app.use('/api/ai', (req, res, next) => {
+    if (req.headers['x-mim-shell-token'] !== shellToken) {
+      res.status(401).json({ error: 'Missing or invalid shell token' })
+      return
+    }
+    next()
+  })
 
   // Serve SDK files
   app.use('/sdk', express.static(sdkDir))
@@ -196,6 +212,7 @@ export async function createServer(
         skills: Array.isArray(req.body?.skills)
           ? req.body.skills.filter((name: unknown): name is string => typeof name === 'string')
           : undefined,
+        agentId: typeof req.body?.agentId === 'string' ? req.body.agentId : undefined,
         abortSignal: abort.signal,
       })
       await sendWebResponse(res, response)
@@ -484,6 +501,7 @@ export async function createServer(
 
   return {
     port,
+    shellToken,
     close: () => server.close(),
     broadcast: (event: string, data?: unknown) => {
       // Buffer package job events for replay on reconnect.

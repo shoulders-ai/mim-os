@@ -1,3 +1,5 @@
+import { aiApiBase, aiFetch } from './aiApi.js'
+
 const MAX_TASK_LABEL_CHARS = 40
 const MAX_TASK_LABEL_WORDS = 4
 const OPTION_WORDS = new Set([
@@ -130,8 +132,9 @@ export function taskLabelContextLabels(attachments = [], contextChips = []) {
   return cleanContextLabels(labels)
 }
 
-export async function requestTaskLabel(apiBaseUrl, { userText, contextLabels = [] }) {
-  const response = await fetch(`${apiBaseUrl}/api/ai/task-label`, {
+export async function requestTaskLabel({ userText, contextLabels = [] }) {
+  const base = await aiApiBase()
+  const response = await aiFetch(`${base}/api/ai/task-label`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({

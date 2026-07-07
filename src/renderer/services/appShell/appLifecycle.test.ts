@@ -32,6 +32,7 @@ function makeDeps(overrides: Partial<AppLifecycleDeps> = {}) {
     refreshAgentSessions: vi.fn(async () => undefined),
     refreshApps: vi.fn(async () => undefined),
     refreshAgents: vi.fn(async () => undefined),
+    refreshAppAgents: vi.fn(async () => undefined),
     restoreInitialWork: vi.fn(async () => undefined),
     loadFileIndex: vi.fn(async () => undefined),
     welcomeDismissed: vi.fn(() => welcomeDismissed),

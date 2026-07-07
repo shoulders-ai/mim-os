@@ -51,10 +51,21 @@ export interface CapabilitySkill {
   label: string
 }
 
+export interface CapabilityAgent {
+  key: string
+  name: string
+  icon?: string
+  model?: string
+  scoped: boolean
+  toolCount?: number
+  skills?: string[]
+}
+
 export interface PackageCapabilities {
   packageId: string
   jobs: CapabilityJob[]
   tools: CapabilityTool[]
+  agents?: CapabilityAgent[]
   skills?: CapabilitySkill[]
   diagnostics: string[]
 }

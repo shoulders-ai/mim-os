@@ -84,6 +84,7 @@ describe('InlineAI', () => {
         return {}
       }),
       getPort: vi.fn(async () => 3030),
+      getAiToken: vi.fn(async () => 'test-shell-token'),
       },
     })
   })

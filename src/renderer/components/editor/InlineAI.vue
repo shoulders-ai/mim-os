@@ -151,6 +151,7 @@ import { IconArrowUp, IconCheck, IconPlayerStop, IconRefresh, IconX } from '@tab
 import { useSettingsStore } from '../../stores/settings.js'
 import { modelMenuItems, resolvePreferredModel } from '../../services/ai/modelControls.js'
 import { shortcutLabel } from '../../services/shortcutLabels.js'
+import { aiApiBase, aiFetch } from '../../services/ai/aiApi.js'
 import ModelPicker from '../chat/ModelPicker.vue'
 
 const TOOL_LABELS = {
@@ -245,7 +246,6 @@ const modelClass = computed(() => isReview.value ? 'hidden' : 'w-[136px] min-w-[
 let chatInstance = null
 const _chatVersion = ref(0)
 let chatPoll = null
-let aiBaseUrlPromise = null
 const appliedEditToolCalls = new Set()
 
 const selectedInlineModel = computed(() =>
@@ -306,25 +306,20 @@ const submitTitle = computed(() => {
   return pendingEdit.value ? 'Refine proposed edit (Enter)' : 'Generate edit (Enter)'
 })
 
-async function aiApi(path) {
-  if (!aiBaseUrlPromise) {
-    aiBaseUrlPromise = window.kernel.getPort().then(port => `http://127.0.0.1:${port}`)
-  }
-  return `${await aiBaseUrlPromise}${path}`
-}
-
 async function createChat() {
   await modelsReady
   if (!registry.value) throw new Error('No API key configured. Open Settings to add one.')
   const model = selectedInlineModel.value
   if (!model?.provider) throw new Error('No API key configured for inline AI. Open Settings to add a key.')
-  const api = await aiApi('/api/ai/inline')
+  const base = await aiApiBase()
+  const api = `${base}/api/ai/inline`
 
   chatInstance = new Chat({
     id: `inline-ai-${Date.now()}`,
     messages: [],
     transport: new DefaultChatTransport({
       api,
+      fetch: aiFetch,
       prepareSendMessagesRequest: ({ id, messages, trigger, messageId }) => ({
         body: {
           id,

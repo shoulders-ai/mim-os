@@ -10,6 +10,7 @@ const aiRuntimeMock = vi.hoisted(() => ({
     streamInlineResponse: vi.fn(),
     generateGhostSuggestions: vi.fn(),
     generateTaskLabel: vi.fn(),
+    generateSummary: vi.fn(),
   },
 }))
 
@@ -27,6 +28,7 @@ describe('server AI endpoints', () => {
     aiRuntimeMock.runtime.streamInlineResponse.mockReset().mockResolvedValue(new Response('inline-ok'))
     aiRuntimeMock.runtime.generateGhostSuggestions.mockReset().mockResolvedValue({ suggestions: [' next'] })
     aiRuntimeMock.runtime.generateTaskLabel.mockReset().mockResolvedValue({ label: 'Review manuscript comments' })
+    aiRuntimeMock.runtime.generateSummary.mockReset().mockResolvedValue({ summary: 'A summary of the conversation.' })
   })
 
   afterEach(() => {
@@ -60,7 +62,10 @@ describe('server AI endpoints', () => {
 
     const response = await fetch(`http://127.0.0.1:${server.port}/api/ai/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mim-shell-token': server.shellToken,
+      },
       body: JSON.stringify({
         id: 's1',
         messages,
@@ -78,8 +83,34 @@ describe('server AI endpoints', () => {
       modelId: 'claude-sonnet-4',
       controlId: 'medium',
       skills: ['issue-work', 'docx-review'],
+      agentId: undefined,
       abortSignal: expect.any(AbortSignal),
     })
+  })
+
+  it('forwards agentId from body to streamChatResponse', async () => {
+    server = await createServer(makeTools(), makePackages())
+    const messages = [{ id: 'm1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }]
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ai/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mim-shell-token': server.shellToken,
+      },
+      body: JSON.stringify({
+        id: 's1',
+        messages,
+        agentId: 'package:review-app/referee',
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(aiRuntimeMock.runtime.streamChatResponse).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'package:review-app/referee',
+      }),
+    )
   })
 
   it('does not abort an AI chat stream when the POST request body finishes', async () => {
@@ -98,7 +129,10 @@ describe('server AI endpoints', () => {
 
     const response = await fetch(`http://127.0.0.1:${server.port}/api/ai/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mim-shell-token': server.shellToken,
+      },
       body: JSON.stringify({
         id: 's1',
         messages: [{ id: 'm1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }],
@@ -116,7 +150,10 @@ describe('server AI endpoints', () => {
 
     const response = await fetch(`http://127.0.0.1:${server.port}/api/ai/inline`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mim-shell-token': server.shellToken,
+      },
       body: JSON.stringify({
         id: 'inline-1',
         messages,
@@ -143,7 +180,10 @@ describe('server AI endpoints', () => {
 
     const response = await fetch(`http://127.0.0.1:${server.port}/api/ai/ghost`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mim-shell-token': server.shellToken,
+      },
       body: JSON.stringify({
         before: 'The intervention',
         after: ' worked.',
@@ -167,7 +207,10 @@ describe('server AI endpoints', () => {
 
     const response = await fetch(`http://127.0.0.1:${server.port}/api/ai/task-label`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mim-shell-token': server.shellToken,
+      },
       body: JSON.stringify({
         userText: 'Please compare the supplier quotes before the finance meeting',
         contextLabels: ['quotes.xlsx', 123, 'finance agenda'],
@@ -181,5 +224,138 @@ describe('server AI endpoints', () => {
       contextLabels: ['quotes.xlsx', 'finance agenda'],
       modelId: undefined,
     })
+  })
+
+  it('routes summary requests through the central AI runtime', async () => {
+    server = await createServer(makeTools(), makePackages())
+    const messages = [
+      { role: 'user', parts: [{ type: 'text', text: 'Explain photosynthesis' }] },
+      { role: 'assistant', parts: [{ type: 'text', text: 'Photosynthesis is...' }] },
+    ]
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ai/summary`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mim-shell-token': server.shellToken,
+      },
+      body: JSON.stringify({ messages }),
+    })
+
+    expect(response.status).toBe(200)
+    await expect(response.json()).resolves.toEqual({ summary: 'A summary of the conversation.' })
+    expect(aiRuntimeMock.runtime.generateSummary).toHaveBeenCalledWith({
+      messages,
+      modelId: undefined,
+    })
+  })
+})
+
+describe('shell token middleware', () => {
+  let server: Awaited<ReturnType<typeof createServer>> | null
+
+  beforeEach(() => {
+    server = null
+    aiRuntimeMock.createAiRuntime.mockReset().mockReturnValue(aiRuntimeMock.runtime)
+    aiRuntimeMock.runtime.streamChatResponse.mockReset().mockResolvedValue(new Response('chat-ok'))
+    aiRuntimeMock.runtime.streamInlineResponse.mockReset().mockResolvedValue(new Response('inline-ok'))
+    aiRuntimeMock.runtime.generateGhostSuggestions.mockReset().mockResolvedValue({ suggestions: [' next'] })
+    aiRuntimeMock.runtime.generateTaskLabel.mockReset().mockResolvedValue({ label: 'Label' })
+    aiRuntimeMock.runtime.generateSummary.mockReset().mockResolvedValue({ summary: 'Summary' })
+  })
+
+  afterEach(() => {
+    server?.close()
+  })
+
+  function makePackages(): PackageLoader {
+    return {
+      list: () => [],
+      get: () => undefined,
+      diagnostics: () => [],
+      onChange: () => undefined,
+      rescan: async () => undefined,
+    }
+  }
+
+  function makeTools(): ToolRegistry {
+    return {
+      register: (_tool: ToolDef) => undefined,
+      call: vi.fn(),
+      list: () => [],
+      get: () => undefined,
+      getWorkspacePath: () => null,
+      setWorkspacePath: () => undefined,
+    }
+  }
+
+  const AI_ROUTES = [
+    { path: '/api/ai/chat', mock: 'streamChatResponse' },
+    { path: '/api/ai/inline', mock: 'streamInlineResponse' },
+    { path: '/api/ai/ghost', mock: 'generateGhostSuggestions' },
+    { path: '/api/ai/task-label', mock: 'generateTaskLabel' },
+    { path: '/api/ai/summary', mock: 'generateSummary' },
+  ] as const
+
+  for (const { path, mock } of AI_ROUTES) {
+    it(`rejects ${path} without the shell token header`, async () => {
+      server = await createServer(makeTools(), makePackages())
+
+      const response = await fetch(`http://127.0.0.1:${server.port}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+
+      expect(response.status).toBe(401)
+      await expect(response.json()).resolves.toEqual({ error: 'Missing or invalid shell token' })
+      expect(aiRuntimeMock.runtime[mock]).not.toHaveBeenCalled()
+    })
+
+    it(`rejects ${path} with a wrong shell token`, async () => {
+      server = await createServer(makeTools(), makePackages())
+
+      const response = await fetch(`http://127.0.0.1:${server.port}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-mim-shell-token': 'wrong-token-value',
+        },
+        body: JSON.stringify({}),
+      })
+
+      expect(response.status).toBe(401)
+      await expect(response.json()).resolves.toEqual({ error: 'Missing or invalid shell token' })
+      expect(aiRuntimeMock.runtime[mock]).not.toHaveBeenCalled()
+    })
+  }
+
+  it('allows OPTIONS preflight on /api/ai/* without a shell token', async () => {
+    server = await createServer(makeTools(), makePackages())
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ai/chat`, {
+      method: 'OPTIONS',
+    })
+
+    expect(response.status).toBe(204)
+  })
+
+  it('exposes shellToken as a string on the server handle', async () => {
+    server = await createServer(makeTools(), makePackages())
+    expect(typeof server.shellToken).toBe('string')
+    expect(server.shellToken.length).toBeGreaterThan(0)
+  })
+
+  it('includes x-mim-shell-token in CORS allowed headers', async () => {
+    server = await createServer(makeTools(), makePackages())
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ai/chat`, {
+      method: 'OPTIONS',
+      headers: { Origin: `http://127.0.0.1:${server.port}` },
+    })
+
+    expect(response.status).toBe(204)
+    const allowHeaders = response.headers.get('access-control-allow-headers')
+    expect(allowHeaders).toContain('x-mim-shell-token')
   })
 })

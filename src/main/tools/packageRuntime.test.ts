@@ -64,6 +64,7 @@ describe('app runtime tools', () => {
         packageId: 'self',
         jobs: [],
         tools: [],
+        agents: [],
         diagnostics: [],
       }])
 
@@ -73,6 +74,44 @@ describe('app runtime tools', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('exposes agents in package capabilities list output', async () => {
+    const { tools, runtime } = makeTools()
+    runtime.listCapabilities.mockResolvedValue([{
+      packageId: 'self',
+      jobs: [],
+      tools: [],
+      agents: [
+        { key: 'reviewer', name: 'Code Reviewer', icon: 'CR', model: 'claude-opus-4-8', tools: ['fs.read', 'search.files'], skills: ['review'], instructions: async () => 'prompt' },
+        { key: 'helper', name: 'helper', instructions: async () => 'prompt' },
+      ],
+      diagnostics: [],
+    }])
+
+    const result = await tools.call('package.capabilities.list', {}, { actor: 'user' }) as {
+      packages: Array<{
+        agents: Array<{ key: string; name: string; icon?: string; model?: string; scoped: boolean; toolCount?: number; skills?: string[] }>
+      }>
+    }
+
+    expect(result.packages[0].agents).toHaveLength(2)
+
+    const reviewer = result.packages[0].agents.find(a => a.key === 'reviewer')!
+    expect(reviewer.name).toBe('Code Reviewer')
+    expect(reviewer.icon).toBe('CR')
+    expect(reviewer.model).toBe('claude-opus-4-8')
+    expect(reviewer.scoped).toBe(true)
+    expect(reviewer.toolCount).toBe(2)
+    expect(reviewer.skills).toEqual(['review'])
+
+    const helper = result.packages[0].agents.find(a => a.key === 'helper')!
+    expect(helper.name).toBe('helper')
+    expect(helper.scoped).toBe(false)
+    expect(helper.toolCount).toBeUndefined()
+    expect(helper.icon).toBeUndefined()
+    expect(helper.model).toBeUndefined()
+    expect(helper.skills).toBeUndefined()
   })
 
   it('starts app jobs with the authenticated app identity', async () => {

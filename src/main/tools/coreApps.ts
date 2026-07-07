@@ -3,6 +3,7 @@ import { join } from 'path'
 import type { PackageEnablementStore } from '@main/packages/packageEnablement.js'
 import type { LoadedPackage, PackageLoader } from '@main/packages/packages.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
+import type { MountedAgentSummary } from '@main/ai/agentMounts.js'
 import { parseMimYaml, readCommittedApp, removeApp } from '@main/workspace/workspaceContract.js'
 
 export type AppLayer = 'workspace' | 'local' | 'default'
@@ -29,6 +30,7 @@ export interface CoreAppToolsDeps {
   enablement: PackageEnablementStore
   invalidate?: (packageId: string) => void
   emit?: (channel: string) => void
+  agentMounts?: { list(): Promise<MountedAgentSummary[]> }
 }
 
 function objectSchema(properties: Record<string, unknown>, required: string[] = []) {
@@ -241,6 +243,17 @@ export function registerCoreAppTools(tools: ToolRegistry, deps?: CoreAppToolsDep
       invalidate?.(id)
       emit?.('apps:changed')
       return { ok: true, id }
+    },
+  })
+
+  tools.register({
+    name: 'app.agents.list',
+    description: 'List mounted agent profiles from enabled apps.',
+    inputSchema: objectSchema({}),
+    execute: async () => {
+      const d = requireDeps()
+      if (!d.agentMounts) return { agents: [] }
+      return { agents: await d.agentMounts.list() }
     },
   })
 }

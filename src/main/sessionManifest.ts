@@ -25,6 +25,7 @@ export interface ManifestEntry {
   archived: boolean
   sortOrder?: number
   taskLabelGenerated?: boolean
+  agentId?: string
   createdAt: string
   updatedAt: string
 }
@@ -144,6 +145,7 @@ export function extractManifestEntry(session: Record<string, unknown>): Manifest
   }
   if (typeof session.sortOrder === 'number') entry.sortOrder = session.sortOrder
   if (session.taskLabelGenerated === true) entry.taskLabelGenerated = true
+  if (typeof session.agentId === 'string') entry.agentId = session.agentId
   return entry
 }
 

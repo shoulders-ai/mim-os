@@ -8,6 +8,7 @@ import {
   type PackageRunRecord,
 } from '../../stores/runs.js'
 import { useAgentsStore } from '../../stores/agents.js'
+import { useAppAgentsStore } from '../../stores/appAgents.js'
 import { relativeTime } from '../../services/relativeTime.js'
 import ArchiveCard from './ArchiveCard.vue'
 
@@ -28,6 +29,7 @@ const emit = defineEmits<{
 const sessionStore = useSessionStore()
 const runsStore = useRunsStore()
 const agentsStore = useAgentsStore()
+const appAgentsStore = useAppAgentsStore()
 
 interface ArchiveItem {
   id: string
@@ -104,12 +106,14 @@ async function loadBrowse() {
     if (Array.isArray(result?.sessions)) {
       for (const item of result.sessions) {
         const existing = byKey.get(`session:${item.id}`)
+        const sessionAgentId = (item as { agentId?: string }).agentId ?? existing?.agentId
         setItem({
           ...existing,
           ...item,
           kind: 'session',
           archived: true,
-          meta: 'Archived chat',
+          agentId: sessionAgentId,
+          meta: appAgentMeta(sessionAgentId, 'Archived chat'),
         })
       }
     }
@@ -159,7 +163,14 @@ async function loadBrowse() {
   }
 }
 
+function appAgentMeta(agentId: string | undefined, prefix: string): string {
+  if (!agentId) return prefix
+  const mount = appAgentsStore.byId(agentId)
+  return mount ? `${prefix} / ${mount.name}` : prefix
+}
+
 function sessionToHistoryItem(session: Session): ArchiveItem {
+  const base = session.archived ? 'Archived chat' : 'Active chat'
   return {
     id: session.id,
     kind: 'session',
@@ -168,7 +179,8 @@ function sessionToHistoryItem(session: Session): ArchiveItem {
     messageCount: session.messages?.length ?? 0,
     preview: sessionPreview(session),
     archived: session.archived,
-    meta: session.archived ? 'Archived chat' : 'Active chat',
+    agentId: session.agentId,
+    meta: appAgentMeta(session.agentId, base),
   }
 }
 
@@ -256,7 +268,8 @@ async function runSearch(q: string) {
         preview: '',
         previewHtml: highlight(r.excerpt),
         archived: session?.archived === true,
-        meta: session?.archived ? 'Archived chat' : 'Active chat',
+        agentId: session?.agentId,
+        meta: appAgentMeta(session?.agentId, session?.archived ? 'Archived chat' : 'Active chat'),
       }]
     })
   } finally {

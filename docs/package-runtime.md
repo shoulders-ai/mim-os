@@ -159,7 +159,19 @@ export const tools = {
   }
 }
 
+export const agents = {
+  reviewer: {
+    name: 'Reviewer',
+    tools: ['fs.read'],
+    async instructions(ctx) { return 'You review documents.' }
+  }
+}
 ```
+
+The `agents` export is parsed alongside `jobs` and `tools` by `parseAgents` in
+`packageRuntime.ts`. Shape validation (structural diagnostics) happens at parse
+time; semantic validation (tool id existence, model lookup) happens at mount
+time in `agentMounts.ts`.
 
 Later, `defineJob` and `defineTool` can be added as optional
 descriptor helpers for stronger editor autocomplete and clearer authoring

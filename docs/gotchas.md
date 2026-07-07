@@ -295,6 +295,15 @@ Every other channel stays on `sendToRenderer` (main-window-only):
 
 When adding a new IPC event, default to `sendToRenderer` (main-only). Promote to `broadcastToRenderers` only when pop-out windows genuinely consume the event, and verify no handler on the receiving side has side effects that break when invoked twice.
 
+## Agent tool allowlists use canonical dotted ids, not AI SDK keys
+
+The `tools` array in an agent descriptor uses canonical registry tool ids
+(dotted names like `fs.read`, `search.files`), not the AI SDK keys the model
+sees (underscored: `fs_read`, `search_files`). The registry resolves them.
+Core tools that have explicit AI key aliases are the exception: `shell.run` is
+exposed to the model as `bash` and is allowlisted as `shell.run`. Unknown ids
+are load-time diagnostics, not silent no-ops.
+
 ## App iframes must never be detached from the DOM while alive
 
 Re-inserting an `<iframe>` into the DOM resets its browsing context: the app inside reboots from scratch (module graph, WebSocket identify, data load — around a second of blank frame). Vue's `KeepAlive` detaches the subtree on deactivate, so it does NOT preserve iframes. `WorkHost` therefore keeps every visited `PackageFrame` mounted and hides inactive ones with `v-show`; frames are only remounted when the `packages` list identity changes (install/reload/workspace switch), which is what lets `app.reload` deliver fresh app code. Keep any new iframe-hosting surface on the same pattern.

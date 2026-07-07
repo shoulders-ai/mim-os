@@ -21,6 +21,7 @@ import { setAgentContextContributionsProvider, setAgentContextLocalPackagesProvi
 import { registerAiTools } from '@main/ai/ai.js'
 import { registerArchiveTools } from '@main/tools/archive.js'
 import { registerCoreAppTools } from '@main/tools/coreApps.js'
+import { createAgentMounts } from '@main/ai/agentMounts.js'
 import { registerRegistryTools } from '@main/tools/registryTools.js'
 import { lookupRegistryEntry } from '@main/packages/registrySources.js'
 import { registerInstallTools } from '@main/tools/install.js'
@@ -191,10 +192,12 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
         syncNamedTools: async () => { await namedTools.sync() },
       })
 
+      const agentMounts = createAgentMounts({ runtime, packages, tools })
       registerCoreAppTools(tools, {
         packages,
         enablement,
         invalidate: (id) => { runtime.invalidate(id); void namedTools.sync() },
+        agentMounts,
       })
 
       setAgentContextContributionsProvider(createAgentContextContributionsProvider({ runtime, packages }))

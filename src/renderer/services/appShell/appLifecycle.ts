@@ -16,6 +16,7 @@ export interface AppLifecycleDeps {
   refreshAgentSessions(): Promise<unknown> | unknown
   refreshApps(): Promise<unknown> | unknown
   refreshAgents(): Promise<unknown> | unknown
+  refreshAppAgents(): Promise<unknown> | unknown
   restoreInitialWork(): Promise<unknown> | unknown
   loadFileIndex(): Promise<unknown> | unknown
   welcomeDismissed(): boolean
@@ -41,6 +42,7 @@ export function createAppLifecycleActions(deps: AppLifecycleDeps) {
       await deps.refreshAgentSessions()
       await deps.refreshApps()
       await deps.refreshAgents()
+      await deps.refreshAppAgents()
     }
     await deps.restoreInitialWork()
 
@@ -65,6 +67,7 @@ export function createAppLifecycleActions(deps: AppLifecycleDeps) {
     void deps.refreshWorkspaceStatus()
     void deps.refreshApps()
     void deps.refreshAgents()
+    void deps.refreshAppAgents()
     void deps.loadFileIndex()
   }
 

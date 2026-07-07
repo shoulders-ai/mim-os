@@ -66,3 +66,41 @@ describe('renderer AI integration boundary', () => {
     expect(text).not.toContain('generateText')
   })
 })
+
+describe('shell token contract — all AI callers use the shared aiApi helper', () => {
+  const AI_CALLER_FILES = [
+    'src/renderer/components/chat/ChatView.vue',
+    'src/renderer/components/editor/InlineAI.vue',
+    'src/renderer/services/ai/ghost.js',
+    'src/renderer/services/ai/taskLabel.js',
+    'src/renderer/services/ai/summary.js',
+  ]
+
+  for (const file of AI_CALLER_FILES) {
+    it(`${file} imports from the shared aiApi helper`, () => {
+      const text = source(file)
+      // Files inside services/ai/ use relative ./aiApi; components use ../../services/ai/aiApi
+      expect(text, `${file} must import from the aiApi helper`)
+        .toMatch(/from\s+['"](?:\.\/|.*services\/ai\/)aiApi/)
+    })
+
+    it(`${file} does not use raw fetch() on /api/ai paths`, () => {
+      const text = source(file)
+      // Match patterns like: fetch(`${baseUrl}/api/ai  or  fetch(await aiApi  with raw fetch(
+      // We allow aiFetch — that IS the helper. We forbid raw fetch() calls that hit /api/ai.
+      const lines = text.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+        // Skip import lines
+        if (line.trimStart().startsWith('import ')) continue
+        // Skip the aiFetch definition itself (only in aiApi.ts, not in these files)
+        // Look for raw `fetch(` that is NOT `aiFetch(`
+        if (/\bfetch\s*\(/.test(line) && !/\baiFetch\s*\(/.test(line) && /api\/ai/.test(line)) {
+          expect.fail(
+            `${file}:${i + 1} uses raw fetch() on an /api/ai path — must use aiFetch from aiApi helper`,
+          )
+        }
+      }
+    })
+  }
+})

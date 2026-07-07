@@ -6,6 +6,7 @@ import {
   aiToolKey,
   buildTaskLabelPrompt,
   buildTaskLabelSystemPrompt,
+  canonicalToolIdToAiKey,
   cleanTaskLabel,
   activateSelectedSkills,
   createAiRuntime,
@@ -18,13 +19,26 @@ import {
   repairIncompleteToolMessages,
   providerBaseUrl,
   summarizeTurnUsage,
+  chatProfile,
+  inlineProfile,
+  streamProfileResponse,
+  type AgentProfile,
 } from '@main/ai/aiRuntime.js'
 import { generateObject } from 'ai'
+import { loadRegistry } from '@main/ai/ai.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
 
 vi.mock('ai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ai')>()
-  return { ...actual, generateObject: vi.fn() }
+  return {
+    ...actual,
+    generateObject: vi.fn(),
+    ToolLoopAgent: vi.fn().mockImplementation(() => ({
+      stream: vi.fn().mockResolvedValue({
+        toUIMessageStreamResponse: vi.fn().mockReturnValue(new Response('ok')),
+      }),
+    })),
+  }
 })
 
 vi.mock('@main/ai/ai.js', () => ({
@@ -1584,5 +1598,491 @@ describe('single-shot generation functions trace through the tool registry', () 
     expect(result.summary).toBe('Discussed ghost fix.')
     expect(traced).toHaveLength(1)
     expect(traced[0]).toMatchObject({ kind: 'model.call', data: expect.objectContaining({ profile: 'summary' }) })
+  })
+})
+
+describe('AgentProfile', () => {
+  const mockedLoadRegistry = vi.mocked(loadRegistry)
+
+  function mockRegistryWithTrace(overrides?: {
+    skills?: Array<{ name: string; description: string; body?: string; tools: string[]; unlocks: string[] }>
+  }) {
+    const traced: Array<Record<string, unknown>> = []
+    const tools = {
+      call: vi.fn(async (name: string, params: Record<string, unknown>) => {
+        if (name === 'google.status') return { configured: false, tokenConfigured: false, grantedScopes: [] }
+        if (name === 'slack.status') return { configured: false }
+        if (name === 'skill.list') return { skills: overrides?.skills ?? [] }
+        if (name === 'skill.get') {
+          const skill = (overrides?.skills ?? []).find(s => s.name === (params as Record<string, unknown>).name)
+          if (!skill) throw new Error('Skill not found')
+          return { skill }
+        }
+        if (name === 'package.tools.list') return { tools: [] }
+        return { ok: true }
+      }),
+      getWorkspacePath: () => null,
+      trace: {
+        append: vi.fn((event: Record<string, unknown>) => traced.push(event)),
+        writePayload: vi.fn(() => 'ref-123'),
+      },
+      shouldCaptureContent: () => false,
+    } as unknown as ToolRegistry
+    return { tools, traced }
+  }
+
+  function registryWithModels(models: Array<{ id: string; model: string; provider: string }>) {
+    return {
+      models,
+      defaults: {},
+      providers: { anthropic: { url: 'https://api.anthropic.com/v1/messages' } },
+    }
+  }
+
+  const simpleRequest = {
+    messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any,
+  }
+
+  it('chatProfile field values match the mandated table', () => {
+    expect(chatProfile.id).toBe('chat')
+    expect(chatProfile.toolSurface).toBe('chat')
+    expect(chatProfile.modelFeature).toBe('chat')
+    expect(chatProfile.useCatalogs).toBe(true)
+    expect(chatProfile.persistSession).toBe(true)
+    expect(chatProfile.stepCap).toBe(100)
+    expect(chatProfile.sendReasoning).toBe(true)
+    expect(chatProfile.maxOutputTokens).toBeUndefined()
+    expect(chatProfile.temperature).toBeUndefined()
+    expect(chatProfile.defaultModelId).toBeUndefined()
+    expect(typeof chatProfile.buildInstructions).toBe('function')
+  })
+
+  it('inlineProfile field values match the mandated table', () => {
+    expect(inlineProfile.id).toBe('inline')
+    expect(inlineProfile.toolSurface).toBe('inline')
+    expect(inlineProfile.modelFeature).toBe('inline')
+    expect(inlineProfile.useCatalogs).toBe(false)
+    expect(inlineProfile.persistSession).toBe(false)
+    expect(inlineProfile.stepCap).toBe(4)
+    expect(inlineProfile.maxOutputTokens).toBe(2000)
+    expect(inlineProfile.temperature).toBe(0.3)
+    expect(inlineProfile.sendReasoning).toBe(false)
+    expect(inlineProfile.defaultModelId).toBeUndefined()
+    expect(typeof inlineProfile.buildInstructions).toBe('function')
+  })
+
+  it('resolves profile.defaultModelId when request.modelId is absent, request.modelId wins when present', async () => {
+    // Part 1: defaultModelId is used when request.modelId is absent
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+      { id: 'custom-default', model: 'custom-default', provider: 'anthropic' },
+    ]))
+    const { tools: tools1, traced: traced1 } = mockRegistryWithTrace()
+    const profile: AgentProfile = {
+      id: 'test-profile',
+      toolSurface: 'inline',
+      modelFeature: 'chat',
+      defaultModelId: 'custom-default',
+      buildInstructions: () => 'test instructions',
+      useCatalogs: false,
+      persistSession: false,
+      stepCap: 4,
+      sendReasoning: false,
+    }
+
+    await streamProfileResponse({ profile, tools: tools1, request: simpleRequest })
+
+    const turnTrace1 = traced1.find(e => e.kind === 'chat.turn')
+    expect(turnTrace1?.model).toBe('custom-default')
+
+    // Part 2: request.modelId wins over defaultModelId
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+      { id: 'custom-default', model: 'custom-default', provider: 'anthropic' },
+    ]))
+    const { tools: tools2, traced: traced2 } = mockRegistryWithTrace()
+
+    await streamProfileResponse({
+      profile,
+      tools: tools2,
+      request: { ...simpleRequest, modelId: 'test-model' },
+    })
+
+    const turnTrace2 = traced2.find(e => e.kind === 'chat.turn')
+    expect(turnTrace2?.model).toBe('test-model')
+  })
+
+  it('rejects when buildInstructions rejects', async () => {
+    const { tools } = mockRegistryWithTrace()
+    const profile: AgentProfile = {
+      id: 'failing-profile',
+      toolSurface: 'inline',
+      modelFeature: 'chat',
+      buildInstructions: () => Promise.reject(new Error('instructions assembly failed')),
+      useCatalogs: false,
+      persistSession: false,
+      stepCap: 4,
+      sendReasoning: false,
+    }
+
+    await expect(streamProfileResponse({ profile, tools, request: simpleRequest }))
+      .rejects.toThrow('instructions assembly failed')
+  })
+
+  it('passes populated skillCatalog and selectedSkillsSection when useCatalogs is true, empty/null when false', async () => {
+    const testSkills = [
+      { name: 'test-skill', description: 'A test skill', body: 'Skill body', tools: [], unlocks: [] },
+    ]
+
+    // Part 1: useCatalogs true — buildInstructions receives catalog and selected section
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const { tools: tools1 } = mockRegistryWithTrace({ skills: testSkills })
+    let capturedTrue: Record<string, unknown> | undefined
+    const trueProfile: AgentProfile = {
+      id: 'spy-true',
+      toolSurface: 'inline',
+      modelFeature: 'chat',
+      buildInstructions: (input) => {
+        capturedTrue = input as any
+        return 'ok'
+      },
+      useCatalogs: true,
+      persistSession: false,
+      stepCap: 4,
+      sendReasoning: false,
+    }
+
+    await streamProfileResponse({
+      profile: trueProfile,
+      tools: tools1,
+      request: { ...simpleRequest, skills: ['test-skill'] },
+    })
+
+    expect(capturedTrue).toBeDefined()
+    expect(capturedTrue!.skillCatalog).toEqual([
+      expect.objectContaining({ name: 'test-skill', description: 'A test skill' }),
+    ])
+    expect(capturedTrue!.selectedSkillsSection).toContain('ACTIVE SKILLS')
+    expect(capturedTrue!.selectedSkillsSection).toContain('test-skill')
+
+    // Part 2: useCatalogs false — buildInstructions receives empty/null
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const { tools: tools2 } = mockRegistryWithTrace({ skills: testSkills })
+    let capturedFalse: Record<string, unknown> | undefined
+    const falseProfile: AgentProfile = {
+      id: 'spy-false',
+      toolSurface: 'inline',
+      modelFeature: 'chat',
+      buildInstructions: (input) => {
+        capturedFalse = input as any
+        return 'ok'
+      },
+      useCatalogs: false,
+      persistSession: false,
+      stepCap: 4,
+      sendReasoning: false,
+    }
+
+    await streamProfileResponse({
+      profile: falseProfile,
+      tools: tools2,
+      request: { ...simpleRequest, skills: ['test-skill'] },
+    })
+
+    expect(capturedFalse).toBeDefined()
+    expect(capturedFalse!.skillCatalog).toEqual([])
+    expect(capturedFalse!.selectedSkillsSection).toBeNull()
+  })
+
+  it('toolAllowlist filters the tool map before the active-tool policy snapshot', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const { tools: tools1, traced } = mockRegistryWithTrace()
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+
+    const profile: AgentProfile = {
+      id: 'scoped-agent',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: false,
+      stepCap: 10,
+      sendReasoning: true,
+      toolAllowlist: ['fs.read', 'search'],
+      buildInstructions: () => 'scoped instructions',
+    }
+
+    await streamProfileResponse({ profile, tools: tools1, request: simpleRequest })
+
+    // The ToolLoopAgent constructor receives the filtered tool set
+    const agentCall = MockAgent.mock.calls[MockAgent.mock.calls.length - 1]
+    const agentOpts = agentCall[0]
+    const toolKeys = Object.keys(agentOpts.tools)
+    expect(toolKeys).toContain('fs_read')
+    expect(toolKeys).toContain('search')
+    // bash (shell.run) is NOT in the allowlist, so it must be filtered out
+    expect(toolKeys).not.toContain('bash')
+    expect(toolKeys).not.toContain('fs_write')
+    expect(toolKeys).not.toContain('git_commit')
+
+    // The activeTools should only include keys from the filtered set
+    const activeTools = agentOpts.activeTools
+    if (activeTools) {
+      for (const key of activeTools) {
+        expect(toolKeys).toContain(key)
+      }
+    }
+  })
+
+  it('skill key retained only with preActivatedSkills', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const { tools: tools1 } = mockRegistryWithTrace()
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+
+    // With preActivatedSkills: skill key should be present
+    const profileWithSkills: AgentProfile = {
+      id: 'with-skills',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: false,
+      stepCap: 10,
+      sendReasoning: true,
+      toolAllowlist: ['fs.read'],
+      preActivatedSkills: ['package:test-app/review'],
+      buildInstructions: () => 'instructions',
+    }
+
+    await streamProfileResponse({ profile: profileWithSkills, tools: tools1, request: simpleRequest })
+    const call1 = MockAgent.mock.calls[MockAgent.mock.calls.length - 1]
+    const toolKeys1 = Object.keys(call1[0].tools)
+    expect(toolKeys1).toContain('skill')
+    expect(toolKeys1).toContain('fs_read')
+
+    // Without preActivatedSkills: skill key should NOT be present in allowlisted set
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const { tools: tools2 } = mockRegistryWithTrace()
+
+    const profileNoSkills: AgentProfile = {
+      id: 'no-skills',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: false,
+      stepCap: 10,
+      sendReasoning: true,
+      toolAllowlist: ['fs.read'],
+      buildInstructions: () => 'instructions',
+    }
+
+    await streamProfileResponse({ profile: profileNoSkills, tools: tools2, request: simpleRequest })
+    const call2 = MockAgent.mock.calls[MockAgent.mock.calls.length - 1]
+    const toolKeys2 = Object.keys(call2[0].tools)
+    expect(toolKeys2).not.toContain('skill')
+    expect(toolKeys2).toContain('fs_read')
+  })
+
+  it('preActivatedSkills merged into skill activation', async () => {
+    const testSkills = [
+      { name: 'review', description: 'Do review', body: 'Review body', tools: [], unlocks: [] },
+    ]
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const { tools } = mockRegistryWithTrace({ skills: testSkills })
+
+    const profile: AgentProfile = {
+      id: 'pre-act',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: false,
+      stepCap: 10,
+      sendReasoning: true,
+      preActivatedSkills: ['package:test-app/review'],
+      buildInstructions: () => 'instructions',
+    }
+
+    await streamProfileResponse({ profile, tools, request: simpleRequest })
+
+    // skill.get should have been called for the pre-activated skill
+    const skillCalls = vi.mocked(tools.call).mock.calls.filter(
+      ([name]) => name === 'skill.get',
+    )
+    const qualifiedNames = skillCalls.map(([, params]) => (params as Record<string, unknown>).name)
+    expect(qualifiedNames).toContain('package:test-app/review')
+  })
+})
+
+describe('canonicalToolIdToAiKey', () => {
+  it('maps shell.run to bash', () => {
+    expect(canonicalToolIdToAiKey('shell.run')).toBe('bash')
+  })
+
+  it('maps web.live.open to browser_open', () => {
+    expect(canonicalToolIdToAiKey('web.live.open')).toBe('browser_open')
+  })
+
+  it('maps web.live.act to browser_act', () => {
+    expect(canonicalToolIdToAiKey('web.live.act')).toBe('browser_act')
+  })
+
+  it('maps google.setOAuthClient to google_set_oauth_client', () => {
+    expect(canonicalToolIdToAiKey('google.setOAuthClient')).toBe('google_set_oauth_client')
+  })
+
+  it('falls back to aiToolKey for standard dotted names', () => {
+    expect(canonicalToolIdToAiKey('fs.read')).toBe('fs_read')
+    expect(canonicalToolIdToAiKey('gmail.search')).toBe('gmail_search')
+    expect(canonicalToolIdToAiKey('slack.send')).toBe('slack_send')
+  })
+
+  it('passes through already-sanitized keys', () => {
+    expect(canonicalToolIdToAiKey('search')).toBe('search')
+    expect(canonicalToolIdToAiKey('bash')).toBe('bash')
+  })
+})
+
+describe('mounted agent tool calls run as actor ai through normal gate', () => {
+  it('tool calls under a mounted profile pass ctx.actor === ai', async () => {
+    const calls: Array<{ name: string; ctx: Record<string, unknown> }> = []
+    const tools = {
+      call: vi.fn(async (name: string, params: Record<string, unknown>, ctx: Record<string, unknown>) => {
+        calls.push({ name, ctx })
+        if (name === 'google.status') return { configured: false, tokenConfigured: false, grantedScopes: [] }
+        if (name === 'skill.list') return { skills: [] }
+        if (name === 'package.tools.list') return { tools: [] }
+        return { ok: true }
+      }),
+      getWorkspacePath: () => null,
+      trace: {
+        append: vi.fn(),
+        writePayload: vi.fn(() => null),
+      },
+      shouldCaptureContent: () => false,
+    } as unknown as ToolRegistry
+
+    const aiTools = await createAiSdkTools({
+      tools,
+      profile: 'chat',
+      sessionId: 's1',
+      trace: { traceId: 't1', spanId: 's1' },
+    })
+
+    // Execute a tool — the call should have actor 'ai'
+    await aiTools.fs_read.execute?.({ path: 'test.md' }, {})
+
+    const fsReadCall = calls.find(c => c.name === 'fs.read')
+    expect(fsReadCall).toBeDefined()
+    expect(fsReadCall!.ctx.actor).toBe('ai')
+  })
+})
+
+describe('createAiRuntime agentId resolution', () => {
+  const mockedLoadRegistry = vi.mocked(loadRegistry)
+
+  function registryWithModels(models: Array<{ id: string; model: string; provider: string }>) {
+    return {
+      models,
+      defaults: {},
+      providers: { anthropic: { url: 'https://api.anthropic.com/v1/messages' } },
+    }
+  }
+
+  function mockToolsForAgent() {
+    const tools = {
+      call: vi.fn(async (name: string) => {
+        if (name === 'google.status') return { configured: false, tokenConfigured: false, grantedScopes: [] }
+        if (name === 'skill.list') return { skills: [] }
+        if (name === 'package.tools.list') return { tools: [] }
+        return { ok: true }
+      }),
+      getWorkspacePath: () => null,
+      trace: {
+        append: vi.fn(),
+        writePayload: vi.fn(() => null),
+      },
+      shouldCaptureContent: () => false,
+    } as unknown as ToolRegistry
+    return tools
+  }
+
+  const simpleRequest = {
+    messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'hello' }] }] as any,
+  }
+
+  it('resolves agentId to profile via agentMounts.resolveProfile', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const tools = mockToolsForAgent()
+    const agentProfile: AgentProfile = {
+      id: 'package:review-app/referee',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: false,
+      persistSession: false,
+      stepCap: 10,
+      sendReasoning: true,
+      buildInstructions: () => 'agent instructions',
+    }
+    const resolveProfile = vi.fn().mockResolvedValue(agentProfile)
+    const runtime = createAiRuntime({ tools, agentMounts: { resolveProfile } })
+
+    const response = await runtime.streamChatResponse({
+      ...simpleRequest,
+      agentId: 'package:review-app/referee',
+    })
+
+    expect(resolveProfile).toHaveBeenCalledWith('package:review-app/referee')
+    expect(response).toBeInstanceOf(Response)
+  })
+
+  it('throws when agentId is set but agentMounts is absent', async () => {
+    const tools = mockToolsForAgent()
+    const runtime = createAiRuntime({ tools })
+
+    await expect(runtime.streamChatResponse({
+      ...simpleRequest,
+      agentId: 'package:review-app/referee',
+    })).rejects.toThrow('Agent chat is not available')
+  })
+
+  it('propagates resolveProfile rejection', async () => {
+    const tools = mockToolsForAgent()
+    const resolveProfile = vi.fn().mockRejectedValue(
+      new Error('Unknown or unavailable agent: package:ghost/missing'),
+    )
+    const runtime = createAiRuntime({ tools, agentMounts: { resolveProfile } })
+
+    await expect(runtime.streamChatResponse({
+      ...simpleRequest,
+      agentId: 'package:ghost/missing',
+    })).rejects.toThrow('Unknown or unavailable agent: package:ghost/missing')
+  })
+
+  it('uses chatProfile when agentId is absent even with agentMounts wired', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const tools = mockToolsForAgent()
+    const resolveProfile = vi.fn()
+    const runtime = createAiRuntime({ tools, agentMounts: { resolveProfile } })
+
+    const response = await runtime.streamChatResponse(simpleRequest)
+
+    expect(resolveProfile).not.toHaveBeenCalled()
+    expect(response).toBeInstanceOf(Response)
   })
 })

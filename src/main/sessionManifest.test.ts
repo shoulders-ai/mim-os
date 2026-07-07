@@ -164,4 +164,21 @@ describe('Session manifest', () => {
     })
     expect((entry as unknown as Record<string, unknown>).messages).toBeUndefined()
   })
+
+  it('extractManifestEntry carries agentId when present', () => {
+    const entry = extractManifestEntry({
+      id: 's1',
+      label: 'Agent chat',
+      agentId: 'package:review-app/referee',
+    })
+    expect(entry.agentId).toBe('package:review-app/referee')
+  })
+
+  it('extractManifestEntry omits agentId when absent', () => {
+    const entry = extractManifestEntry({
+      id: 's1',
+      label: 'Plain chat',
+    })
+    expect('agentId' in entry).toBe(false)
+  })
 })

@@ -109,6 +109,44 @@ describe('starter templates', () => {
     expect(js).not.toContain('job.completed')
   })
 
+  it('renders the Agent template with agents export, skill, and id coupling', () => {
+    const params = renderAppTemplate('agent', {
+      id: 'stats-referee',
+      name: 'Stats Referee',
+    })
+    const backend = String(params.backend)
+    const readme = String(params.readme)
+    const skill = (params.skills as Array<{ name: string; content: string }>)[0]
+    const skillMeta = frontmatterOf(skill.content)
+
+    expect(params.id).toBe('stats-referee')
+    expect(params.name).toBe('Stats Referee')
+    expect(params.icon).toBe('S')
+
+    // Backend exports agents, not tools or jobs
+    expect(backend).toContain('export const agents')
+    expect(backend).toContain("name: 'Stats Referee'")
+    expect(backend).toContain('statsReferee:')
+    expect(backend).toContain("skills: ['stats-referee']")
+    expect(backend).toContain('ctx.data.kv.get')
+    expect(backend).toContain('{{WORKSPACE_TREE}}')
+    expect(backend).not.toContain('export const tools')
+    expect(backend).not.toContain('export const jobs')
+
+    // No views, no provides — headless agent-only app
+    expect(params.html).toBeUndefined()
+    expect(params.js).toBeUndefined()
+    expect(params.provides).toBeUndefined()
+
+    // Skill is coupled to the app id
+    expect(skill.name).toBe('stats-referee')
+    expect(skillMeta.name).toBe('stats-referee')
+
+    // README mentions the iterate loop
+    expect(readme).toContain('package.validate')
+    expect(readme).toContain('package.reload')
+  })
+
   it('creates and validates every rendered app template', async () => {
     root = mkdtempSync(join(tmpdir(), 'mim-template-test-'))
     const tools = createToolRegistry(createTraceLog())

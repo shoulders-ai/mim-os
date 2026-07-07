@@ -6,7 +6,7 @@ import {
 import type { LoadedPackage } from './types.js'
 
 export type ShellAction =
-  | { type: 'open-draft-chat' }
+  | { type: 'open-draft-chat'; agentId?: string }
   | { type: 'open-files' }
   | { type: 'open-monitor' }
   | { type: 'open-terminal' }
@@ -63,6 +63,7 @@ export function resolvePaletteAction(id: string): ShellAction {
   if (id === 'surface:terminal') return { type: 'open-terminal' }
   if (id === 'surface:history') return { type: 'open-archive' }
   if (id === 'action:new-chat') return { type: 'open-draft-chat' }
+  if (id.startsWith('action:new-agent-chat:')) return { type: 'open-draft-chat', agentId: id.slice('action:new-agent-chat:'.length) }
   if (id === 'action:new-document') return { type: 'new-document' }
   if (id === 'action:open-file') return { type: 'open-file-dialog' }
   if (id === 'action:export-document') return { type: 'export-document' }

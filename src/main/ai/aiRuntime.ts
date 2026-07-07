@@ -60,7 +60,7 @@ interface ActivatedSkill {
   unlocks: string[]
 }
 
-interface SkillCatalogSummary {
+export interface SkillCatalogSummary {
   id?: string
   name: string
   description: string
@@ -71,20 +71,77 @@ interface SkillCatalogSummary {
 
 interface AiRuntimeOptions {
   tools: ToolRegistry
+  agentMounts?: { resolveProfile(agentId: string): Promise<AgentProfile> }
 }
 
-interface StreamRequest {
+export interface StreamRequest {
   id?: string
   messages: UIMessage[]
   modelId?: string
   controlId?: string
   skills?: string[]
+  agentId?: string
   selection?: {
     text?: string
     contextBefore?: string
     contextAfter?: string
   }
   abortSignal?: AbortSignal
+}
+
+export interface AgentProfile {
+  id: string
+  toolSurface: 'chat' | 'inline'
+  modelFeature: string
+  defaultModelId?: string
+  buildInstructions(input: {
+    workspacePath: string | undefined
+    skillCatalog: SkillCatalogSummary[]
+    selectedSkillsSection: string | null
+    request: StreamRequest
+    trace?: { traceId: string; spanId: string }
+  }): string | Promise<string>
+  useCatalogs: boolean
+  persistSession: boolean
+  stepCap: number
+  maxOutputTokens?: number
+  temperature?: number
+  sendReasoning: boolean
+  toolAllowlist?: string[]
+  preActivatedSkills?: string[]
+}
+
+export const chatProfile: AgentProfile = {
+  id: 'chat',
+  toolSurface: 'chat',
+  modelFeature: 'chat',
+  useCatalogs: true,
+  persistSession: true,
+  stepCap: 100,
+  sendReasoning: true,
+  buildInstructions({ workspacePath, skillCatalog, selectedSkillsSection }) {
+    return [
+      getSystemPrompt(workspacePath, {
+        skillCatalog: formatSkillCatalogSection(skillCatalog) ?? undefined,
+      }),
+      selectedSkillsSection,
+    ].filter(Boolean).join('\n\n\n')
+  },
+}
+
+export const inlineProfile: AgentProfile = {
+  id: 'inline',
+  toolSurface: 'inline',
+  modelFeature: 'inline',
+  useCatalogs: false,
+  persistSession: false,
+  stepCap: 4,
+  maxOutputTokens: 2000,
+  temperature: 0.3,
+  sendReasoning: false,
+  buildInstructions({ request }) {
+    return buildInlineSystemPrompt(request.selection || {})
+  },
 }
 
 interface GhostRequest {
@@ -115,6 +172,27 @@ const MAX_TASK_LABEL_WORDS = 4
 // Anthropic tool names must match [A-Za-z0-9_-]+; normalize dotted/other names for SDK keys
 export function aiToolKey(name: string): string {
   return name.replace(/[^A-Za-z0-9_-]/g, '_')
+}
+
+// SDK keys whose canonical registry tool id does not sanitize to the key
+// mechanically. Every static tool in createAiSdkTools was verified; these are
+// the only four mismatches. Composite SDK tools with no single canonical id
+// (connections_status, connections_configure, skill, suggest_edit,
+// package_tools_execute, ...) are intentionally NOT reachable via allowlist in v1.
+const CANONICAL_TO_AI_KEY_EXCEPTIONS: Record<string, string> = {
+  'shell.run': 'bash',
+  'web.live.open': 'browser_open',
+  'web.live.act': 'browser_act',
+  'google.setOAuthClient': 'google_set_oauth_client',
+}
+
+/**
+ * Map a canonical registry tool id to its AI SDK key. Uses the exceptions
+ * table for the handful of tools whose SDK key was chosen for UX reasons
+ * rather than mechanical sanitization; falls back to aiToolKey.
+ */
+export function canonicalToolIdToAiKey(id: string): string {
+  return CANONICAL_TO_AI_KEY_EXCEPTIONS[id] ?? aiToolKey(id)
 }
 
 const contextDataSchema = z.object({
@@ -155,12 +233,18 @@ const packageCreateInputSchema = z.object({
   override: z.boolean().optional(),
 })
 
-export function createAiRuntime({ tools }: AiRuntimeOptions) {
+export function createAiRuntime({ tools, agentMounts }: AiRuntimeOptions) {
   return {
-    streamChatResponse: (request: StreamRequest) =>
-      streamProfileResponse({ profile: 'chat', tools, request }),
+    streamChatResponse: async (request: StreamRequest) => {
+      let profile: AgentProfile = chatProfile
+      if (request.agentId) {
+        if (!agentMounts) throw new Error('Agent chat is not available')
+        profile = await agentMounts.resolveProfile(request.agentId)
+      }
+      return streamProfileResponse({ profile, tools, request })
+    },
     streamInlineResponse: (request: StreamRequest) =>
-      streamProfileResponse({ profile: 'inline', tools, request }),
+      streamProfileResponse({ profile: inlineProfile, tools, request }),
     generateGhostSuggestions: (request: GhostRequest) =>
       generateGhostSuggestions({ tools, request }),
     generateTaskLabel: (request: TaskLabelRequest) =>
@@ -1012,17 +1096,18 @@ function normalizeActivatedSkill(raw: unknown): ActivatedSkill {
   }
 }
 
-async function streamProfileResponse({
+export async function streamProfileResponse({
   profile,
   tools,
   request,
 }: {
-  profile: 'chat' | 'inline'
+  profile: AgentProfile
   tools: ToolRegistry
   request: StreamRequest
 }): Promise<Response> {
   const registry = loadRegistry()
-  const modelConfig = resolveRequestModel(registry, profile, request.modelId)
+  const effectiveModelId = request.modelId || profile.defaultModelId
+  const modelConfig = resolveRequestModel(registry, profile.modelFeature, effectiveModelId)
   const { key } = resolveKey(modelConfig.provider)
   if (!key) throw new Error(`No API key configured for ${modelConfig.provider}`)
   const { model } = await createSdkModel({ registry, modelConfig, apiKey: key })
@@ -1042,16 +1127,16 @@ async function streamProfileResponse({
     spanId: turnSpanId,
     ...(sessionId ? { sessionId } : {}),
     model: modelConfig.model,
-    data: { profile },
+    data: { profile: profile.id },
   })
-  const [packageTools, skillCatalog] = profile === 'chat'
+  const [packageTools, skillCatalog] = profile.useCatalogs
     ? await Promise.all([listPackageTools(tools, sessionId, turnTrace), listSkillCatalog(tools, sessionId, turnTrace)])
     : [[], []] as const
   const gatedToolNames = skillUnlocksFromCatalog(skillCatalog)
   const activatedSkillTools = new Set<string>()
-  const aiTools = await createAiSdkTools({
+  let aiTools = await createAiSdkTools({
     tools,
-    profile,
+    profile: profile.toolSurface,
     sessionId,
     packageTools,
     onSkillActivated: skill => {
@@ -1060,8 +1145,25 @@ async function streamProfileResponse({
     },
     trace: { traceId: turnTraceId, spanId: turnSpanId },
   })
-  const selectedSkills = profile === 'chat'
-    ? await activateSelectedSkillsFromRegistry(tools, request.skills, {
+  // Allowlist filtering: when the profile declares a toolAllowlist, narrow the
+  // tool map BEFORE the active-tool policy snapshots Object.keys(aiTools).
+  if (profile.toolAllowlist) {
+    const allowed = new Set(profile.toolAllowlist.map(canonicalToolIdToAiKey))
+    // The `skill` key is additionally kept iff the profile has preActivatedSkills
+    if (profile.preActivatedSkills?.length) allowed.add('skill')
+    const filtered: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(aiTools)) {
+      if (allowed.has(key)) filtered[key] = value
+    }
+    aiTools = filtered as typeof aiTools
+  }
+  // Merge preActivatedSkills BEFORE request.skills into the skill activation call
+  const mergedSkills = [
+    ...(profile.preActivatedSkills ?? []),
+    ...(request.skills ?? []),
+  ]
+  const selectedSkills = profile.useCatalogs
+    ? await activateSelectedSkillsFromRegistry(tools, mergedSkills, {
         sessionId,
         traceId: turnTraceId,
         spanId: turnSpanId,
@@ -1070,16 +1172,16 @@ async function streamProfileResponse({
   // Pre-activated tools must land in the set before the policy snapshots its
   // initial activeTools, so composer-selected skills are usable from step one.
   selectedSkills.toolNames.forEach(toolName => activatedSkillTools.add(toolName))
-  const activeToolPolicy = profile === 'chat'
+  const activeToolPolicy = profile.useCatalogs
     ? createSkillActiveToolPolicy(Object.keys(aiTools), activatedSkillTools, gatedToolNames)
     : null
   const normalizedMessages = normalizeFileUIParts(request.messages || [])
   const repaired = repairIncompleteToolMessages(normalizedMessages)
-  const compacted = profile === 'chat'
+  const compacted = profile.useCatalogs
     ? compactBrowserToolResultsForContext(repaired.messages)
     : { messages: repaired.messages, changed: false }
   const preparedMessages = compacted.messages
-  if (profile === 'chat' && sessionId && (repaired.changed || compacted.changed)) {
+  if (profile.useCatalogs && profile.persistSession && sessionId && (repaired.changed || compacted.changed)) {
     await persistRepairedChatSession(tools, sessionId, preparedMessages, turnTrace)
   }
   const uiMessages = await validateUIMessages({
@@ -1095,25 +1197,25 @@ async function streamProfileResponse({
   })
   const turnUsageSteps: UsageSummary[] = []
 
+  const instructions = await profile.buildInstructions({
+    workspacePath: tools.getWorkspacePath() ?? undefined,
+    skillCatalog,
+    selectedSkillsSection: selectedSkills.promptSection,
+    request,
+    trace: turnTrace,
+  })
+
   const agent = new ToolLoopAgent({
     model,
-    instructions: profile === 'chat'
-      ? [
-          getSystemPrompt(tools.getWorkspacePath() ?? undefined, {
-            skillCatalog: formatSkillCatalogSection(skillCatalog) ?? undefined,
-          }),
-          selectedSkills.promptSection,
-        ]
-        .filter(Boolean).join('\n\n\n')
-      : buildInlineSystemPrompt(request.selection || {}),
+    instructions,
     tools: aiTools,
     activeTools: activeToolPolicy?.activeTools as any,
     prepareStep: activeToolPolicy?.prepareStep as any,
     // Chat cap is a runaway backstop, not a task limit — the renderer shows a
     // Continue notice when it's hit (ChatView step-cap notice tracks this number).
-    stopWhen: stepCountIs(profile === 'chat' ? 100 : 4),
-    maxOutputTokens: profile === 'chat' ? undefined : 2000,
-    temperature: profile === 'chat' ? undefined : 0.3,
+    stopWhen: stepCountIs(profile.stepCap),
+    maxOutputTokens: profile.maxOutputTokens,
+    temperature: profile.temperature,
     providerOptions: buildProviderOptions(modelConfig, request.controlId),
     onStepFinish(event) {
       if (event.usage) {
@@ -1126,7 +1228,7 @@ async function streamProfileResponse({
           parentSpanId: turnSpanId,
           ...(sessionId ? { sessionId } : {}),
           model: modelConfig.model,
-          data: { profile, ...usage },
+          data: { profile: profile.id, ...usage },
         })
       }
     },
@@ -1139,7 +1241,7 @@ async function streamProfileResponse({
 
   return result.toUIMessageStreamResponse({
     originalMessages: uiMessages,
-    sendReasoning: profile === 'chat',
+    sendReasoning: profile.sendReasoning,
     onFinish: async ({ messages }) => {
       // Capture the turn's full message array (input + assistant output + tool
       // calls/results) as a payload blob so the Activity Story can show what the
@@ -1157,10 +1259,10 @@ async function streamProfileResponse({
         durationMs: Date.now() - turnStartedAt,
         ...(sessionId ? { sessionId } : {}),
         model: modelConfig.model,
-        data: { profile, steps: turnUsageSteps.length },
+        data: { profile: profile.id, steps: turnUsageSteps.length },
         ...(messagesRef ? { payloadRef: messagesRef } : {}),
       })
-      if (profile !== 'chat' || !sessionId) return
+      if (!profile.persistSession || !sessionId) return
       const turnUsage = summarizeTurnUsage(turnUsageSteps, estimatedContextTokens)
       await persistChatSession(tools, sessionId, messages, turnUsage.usage, turnUsage.contextTokens, turnTrace)
     },

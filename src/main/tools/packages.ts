@@ -412,6 +412,7 @@ interface ValidationSummary {
   jobs: number
   skills: number
   namedTools: number
+  agents: number
 }
 
 async function validateWorkspacePackage(workspace: string, id: string): Promise<{
@@ -425,7 +426,7 @@ async function validateWorkspacePackage(workspace: string, id: string): Promise<
   const pkgDir = join(workspace, 'packages', id)
   const errors: ValidationDiagnostic[] = []
   const warnings: ValidationDiagnostic[] = []
-  const summary: ValidationSummary = { tools: 0, jobs: 0, skills: 0, namedTools: 0 }
+  const summary: ValidationSummary = { tools: 0, jobs: 0, skills: 0, namedTools: 0, agents: 0 }
 
   const addError = (path: string, message: string) => errors.push({ path, message })
   const addWarning = (path: string, message: string) => warnings.push({ path, message })
@@ -493,6 +494,7 @@ function validateBackendExports(input: {
 }): void {
   validateBackendJobs(input)
   validateBackendTools(input)
+  validateBackendAgents(input)
   if (input.mod.agentContext !== undefined && typeof input.mod.agentContext !== 'function') {
     input.errors.push({ path: input.backendPath, message: 'backend export "agentContext" must be a function' })
   }
@@ -587,6 +589,35 @@ function validateBackendTools(input: {
     if (![...namedTools].some(name => matchesToolGrant(grant.pattern, name))) {
       input.warnings.push({ path: input.backendPath, message: `mim.provides.tools grant "${grant.pattern}" does not match any backend named tool` })
     }
+  }
+}
+
+function validateBackendAgents(input: {
+  backendPath: string
+  mod: Record<string, unknown>
+  errors: ValidationDiagnostic[]
+  summary: ValidationSummary
+}): void {
+  const raw = input.mod.agents
+  if (raw == null) return
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    input.errors.push({ path: input.backendPath, message: 'backend export "agents" must be an object' })
+    return
+  }
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!isValidCapabilityId(key)) {
+      input.errors.push({ path: input.backendPath, message: `Invalid agent key: ${key}` })
+      continue
+    }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      input.errors.push({ path: input.backendPath, message: `Agent ${key} must be an object` })
+      continue
+    }
+    if (typeof (value as Record<string, unknown>).instructions !== 'function') {
+      input.errors.push({ path: input.backendPath, message: `Agent ${key} must export instructions(ctx)` })
+      continue
+    }
+    input.summary.agents += 1
   }
 }
 

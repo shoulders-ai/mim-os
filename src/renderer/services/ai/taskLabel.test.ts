@@ -3,7 +3,6 @@ import {
   cleanTaskLabel,
   isPlaceholderTaskLabel,
   provisionalTaskLabel,
-  requestTaskLabel,
   shouldRequestTaskLabel,
   taskLabelContextLabels,
 } from './taskLabel.js'
@@ -53,13 +52,22 @@ describe('task label helpers', () => {
     expect(provisionalTaskLabel('summarize this', ['interview_notes.docx'])).toBe('Summarize interview notes')
   })
 
-  it('requests a task label from the local AI endpoint', async () => {
+  it('requests a task label from the local AI endpoint with shell token', async () => {
+    vi.stubGlobal('window', {
+      kernel: {
+        getPort: vi.fn().mockResolvedValue(17654),
+        getAiToken: vi.fn().mockResolvedValue('test-shell-token'),
+      },
+    })
+    vi.resetModules()
+
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ label: ' Compare supplier quotes. ' }),
     })
 
-    const label = await requestTaskLabel('http://127.0.0.1:17654', {
+    const { requestTaskLabel } = await import('./taskLabel.js')
+    const label = await requestTaskLabel({
       userText: 'Compare the quotes before the finance meeting',
       contextLabels: ['quotes.xlsx', 'quotes.xlsx'],
     })
@@ -68,13 +76,16 @@ describe('task label helpers', () => {
       'http://127.0.0.1:17654/api/ai/task-label',
       expect.objectContaining({
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userText: 'Compare the quotes before the finance meeting',
           contextLabels: ['quotes.xlsx'],
         }),
       }),
     )
+    // Verify the shell token header is set
+    const callHeaders = fetchMock.mock.calls[0][1].headers
+    expect(callHeaders.get('x-mim-shell-token')).toBe('test-shell-token')
+    expect(callHeaders.get('Content-Type')).toBe('application/json')
     expect(label).toBe('Compare supplier quotes')
   })
 })

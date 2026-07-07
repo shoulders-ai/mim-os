@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { getSystemPrompt, PROJECT_LOG_MAX_CHARS, resolveTemplateVars } from '@main/ai/systemPrompt.js'
+import { buildPromptTemplateVars, getSystemPrompt, PROJECT_LOG_MAX_CHARS, resolveTemplateVars } from '@main/ai/systemPrompt.js'
 
 describe('getSystemPrompt', () => {
   let dir: string

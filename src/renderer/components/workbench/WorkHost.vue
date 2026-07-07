@@ -186,6 +186,7 @@ defineExpose({
     ref="chatRef"
     :session-id="activeWork?.kind === 'chat' ? activeWork.sessionId : undefined"
     :draft="activeWork?.kind === 'chat-draft'"
+    :agent-id="activeWork?.kind === 'chat-draft' ? activeWork.agentId : undefined"
     @open-file="emit('openFile', $event)"
     @session-created="emit('openSession', $event)"
     @archive-session="emit('archiveSession', $event)"

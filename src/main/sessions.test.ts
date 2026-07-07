@@ -189,4 +189,44 @@ describe('Session tools', () => {
     const content = JSON.parse(readFileSync(join(sessionsDir, `${created.id}.json`), 'utf-8'))
     expect(content.label).toBe('After')
   })
+
+  it('creates a session with agentId and persists it to file and manifest', async () => {
+    const session = await tools.call('session.create', {
+      label: 'Agent chat',
+      agentId: 'package:review-app/referee',
+    }, ctx) as Record<string, unknown>
+    const id = String(session.id)
+    expect(session.agentId).toBe('package:review-app/referee')
+
+    // Persisted to disk
+    const raw = JSON.parse(readFileSync(join(dir, '.mim', 'sessions', `${id}.json`), 'utf-8'))
+    expect(raw.agentId).toBe('package:review-app/referee')
+
+    // Listed with agentId
+    const result = await tools.call('session.list', {}, ctx) as { sessions: Array<{ agentId?: string }> }
+    expect(result.sessions[0].agentId).toBe('package:review-app/referee')
+  })
+
+  it('session without agentId does not serialize an agentId key', async () => {
+    const session = await tools.call('session.create', { label: 'Plain' }, ctx) as { id: string } & Record<string, unknown>
+    expect(session.agentId).toBeUndefined()
+
+    const raw = JSON.parse(readFileSync(join(dir, '.mim', 'sessions', `${session.id}.json`), 'utf-8'))
+    expect('agentId' in raw).toBe(false)
+  })
+
+  it('session.update ignores agentId param and does not change stored agentId', async () => {
+    const created = await tools.call('session.create', {
+      label: 'With agent',
+      agentId: 'package:app/agent-a',
+    }, ctx) as { id: string }
+    await tools.call('session.update', {
+      id: created.id,
+      label: 'Updated',
+      agentId: 'package:app/agent-b',
+    }, ctx)
+    const got = await tools.call('session.get', { id: created.id }, ctx) as { agentId?: string; label: string }
+    expect(got.label).toBe('Updated')
+    expect(got.agentId).toBe('package:app/agent-a')
+  })
 })

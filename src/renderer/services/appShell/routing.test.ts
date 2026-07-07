@@ -78,4 +78,11 @@ describe('app shell routing', () => {
     expect(resolvePaletteAction('file:docs/a.md')).toEqual({ type: 'open-file', path: 'docs/a.md' })
     expect(resolvePaletteAction('unknown')).toEqual({ type: 'none' })
   })
+
+  it('routes new-agent-chat palette actions to open-draft-chat with agentId', () => {
+    expect(resolvePaletteAction('action:new-agent-chat:package:research/default')).toEqual({
+      type: 'open-draft-chat',
+      agentId: 'package:research/default',
+    })
+  })
 })

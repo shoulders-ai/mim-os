@@ -3,6 +3,7 @@ import {
   rankPaletteItems,
   coreActions,
   coreSurfaces,
+  agentActions,
   type PaletteItem,
 } from './commandPalette.js'
 
@@ -131,5 +132,39 @@ describe('coreSurfaces', () => {
 
   it('does not include Editor as a Navigator surface', () => {
     expect(coreSurfaces().some(surface => surface.id === 'surface:editor')).toBe(false)
+  })
+})
+
+describe('agentActions', () => {
+  it('generates one action item per mounted agent', () => {
+    const agents = [
+      { id: 'package:research/default', name: 'Research' },
+      { id: 'package:coder/review', name: 'Code Review' },
+    ]
+    const items = agentActions(agents)
+    expect(items).toHaveLength(2)
+    expect(items[0]).toEqual({
+      id: 'action:new-agent-chat:package:research/default',
+      kind: 'action',
+      label: 'New Research chat',
+      hint: '',
+    })
+    expect(items[1]).toEqual({
+      id: 'action:new-agent-chat:package:coder/review',
+      kind: 'action',
+      label: 'New Code Review chat',
+      hint: '',
+    })
+  })
+
+  it('returns empty array for no agents', () => {
+    expect(agentActions([])).toEqual([])
+  })
+
+  it('agent actions are matchable in the palette', () => {
+    const agents = [{ id: 'package:research/default', name: 'Research' }]
+    const items = [...coreSurfaces(), ...coreActions(), ...agentActions(agents)]
+    const ranked = rankPaletteItems('research', items)
+    expect(ranked.some(r => r.item.id === 'action:new-agent-chat:package:research/default')).toBe(true)
   })
 })

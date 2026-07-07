@@ -116,3 +116,16 @@ export function coreSurfaces(): PaletteItem[] {
     { id: 'surface:history', kind: 'surface', label: 'History', hint: '' },
   ]
 }
+
+// One palette item per mounted app agent, so the user can launch a new
+// agent chat from Cmd+K.
+export function agentActions(
+  agents: Array<{ id: string; name: string }>,
+): PaletteItem[] {
+  return agents.map(agent => ({
+    id: `action:new-agent-chat:${agent.id}`,
+    kind: 'action' as PaletteItemKind,
+    label: `New ${agent.name} chat`,
+    hint: '',
+  }))
+}

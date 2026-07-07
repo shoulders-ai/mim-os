@@ -16,8 +16,13 @@ terms: what the user can ask Mim to do after the work is complete.
 Choose the smallest durable abstraction that solves the user's recurring task:
 
 - Persistent instructions only: create a workspace skill at `skills/<name>/SKILL.md`.
+- A specialised assistant with its own prompt/tools/model: create an app with an `agents` export.
 - Custom logic, data, HTTP, secrets, jobs, or UI: create an app under `packages/<id>/`.
 - Both: create an app and include an app skill under `packages/<id>/skills/<name>/SKILL.md`.
+
+Use a skill to shape the main chat's default behavior. Mount an agent only
+when the capability needs a separate identity: its own sessions and history,
+tool scope, model, or persona.
 
 Ask at most one or two clarifying questions when the answer changes the
 abstraction, permissions, or external account setup. Otherwise proceed.
@@ -116,6 +121,29 @@ Use this loop for every app:
 Do not claim the capability is ready until validation is clean enough, the app
 is enabled, capabilities are visible, and at least one representative tool or
 job has been tested.
+
+## Agent Apps
+
+A headless app can mount agents via `export const agents` in the backend.
+After `package_validate` and `package_reload`, the agent row appears in the
+sidebar. Each agent runs in its own chat sessions.
+
+Agent descriptor fields:
+
+- `name` (string) — sidebar label.
+- `icon` (string, optional) — short text token.
+- `model` (string, optional) — default model id; user picker still wins.
+- `tools` (string[], optional) — canonical tool id allowlist intersected with
+  Settings > Tools. Omit for full chat tools.
+- `skills` (string[], optional) — app skill names pre-activated each turn.
+- `instructions(ctx)` (required) — returns the system prompt string. `ctx`
+  is constrained: `ctx.package`, `ctx.data` (kv.get/keys,
+  collection.get/list), `ctx.files.readPackageText`, `ctx.abort`. No
+  tools.call, http, secrets, ai, or writes. 3s budget; failure names the
+  agent. The returned string resolves template vars (`{{WORKSPACE_TREE}}`,
+  `{{TOOL_SET}}`, etc.). Rule: compute at action time, read at prompt time.
+
+Agent id format: `package:<packageId>/<key>`.
 
 ## Trust Boundary
 

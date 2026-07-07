@@ -61,6 +61,7 @@ describe('AppsSettingsPanel sections', () => {
             packageId: 'runtime-demo',
             jobs: [{ id: 'inspectWorkspace', label: 'Inspect workspace' }],
             tools: [{ id: 'summarize', name: 'pkg_runtime__summarizeWorkspace', label: 'Summarize workspace' }],
+            agents: [{ key: 'helper', name: 'Helper', scoped: false }],
             skills: [{ id: 'runtime-skill', label: 'Runtime skill' }],
             diagnostics: [],
           }],

@@ -514,4 +514,248 @@ describe('app runtime capabilities', () => {
     expect(caps.agentContext).toBeUndefined()
     expect(caps.diagnostics.some(d => d.includes('agentContext') && d.includes('must be a function'))).toBe(true)
   })
+
+  // ---- Agent descriptor parsing ----
+
+  it('parses agents export with two agents, one minimal one full', async () => {
+    writePackage('agent-app', `
+      export const agents = {
+        minimal: {
+          async instructions() { return 'You are minimal.' }
+        },
+        full: {
+          name: 'Full Agent',
+          icon: 'FA',
+          model: 'claude-opus-4-8',
+          tools: ['fs.read', 'search.files'],
+          skills: ['review-methods'],
+          async instructions(ctx) {
+            return 'You are the full agent.'
+          }
+        }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('agent-app', true)
+    enablement.ackTrust(packages.get('agent-app')!)
+
+    const caps = await runtime.loadCapabilities('agent-app')
+
+    expect(caps.diagnostics).toEqual([])
+    expect(caps.agents).toHaveLength(2)
+
+    const minimal = caps.agents.find(a => a.key === 'minimal')!
+    expect(minimal.name).toBe('minimal')
+    expect(minimal.icon).toBeUndefined()
+    expect(minimal.model).toBeUndefined()
+    expect(minimal.tools).toBeUndefined()
+    expect(minimal.skills).toBeUndefined()
+    expect(minimal.instructions).toBeTypeOf('function')
+
+    const full = caps.agents.find(a => a.key === 'full')!
+    expect(full.name).toBe('Full Agent')
+    expect(full.icon).toBe('FA')
+    expect(full.model).toBe('claude-opus-4-8')
+    expect(full.tools).toEqual(['fs.read', 'search.files'])
+    expect(full.skills).toEqual(['review-methods'])
+    expect(full.instructions).toBeTypeOf('function')
+  })
+
+  it('returns empty agents array for packages without agents export', async () => {
+    writePackage('no-agents', `
+      export const jobs = {
+        run: { label: 'Run', async run() { return {} } }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('no-agents', true)
+    enablement.ackTrust(packages.get('no-agents')!)
+
+    const caps = await runtime.loadCapabilities('no-agents')
+
+    expect(caps.agents).toEqual([])
+    expect(caps.diagnostics).toEqual([])
+  })
+
+  it('emits diagnostic when agents export is not an object', async () => {
+    writePackage('agents-bad-type', `
+      export const agents = "not an object"
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('agents-bad-type', true)
+    enablement.ackTrust(packages.get('agents-bad-type')!)
+
+    const caps = await runtime.loadCapabilities('agents-bad-type')
+
+    expect(caps.agents).toEqual([])
+    expect(caps.diagnostics).toContain('backend export "agents" must be an object')
+  })
+
+  it('emits diagnostic for invalid agent key', async () => {
+    writePackage('agents-bad-key', `
+      export const agents = {
+        'INVALID KEY!': {
+          async instructions() { return 'x' }
+        }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('agents-bad-key', true)
+    enablement.ackTrust(packages.get('agents-bad-key')!)
+
+    const caps = await runtime.loadCapabilities('agents-bad-key')
+
+    expect(caps.agents).toEqual([])
+    expect(caps.diagnostics.some(d => d.includes('Invalid agent key'))).toBe(true)
+  })
+
+  it('emits diagnostic when agent value is not an object', async () => {
+    writePackage('agents-not-obj', `
+      export const agents = {
+        broken: 42
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('agents-not-obj', true)
+    enablement.ackTrust(packages.get('agents-not-obj')!)
+
+    const caps = await runtime.loadCapabilities('agents-not-obj')
+
+    expect(caps.agents).toEqual([])
+    expect(caps.diagnostics).toContain('Agent broken must be an object')
+  })
+
+  it('emits diagnostic when agent instructions is not a function', async () => {
+    writePackage('agents-no-fn', `
+      export const agents = {
+        broken: {
+          instructions: 'not a function'
+        }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('agents-no-fn', true)
+    enablement.ackTrust(packages.get('agents-no-fn')!)
+
+    const caps = await runtime.loadCapabilities('agents-no-fn')
+
+    expect(caps.agents).toEqual([])
+    expect(caps.diagnostics).toContain('Agent broken must export instructions(ctx)')
+  })
+
+  it('emits diagnostics for non-string name/icon/model and falls back', async () => {
+    writePackage('agents-bad-strings', `
+      export const agents = {
+        test: {
+          name: 42,
+          icon: false,
+          model: [],
+          async instructions() { return 'x' }
+        }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('agents-bad-strings', true)
+    enablement.ackTrust(packages.get('agents-bad-strings')!)
+
+    const caps = await runtime.loadCapabilities('agents-bad-strings')
+
+    expect(caps.agents).toHaveLength(1)
+    const agent = caps.agents[0]
+    expect(agent.name).toBe('test')
+    expect(agent.icon).toBeUndefined()
+    expect(agent.model).toBeUndefined()
+    expect(caps.diagnostics).toContain('Agent test: name must be a string')
+    expect(caps.diagnostics).toContain('Agent test: icon must be a string')
+    expect(caps.diagnostics).toContain('Agent test: model must be a string')
+  })
+
+  it('emits diagnostics for non-array tools/skills and treats as absent', async () => {
+    writePackage('agents-bad-arrays', `
+      export const agents = {
+        test: {
+          tools: 'not-an-array',
+          skills: 42,
+          async instructions() { return 'x' }
+        }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('agents-bad-arrays', true)
+    enablement.ackTrust(packages.get('agents-bad-arrays')!)
+
+    const caps = await runtime.loadCapabilities('agents-bad-arrays')
+
+    expect(caps.agents).toHaveLength(1)
+    const agent = caps.agents[0]
+    expect(agent.tools).toBeUndefined()
+    expect(agent.skills).toBeUndefined()
+    expect(caps.diagnostics).toContain('Agent test: tools must be an array of strings')
+    expect(caps.diagnostics).toContain('Agent test: skills must be an array of strings')
+  })
+
+  it('filters non-string entries in tools/skills arrays with diagnostics', async () => {
+    writePackage('agents-mixed-entries', `
+      export const agents = {
+        test: {
+          tools: ['fs.read', 42, 'search.files'],
+          skills: ['review', null],
+          async instructions() { return 'x' }
+        }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('agents-mixed-entries', true)
+    enablement.ackTrust(packages.get('agents-mixed-entries')!)
+
+    const caps = await runtime.loadCapabilities('agents-mixed-entries')
+
+    expect(caps.agents).toHaveLength(1)
+    const agent = caps.agents[0]
+    expect(agent.tools).toEqual(['fs.read', 'search.files'])
+    expect(agent.skills).toEqual(['review'])
+    expect(caps.diagnostics.some(d => d.includes('tools entries must be strings'))).toBe(true)
+    expect(caps.diagnostics.some(d => d.includes('skills entries must be strings'))).toBe(true)
+  })
+
+  it('distinguishes tools absent (undefined) from tools empty array', async () => {
+    writePackage('agents-scope', `
+      export const agents = {
+        unscoped: {
+          async instructions() { return 'full set' }
+        },
+        scoped: {
+          tools: [],
+          async instructions() { return 'scoped to nothing extra' }
+        }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('agents-scope', true)
+    enablement.ackTrust(packages.get('agents-scope')!)
+
+    const caps = await runtime.loadCapabilities('agents-scope')
+
+    expect(caps.diagnostics).toEqual([])
+    const unscoped = caps.agents.find(a => a.key === 'unscoped')!
+    const scoped = caps.agents.find(a => a.key === 'scoped')!
+    expect(unscoped.tools).toBeUndefined()
+    expect(scoped.tools).toEqual([])
+  })
+
+  it('disabled package returns no agents', async () => {
+    writePackage('agents-disabled', `
+      export const agents = {
+        helper: {
+          async instructions() { return 'never loaded' }
+        }
+      }
+    `)
+    const { runtime } = await makeRuntime()
+
+    const caps = await runtime.loadCapabilities('agents-disabled')
+
+    expect(caps.agents).toEqual([])
+    expect(caps.diagnostics.some(d => d.includes('disabled'))).toBe(true)
+  })
 })

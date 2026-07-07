@@ -44,6 +44,22 @@ describe('work entry factories', () => {
     expect(draft.id).toBe(chatWorkEntry('new').id)
   })
 
+  it('builds a chat draft with agentId and custom title', () => {
+    const draft = chatDraftWorkEntry({ agentId: 'package:research/default', title: 'Research' })
+    expect(draft).toEqual({
+      id: 'work:chat:new',
+      kind: 'chat-draft',
+      title: 'Research',
+      agentId: 'package:research/default',
+    })
+  })
+
+  it('builds a plain chat draft when agentId is omitted', () => {
+    const draft = chatDraftWorkEntry()
+    expect(draft.title).toBe('Chat')
+    expect('agentId' in draft).toBe(false)
+  })
+
   it('builds singleton terminal, files, activity, and archive entries', () => {
     expect(terminalWorkEntry()).toEqual({ id: 'work:terminal', kind: 'terminal', title: 'Terminal' })
     expect(filesWorkEntry()).toEqual({ id: 'work:files', kind: 'files', title: 'Files', query: '' })

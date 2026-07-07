@@ -59,6 +59,7 @@ import { registerSkillTools } from '@main/tools/skills.js'
 import { createNamedPackageToolSync, type NamedPackageToolSync } from '@main/packages/namedPackageTools.js'
 import { createAgentContextContributionsProvider, createLocalPackageStatusProvider } from '@main/packages/packageContributions.js'
 import { registerCoreAppTools } from '@main/tools/coreApps.js'
+import { createAgentMounts } from '@main/ai/agentMounts.js'
 import { checkForUpdates } from '@main/packages/updateCheck.js'
 import { registerLogbookTools } from '@main/tools/logbook.js'
 import { registerWebTools } from '@main/tools/web.js'
@@ -725,6 +726,7 @@ async function boot(): Promise<void> {
     trace: traceLog,
     secrets: packageSecretStore,
   })
+  const agentMounts = createAgentMounts({ runtime: packageRuntime, packages, tools })
   namedPackageTools = createNamedPackageToolSync({ runtime: packageRuntime, tools, packages })
   setAgentContextContributionsProvider(createAgentContextContributionsProvider({ runtime: packageRuntime, packages }))
   setAgentContextLocalPackagesProvider(createLocalPackageStatusProvider({ runtime: packageRuntime, packages, enablement: packageEnablement }))
@@ -777,6 +779,7 @@ async function boot(): Promise<void> {
       broadcastToRenderers(channel)
       server?.broadcast(channel, {})
     },
+    agentMounts,
   })
 
   setAgentContextAppsResolver((ws): AgentContextApp[] => {
@@ -853,6 +856,7 @@ async function boot(): Promise<void> {
       if (googleMcp.connected) specs.push(...GOOGLE_MCP_TOOL_SPECS)
       return specs
     },
+    agentMounts,
   })
   try {
     writeMcpDiscoveryFile({
@@ -1061,6 +1065,7 @@ async function boot(): Promise<void> {
   ipcMain.on('pty:input', (_event, id: number, data: string) => writePty(id, data))
 
   ipcMain.handle('kernel:port', () => server!.port)
+  ipcMain.handle('kernel:ai-token', () => server!.shellToken)
   ipcMain.handle('kernel:packages', () => packages.list())
   ipcMain.handle('kernel:workspace', () => tools.getWorkspacePath())
   ipcMain.handle('kernel:package-launch-url', (_event, packageId: string, viewId?: string) =>

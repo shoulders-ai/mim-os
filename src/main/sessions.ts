@@ -19,6 +19,7 @@ export interface Session {
   archived: boolean
   sortOrder?: number
   taskLabelGenerated?: boolean
+  agentId?: string
   createdAt: string
   updatedAt: string
 }
@@ -52,6 +53,7 @@ function normalizeSession(raw: Session): Session {
   }
   if (typeof raw.sortOrder === 'number') session.sortOrder = raw.sortOrder
   if (raw.taskLabelGenerated === true) session.taskLabelGenerated = true
+  if (typeof raw.agentId === 'string') session.agentId = raw.agentId
   return session
 }
 
@@ -71,6 +73,7 @@ export function registerSessionTools(tools: ToolRegistry, options: SessionToolOp
       if (!ws) throw new Error('No workspace open')
 
       const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      const agentId = typeof params.agentId === 'string' && params.agentId.length > 0 ? params.agentId : undefined
       const session: Session = {
         id,
         label: (params.label as string) || 'New chat',
@@ -84,6 +87,7 @@ export function registerSessionTools(tools: ToolRegistry, options: SessionToolOp
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }
+      if (agentId) session.agentId = agentId
 
       const dir = join(ws, '.mim', 'sessions')
       mkdirSync(dir, { recursive: true })

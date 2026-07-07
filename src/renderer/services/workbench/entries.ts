@@ -21,7 +21,7 @@ export interface WorkEntryBase {
 
 export type WorkEntry =
   | (WorkEntryBase & { kind: 'chat'; sessionId: string })
-  | (WorkEntryBase & { kind: 'chat-draft' })
+  | (WorkEntryBase & { kind: 'chat-draft'; agentId?: string })
   | (WorkEntryBase & { kind: 'terminal'; terminalGroupId?: string })
   | (WorkEntryBase & { kind: 'files'; query?: string })
   | (WorkEntryBase & { kind: 'activity-trust' })
@@ -82,11 +82,12 @@ export function chatWorkEntry(sessionId: string, title = 'Chat'): WorkEntry {
   }
 }
 
-export function chatDraftWorkEntry(): WorkEntry {
+export function chatDraftWorkEntry(options?: { agentId?: string; title?: string }): WorkEntry {
   return {
     id: 'work:chat:new',
     kind: 'chat-draft',
-    title: 'Chat',
+    title: options?.title ?? 'Chat',
+    ...(options?.agentId ? { agentId: options.agentId } : {}),
   }
 }
 

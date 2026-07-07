@@ -18,6 +18,7 @@ function makeHarness(overrides: Partial<AppKernelEventDeps> = {}) {
   const deps: AppKernelEventDeps = {
     setPackages: vi.fn(),
     refreshApps: vi.fn(),
+    refreshAppAgents: vi.fn(),
     handleWorkspaceChanged: vi.fn(),
     setAppUpdates: vi.fn(),
     refreshKeyStatuses: vi.fn(),

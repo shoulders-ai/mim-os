@@ -7,6 +7,13 @@ task from now on." Skills and apps are the implementation choices.
 Use this guide when deciding what to build, explaining the workflow to a user,
 or debugging why a custom capability is not visible in chat.
 
+## Skill vs Agent
+
+Use a skill to shape the main chat's default behavior. Mount an agent only
+when the capability needs a separate identity — its own sessions and history,
+tool scope, model, or persona. A headless agent-only app is the lighter of
+the two only when that separation is the point.
+
 ## The User Path
 
 A user should be able to describe the capability in plain language:
@@ -20,6 +27,7 @@ The agent should translate that into the smallest durable abstraction:
 | Need | Build |
 |---|---|
 | Persistent instructions for chat | Workspace skill in `skills/<name>/SKILL.md` |
+| A specialised assistant with its own prompt/tools/model | App with an `agents` export |
 | Custom logic, data, HTTP, secrets, jobs, or UI | App in `packages/<id>/` |
 | Instructions plus executable behavior | App with bundled skill |
 

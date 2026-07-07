@@ -275,11 +275,16 @@ function rowDiagnostics(id: string): PackageDiagnostic[] {
   return [...loaderDiags, ...capDiags]
 }
 
+function agentScopeLabel(agent: { scoped: boolean; toolCount?: number }): string {
+  return agent.scoped ? `Scoped: ${agent.toolCount ?? 0} tools` : 'Full chat tools'
+}
+
 function capabilityGroups(id: string): Array<{ key: string; label: string; items: string[] }> {
   const caps = capabilities.value.find(c => c.packageId === id) ?? null
   return [
     { key: 'jobs', label: 'Jobs', items: caps?.jobs.map(j => j.label || j.id) ?? [] },
     { key: 'tools', label: 'Tools', items: caps?.tools.map(t => t.label || t.name) ?? [] },
+    { key: 'agents', label: 'Provides an agent', items: caps?.agents?.map(a => `${a.name} (${agentScopeLabel(a)})`) ?? [] },
     { key: 'skills', label: 'Teaches the agent', items: caps?.skills?.map(s => s.label || s.id) ?? [] },
   ].filter(g => g.items.length > 0)
 }

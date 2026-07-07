@@ -15,6 +15,7 @@ interface Window {
     on(channel: string, cb: (...args: unknown[]) => void): void
     off(channel: string, cb: (...args: unknown[]) => void): void
     getPort(): Promise<number>
+    getAiToken(): Promise<string>
     getPackages(): Promise<Array<{
       manifest: {
         id: string
