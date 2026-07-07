@@ -1,16 +1,18 @@
 # Code Execution
 
-Mim's code execution system lets the AI agent write scripts to real workspace
-files and run them via detected interpreters. The primitives serve the agent
-loop (write, run, fix, show) and the human loop (Cmd+Enter to a terminal).
+Mim's code execution system provides two registry tools for running commands in
+the workspace: `shell.run` (the unified AI-facing `bash` tool) and `code.run`
+(the allowlisted interpreter tool used by the editor Render button). The
+primitives serve the agent loop (write, run, fix, show) and the human loop
+(Cmd+Enter to a terminal).
 
 ## Source Map
 
 - Toolchain detection: `src/main/toolchain/toolchain.ts`
 - Toolchain tool: `src/main/tools/toolchain.ts`
-- Code.run tool: `src/main/tools/code.ts`
+- Code tools (code.run + shell.run): `src/main/tools/code.ts`
 - Plot-capture harness: `resources/r/mim-run.R`
-- AI tool (`code_run`): `src/main/ai/aiRuntime.ts`
+- AI tool (`bash`): `src/main/ai/aiRuntime.ts`
 - Agent context Toolchain section: `src/main/ai/agentContext.ts`
 - Tool policy domain: `src/main/tools/toolPolicy.ts`
 - Settings (interpreter allowlist): `src/main/tools/settings.ts`
@@ -172,33 +174,75 @@ base-graphics `plot()` calls that would otherwise go to `Rplots.pdf`.
 
 Users opt out per call with `capture_plots: false`.
 
+## Unified Bash Tool (shell.run)
+
+The AI agent uses a single `bash` tool (registry name `shell.run`) for all
+command execution. Two modes:
+
+**Captured mode (default, `terminal` falsy):** Spawns the user's login shell
+(`defaultShell()` from `@main/platform.js`) with `['-lc', command]` on POSIX
+or `cmd.exe ['/d','/s','/c', command]` on Windows. Returns exit code,
+stdout/stderr tails, and workspace products.
+
+**Terminal mode (`terminal: true`):** Types the command into the user's visible
+terminal and returns `{ sent: true }` immediately. No output capture, no
+products, no run.json. Used for dev servers, watch modes, and interactive
+processes. Requires the desktop app — headless throws a clear error.
+
+### Parameters
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| command | string (min 1) | required | Shell command to execute |
+| terminal | boolean | false | Type into visible terminal instead |
+| timeout_ms | number | 120000 | Clamped to 1000-480000 |
+| capture_plots | boolean | true | Enable R plot-capture fast path |
+
+### R Plot-Capture Fast Path
+
+When `capture_plots !== false` AND the command matches the exact regex
+`^\s*Rscript\s+(\S+\.[rR])\s*$` (single file argument, no flags, pipes,
+chaining, or quotes) AND Rscript is toolchain-detected AND the harness file
+resolves: the shell is bypassed and Rscript is spawned directly with the
+plot-capture harness. Anything else runs verbatim via the shell.
+
+### Kill Switch
+
+The `shell.run` tool-policy row (domain: `code`, risk: `sensitive`, default
+enabled) governs the `bash` AI tool key. Disabling it in Settings > Tools
+removes the `bash` tool from the AI tool set entirely. Disabling does NOT
+affect `code.run` (the Render button path).
+
 ## Security Posture
 
-Three decisions define the security model:
+**D1 — Interpreter allowlist (code.run only).** `code.run` restricts to
+detected binaries from the fixed catalog. The allowlist is user-configurable
+in Settings > Tools. `shell.run` has no interpreter allowlist — it provides
+full shell access, gated by per-call approval.
 
-**D1 — Interpreter allowlist.** Only detected binaries from the fixed catalog
-are spawnable. The allowlist is user-configurable in Settings > Tools. No shell
-invocation, no arbitrary commands.
+**D3 — Per-run approval with session allow.** Both `code.run` and `shell.run`
+are category `system`, risk `high`. Every call prompts in Normal and Strict
+modes. The session "always allow" checkbox applies (subject to the
+sensitive-path floor). `shell.run` shows "run a shell command" plus the
+command string. `code.run` shows "run a script" plus the joined argv.
 
-**D3 — Per-run approval with session allow.** `code.run` is category `system`,
-risk `high`, effect `mutate`. Every call prompts in Normal and Strict modes.
-The session "always allow" checkbox applies (subject to the sensitive-path
-floor). The approval card shows "run a script" plus the joined argv.
-
-**D6 — Detected absolute paths.** `resolveInterpreter` returns the absolute
-path found by the login shell. The spawn never falls back to PATH-relative
-lookup, preventing workspace-planted executables from being invoked.
-
-The `code` tool-policy domain (risk `sensitive`, default enabled) governs the
-`code_run` AI tool key. Disabling the domain in Settings > Tools removes
-`code_run` from the AI tool set entirely.
+**D6 — Detected absolute paths (code.run only).** `resolveInterpreter`
+returns the absolute path found by the login shell. The spawn never falls
+back to PATH-relative lookup, preventing workspace-planted executables from
+being invoked.
 
 ## AI Tool
 
-The `code_run` AI tool has an 8.5-minute timeout (510,000ms) to accommodate
-the maximum 480s script runtime plus kill grace. The tool description instructs
-the agent to write code to a file first, run it, fix on failure, and open the
-best product with `editor_open` after success.
+The `bash` AI tool has an 8.5-minute timeout (510,000ms) to accommodate the
+maximum 480s script runtime plus kill grace. The tool description instructs the
+agent to write code to a file first, run it, fix on failure, and open the best
+product with `editor_open` after success.
+
+## code.run Kernel Tool
+
+`code.run` remains as the kernel-level interpreter execution tool. It is used
+by the editor Render button (user actor, not AI) and the headless CLI. It
+enforces the interpreter allowlist and does NOT provide shell access.
 
 ## Render
 
@@ -218,24 +262,28 @@ cached service). Clicking it calls `code.run` with `capture_plots: false`.
 
 ## Chat Run Card
 
-`code_run` tool results render as a purpose-built card in chat
-(`ChatCodeRunCard.vue`). The card shows:
+`bash` tool parts render as a purpose-built card in chat (`ChatCodeRunCard.vue`).
+The card shows:
 
-- Command line (joined argv)
-- Status indicator (running/ok/failed/timed-out)
+- Command line (the `command` string)
+- Status indicator (running/ok/failed/timed-out/sent)
 - Duration label
 - Collapsible output text (stdout + stderr)
 - Truncation notice when output was capped
 - Product chips with kind icon, filename, and size
 
-Clicking a product chip opens the file in the Artifact pane via the chat
-open-file path.
+Terminal-mode results (`{ sent: true }`) render with a `sent` status and no
+output/products section. Clicking a product chip opens the file in the Artifact
+pane via the chat open-file path.
 
 ## Settings Surface
 
 Settings > Tools shows a "Code execution" group containing:
 
-- The `code.run` policy toggle (enable/disable for the AI agent)
+- The `shell.run` (Bash) policy toggle — disable to remove agent command
+  execution entirely
+- The `code.run` (Run code interpreters) policy toggle — disable to remove
+  Render-button agent access (the Render button itself still works as user actor)
 - Per-interpreter toggles built from `toolchain.status` results: R, Rscript,
   Quarto, python3 (pandoc excluded). Each shows name, version or "not found",
   and a toggle bound to the `codeInterpreters` setting. Not-installed entries
@@ -252,14 +300,47 @@ selection (or current line if no selection) to the terminal and advances the
 cursor to the next non-blank line. The logic lives in
 `codemirror/sendToTerminal.js`.
 
+### Cmd+Shift+Enter: Source File / Send Chunk
+
+Behavior depends on the active file type:
+
+- **Rmd/qmd files**: sends the whole chunk body (fences excluded). Outside any
+  chunk, does nothing. Chunk detection uses the CM6 markdown syntax tree
+  (`FencedCode` nodes) with fence-info normalization.
+- **R files**: saves the file first, then sends
+  `source('<escaped path>', echo = TRUE)` to the terminal. If the save fails,
+  nothing is sent. Path escaping uses `escapeForRString` from
+  `renderDocument.ts` (single-quote R string escaping).
+- **Other code files**: sends the entire buffer text with its language to the
+  terminal, flowing through the bracketed-paste and chunked-write pipeline.
+
 ### Rmd/qmd Chunk Execution
 
 In `.rmd`/`.qmd` files, Cmd+Enter inside an `{r}` or `{python}` chunk sends
 the current line/selection. Cmd+Shift+Enter sends the whole chunk body (fences
 excluded). Outside any chunk, Cmd+Enter does nothing.
 
-Chunk detection uses the CM6 markdown syntax tree (`FencedCode` nodes) with
-fence-info normalization.
+### Bracketed Paste
+
+Multi-line sends to R program tabs are wrapped in bracketed-paste escape
+markers (`\x1b[200~` ... `\x1b[201~`) so that R's readline treats the paste
+as a single unit rather than executing line-by-line. The format:
+
+```
+\x1b[200~<CR-joined body, no trailing CR inside>\x1b[201~\r
+```
+
+Single-line sends and sends to non-R (shell) tabs use plain CR-joined text
+with one trailing CR. Bracketed paste is determined by the `program` field on
+the terminal tab (`TermTab.program === 'r'`).
+
+### Chunked Writes
+
+Large payloads are split into 16KB chunks and written sequentially via
+`terminal.write` kernel calls. This prevents xterm/pty buffer overflow on
+large pastes. Payloads exceeding 2,000,000 characters are rejected with an
+error toast ("Selection too large to paste -- use Source (Cmd+Shift+Enter)
+instead") and nothing is sent.
 
 ### R Console Auto-Spawn
 
@@ -271,8 +352,16 @@ not found -- sent to shell".
 Terminal program spawn validates the program name against `detectToolchain()`
 binPaths. `PROGRAM_DEFAULT_ARGS` maps `r` to `['--no-save']`.
 
+### Program Metadata
+
+`TermTab` carries an optional `program` field set when a program tab is
+spawned (via `addProgramTab` or `sendText`'s implicit spawn path). Shell tabs
+leave `program` undefined. This field drives the bracketed-paste decision.
+
 ### Workbench Command
 
-The editor emits `{ type: 'terminal.send', text, language }`. The app shell
-reveals the terminal Work surface and routes to
-`WorkHost.sendTerminalText(text, opts)`.
+The editor emits `{ type: 'terminal.send', text, language }`. The command
+router opens the terminal in the Work pane with `preserveArtifact: true` so
+the editor stays visible, then routes to `WorkHost.sendTerminalText(text, opts)`.
+After the async send, `EditorPanel` refocuses the CodeMirror view so the user
+can press Cmd+Enter repeatedly to step through a file without losing the cursor.

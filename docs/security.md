@@ -115,23 +115,26 @@ Classification → `workspace` | `sensitive` | `outside-workspace` | `invalid`.
 
 ## Code Execution Gate
 
-`code.run` is gated with `{ category: 'system', risk: 'high', targetParam: 'argv' }`.
-This means:
+Two registry tools provide command execution:
 
-- Effect is `mutate` (system category maps to mutate effect).
-- Prompts in both Normal and Strict modes.
-- The approval card shows "run a script" plus the joined argv array as the target
-  display (e.g. "Rscript analysis/fit.R").
-- Session "always allow" applies (the checkbox appears on the approval card),
-  subject to the sensitive-path floor.
+**`shell.run`** (AI key: `bash`) — full shell access with captured output. Gated
+with `{ category: 'system', risk: 'high', targetParam: 'command' }`. The approval
+card shows "run a shell command" plus the command string. Per-call approval with
+session "always allow" checkbox.
 
-The `code` tool-policy domain (`src/main/tools/toolPolicy.ts`) governs the
-`code_run` AI tool key with risk `sensitive` and `defaultEnabled: true`. Users
-disable it in Settings > Tools to remove `code_run` from the AI tool set entirely.
+**`code.run`** — allowlisted interpreter execution for the Render button and
+headless CLI. Gated with `{ category: 'system', risk: 'high', targetParam: 'argv' }`.
 
-Interpreter resolution enforces decision D6: only absolute paths detected by the
-login shell are spawnable. The `codeInterpreters` setting (default: `['rscript',
-'r', 'quarto']`) further restricts which detected interpreters the tool accepts.
+The `shell.run` tool-policy row (`src/main/tools/toolPolicy.ts`) governs the
+`bash` AI tool key with risk `sensitive` and `defaultEnabled: true`. Users
+disable it in Settings > Tools to remove the `bash` tool from the AI tool set
+entirely. Disabling it does NOT affect `code.run` (the Render button path).
+
+The `code.run` row remains for the interpreter allowlist and Settings > Tools
+interpreter toggles. Interpreter resolution enforces decision D6: only absolute
+paths detected by the login shell are spawnable. The `codeInterpreters` setting
+(default: `['rscript', 'r', 'quarto']`) further restricts which detected
+interpreters `code.run` accepts.
 
 ## Session "Always allow"
 

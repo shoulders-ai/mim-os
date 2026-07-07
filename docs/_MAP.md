@@ -80,7 +80,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Main Process — AI
 
-- **Model registry.** Model catalog, key resolution (env → `~/.mim/keys.env`), model-default cascade. `src/main/ai/ai.ts`, `resources/ai-models.json`.
+- **Model registry.** Model catalog, key resolution (`~/.mim/keys.env` → env), model-default cascade. `src/main/ai/ai.ts`, `resources/ai-models.json`.
 - **AI runtime.** Vercel AI SDK provider calls, ToolLoopAgent profiles, ghost generation, tool wrapping, usage/context tracking, and browser-tool message compaction. `src/main/ai/aiRuntime.ts`, `src/main/ai/messageCompaction.ts`.
 - **System prompt.** Template-based from `AGENTS.md` with `{{TOOL_SET}}`, `{{SKILL_CATALOG}}`, `{{WORKSPACE_TREE}}`, `{{PROJECT_LOG}}` etc. `src/main/ai/systemPrompt.ts`, `workspaceTree.ts`.
 - **Agent context.** Deterministic `.mim/agent-context.md` digest with workspace/app/git health. `src/main/ai/agentContext.ts`, `packages/packageContributions.ts`.
@@ -88,7 +88,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 ### Main Process — Execution & Terminal
 
 - **Toolchain detection.** Catalog of R/Rscript/Quarto/pandoc/python3 with login-shell binary resolution, version capture, and promise cache. `src/main/toolchain/toolchain.ts`. Docs: [code-execution.md](code-execution.md).
-- **Code execution.** `code.run` tool: allowlisted interpreter spawn, output tail caps, product scan, run records, plot-capture harness. `src/main/tools/code.ts`, `resources/r/mim-run.R`. Docs: [code-execution.md](code-execution.md).
+- **Code execution.** `shell.run` (AI key: `bash`) unified shell tool and `code.run` allowlisted interpreter tool: spawn, output tail caps, product scan, run records, plot-capture harness. `src/main/tools/code.ts`, `resources/r/mim-run.R`. Docs: [code-execution.md](code-execution.md).
 - **Terminal (PTY).** node-pty spawning, shell integration, keybinding profiles, program tabs (toolchain-validated). `src/main/pty.ts`, `ptyCommand.ts`, `ptyShellIntegration.ts`.
 - **Agent sessions.** CLI coding agents (Claude Code, Codex, Gemini CLI) as first-class runs with status tracking. `src/main/agents/`. Docs: [agent-sessions.md](agent-sessions.md).
 
@@ -132,9 +132,10 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Editor / Document pane.** Unified tab host: CodeMirror text, PDF viewer, table grid (AG Grid), file cards. Autosave, conflict bar, per-tab scroll restore, inline AI (Cmd+K), diff review, comments rail, citations, ghost completions. `src/renderer/components/editor/`. Docs: [document-pane.md](document-pane.md), [comments.md](comments.md).
 - **CodeMirror extensions.** Setup, formatting, citations, outline, ghost, live preview, inline anchor, send-to-terminal (Cmd+Enter / chunk send). `src/renderer/components/editor/codemirror/`.
 - **Terminal.** xterm.js multi-tab shells, TerminalSurface shared with agent sessions. `src/renderer/components/terminal/`.
-- **Files.** Work-side file browser: Browse/Recent/Changed, search, drag-drop import/move, context menus, passive active-document marker, image artifact viewer. `src/renderer/components/files/`, `services/fileOpenPolicy.ts`, `components/files/ImageArtifact.vue`.
+- **Files.** Work-side file browser: Browse/Recent/Changed, search, drag-drop import/move, multi-select (cmd/ctrl+click, shift+click) with bulk move/delete, context menus, passive active-document marker, image artifact viewer. `src/renderer/components/files/`, `services/fileOpenPolicy.ts`, `components/files/ImageArtifact.vue`.
 - **History.** Browse active/archived sessions, app runs, agent sessions. `src/renderer/components/archive/`.
 - **Agent sessions.** Work surface for live terminal or scrollback replay. `src/renderer/components/agents/AgentSessionView.vue`.
+- **Pop-out editor windows.** Move any editor tab into its own OS window and back. Ack'd handshake tab transfer, per-window close guards, aggregate quit guard, focused-window menu routing, terminal/chat forwarding, theme/settings live-sync, macOS native document-edited/represented-filename, `editor.open` routing to the owning pop-out. `src/main/windows/popoutWindows.ts`, `src/renderer/popout.html`, `src/renderer/popout.ts`, `src/renderer/components/popout/PopoutShell.vue`. Docs: [document-pane.md](document-pane.md) (pop-out section).
 
 ### Renderer — Shell & Navigation
 
@@ -216,7 +217,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 - [proposals/r-first-class.md](proposals/r-first-class.md) — **implemented** (phases 1-5; phase 6 deferred). First-class R/Rmd/Quarto: `code.run` execution primitive, plot/artifact viewing, Cmd+Enter send-to-terminal, render loop, R modelling skill.
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
-- [proposals/side-by-side-editing.md](proposals/side-by-side-editing.md) — side-by-side editing workflow proposal.
+- [proposals/popout-editor-window.md](proposals/popout-editor-window.md) — **implemented** (phases 0-3; phase 4 deferred). Pop-out editor windows: move any editor tab into its own OS window and back, with full tab-state transfer, per-window close guards, focused-window menu routing, and macOS native touches.
 - [proposals/tools-settings-tab.md](proposals/tools-settings-tab.md) — Settings > Tools plan for unified AI/MCP tool availability policy.
 
 ## File Tree
@@ -281,6 +282,8 @@ src/
       gate.ts                   # Permission gate
       gate-paths.ts             # Path classifier
     server/server.ts            # Express + WebSocket server
+    windows/
+      popoutWindows.ts          # Pop-out window registry, pure decision helpers
     workspace/
       workspaceBoot.ts          # Last-workspace restore
       workspaceContract.ts      # mim.yaml schema/parser/scaffold
@@ -330,7 +333,7 @@ src/
       trace.ts                  # Trace query tools
       toolPolicy.ts             # Settings > Tools availability policy
       toolchain.ts              # toolchain.status tool
-      code.ts                   # code.run execution tool
+      code.ts                   # code.run + shell.run execution tools
       comments.ts               # Comment tools
       references.ts             # Bibliography tools
       resources.ts              # Resource collection tools
@@ -345,6 +348,8 @@ src/
   renderer/                     # Vue 3 SPA
     App.vue                     # Composition shell
     main.ts                     # Vue app mount
+    popout.html                 # Pop-out editor window entry (multi-page Electron)
+    popout.ts                   # createApp(PopoutShell) + Pinia
     styles.css                  # Tailwind, tokens, themes
     styles.contrast.test.ts     # WCAG contrast contract for all 8 themes
     stores/
@@ -393,7 +398,7 @@ src/
       chat/
         ChatView.vue            # Main chat surface
         ChatMessage.vue         # Message rendering
-        ChatCodeRunCard.vue     # code_run result card
+        ChatCodeRunCard.vue     # bash result card
         chatCodeRunCard.ts      # Run card view-model
         ChatComposer.vue        # Input + context chips
         InlineApproval.vue      # Inline permission card
@@ -429,6 +434,8 @@ src/
         WorkHost.vue            # Work surface host
         ArtifactHost.vue        # Artifact surface host
         PaneHeader.vue          # Pane header controls
+      popout/
+        PopoutShell.vue           # Pop-out editor window shell
       agents/AgentSessionView.vue  # Agent session Work surface
       archive/ArchiveBrowser.vue   # History Work surface
       packages/PackageFrame.vue    # App iframe host

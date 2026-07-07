@@ -108,6 +108,30 @@ Markdown-specific chrome must stay gated on the active tab being text and
 markdown. PDF/table/card tabs should not leak into autosave, comments, export,
 current-document context, or text dirty state.
 
+## External Changes and Deletion
+
+`useEditorFileSync.ts` owns disk/buffer reconciliation. Two facts are tracked
+separately and must not be conflated: `externalState` (`'changed' | 'deleted'`,
+drives the ConflictBar) and `dirty` (buffer differs from the last save, drives
+the tab dot, close prompts, and the quit guard). A clean buffer whose file
+changed or vanished on disk has nothing unsaved — the content is recoverable
+from the OS Trash and `.mim/history` — so it never trips save prompts.
+
+Deletions split by intent:
+
+- **User-initiated** (Files pane → Delete): `fs.trash` with the `user` actor
+  triggers a `workspace:files-trashed` broadcast to all windows (main +
+  pop-outs). EditorPanel closes clean tabs for the trashed paths (including
+  tabs under a trashed folder) silently; dirty tabs stay open with the
+  deleted ConflictBar because those edits exist nowhere else.
+- **External** (agents, CLI, Finder): only the file watcher reports these.
+  The tab always stays open with the deleted ConflictBar ("Recreate from
+  buffer") so the user sees what happened; a clean tab still closes without
+  any prompt.
+
+Closing a dirty tab whose file was deleted prompts with deletion wording
+("was deleted on disk … discard?"), not "unsaved changes".
+
 ## Implementation Shape
 
 `EditorPanel.vue` is the document-stage orchestrator. It keeps the single shared
@@ -211,6 +235,37 @@ pre-loaded content and `readOnly: true` on the `TabState`. Read-only tabs:
 The primary consumer is the package documentation door: clicking the `?` icon
 on the Work header (or the Documentation link in Settings > Apps) calls
 `package.readme` and opens the result as a read-only tab in the Artifact pane.
+
+## Pop-Out Editor Windows
+
+Any editor tab can be moved into its own OS window via the tab-strip button
+or the "Move Tab to New Window" command palette action. The tab transfers
+with full state (content, selection, scroll, view mode, dirty flag) through
+an ack'd handshake: the source serializes, main creates the pop-out window,
+waits for `popout:ready`, delivers the tab on `editor:adopt-tab`, then the
+source closes its copy. Failure at any step leaves the source tab intact.
+
+Transfer is a **move**, not a copy. The same file open in two windows is
+possible only if the user explicitly re-opens it, in which case existing
+external-change conflict machinery governs (clean tab reloads; dirty tab
+shows ConflictBar).
+
+Pop-out tabs are **not persisted** in `.mim/editor-tabs.json` (persistence
+is disabled when `windowRole === 'popout'`). On app restart, only
+main-window tabs restore. Pop-outs are workspace-scoped: workspace switch
+and main-window close trigger per-window dirty guards then close all
+pop-outs.
+
+Features that stay main-window-only: approval-sourced diffs (AI edit
+previews remain beside the chat that triggered them), the command palette,
+and Navigator/Work surfaces.
+
+When `editor.open` fires (bridge tool, chat, or MCP), if a pop-out already
+has that path open, the pop-out is focused and receives the open event
+instead of the main window.
+
+On macOS, pop-out windows use `setDocumentEdited` (native dirty dot in the
+close button) and `setRepresentedFilename` (proxy icon in the title bar).
 
 ## Persistence
 

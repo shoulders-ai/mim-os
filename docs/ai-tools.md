@@ -46,7 +46,7 @@ Attached text context is converted into model-visible `<attached-file>` blocks i
 ## Cross-Surface Tools
 
 - `editor_open` opens a workspace path in the Editor Artifact.
-- `terminal_run` calls `terminal.run` as the AI actor. The renderer keeps the current Chat Work surface visible and mounts the scratch Terminal in the background before writing the command. The tool returns after the command is sent; it does not return stdout or stderr to the model. Direct user/app-shell terminal actions still reveal Terminal Work before writing.
+- `bash` calls `shell.run` as the AI actor. Default (captured) mode spawns the command in the workspace and returns `{ exitCode, stdout, stderr, products, runId }` — stdout/stderr are tail-truncated, and `products` lists files the run created or changed (ranked, workspace-relative paths). The exact form `Rscript <file>.R` is rewritten to run through a plot-capture harness so base-graphics plots are returned as image products. Set `terminal: true` to instead type the command into the user's visible Terminal (mounting it in the background if needed) and return immediately without capturing output — use that for things the user should watch (dev servers, watch modes) rather than one-shot commands. See docs/code-execution.md for the full contract.
 
 ## Comment Tools
 

@@ -47,10 +47,10 @@ Release packaging is driven by `.github/workflows/release.yml` on `v*` tags or m
 ## AI Key Setup
 
 The key resolver checks, in order:
-1. Environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`)
-2. `~/.mim/keys.env`
+1. `~/.mim/keys.env` (app-managed — what Settings writes)
+2. Environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`)
 
-Keys can be set from the app via the `ai.setKey` tool and removed via `ai.clearKey`, both of which write `~/.mim/keys.env`. Settings > Models exposes a key field plus a Remove control for file-stored keys. Key changes apply live to every AI surface (chat, inline rewrite, ghost, apps) with no app restart: `setKey`/`clearKey` emit `ai:keys-changed`, and the renderer caches key status reactively in the settings store.
+The app-managed file wins so keys set, replaced, or removed in Settings always take effect, even when a stale key is exported in the shell that launched the app. Keys can be set from the app via the `ai.setKey` tool and removed via `ai.clearKey`, both of which write `~/.mim/keys.env`. Settings > AI & Models shows each configured key as a masked tail (`ai.keyStatus` returns the fragment; the full key never leaves the main process) with Replace/Remove controls for file-stored keys; env-sourced keys show Replace only, since removing them means removing the variable from the shell that launches Mim. Key changes apply live to every AI surface (chat, inline rewrite, ghost, apps) with no app restart: `setKey`/`clearKey` emit `ai:keys-changed`, and the renderer caches key status reactively in the settings store.
 
 `~/.mim/config.yaml` may hold identity, model defaults, and integration account labels. It never holds API keys or integration tokens.
 

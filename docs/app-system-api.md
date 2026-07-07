@@ -700,7 +700,7 @@ Apps that need old-style tool-loop agents can use the lower-level helpers:
 
 ```js
 const review = await ctx.ai.callAnthropic({
-  model: 'claude-sonnet-4-6',
+  model: 'claude-sonnet-5',
   system: 'You must call submit_review.',
   messages: [{ role: 'user', content: 'Review this paper.' }],
   tools: [{
@@ -713,7 +713,7 @@ const review = await ctx.ai.callAnthropic({
 })
 
 const gate = await ctx.ai.callGemini({
-  model: 'gemini-3.1-flash-lite-preview',
+  model: 'gemini-3.1-flash-lite',
   system: 'Return JSON only.',
   messages: [{ role: 'user', content: 'Classify this document.' }]
 })
@@ -1004,6 +1004,22 @@ runtime.on('theme:changed', (tokens) => {
   // tokens is a Record<string, string> of resolved CSS var values
   console.log(tokens['--color-accent'])
 })
+```
+
+The `postMessage` only arrives after the iframe has loaded, so the first paint would otherwise use the light-theme defaults from `tokens.css`. To paint theme-correct from the first frame, the host also appends the same tokens to the launch URL as a `#mim-theme=<url-encoded JSON>` fragment. Apps that care about the first paint (anything with a static loading skeleton) should apply it with an inline script at the top of `<head>`:
+
+```html
+<script>
+  try {
+    const match = /mim-theme=([^&]+)/.exec(location.hash)
+    if (match) {
+      const tokens = JSON.parse(decodeURIComponent(match[1]))
+      for (const [key, value] of Object.entries(tokens)) {
+        document.documentElement.style.setProperty(key, value)
+      }
+    }
+  } catch {}
+</script>
 ```
 
 ## Enablement and Registry Tools

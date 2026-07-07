@@ -18,6 +18,10 @@ The Activity feed groups one run per `traceId` (`feedRuns` in `ActivityTrustView
 
 Single-shot housekeeping model calls (ghost, task-label, summary) are genuinely separate renderer-initiated requests, so they cannot inherit the turn trace — and the task-label deliberately uses the cheap `extract` model (this is why a sonnet chat showed a stray "haiku" `model.call`). They are filtered out of the feed by `run.kind === 'model'` (a run rooted on a bare `model` span) but stay in Health cost aggregation and the Timeline. Do not "fix" the haiku entry by forcing the chat model onto label generation — that is intended cost savings.
 
+## Editor: dirty and externalState are separate facts
+
+`useEditorFileSync.ts`'s `markTabChangedOnDisk`/`markOpenTabChangedOnDisk` set `tab.externalState` (drives the ConflictBar) but must **not** force `tab.dirty = true`. Dirty means "buffer differs from the last save" and drives close-confirmation prompts and the quit guard; externalState means "disk moved out from under this tab" and is fully recoverable (OS Trash, `.mim/history`). Conflating them made every external change — including ones the user caused themselves via the Files pane delete — falsely claim "unsaved changes" on a clean buffer. See [document-pane.md](document-pane.md) External Changes and Deletion section for the full user-delete-vs-external-delete split.
+
 ## Native modules require electron-rebuild
 
 `better-sqlite3` and `node-pty` are native Node addons. After `npm install`, `electron-rebuild` runs via the `postinstall` script. If you add another native module, it must be rebuilt too or Electron will crash at runtime with a `NODE_MODULE_VERSION` mismatch.
@@ -136,7 +140,7 @@ Themes are applied via `<html data-theme="white">`, not CSS classes. The app def
 
 ## AI key status must be shared, never cached per-surface
 
-The main process re-resolves provider keys on every request (`resolveKey` reads `process.env` then `~/.mim/keys.env` fresh), so a key change is live in main immediately. The renderer is what goes stale: AI surfaces read provider-configured booleans, and if each component fetches `ai.keyStatus` once on mount and caches it locally, adding a key in Settings won't reach chat/inline until an app restart. Read key status only from the shared settings store (`keyStatuses`/`providerConfigured`/`anyKeyConfigured`); never re-introduce a per-component copy. `ai.setKey`/`ai.clearKey` emit `ai:keys-changed` (sent to the renderer and broadcast to package iframes); `App.vue` re-fetches the store on that event, and long-lived closures (e.g. the chat engine's `prepareSendMessagesRequest`) must read the store ref live rather than snapshot it.
+The main process re-resolves provider keys on every request (`resolveKey` reads `~/.mim/keys.env` fresh, falling back to `process.env`), so a key change is live in main immediately. The file wins over the environment on purpose: Settings must stay authoritative, otherwise a key exported in the shell that launched the app silently shadows every set/replace/remove made in the app. The renderer is what goes stale: AI surfaces read provider-configured booleans, and if each component fetches `ai.keyStatus` once on mount and caches it locally, adding a key in Settings won't reach chat/inline until an app restart. Read key status only from the shared settings store (`keyStatuses`/`providerConfigured`/`anyKeyConfigured`); never re-introduce a per-component copy. `ai.setKey`/`ai.clearKey` emit `ai:keys-changed` (sent to the renderer and broadcast to package iframes); `App.vue` re-fetches the store on that event, and long-lived closures (e.g. the chat engine's `prepareSendMessagesRequest`) must read the store ref live rather than snapshot it.
 
 ## Shared resources: mim.yaml only round-trips known keys
 
@@ -270,3 +274,27 @@ When killing a timed-out child process on POSIX, signal the process group (`proc
 ## SVG is intentionally NOT in the shared attachment MEDIA_TYPE_MAP
 
 `src/renderer/services/attachments.js` defines `MEDIA_TYPE_MAP` for model-facing attachments. SVG is deliberately excluded: model providers reject SVG as an image attachment type. The in-app image viewer handles SVG fine (it renders in `<img>` tags), and `fs.readImageDataUrl` special-cases `.svg` by returning `image/svg+xml` as the media type for local preview. Do not add SVG to the attachment map.
+
+## Broadcast vs. targeted IPC channels
+
+`broadcastToRenderers` in `src/main/index.ts` fans an event to ALL renderer windows (main + pop-outs). Only workspace-global state channels belong there:
+
+- `workspace:files-changed` -- every editor window must see file mutations.
+- `workspace:changed` -- identity change affects all windows equally.
+- `apps:changed` -- apps are workspace-scoped; every window refreshes.
+- `ai:keys-changed` -- provider key availability is window-independent.
+- `settings:changed` -- theme and preferences apply everywhere.
+
+Every other channel stays on `sendToRenderer` (main-window-only):
+
+- `gate:request` -- approval cards live only in the main window's chat. Broadcasting would enqueue duplicates and risk double-handled approvals.
+- `packages:changed`, `resources:changed` -- only the main window's Navigator reacts; pop-outs have no Navigator or resource UI.
+- Package job events, agent session events, auto-updater -- main window surfaces only.
+- `bridge:*` commands -- always target one specific window (the main window).
+- `menu:*` commands -- Phase 2 will add focused-window routing; until then they target main.
+
+When adding a new IPC event, default to `sendToRenderer` (main-only). Promote to `broadcastToRenderers` only when pop-out windows genuinely consume the event, and verify no handler on the receiving side has side effects that break when invoked twice.
+
+## App iframes must never be detached from the DOM while alive
+
+Re-inserting an `<iframe>` into the DOM resets its browsing context: the app inside reboots from scratch (module graph, WebSocket identify, data load — around a second of blank frame). Vue's `KeepAlive` detaches the subtree on deactivate, so it does NOT preserve iframes. `WorkHost` therefore keeps every visited `PackageFrame` mounted and hides inactive ones with `v-show`; frames are only remounted when the `packages` list identity changes (install/reload/workspace switch), which is what lets `app.reload` deliver fresh app code. Keep any new iframe-hosting surface on the same pattern.

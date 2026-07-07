@@ -235,6 +235,16 @@ Work browsing, hover, or highlight state must not destroy a stable Artifact. Use
 an explicit "Open" / "Open in Editor" / "Replace Artifact" interaction for
 replacement.
 
+## Pop-Out Editor Windows
+
+Pop-out editor windows live outside the Navigator/Work/Artifact pane model.
+Each pop-out is a separate OS window running a `PopoutShell` with its own
+`EditorPanel` instance. Pop-outs have no Navigator, no Work host, no chat,
+and no terminal surface. The Artifact pane contract is unchanged: the main
+window's Artifact pane and all of its replacement/history/guard semantics
+operate independently of pop-outs. See [document-pane.md](document-pane.md)
+for transfer semantics, persistence rules, and what stays main-window-only.
+
 ## History
 
 History is Work (`work:archive`), not Artifact. Opening History refreshes from
