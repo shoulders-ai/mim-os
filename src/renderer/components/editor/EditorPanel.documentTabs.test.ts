@@ -511,6 +511,44 @@ describe('EditorPanel document tabs', () => {
     expect(mounted.root.textContent).not.toContain('Untitled')
   })
 
+  it('cycleTab wraps forward and backward across text, pdf, and card tabs', async () => {
+    mounted = mountPanel()
+    await flushUi()
+
+    await mounted.panelRef.value.openDocument('docs/a.md', 'text')
+    await mounted.panelRef.value.openDocument('docs/report.pdf', 'pdf')
+    await mounted.panelRef.value.openDocument('inputs/source.docx', 'card')
+    await flushUi()
+    expect(mounted.root.querySelector('[data-testid="file-card-artifact"]')?.getAttribute('data-path')).toBe('inputs/source.docx')
+
+    // Wraps from the last tab (card) forward to the first (text)
+    mounted.panelRef.value.cycleTab(1)
+    await flushUi()
+    expect(mounted.panelRef.value.getCurrentDocument()).toMatchObject({ path: 'docs/a.md' })
+
+    // Wraps from the first tab (text) backward to the last (card)
+    mounted.panelRef.value.cycleTab(-1)
+    await flushUi()
+    expect(mounted.root.querySelector('[data-testid="file-card-artifact"]')?.getAttribute('data-path')).toBe('inputs/source.docx')
+
+    mounted.panelRef.value.cycleTab(-1)
+    await flushUi()
+    expect(mounted.root.querySelector('[data-testid="pdf-artifact"]')?.getAttribute('data-path')).toBe('docs/report.pdf')
+  })
+
+  it('cycleTab is a no-op with fewer than two tabs', async () => {
+    mounted = mountPanel()
+    await flushUi()
+
+    mounted.panelRef.value.createUntitledTab()
+    await flushUi()
+    expect(mounted.panelRef.value.getCurrentDocument()).toMatchObject({ name: 'Untitled' })
+
+    mounted.panelRef.value.cycleTab(1)
+    await flushUi()
+    expect(mounted.panelRef.value.getCurrentDocument()).toMatchObject({ name: 'Untitled' })
+  })
+
   it('keeps the editor mount usable after the last tab is closed and a new tab is opened', async () => {
     mounted = mountPanel()
     await flushUi()

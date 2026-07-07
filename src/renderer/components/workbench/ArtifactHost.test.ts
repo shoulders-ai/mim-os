@@ -9,6 +9,7 @@ const editorCalls = vi.hoisted(() => ({
   openDocument: vi.fn(),
   createUntitledTab: vi.fn(),
   closeActiveTab: vi.fn(),
+  cycleTab: vi.fn(),
   saveActiveFile: vi.fn(async () => true),
   saveActiveFileAs: vi.fn(async () => true),
   getArtifactReplacementDecision: vi.fn(() => 'needs-confirmation'),
@@ -26,6 +27,7 @@ vi.mock('../editor/EditorPanel.vue', async () => {
           openDocument: editorCalls.openDocument,
           createUntitledTab: editorCalls.createUntitledTab,
           closeActiveTab: editorCalls.closeActiveTab,
+          cycleTab: editorCalls.cycleTab,
           saveActiveFile: editorCalls.saveActiveFile,
           saveActiveFileAs: editorCalls.saveActiveFileAs,
           getArtifactReplacementDecision: editorCalls.getArtifactReplacementDecision,
@@ -108,6 +110,7 @@ describe('ArtifactHost', () => {
     hostRef.value.newUntitledTab()
     expect(hostRef.value.openLauncher).toBeUndefined()
     hostRef.value.closeActiveTab()
+    hostRef.value.cycleTab(1)
     hostRef.value.saveActiveFile()
     hostRef.value.saveActiveFileAs()
     const decision = hostRef.value.getArtifactReplacementDecision(
@@ -121,6 +124,7 @@ describe('ArtifactHost', () => {
     expect(editorCalls.openDocument).toHaveBeenCalledWith('deck.pdf', 'pdf')
     expect(editorCalls.createUntitledTab).toHaveBeenCalledOnce()
     expect(editorCalls.closeActiveTab).toHaveBeenCalledOnce()
+    expect(editorCalls.cycleTab).toHaveBeenCalledWith(1)
     expect(editorCalls.saveActiveFile).toHaveBeenCalledOnce()
     expect(editorCalls.saveActiveFileAs).toHaveBeenCalledOnce()
     expect(decision).toBe('needs-confirmation')

@@ -12,6 +12,7 @@ export interface ShellActionDeps {
   createUntitledInEditor(): Promise<unknown> | unknown
   openFileViaDialog(): Promise<unknown> | unknown
   openExportDialog(): void
+  popOutActiveTab(): Promise<unknown> | unknown
   openShortcuts(): void
   openChatWork(sessionId: string): Promise<unknown> | unknown
   openFileInEditor(path: string): Promise<unknown> | unknown
@@ -48,6 +49,9 @@ export async function runShellAction(action: ShellAction, deps: ShellActionDeps)
       break
     case 'export-document':
       deps.openExportDialog()
+      break
+    case 'pop-out-tab':
+      await deps.popOutActiveTab()
       break
     case 'open-shortcuts':
       deps.openShortcuts()

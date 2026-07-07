@@ -15,6 +15,7 @@ function makeDeps(overrides: Partial<KeyboardActionDeps> = {}) {
     navigateArtifactHistory: vi.fn(async () => undefined),
     cycleSession: vi.fn(),
     cycleActivity: vi.fn(),
+    cycleEditorTab: vi.fn(),
     nextTick: vi.fn(async () => undefined),
     ...overrides,
   }
@@ -82,5 +83,15 @@ describe('app shell keyboard actions', () => {
 
     expect(deps.cycleActivity).toHaveBeenNthCalledWith(1, 1)
     expect(deps.cycleActivity).toHaveBeenNthCalledWith(2, -1)
+  })
+
+  it('routes editor tab cycling actions', async () => {
+    const deps = makeDeps()
+
+    await runKeyAction({ action: 'editor-tab-next' }, deps)
+    await runKeyAction({ action: 'editor-tab-prev' }, deps)
+
+    expect(deps.cycleEditorTab).toHaveBeenNthCalledWith(1, 1)
+    expect(deps.cycleEditorTab).toHaveBeenNthCalledWith(2, -1)
   })
 })

@@ -12,6 +12,7 @@ import {
 const props = defineProps<{
   files: Array<{ path: string; name: string }>
   sessions: Array<{ id: string; label: string }>
+  hasActiveEditorTab?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,7 +29,7 @@ const listRef = ref<HTMLDivElement | null>(null)
 const allItems = computed<PaletteItem[]>(() => {
   const items: PaletteItem[] = [
     ...coreSurfaces(),
-    ...coreActions(),
+    ...coreActions(undefined, { hasActiveEditorTab: props.hasActiveEditorTab }),
   ]
   for (const session of props.sessions) {
     items.push({

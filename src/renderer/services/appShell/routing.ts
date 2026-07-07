@@ -16,6 +16,7 @@ export type ShellAction =
   | { type: 'new-document' }
   | { type: 'open-file-dialog' }
   | { type: 'export-document' }
+  | { type: 'pop-out-tab' }
   | { type: 'open-shortcuts' }
   | { type: 'open-session'; sessionId: string }
   | { type: 'open-file'; path: string }
@@ -65,6 +66,7 @@ export function resolvePaletteAction(id: string): ShellAction {
   if (id === 'action:new-document') return { type: 'new-document' }
   if (id === 'action:open-file') return { type: 'open-file-dialog' }
   if (id === 'action:export-document') return { type: 'export-document' }
+  if (id === 'action:pop-out-tab') return { type: 'pop-out-tab' }
   if (id === 'action:settings') return { type: 'open-settings' }
   if (id === 'action:shortcuts') return { type: 'open-shortcuts' }
   if (id.startsWith('session:')) return { type: 'open-session', sessionId: id.slice('session:'.length) }

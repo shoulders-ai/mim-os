@@ -110,7 +110,8 @@ describe('routeKeyEvent', () => {
     expect(routeKeyEvent(ctx({ key: 'Tab', metaOrCtrl: true, ctrlKey: false }))).toBeNull()
   })
 
-  // ── Activity cycling (Cmd+Option+Arrow) ──
+  // ── Tab cycling (Cmd+Option+Arrow): editor tabs when the editor pane has
+  // focus, activity rows everywhere else ──
   it('Cmd+Option+ArrowRight cycles to next activity', () => {
     expect(routeKeyEvent(ctx({ key: 'ArrowRight', altKey: true }))).toEqual({ action: 'activity-next' })
   })
@@ -119,12 +120,27 @@ describe('routeKeyEvent', () => {
     expect(routeKeyEvent(ctx({ key: 'ArrowLeft', altKey: true }))).toEqual({ action: 'activity-prev' })
   })
 
-  it('Cmd+Option+ArrowRight works while editor is focused', () => {
-    expect(routeKeyEvent(ctx({ key: 'ArrowRight', altKey: true, editorFocused: true }))).toEqual({ action: 'activity-next' })
+  it('Cmd+Option+ArrowRight cycles editor tabs while the editor is focused', () => {
+    expect(routeKeyEvent(ctx({ key: 'ArrowRight', altKey: true, editorFocused: true, focusedPane: 'artifact' })))
+      .toEqual({ action: 'editor-tab-next' })
   })
 
-  it('Cmd+Option+ArrowRight works while terminal is focused', () => {
+  it('Cmd+Option+ArrowLeft cycles editor tabs backward while the editor is focused', () => {
+    expect(routeKeyEvent(ctx({ key: 'ArrowLeft', altKey: true, editorFocused: true, focusedPane: 'artifact' })))
+      .toEqual({ action: 'editor-tab-prev' })
+  })
+
+  it('Cmd+Option+ArrowRight cycles editor tabs when focus is anywhere in the Artifact pane (PDF, table, file card)', () => {
+    expect(routeKeyEvent(ctx({ key: 'ArrowRight', altKey: true, focusedPane: 'artifact' })))
+      .toEqual({ action: 'editor-tab-next' })
+  })
+
+  it('Cmd+Option+ArrowRight cycles activity while terminal is focused', () => {
     expect(routeKeyEvent(ctx({ key: 'ArrowRight', altKey: true, terminalFocused: true }))).toEqual({ action: 'activity-next' })
+  })
+
+  it('Cmd+Option+ArrowRight cycles activity when no pane is focused', () => {
+    expect(routeKeyEvent(ctx({ key: 'ArrowRight', altKey: true, focusedPane: 'none' }))).toEqual({ action: 'activity-next' })
   })
 
   it('Cmd+ArrowRight without Option does not cycle activity', () => {

@@ -47,7 +47,10 @@ export default defineConfig({
     publicDir: resolve(__dirname, 'public'),
     build: {
       rollupOptions: {
-        input: resolve(__dirname, 'src/renderer/index.html')
+        input: {
+          index: resolve(__dirname, 'src/renderer/index.html'),
+          popout: resolve(__dirname, 'src/renderer/popout.html'),
+        }
       }
     }
   }

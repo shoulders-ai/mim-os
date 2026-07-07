@@ -86,6 +86,23 @@ describe('coreActions', () => {
     expect(coreActions().some(action => action.id === 'action:new-file')).toBe(false)
   })
 
+  it('includes Move Tab to New Window only when an editor tab is active', () => {
+    const withTab = coreActions(undefined, { hasActiveEditorTab: true })
+    expect(withTab).toContainEqual({
+      id: 'action:pop-out-tab',
+      kind: 'action',
+      label: 'Move Tab to New Window',
+      hint: '',
+    })
+  })
+
+  it('omits Move Tab to New Window when no editor tab is active', () => {
+    expect(coreActions().some(a => a.id === 'action:pop-out-tab')).toBe(false)
+    expect(
+      coreActions(undefined, { hasActiveEditorTab: false }).some(a => a.id === 'action:pop-out-tab'),
+    ).toBe(false)
+  })
+
   it('uses platform-appropriate shortcut hints', () => {
     expect(coreActions('Linux x86_64')).toContainEqual({
       id: 'action:export-document',

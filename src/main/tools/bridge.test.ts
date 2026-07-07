@@ -1,29 +1,18 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createToolRegistry } from '@main/tools/registry.js'
 import { createTraceLog } from '@main/trace/trace.js'
-
-// Mock electron's BrowserWindow before importing bridge tools
-const mockSend = vi.fn()
-vi.mock('electron', () => ({
-  BrowserWindow: {
-    getAllWindows: () => [{
-      webContents: { send: mockSend }
-    }]
-  }
-}))
-
-// Import after mock is set up
-const { registerBridgeTools } = await import('@main/tools/bridge.js')
+import { registerBridgeTools } from '@main/tools/bridge.js'
 
 describe('Bridge tools', () => {
   let tools: ReturnType<typeof createToolRegistry>
   const ctx = { actor: 'user' as const }
+  const mockSend = vi.fn()
 
   beforeEach(() => {
     mockSend.mockClear()
     const trace = createTraceLog()
     tools = createToolRegistry(trace)
-    registerBridgeTools(tools)
+    registerBridgeTools(tools, { sendToMainWindow: mockSend })
   })
 
   it('chat.send emits bridge:chat:send', async () => {
@@ -175,6 +164,31 @@ describe('Bridge tools', () => {
         ctx
       )
     ).rejects.toThrow('Unsupported Work target: artifact-output')
+  })
+
+  it('editor.open routes to pop-out when routeEditorOpen returns true', async () => {
+    const routeFn = vi.fn().mockReturnValue(true)
+    const trace = createTraceLog()
+    const routedTools = createToolRegistry(trace)
+    const routedSend = vi.fn()
+    registerBridgeTools(routedTools, { sendToMainWindow: routedSend, routeEditorOpen: routeFn })
+
+    const result = await routedTools.call('editor.open', { path: 'docs/readme.md' }, ctx) as { opened: string }
+    expect(result.opened).toBe('docs/readme.md')
+    expect(routeFn).toHaveBeenCalledWith('docs/readme.md')
+    expect(routedSend).not.toHaveBeenCalled()
+  })
+
+  it('editor.open falls back to main window when routeEditorOpen returns false', async () => {
+    const routeFn = vi.fn().mockReturnValue(false)
+    const trace = createTraceLog()
+    const routedTools = createToolRegistry(trace)
+    const routedSend = vi.fn()
+    registerBridgeTools(routedTools, { sendToMainWindow: routedSend, routeEditorOpen: routeFn })
+
+    await routedTools.call('editor.open', { path: 'docs/readme.md' }, ctx)
+    expect(routeFn).toHaveBeenCalledWith('docs/readme.md')
+    expect(routedSend).toHaveBeenCalledWith('bridge:editor:open', { path: 'docs/readme.md' })
   })
 
   it('all bridge tools are registered', () => {

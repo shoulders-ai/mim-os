@@ -129,6 +129,7 @@ const artifactHostRef = ref<{
   retargetDocumentPath?: (oldPath: string, newPath: string, type: WorkspaceMoveResult['type']) => void
   newUntitledTab?: () => void
   closeActiveTab?: () => void
+  cycleTab?: (direction: 1 | -1) => void
   saveActiveFile?: () => Promise<boolean> | boolean
   saveActiveFileAs?: () => Promise<boolean> | boolean
   openExportDialog?: () => void
@@ -136,6 +137,9 @@ const artifactHostRef = ref<{
     current: ArtifactEntry,
     next: ArtifactEntry | null,
   ) => ArtifactReplacementDecision
+  adoptTab?: (tab: unknown) => void
+  popOutActiveTab?: () => Promise<void> | void
+  hasActiveEditorTab?: () => boolean
 } | null>(null)
 const settingsOpen = ref(false)
 const settingsSection = ref<SettingsSection>(DEFAULT_SETTINGS_SECTION)
@@ -144,6 +148,9 @@ const addProjectMode = ref<'new' | 'clone'>('new')
 const welcomeOpen = ref(false)
 const shortcutsOpen = ref(false)
 const paletteOpen = ref(false)
+// Snapshot of whether an editor tab is active, taken when the palette opens —
+// gates editor-scoped palette actions (Move Tab to New Window).
+const paletteEditorTabActive = ref(false)
 const fileIndex = useWorkspaceFileIndex()
 const sidebarDragging = ref(false)
 const rightDragging = ref(false)
@@ -743,6 +750,7 @@ const shellActionDeps = {
   createUntitledInEditor,
   openFileViaDialog,
   openExportDialog: () => { artifactHostRef.value?.openExportDialog?.() },
+  popOutActiveTab: () => { artifactHostRef.value?.popOutActiveTab?.() },
   openShortcuts: () => { shortcutsOpen.value = true },
   openChatWork,
   openFileInEditor,
@@ -789,7 +797,7 @@ async function openPackageDocsFromSettings(id: string) {
 // surface in focus: editor tab, then terminal tab, then archive the session.
 function handleCloseTab() {
   executeCloseTabAction({
-    editorFocused: isEditorFocused,
+    editorPaneFocused: () => isEditorFocused() || focusedPane() === 'artifact',
     activeWorkHost: () => activeWorkHost.value,
     closeActiveArtifactTab: () => { artifactHostRef.value?.closeActiveTab?.() },
     closeTerminalTab: () => { workHostRef.value?.closeTerminalTab?.() },
@@ -954,7 +962,10 @@ function handleKeydown(e: KeyboardEvent) {
   e.preventDefault()
 
   void runKeyAction(result, {
-    openCommandPalette: () => { paletteOpen.value = true },
+    openCommandPalette: () => {
+      paletteEditorTabActive.value = artifactHostRef.value?.hasActiveEditorTab?.() ?? false
+      paletteOpen.value = true
+    },
     openDraftChatWork,
     openTerminalWork,
     addTerminalTab: () => workHostRef.value?.addTerminalTab?.(),
@@ -963,6 +974,7 @@ function handleKeydown(e: KeyboardEvent) {
     navigateArtifactHistory,
     cycleSession,
     cycleActivity,
+    cycleEditorTab: direction => { artifactHostRef.value?.cycleTab?.(direction) },
     nextTick: () => nextTick(),
   })
 }
@@ -1107,6 +1119,9 @@ onMounted(async () => {
     pushToast: toast => { toastStore.push(toast) },
     downloadUpdate: () => window.kernel.downloadUpdate(),
     quitAndInstall: () => window.kernel.quitAndInstall(),
+    adoptTab: tab => { artifactHostRef.value?.adoptTab?.(tab) },
+    dispatchTerminalSend: (text, language) => handleSendToTerminal({ text, language }),
+    prepareChatDraft,
   })
 })
 
@@ -1382,6 +1397,7 @@ onBeforeUnmount(() => {
         v-if="paletteOpen"
         :files="fileIndex.files.value.map(f => ({ path: f.path, name: f.name }))"
         :sessions="sessionStore.visibleSessions.map(s => ({ id: s.id, label: s.label }))"
+        :has-active-editor-tab="paletteEditorTabActive"
         @select="handlePaletteSelect"
         @close="paletteOpen = false"
       />

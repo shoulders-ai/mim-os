@@ -17,6 +17,7 @@ function makeDeps(overrides: Partial<ShellActionDeps> = {}) {
     createUntitledInEditor: vi.fn(async () => undefined),
     openFileViaDialog: vi.fn(async () => undefined),
     openExportDialog: vi.fn(),
+    popOutActiveTab: vi.fn(async () => undefined),
     openShortcuts: vi.fn(),
     openChatWork: vi.fn(async () => undefined),
     openFileInEditor: vi.fn(async () => undefined),
@@ -56,12 +57,14 @@ describe('app shell actions', () => {
     await runShellAction({ type: 'new-document' }, deps)
     await runShellAction({ type: 'open-file-dialog' }, deps)
     await runShellAction({ type: 'export-document' }, deps)
+    await runShellAction({ type: 'pop-out-tab' }, deps)
     await runShellAction({ type: 'open-shortcuts' }, deps)
 
     expect(deps.openSettings).toHaveBeenCalledWith('ai')
     expect(deps.createUntitledInEditor).toHaveBeenCalledOnce()
     expect(deps.openFileViaDialog).toHaveBeenCalledOnce()
     expect(deps.openExportDialog).toHaveBeenCalledOnce()
+    expect(deps.popOutActiveTab).toHaveBeenCalledOnce()
     expect(deps.openShortcuts).toHaveBeenCalledOnce()
   })
 

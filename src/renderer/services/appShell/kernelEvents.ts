@@ -47,6 +47,9 @@ export interface AppKernelEventDeps {
   pushToast(toast: AppShellToast): void
   downloadUpdate(): Promise<unknown> | unknown
   quitAndInstall(): Promise<unknown> | unknown
+  adoptTab?(tab: unknown): void
+  dispatchTerminalSend?(text: string, language: string | null): void
+  prepareChatDraft?(payload: { targetSessionId?: string | null; text: string; attachments: unknown[]; contextChips?: unknown[] }): Promise<unknown> | unknown
 }
 
 export function registerAppKernelEvents(
@@ -154,6 +157,28 @@ export function registerAppKernelEvents(
     ['app:update-error', () => {
       // Background update checks should not interrupt the user. Download and
       // install errors from explicit user actions are surfaced by their actions.
+    }],
+    ['editor:adopt-tab', (tab: unknown) => {
+      deps.adoptTab?.(tab)
+    }],
+    ['popout:main-command', (data: unknown) => {
+      if (!isRecord(data) || typeof data.type !== 'string') return
+      if (data.type === 'terminal.send') {
+        const payload = isRecord(data.payload) ? data.payload : undefined
+        if (payload && typeof payload.text === 'string') {
+          deps.dispatchTerminalSend?.(payload.text, typeof payload.language === 'string' ? payload.language : null)
+        }
+      } else if (data.type === 'chat.prepareDraft') {
+        const payload = isRecord(data.payload) ? data.payload : undefined
+        if (payload && typeof payload.text === 'string') {
+          void deps.prepareChatDraft?.({
+            targetSessionId: typeof payload.targetSessionId === 'string' ? payload.targetSessionId : null,
+            text: payload.text,
+            attachments: Array.isArray(payload.attachments) ? payload.attachments : [],
+            contextChips: Array.isArray(payload.contextChips) ? payload.contextChips : [],
+          })
+        }
+      }
     }],
   ]
 

@@ -90,11 +90,13 @@ describe('app shell kernel events', () => {
       'app:update-progress',
       'app:update-downloaded',
       'app:update-error',
+      'editor:adopt-tab',
+      'popout:main-command',
     ])
 
     unregister()
 
-    expect(kernel.off).toHaveBeenCalledTimes(28)
+    expect(kernel.off).toHaveBeenCalledTimes(30)
     expect(registeredChannels()).toEqual([])
     expect(deps.refreshApps).not.toHaveBeenCalled()
   })
@@ -244,5 +246,114 @@ describe('app shell kernel events', () => {
     emit('app:update-error', { message: 'metadata missing' })
 
     expect(deps.pushToast).not.toHaveBeenCalled()
+  })
+
+  it('routes editor:adopt-tab to the adoptTab dep', () => {
+    const adoptTab = vi.fn()
+    const { deps, kernel, emit } = makeHarness({ adoptTab })
+    registerAppKernelEvents(kernel, deps)
+
+    emit('editor:adopt-tab', { path: 'notes.md', kind: 'text', name: 'notes.md', dirty: false })
+
+    expect(adoptTab).toHaveBeenCalledWith({ path: 'notes.md', kind: 'text', name: 'notes.md', dirty: false })
+  })
+
+  it('tolerates missing adoptTab dep gracefully', () => {
+    const { deps, kernel, emit } = makeHarness()
+    registerAppKernelEvents(kernel, deps)
+
+    // adoptTab is not provided in default harness — should not throw
+    expect(() => {
+      emit('editor:adopt-tab', { path: 'test.md', kind: 'text', name: 'test.md', dirty: false })
+    }).not.toThrow()
+  })
+
+  // ── popout:main-command ──
+
+  it('routes terminal.send from popout:main-command to dispatchTerminalSend', () => {
+    const dispatchTerminalSend = vi.fn()
+    const { kernel, emit } = makeHarness({ dispatchTerminalSend })
+    registerAppKernelEvents(kernel, { ...makeHarness().deps, dispatchTerminalSend })
+
+    emit('popout:main-command', {
+      type: 'terminal.send',
+      payload: { text: 'print("hello")', language: 'python' },
+    })
+
+    expect(dispatchTerminalSend).toHaveBeenCalledWith('print("hello")', 'python')
+  })
+
+  it('routes terminal.send with null language when language is absent', () => {
+    const dispatchTerminalSend = vi.fn()
+    const harness = makeHarness({ dispatchTerminalSend })
+    registerAppKernelEvents(harness.kernel, harness.deps)
+
+    harness.emit('popout:main-command', {
+      type: 'terminal.send',
+      payload: { text: 'echo hi' },
+    })
+
+    expect(dispatchTerminalSend).toHaveBeenCalledWith('echo hi', null)
+  })
+
+  it('routes chat.prepareDraft from popout:main-command to prepareChatDraft', () => {
+    const prepareChatDraft = vi.fn()
+    const harness = makeHarness({ prepareChatDraft })
+    registerAppKernelEvents(harness.kernel, harness.deps)
+
+    harness.emit('popout:main-command', {
+      type: 'chat.prepareDraft',
+      payload: {
+        text: 'Review this',
+        attachments: [{ type: 'file', path: 'a.md' }],
+        contextChips: [{ kind: 'file', path: 'b.md' }],
+        targetSessionId: 'sess-1',
+      },
+    })
+
+    expect(prepareChatDraft).toHaveBeenCalledWith({
+      targetSessionId: 'sess-1',
+      text: 'Review this',
+      attachments: [{ type: 'file', path: 'a.md' }],
+      contextChips: [{ kind: 'file', path: 'b.md' }],
+    })
+  })
+
+  it('tolerates missing dispatchTerminalSend and prepareChatDraft deps', () => {
+    const { kernel, emit } = makeHarness()
+    registerAppKernelEvents(kernel, makeHarness().deps)
+
+    // Neither dep is provided — should not throw
+    expect(() => {
+      emit('popout:main-command', { type: 'terminal.send', payload: { text: 'x' } })
+    }).not.toThrow()
+    expect(() => {
+      emit('popout:main-command', { type: 'chat.prepareDraft', payload: { text: 'y', attachments: [] } })
+    }).not.toThrow()
+  })
+
+  it('ignores malformed popout:main-command payloads', () => {
+    const dispatchTerminalSend = vi.fn()
+    const prepareChatDraft = vi.fn()
+    const harness = makeHarness({ dispatchTerminalSend, prepareChatDraft })
+    registerAppKernelEvents(harness.kernel, harness.deps)
+
+    // No type field
+    harness.emit('popout:main-command', { payload: { text: 'x' } })
+    // Non-string type
+    harness.emit('popout:main-command', { type: 42, payload: { text: 'x' } })
+    // Unknown type
+    harness.emit('popout:main-command', { type: 'unknown.verb', payload: { text: 'x' } })
+    // Missing payload
+    harness.emit('popout:main-command', { type: 'terminal.send' })
+    // Non-string text in terminal.send
+    harness.emit('popout:main-command', { type: 'terminal.send', payload: { text: 123 } })
+    // Non-object payload
+    harness.emit('popout:main-command', { type: 'terminal.send', payload: 'bad' })
+    // Null data
+    harness.emit('popout:main-command', null)
+
+    expect(dispatchTerminalSend).not.toHaveBeenCalled()
+    expect(prepareChatDraft).not.toHaveBeenCalled()
   })
 })

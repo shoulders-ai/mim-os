@@ -11,6 +11,8 @@ export interface EditorTabInfo {
   kind: string
   dirty: boolean
   active: boolean
+  /** Present only when state comes from per-window updates (Phase 0+). */
+  window?: 'main' | 'popout'
 }
 
 export interface EditorStateSnapshot {
@@ -20,19 +22,87 @@ export interface EditorStateSnapshot {
 
 const MAX_TABS = 200
 
-let snapshot: EditorStateSnapshot | null = null
+// ── Legacy single-window path (backward compat) ──
 
+let legacySnapshot: EditorStateSnapshot | null = null
+
+// ── Per-window state (Phase 0+) ──
+
+const windowSnapshots = new Map<number, EditorStateSnapshot>()
+let mainWindowId: number | null = null
+let lastFocusedWindowId: number | null = null
+
+// ── Public API ──
+
+/** Identify which webContents id is the main window. */
+export function setMainWindowId(id: number): void {
+  mainWindowId = id
+}
+
+/** Record that a window received focus (drives activeDocument selection). */
+export function noteWindowFocused(id: number): void {
+  lastFocusedWindowId = id
+}
+
+/** Remove a window's snapshot on close/destroy. */
+export function dropWindow(id: number): void {
+  windowSnapshots.delete(id)
+  if (lastFocusedWindowId === id) {
+    // Fall back to any remaining window (prefer main)
+    if (mainWindowId !== null && windowSnapshots.has(mainWindowId)) {
+      lastFocusedWindowId = mainWindowId
+    } else {
+      const remaining = windowSnapshots.keys().next()
+      lastFocusedWindowId = remaining.done ? null : remaining.value
+    }
+  }
+}
+
+/** Legacy single-window update (no window field on tabs). */
 export function updateEditorState(payload: unknown): void {
-  snapshot = normalizeSnapshot(payload)
+  legacySnapshot = normalizeSnapshot(payload)
+}
+
+/** Per-window update — tabs gain a `window` field in the merged read. */
+export function updateWindowEditorState(webContentsId: number, payload: unknown): void {
+  const snap = normalizeSnapshot(payload)
+  if (snap) {
+    windowSnapshots.set(webContentsId, snap)
+  } else {
+    windowSnapshots.delete(webContentsId)
+  }
 }
 
 export function clearEditorState(): void {
-  snapshot = null
+  legacySnapshot = null
+  windowSnapshots.clear()
+  lastFocusedWindowId = null
+}
+
+/**
+ * Find the webContents id of a pop-out window that has the given path open.
+ * Returns null if no pop-out has it, or if only the main window has it.
+ * Paths are compared as workspace-relative strings (case-sensitive).
+ */
+export function findWindowIdForPath(path: string): number | null {
+  if (!path) return null
+  for (const [id, snap] of windowSnapshots) {
+    if (id === mainWindowId) continue
+    for (const tab of snap.openTabs) {
+      if (tab.path === path) return id
+    }
+  }
+  return null
 }
 
 export function getEditorState(): { available: boolean } & EditorStateSnapshot {
-  if (!snapshot) return { available: false, activeDocument: null, openTabs: [] }
-  return { available: true, activeDocument: snapshot.activeDocument, openTabs: snapshot.openTabs }
+  // If per-window snapshots exist, produce a merged view.
+  if (windowSnapshots.size > 0) {
+    return mergedState()
+  }
+  // Otherwise fall back to legacy single-window path.
+  if (!legacySnapshot) return { available: false, activeDocument: null, openTabs: [] }
+  return { available: true, activeDocument: legacySnapshot.activeDocument, openTabs: legacySnapshot.openTabs }
 }
 
 export function registerEditorStateTools(tools: ToolRegistry): void {
@@ -42,6 +112,43 @@ export function registerEditorStateTools(tools: ToolRegistry): void {
     inputSchema: { type: 'object', properties: {} },
     execute: async () => getEditorState(),
   })
+}
+
+// ── Internals ──
+
+function mergedState(): { available: boolean } & EditorStateSnapshot {
+  const allTabs: EditorTabInfo[] = []
+
+  for (const [id, snap] of windowSnapshots) {
+    const role = windowRole(id)
+    for (const tab of snap.openTabs) {
+      allTabs.push({ ...tab, window: role })
+    }
+  }
+
+  // activeDocument comes from the most recently focused window that has one
+  const focusedSnap = lastFocusedWindowId !== null ? windowSnapshots.get(lastFocusedWindowId) : undefined
+  let activeDocument: EditorStateSnapshot['activeDocument'] = null
+  if (focusedSnap?.activeDocument) {
+    activeDocument = focusedSnap.activeDocument
+  } else {
+    // Fall back: find any window that has an activeDocument
+    for (const snap of windowSnapshots.values()) {
+      if (snap.activeDocument) {
+        activeDocument = snap.activeDocument
+        break
+      }
+    }
+  }
+
+  // Cap total tabs
+  if (allTabs.length > MAX_TABS) allTabs.length = MAX_TABS
+
+  return { available: true, activeDocument, openTabs: allTabs }
+}
+
+function windowRole(webContentsId: number): 'main' | 'popout' {
+  return webContentsId === mainWindowId ? 'main' : 'popout'
 }
 
 function normalizeSnapshot(payload: unknown): EditorStateSnapshot | null {

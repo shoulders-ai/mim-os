@@ -71,6 +71,7 @@ describe('app shell routing', () => {
     expect(resolvePaletteAction('action:new-document')).toEqual({ type: 'new-document' })
     expect(resolvePaletteAction('action:open-file')).toEqual({ type: 'open-file-dialog' })
     expect(resolvePaletteAction('action:export-document')).toEqual({ type: 'export-document' })
+    expect(resolvePaletteAction('action:pop-out-tab')).toEqual({ type: 'pop-out-tab' })
     expect(resolvePaletteAction('action:settings')).toEqual({ type: 'open-settings' })
     expect(resolvePaletteAction('action:shortcuts')).toEqual({ type: 'open-shortcuts' })
     expect(resolvePaletteAction('session:s1')).toEqual({ type: 'open-session', sessionId: 's1' })

@@ -11,6 +11,7 @@ export interface KeyboardActionDeps {
   navigateArtifactHistory(direction: 'back' | 'forward'): Promise<unknown> | unknown
   cycleSession(direction: 1 | -1): void
   cycleActivity(direction: 1 | -1): void
+  cycleEditorTab(direction: 1 | -1): void
   nextTick(): Promise<void>
 }
 
@@ -55,6 +56,12 @@ export async function runKeyAction(action: Exclude<KeyAction, null>, deps: Keybo
       break
     case 'activity-prev':
       deps.cycleActivity(-1)
+      break
+    case 'editor-tab-next':
+      deps.cycleEditorTab(1)
+      break
+    case 'editor-tab-prev':
+      deps.cycleEditorTab(-1)
       break
   }
 }

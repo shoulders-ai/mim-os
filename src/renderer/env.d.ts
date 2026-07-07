@@ -72,5 +72,12 @@ interface Window {
       dataUrl?: string
     }> }>
     getPathForFile(file: File): string
+
+    // Pop-out editor windows
+    popoutOpenWithTab(tab: Record<string, unknown>): Promise<{ ok: boolean }>
+    popoutReturnTab(tab: Record<string, unknown>): Promise<{ ok: boolean }>
+    popoutReady(): Promise<void>
+    popoutForward(command: Record<string, unknown>): Promise<{ ok: boolean }>
+    popoutSetEdited(state: Record<string, unknown>): Promise<void>
   }
 }

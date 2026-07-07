@@ -86,15 +86,25 @@ export function rankPaletteItems(
 
 // ── Static action items ──
 
-export function coreActions(platform?: string): PaletteItem[] {
-  return [
+export function coreActions(
+  platform?: string,
+  options?: { hasActiveEditorTab?: boolean },
+): PaletteItem[] {
+  const items: PaletteItem[] = [
     { id: 'action:new-chat', kind: 'action', label: 'New chat', hint: shortcutLabel(['Mod', 'N'], platform) },
     { id: 'action:new-document', kind: 'action', label: 'New document', hint: shortcutLabel(['Mod', 'T'], platform) },
     { id: 'action:open-file', kind: 'action', label: 'Open file', hint: shortcutLabel(['Mod', 'O'], platform) },
     { id: 'action:export-document', kind: 'action', label: 'Export document (PDF, Word)', hint: shortcutLabel(['Shift', 'Mod', 'E'], platform) },
+  ]
+  // Only offered while an editor tab is active — moving a tab needs a tab.
+  if (options?.hasActiveEditorTab) {
+    items.push({ id: 'action:pop-out-tab', kind: 'action', label: 'Move Tab to New Window', hint: '' })
+  }
+  items.push(
     { id: 'action:settings', kind: 'action', label: 'Settings', hint: shortcutLabel(['Mod', ','], platform) },
     { id: 'action:shortcuts', kind: 'action', label: 'Keyboard shortcuts', hint: '' },
-  ]
+  )
+  return items
 }
 
 export function coreSurfaces(): PaletteItem[] {

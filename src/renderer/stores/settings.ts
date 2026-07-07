@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
+import { applyThemeToDocument } from '../services/themeSync.js'
 
 export type ThemeName =
   | 'parchment' | 'glacier' | 'sage' | 'white'
@@ -7,7 +8,7 @@ export type ThemeName =
 export type FontFamily = 'sans' | 'serif' | 'mono' | 'slab'
 export type AutomationApprovalMode = 'normal' | 'strict' | 'developer'
 
-export interface KeyStatus { provider: string; configured: boolean; source?: string }
+export interface KeyStatus { provider: string; configured: boolean; source?: string; masked?: string | null }
 
 const DARK_THEMES: ThemeName[] = ['slate', 'monokai', 'nord', 'dracula']
 
@@ -134,11 +135,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const isDarkTheme = computed(() => DARK_THEMES.includes(theme.value))
 
   // ── Theme ──
-  function applyTheme(name: ThemeName) {
-    document.documentElement.dataset.theme = name
-  }
-
-  watch(theme, (val) => applyTheme(val))
+  watch(theme, (val) => applyThemeToDocument(val))
 
   // ── Load ──
   async function load() {
@@ -180,7 +177,7 @@ export const useSettingsStore = defineStore('settings', () => {
     await refreshKeyStatuses()
     await refreshTelemetryStatus()
 
-    applyTheme(theme.value)
+    applyThemeToDocument(theme.value)
     loaded.value = true
   }
 
@@ -230,7 +227,7 @@ export const useSettingsStore = defineStore('settings', () => {
   async function set(key: string, value: unknown) {
     if (!(key in refs)) return
     refs[key].value = value
-    if (key === 'theme') applyTheme(value as ThemeName)
+    if (key === 'theme') applyThemeToDocument(value as ThemeName)
     try {
       await window.kernel.call('settings.set', { key, value })
     } catch {

@@ -4,7 +4,11 @@ export interface CloseTabSession {
 }
 
 export interface CloseTabActionsDeps {
-  editorFocused(): boolean
+  /**
+   * Focus anywhere in the Artifact pane — not just CodeMirror. PDF, table,
+   * image, and file-card tabs must close via Cmd+W the same as text tabs.
+   */
+  editorPaneFocused(): boolean
   activeWorkHost(): string
   closeActiveArtifactTab(): void
   closeTerminalTab(): void
@@ -19,7 +23,7 @@ export interface CloseTabActionsDeps {
 }
 
 export function handleCloseTab(deps: CloseTabActionsDeps): void {
-  if (deps.editorFocused()) {
+  if (deps.editorPaneFocused()) {
     deps.closeActiveArtifactTab()
     return
   }

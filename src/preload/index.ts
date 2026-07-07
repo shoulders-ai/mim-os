@@ -74,4 +74,15 @@ contextBridge.exposeInMainWorld('kernel', {
   readAttachments: (paths: string[]) =>
     ipcRenderer.invoke('kernel:read-attachments', paths),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+
+  // Pop-out editor windows
+  popoutOpenWithTab: (tab: Record<string, unknown>) =>
+    ipcRenderer.invoke('popout:open-with-tab', tab),
+  popoutReturnTab: (tab: Record<string, unknown>) =>
+    ipcRenderer.invoke('popout:return-tab', tab),
+  popoutReady: () => ipcRenderer.invoke('popout:ready'),
+  popoutForward: (command: Record<string, unknown>) =>
+    ipcRenderer.invoke('popout:forward', command),
+  popoutSetEdited: (state: Record<string, unknown>) =>
+    ipcRenderer.invoke('popout:set-edited', state),
 })

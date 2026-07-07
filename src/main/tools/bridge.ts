@@ -1,19 +1,23 @@
-import { BrowserWindow } from 'electron'
 import type { ToolRegistry } from '@main/tools/registry.js'
 
-function sendToRenderer(channel: string, data: unknown): void {
-  const windows = BrowserWindow.getAllWindows()
-  if (windows.length === 0) {
-    throw new Error('No window available')
-  }
-  windows[0].webContents.send(channel, data)
-}
+type SendFn = (channel: string, data: unknown) => void
 
 function objectSchema(properties: Record<string, unknown>, required: string[] = []) {
   return { type: 'object', properties, required }
 }
 
-export function registerBridgeTools(tools: ToolRegistry): void {
+export function registerBridgeTools(
+  tools: ToolRegistry,
+  options?: {
+    sendToMainWindow?: SendFn
+    routeEditorOpen?: (path: string) => boolean
+  },
+): void {
+  // Injected sender targets the main window explicitly, avoiding the
+  // order-fragile BrowserWindow.getAllWindows()[0] that breaks when pop-out
+  // windows exist.
+  const sendToRenderer: SendFn = options?.sendToMainWindow ?? fallbackSend()
+
   tools.register({
     name: 'chat.send',
     description: 'Send a message to the chat surface',
@@ -44,6 +48,10 @@ export function registerBridgeTools(tools: ToolRegistry): void {
       const path = params.path
       if (typeof path !== 'string' || path.length === 0) {
         throw new Error('Missing required parameter: path')
+      }
+      // Route to a pop-out window that already has this file open
+      if (options?.routeEditorOpen?.(path)) {
+        return { opened: path }
       }
       sendToRenderer('bridge:editor:open', { path })
       return { opened: path }
@@ -111,6 +119,22 @@ export function registerBridgeTools(tools: ToolRegistry): void {
       return { opened: true, pane: 'artifact', packageId, viewId }
     }
   })
+}
+
+/** Fallback for tests / headless where no main window is injected. */
+function fallbackSend(): SendFn {
+  return (channel: string, data: unknown) => {
+    // Lazy import to avoid loading Electron in test environments
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { BrowserWindow } = require('electron') as typeof import('electron')
+      const windows = BrowserWindow.getAllWindows()
+      if (windows.length === 0) throw new Error('No window available')
+      windows[0].webContents.send(channel, data)
+    } catch {
+      throw new Error('No window available — inject sendToMainWindow')
+    }
+  }
 }
 
 function resolvePackageId(params: Record<string, unknown>, ctx: Parameters<ToolRegistry['call']>[2]): string {

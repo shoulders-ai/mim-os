@@ -77,6 +77,10 @@ function closeActiveTab() {
   editorRef.value?.closeActiveTab?.()
 }
 
+function cycleTab(direction: 1 | -1) {
+  editorRef.value?.cycleTab?.(direction)
+}
+
 function saveActiveFile() {
   return editorRef.value?.saveActiveFile?.() ?? false
 }
@@ -96,6 +100,18 @@ function getArtifactReplacementDecision(
   return editorRef.value?.getArtifactReplacementDecision?.(current, next) ?? 'yes'
 }
 
+function adoptTab(tab: unknown) {
+  editorRef.value?.adoptTab?.(tab as Parameters<NonNullable<typeof editorRef.value>['adoptTab']>[0])
+}
+
+function popOutActiveTab() {
+  return editorRef.value?.popOutActiveTab?.()
+}
+
+function hasActiveEditorTab(): boolean {
+  return editorRef.value?.hasActiveTab?.() ?? false
+}
+
 defineExpose({
   openFile,
   openDocument,
@@ -104,10 +120,14 @@ defineExpose({
   retargetDocumentPath,
   newUntitledTab,
   closeActiveTab,
+  cycleTab,
   saveActiveFile,
   saveActiveFileAs,
   openExportDialog,
   getArtifactReplacementDecision,
+  adoptTab,
+  popOutActiveTab,
+  hasActiveEditorTab,
 })
 </script>
 

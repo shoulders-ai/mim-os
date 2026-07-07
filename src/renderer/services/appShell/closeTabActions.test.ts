@@ -6,7 +6,7 @@ import {
 
 function makeDeps(overrides: Partial<CloseTabActionsDeps> = {}) {
   const deps: CloseTabActionsDeps = {
-    editorFocused: vi.fn(() => false),
+    editorPaneFocused: vi.fn(() => false),
     activeWorkHost: vi.fn(() => 'chat'),
     closeActiveArtifactTab: vi.fn(),
     closeTerminalTab: vi.fn(),
@@ -26,7 +26,7 @@ function makeDeps(overrides: Partial<CloseTabActionsDeps> = {}) {
 describe('app shell close-tab actions', () => {
   it('closes the focused editor tab first', () => {
     const deps = makeDeps({
-      editorFocused: vi.fn(() => true),
+      editorPaneFocused: vi.fn(() => true),
       activeWorkHost: vi.fn(() => 'terminal'),
     })
 
@@ -34,6 +34,20 @@ describe('app shell close-tab actions', () => {
 
     expect(deps.closeActiveArtifactTab).toHaveBeenCalledOnce()
     expect(deps.closeTerminalTab).not.toHaveBeenCalled()
+    expect(deps.archiveSession).not.toHaveBeenCalled()
+  })
+
+  it('closes non-text document tabs (PDF, table, image) instead of archiving the chat', () => {
+    // Focus on a PDF/table/image tab lives in the Artifact pane but never in
+    // CodeMirror; Cmd+W must still close the document tab, not the session.
+    const deps = makeDeps({
+      editorPaneFocused: vi.fn(() => true),
+      activeWorkHost: vi.fn(() => 'chat'),
+    })
+
+    handleCloseTab(deps)
+
+    expect(deps.closeActiveArtifactTab).toHaveBeenCalledOnce()
     expect(deps.archiveSession).not.toHaveBeenCalled()
   })
 

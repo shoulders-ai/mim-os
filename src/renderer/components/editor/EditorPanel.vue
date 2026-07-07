@@ -43,7 +43,8 @@ import {
 import { editorArtifactReplacementDecision } from '../../services/workbench/artifactReplacement.js'
 import type { ArtifactReplacementDecision } from '../../stores/workbench.js'
 import { marked } from 'marked'
-import { IconHistory } from '@tabler/icons-vue'
+import { IconHistory, IconExternalLink, IconArrowBackUp } from '@tabler/icons-vue'
+import { serializeTabForTransfer, validateTransferredTab, clampSelection, type TransferredTab } from './editorTabTransfer.js'
 import {
   VIEW_MODES,
   type FileVersion,
@@ -73,6 +74,7 @@ import { renderArgv, pickBestProduct, missingPdfEngineGuidance, type RenderProdu
 const viewModes = VIEW_MODES
 
 const emit = defineEmits<{
+  activeDirtyChanged: [dirty: boolean]
   artifactActivated: [entry: ArtifactEntry]
   activeFileChanged: [path: string]
   allTabsClosed: []
@@ -83,8 +85,10 @@ const emit = defineEmits<{
 
 const props = withDefaults(defineProps<{
   port?: number
+  windowRole?: 'main' | 'popout'
 }>(), {
   port: 0,
+  windowRole: 'main',
 })
 
 const editorContainer = ref<HTMLElement | null>(null)
@@ -94,6 +98,7 @@ const tableArtifactRef = ref<InstanceType<typeof TableArtifact> | null>(null)
 let editorView: any = null
 let unregisterCurrentDocumentProvider: null | (() => void) = null
 let unregisterWorkspaceFileChanges: null | (() => void) = null
+let unregisterWorkspaceFilesTrashed: null | (() => void) = null
 let unregisterAppsChanged: null | (() => void) = null
 let unregisterWorkspaceChanged: null | (() => void) = null
 const watchedWorkspaceFiles = new Set<string>()
@@ -499,6 +504,18 @@ function notifyActiveEditorArtifactChanged() {
   emit('artifactActivated', artifactEntryForTab(activeTab.value))
 }
 
+// Notify pop-out shell of active tab dirty-state changes for macOS native chrome.
+watch(
+  () => {
+    const tab = activeTab.value
+    if (!tab) return false
+    if (tab.readOnly) return false
+    if (tab.kind === 'text' && !tab.path && tab.content.length > 0) return true
+    return tab.dirty
+  },
+  (dirty) => { emit('activeDirtyChanged', dirty) },
+)
+
 // Options shared by the initial editor and every fresh per-tab EditorState.
 // A new tab must get its state from createEditorState with these options —
 // never by dispatching its content into another tab's live state, which would
@@ -638,11 +655,9 @@ editorFileSync = useEditorFileSync({
 const {
   restoreTabs,
   disposeTabPersistence,
-} = useEditorTabPersistence({
-  tabs,
-  activeTabIndex,
-  liveContentForTab,
-})
+} = props.windowRole === 'main'
+  ? useEditorTabPersistence({ tabs, activeTabIndex, liveContentForTab })
+  : { restoreTabs: async () => false, disposeTabPersistence: () => {} }
 
 function clearAutoSave() {
   editorFileSync?.clearAutoSave()
@@ -943,7 +958,10 @@ function onCloseTab(index: number) {
   const tab = tabs[index]
   if (!tab) return
   if (tab.dirty && !tab.readOnly) {
-    if (!confirm(`"${tab.name}" has unsaved changes. Close anyway?`)) return
+    const prompt = tab.externalState === 'deleted'
+      ? `"${tab.name}" was deleted on disk, but this tab has edits that exist nowhere else. Close and discard them?`
+      : `"${tab.name}" has unsaved changes. Close anyway?`
+    if (!confirm(prompt)) return
   }
   clearAutoSave()
   tabs.splice(index, 1)
@@ -1318,11 +1336,195 @@ function closeActiveTab() {
   onCloseTab(activeTabIndex.value)
 }
 
+// Cmd+Option+Arrow while the Artifact pane has focus (routed via App.vue's
+// keyRouter). Wraps around, matching the activity-row cycling convention.
+function cycleTab(direction: 1 | -1) {
+  if (tabs.length < 2) return
+  onSelectTab((activeTabIndex.value + direction + tabs.length) % tabs.length)
+}
+
 function getArtifactReplacementDecision(
   current: ArtifactEntry,
   next: ArtifactEntry | null,
 ): ArtifactReplacementDecision {
   return editorArtifactReplacementDecision(current, next, getCurrentDocument())
+}
+
+// ── Pop-out tab transfer ──
+
+// Remove a tab without the dirty confirmation prompt. Used after a successful
+// transfer where the state has already been handed off to another window.
+function forceCloseTab(index: number) {
+  if (index === activeTabIndex.value && historyPreviewActive.value) cancelHistoryPreview()
+  const tab = tabs[index]
+  if (!tab) return
+  clearAutoSave()
+  tabs.splice(index, 1)
+  if (tabs.length === 0) {
+    activeTabIndex.value = 0
+    stats.value = { words: 0, characters: 0, selected: false }
+    activeTableStats.value = { rows: 0, cols: 0 }
+    commentThreads.value = []
+    activeCommentId.value = null
+    emit('activeFileChanged', '')
+    notifyCurrentDocumentChanged()
+    emit('allTabsClosed')
+    return
+  }
+  if (activeTabIndex.value >= tabs.length) {
+    activeTabIndex.value = tabs.length - 1
+  }
+  switchToTabState(activeTab.value)
+  notifyActiveEditorArtifactChanged()
+}
+
+function captureViewState(): { selection?: { anchor: number; head: number }; scrollTop?: number; viewMode?: string } {
+  const result: { selection?: { anchor: number; head: number }; scrollTop?: number; viewMode?: string } = {}
+  if (editorView?.state?.selection?.main) {
+    const sel = editorView.state.selection.main
+    result.selection = { anchor: sel.anchor, head: sel.head }
+  }
+  if (editorView?.scrollDOM) {
+    result.scrollTop = editorView.scrollDOM.scrollTop
+  }
+  result.viewMode = viewMode.value
+  return result
+}
+
+async function handlePopOut() {
+  const tab = activeTab.value
+  if (!tab) return
+  const index = activeTabIndex.value
+
+  // Dirty non-text tabs (e.g. table): save first, then transfer clean
+  if (tab.dirty && tab.kind !== 'text' && tab.path) {
+    const saved = await saveActiveFile()
+    if (!saved) return
+  }
+
+  const vs = captureViewState()
+  const transferred = serializeTabForTransfer(tab, vs)
+
+  try {
+    const channel = props.windowRole === 'main' ? 'popoutOpenWithTab' : 'popoutReturnTab'
+    const result = await window.kernel[channel](transferred as unknown as Record<string, unknown>)
+    if (result?.ok) {
+      forceCloseTab(index)
+    } else {
+      toastStore.push({ kind: 'error', message: 'Could not move tab to another window' })
+    }
+  } catch {
+    toastStore.push({ kind: 'error', message: 'Could not move tab to another window' })
+  }
+}
+
+async function adoptTab(transferred: TransferredTab) {
+  const validated = validateTransferredTab(transferred)
+  if (!validated) return
+
+  if (validated.path && !validated.dirty) {
+    // Clean file-backed tab: re-open from disk via existing path
+    const existingIndex = tabs.findIndex(t => t.path === validated.path && t.kind === validated.kind)
+    if (existingIndex >= 0) {
+      onSelectTab(existingIndex)
+    } else if (validated.kind === 'text') {
+      await openFile(validated.path)
+    } else {
+      await openDocument(validated.path, validated.kind)
+    }
+  } else if (validated.path === null || (validated.dirty && validated.kind === 'text')) {
+    // Untitled or dirty text tab: open with carried content
+    saveActiveTabEditorState()
+    const id = validated.path
+      ? `${validated.path}-${Date.now()}`
+      : `untitled-${Date.now()}-${tabs.length}`
+    tabs.push({
+      id,
+      kind: 'text',
+      path: validated.path ?? '',
+      name: validated.name,
+      content: validated.content ?? '',
+      // Dirty file-backed tabs carry their disk baseline (originalContent +
+      // version hash) so dirty tracking and the stale-write guard survive
+      // the transfer intact.
+      originalContent: validated.path ? validated.originalContent ?? validated.content ?? '' : '',
+      version: validated.version,
+      dirty: validated.dirty,
+      externalState: undefined,
+    })
+    activeTabIndex.value = tabs.length - 1
+    await nextTick()
+    if (editorView) switchToTabState(activeTab.value)
+    else initEditor()
+  } else if (validated.dirty && validated.kind !== 'text' && validated.path) {
+    // Dirty non-text tab with path — it was saved before transfer so open clean
+    await openDocument(validated.path, validated.kind)
+  }
+
+  // Restore selection and scroll if present (text tabs only)
+  if (validated.kind === 'text' && editorView) {
+    await nextTick()
+    if (validated.selection) {
+      const docLen = editorView.state?.doc?.length ?? 0
+      const clamped = clampSelection(validated.selection, docLen)
+      if (clamped) {
+        try {
+          editorView.dispatch({ selection: { anchor: clamped.anchor, head: clamped.head } })
+        } catch { /* selection out of range — ignore */ }
+      }
+    }
+    if (validated.scrollTop != null && editorView.scrollDOM) {
+      editorView.scrollDOM.scrollTop = validated.scrollTop
+    }
+  }
+
+  // Restore viewMode if provided
+  if (validated.viewMode && VIEW_MODES.includes(validated.viewMode as any)) {
+    viewMode.value = validated.viewMode as typeof viewMode.value
+  }
+
+  notifyActiveEditorArtifactChanged()
+}
+
+async function returnAllTabs(): Promise<void> {
+  // Iterate backwards so splice indices stay valid as tabs are removed.
+  for (let i = tabs.length - 1; i >= 0; i--) {
+    const tab = tabs[i]
+    if (!tab) continue
+
+    // Save dirty non-text tabs before transfer
+    if (tab.dirty && tab.kind !== 'text' && tab.path) {
+      // Switch to the tab so saveActiveFile targets the right one
+      if (activeTabIndex.value !== i) {
+        saveActiveTabEditorState()
+        activeTabIndex.value = i
+        switchToTabState(tab)
+        await nextTick()
+      }
+      const saved = await saveActiveFile()
+      if (!saved) continue
+    }
+
+    // Capture view state for the active tab (has live editor); for inactive
+    // tabs the stored editorState carries their cursor/scroll.
+    let vs: { selection?: { anchor: number; head: number }; scrollTop?: number; viewMode?: string } = {}
+    if (i === activeTabIndex.value) {
+      vs = captureViewState()
+    } else if (tab.editorState?.selection?.main) {
+      vs.selection = { anchor: tab.editorState.selection.main.anchor, head: tab.editorState.selection.main.head }
+    }
+
+    const transferred = serializeTabForTransfer(tab, vs)
+
+    try {
+      const result = await window.kernel.popoutReturnTab(transferred as unknown as Record<string, unknown>)
+      if (result?.ok) {
+        forceCloseTab(i)
+      }
+    } catch {
+      // Best-effort: skip tabs that fail to transfer
+    }
+  }
 }
 
 defineExpose({
@@ -1335,10 +1537,15 @@ defineExpose({
   getArtifactReplacementDecision,
   createUntitledTab,
   closeActiveTab,
+  cycleTab,
   saveActiveFile,
   saveActiveFileAs,
   openExportDialog,
   openHistoryForPath,
+  adoptTab,
+  returnAllTabs,
+  popOutActiveTab: handlePopOut,
+  hasActiveTab: () => activeTab.value != null,
 })
 
 // Export the active document via the dialog. Reads the live buffer (not the
@@ -1351,11 +1558,36 @@ function openExportDialog() {
   exportDialogOpen.value = true
 }
 
+// The user deleted these paths through the app's own UI (Files pane → Trash),
+// so honor the intent: clean tabs close silently. Dirty tabs keep the buffer
+// with the deleted conflict banner — those edits exist nowhere else. External
+// deletions (agents, CLI, Finder) never send this event; they go through the
+// watcher and always keep the banner.
+function onWorkspaceFilesTrashed(payload: unknown) {
+  const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {}
+  const paths = Array.isArray(record.paths)
+    ? record.paths.filter((p): p is string => typeof p === 'string' && p.length > 0)
+    : []
+  if (!paths.length) return
+  for (let i = tabs.length - 1; i >= 0; i--) {
+    const tab = tabs[i]
+    if (!tab?.path) continue
+    if (!paths.some(p => tab.path === p || tab.path.startsWith(`${p}/`))) continue
+    if (tab.dirty && !tab.readOnly) {
+      markTabChangedOnDisk(tab, 'deleted')
+      continue
+    }
+    forceCloseTab(i)
+  }
+}
+
 onMounted(async () => {
   unregisterCurrentDocumentProvider = registerCurrentDocumentProvider(getCurrentDocument)
   const onFileChange = (payload: unknown) => { void onWorkspaceFilesChanged(payload) }
   window.kernel.on('workspace:files-changed', onFileChange)
   unregisterWorkspaceFileChanges = () => window.kernel.off('workspace:files-changed', onFileChange)
+  window.kernel.on('workspace:files-trashed', onWorkspaceFilesTrashed)
+  unregisterWorkspaceFilesTrashed = () => window.kernel.off('workspace:files-trashed', onWorkspaceFilesTrashed)
   const onAppsChanged = () => {
     void loadReferences()
     void loadReferenceToolAvailability()
@@ -1392,6 +1624,8 @@ onBeforeUnmount(() => {
   unregisterCurrentDocumentProvider = null
   unregisterWorkspaceFileChanges?.()
   unregisterWorkspaceFileChanges = null
+  unregisterWorkspaceFilesTrashed?.()
+  unregisterWorkspaceFilesTrashed = null
   unregisterAppsChanged?.()
   unregisterAppsChanged = null
   unregisterWorkspaceChanged?.()
@@ -1420,6 +1654,18 @@ onBeforeUnmount(() => {
         @add-tab="onAddTab"
         @reorder-tab="onReorderTab"
       />
+      <button
+        v-if="activeTab && !historyPreviewActive && !diffStore.active"
+        type="button"
+        class="mb-[3px] flex h-[22px] shrink-0 items-center gap-1 rounded-[4px] px-2 font-sans text-[11px] text-ink-3 hover:bg-chrome-mid hover:text-ink"
+        :title="props.windowRole === 'main' ? 'Move tab to new window' : 'Move tab to main window'"
+        :aria-label="props.windowRole === 'main' ? 'Move tab to new window' : 'Move tab to main window'"
+        data-testid="editor-popout-button"
+        @click="handlePopOut"
+      >
+        <IconExternalLink v-if="props.windowRole === 'main'" :size="13" :stroke-width="1.9" />
+        <IconArrowBackUp v-else :size="13" :stroke-width="1.9" />
+      </button>
       <button
         v-if="activeTab?.path"
         type="button"

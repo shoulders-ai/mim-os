@@ -33,7 +33,7 @@ import { lookupRegistryEntry, setAccountRegistryDev } from '@main/packages/regis
 import { registerInstallTools } from '@main/tools/install.js'
 import { DEFAULT_CACHE_ROOT } from '@main/packages/cacheLayout.js'
 import { registerBridgeTools } from '@main/tools/bridge.js'
-import { clearEditorState, registerEditorStateTools, updateEditorState } from '@main/tools/editorState.js'
+import { clearEditorState, dropWindow as dropEditorWindow, findWindowIdForPath, noteWindowFocused, registerEditorStateTools, setMainWindowId, updateWindowEditorState } from '@main/tools/editorState.js'
 import { readTraceCaptureContent, readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
 import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
 import { registerToolchainTools } from '@main/tools/toolchain.js'
@@ -89,6 +89,21 @@ import { resolveBootWorkspace, recordLastWorkspace, isDefaultWorkspace } from '@
 import { deleteMcpDiscoveryFile, writeMcpDiscoveryFile } from '@main/mcp/discovery.js'
 import { createWorkspaceFileWatcher } from '@main/workspace/workspaceFileWatcher.js'
 import { toSlashPath, userHomeDir } from '@main/platform.js'
+import {
+  registerWindow,
+  unregisterWindow,
+  updateWindowDirtyState,
+  totalDirtyCount,
+  unionDirtyPaths,
+  getWindowDirtyState,
+  cascadePosition,
+  popoutCloseGuardMessage,
+  addReadyResolver,
+  resolveReady,
+  removeReadyResolver,
+  resolveMenuTarget,
+  normalizeSetEditedPayload,
+} from '@main/windows/popoutWindows.js'
 
 const HOME_DIR = userHomeDir()
 const AUTO_HISTORY_BASELINE_DELAY_MS = 2_000
@@ -104,6 +119,7 @@ import { createPermissionGate, traceGateDecision } from '@main/security/gate.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
 
 let mainWindow: BrowserWindow | null = null
+const popoutWindows = new Map<number, BrowserWindow>()
 let recentFiles: string[] = []
 let workspaceFileWatcher: ReturnType<typeof createWorkspaceFileWatcher> | null = null
 let telemetryShutdown: (() => Promise<void>) | null = null
@@ -156,9 +172,90 @@ export function createMainWindow(): BrowserWindow {
   })
 }
 
+function createPopoutWindow(): BrowserWindow {
+  // Gather existing popout bounds for cascade positioning
+  const existingBounds: Array<{ x: number; y: number }> = []
+  for (const win of popoutWindows.values()) {
+    if (!win.isDestroyed()) {
+      const bounds = win.getBounds()
+      existingBounds.push({ x: bounds.x, y: bounds.y })
+    }
+  }
+  const fallback = mainWindow && !mainWindow.isDestroyed()
+    ? mainWindow.getBounds()
+    : { x: 100, y: 100 }
+  const pos = cascadePosition(existingBounds, fallback)
+
+  const win = new BrowserWindow({
+    width: 980,
+    height: 760,
+    minWidth: 500,
+    minHeight: 360,
+    x: pos.x,
+    y: pos.y,
+    show: false,
+    ...mainWindowChromeOptions(),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.mjs'),
+      sandbox: false,
+    },
+  })
+  return win
+}
+
+function closeAllPopouts(): void {
+  for (const [id, win] of popoutWindows) {
+    if (!win.isDestroyed()) {
+      win.destroy()
+    }
+    popoutWindows.delete(id)
+  }
+}
+
 function sendToRenderer(channel: string, ...args: unknown[]): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, ...args)
+  }
+}
+
+/**
+ * Send an event to ALL renderer windows (main + pop-outs).
+ *
+ * ONLY workspace-global state channels belong here — channels whose payload
+ * every window must react to identically (file-system changes, workspace
+ * identity, settings). Single-window or security-sensitive channels
+ * (gate:request, package events, agent sessions, updater, bridge commands,
+ * menu commands) stay on sendToRenderer to prevent double-handling.
+ */
+function broadcastToRenderers(channel: string, ...args: unknown[]): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(channel, ...args)
+    }
+  }
+}
+
+/**
+ * Route a menu command to the correct window. Editor-scoped commands go to
+ * the focused pop-out when one has focus; app-scoped commands always go to
+ * the main window (and focus it so the surface is visible).
+ */
+function sendMenuCommand(command: string, ...args: unknown[]): void {
+  const focused = BrowserWindow.getFocusedWindow()
+  const focusedIsPopout = focused != null && popoutWindows.has(focused.webContents.id)
+  const target = resolveMenuTarget(command, focusedIsPopout)
+
+  if (target === 'focused' && focused && !focused.isDestroyed()) {
+    focused.webContents.send(command, ...args)
+  } else {
+    sendToRenderer(command, ...args)
+    // App-scoped commands target a surface that lives in the main window —
+    // bring it forward so the user sees it.
+    if (!focusedIsPopout) return
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.focus()
+    }
   }
 }
 
@@ -168,17 +265,17 @@ function rebuildApplicationMenu(): void {
     appName: app.name,
     recentFiles,
     callbacks: {
-      onNewDocument: () => sendToRenderer('menu:new-document'),
-      onOpenFile: () => sendToRenderer('menu:open-file'),
-      onSaveFile: () => sendToRenderer('menu:save-file'),
-      onSaveFileAs: () => sendToRenderer('menu:save-file-as'),
-      onExportDocument: () => sendToRenderer('menu:export-document'),
-      onOpenRecent: (path) => sendToRenderer('menu:open-recent', path),
-      onClearRecent: () => sendToRenderer('menu:clear-recent'),
-      onCloseTab: () => sendToRenderer('menu:close-tab'),
-      onOpenSettings: () => sendToRenderer('menu:settings'),
-      onShowShortcuts: () => sendToRenderer('menu:shortcuts'),
-      onShowWelcome: () => sendToRenderer('menu:welcome'),
+      onNewDocument: () => sendMenuCommand('menu:new-document'),
+      onOpenFile: () => sendMenuCommand('menu:open-file'),
+      onSaveFile: () => sendMenuCommand('menu:save-file'),
+      onSaveFileAs: () => sendMenuCommand('menu:save-file-as'),
+      onExportDocument: () => sendMenuCommand('menu:export-document'),
+      onOpenRecent: (path) => sendMenuCommand('menu:open-recent', path),
+      onClearRecent: () => sendMenuCommand('menu:clear-recent'),
+      onCloseTab: () => sendMenuCommand('menu:close-tab'),
+      onOpenSettings: () => sendMenuCommand('menu:settings'),
+      onShowShortcuts: () => sendMenuCommand('menu:shortcuts'),
+      onShowWelcome: () => sendMenuCommand('menu:welcome'),
     },
   })
 }
@@ -294,8 +391,6 @@ async function boot(): Promise<void> {
   let namedPackageTools: NamedPackageToolSync | null = null
   let packageEnablement: ReturnType<typeof createPackageEnablementStore> | null = null
   let appUpdater: ReturnType<typeof initAutoUpdater> | null = null
-  let lastDirtyTabCount = 0
-  let dirtyOpenFilePaths = new Set<string>()
 
   // Git mirrors live in a single per-machine cache shared across workspaces, so
   // a repo is cloned once no matter how many workspaces mount it.
@@ -388,7 +483,7 @@ async function boot(): Promise<void> {
   })
   workspaceFileWatcher = createWorkspaceFileWatcher({
     emit: (channel, payload) => {
-      mainWindow?.webContents.send(channel, payload)
+      broadcastToRenderers(channel, payload)
       for (const change of payload.changes) {
         traceOutcomes.observeFileChange(change)
         history.observeFileChange(change)
@@ -399,17 +494,36 @@ async function boot(): Promise<void> {
   registerFileTools(tools, {
     openNativeFile: (path) => shell.openPath(path),
     trashItem: (path) => shell.trashItem(path),
+    onUserTrashed: (paths) => broadcastToRenderers('workspace:files-trashed', { paths }),
   })
   registerCommentTools(tools, {
-    isDirtyOpenPath: (path) => dirtyOpenFilePaths.has(path),
+    isDirtyOpenPath: (path) => unionDirtyPaths().has(path),
   })
   registerWorkspaceTools(tools)
-  registerBridgeTools(tools)
+  registerBridgeTools(tools, {
+    sendToMainWindow: (channel, data) => sendToRenderer(channel, data),
+    routeEditorOpen: (path) => {
+      const popoutId = findWindowIdForPath(path)
+      if (popoutId == null) return false
+      const popout = popoutWindows.get(popoutId)
+      if (!popout || popout.isDestroyed()) return false
+      popout.webContents.send('bridge:editor:open', { path })
+      popout.show()
+      popout.focus()
+      return true
+    },
+  })
   registerEditorStateTools(tools)
-  registerSettingsTools(tools)
+  registerSettingsTools(tools, {
+    onChange: () => broadcastToRenderers('settings:changed'),
+  })
   registerToolPolicyTools(tools)
   registerToolchainTools(tools)
-  registerCodeTools(tools)
+  registerCodeTools(tools, {
+    sendTerminalCommand: (command: string) => {
+      sendToRenderer('bridge:terminal:run', { command, reveal: true })
+    },
+  })
   // Registered here (not a tools/ module) because it needs the Electron app
   // handle; the headless server never has these versions to report.
   tools.register({
@@ -425,7 +539,7 @@ async function boot(): Promise<void> {
   })
   registerSessionTools(tools)
   registerAiTools(tools, (channel) => {
-    mainWindow?.webContents.send(channel)
+    broadcastToRenderers(channel)
     server?.broadcast(channel, {})
   })
   registerPtyTools(tools)
@@ -660,7 +774,7 @@ async function boot(): Promise<void> {
     enablement: packageEnablement,
     invalidate: (id) => { packageRuntime.invalidate(id); void namedPackageTools?.sync() },
     emit: (channel) => {
-      mainWindow?.webContents.send(channel)
+      broadcastToRenderers(channel)
       server?.broadcast(channel, {})
     },
   })
@@ -782,7 +896,11 @@ async function boot(): Promise<void> {
     packageRuntime.invalidate()
     await namedPackageTools!.sync()
     mainWindow?.webContents.send('packages:changed', packages!.list())
-    mainWindow?.webContents.send('workspace:changed', path)
+    // Close all pop-outs before broadcasting the workspace change — they are
+    // workspace-scoped and would show stale content. Each popout's own close
+    // guard applies; if a guard is cancelled, that popout survives (acceptable).
+    closeAllPopouts()
+    broadcastToRenderers('workspace:changed', path)
     mainWindow?.webContents.send('resources:changed')
     // Notify package iframes via WebSocket so they reload their data
     server?.broadcast('workspace:changed', { path })
@@ -986,37 +1104,180 @@ async function boot(): Promise<void> {
     return { action: 'deny' }
   })
 
+  // ── Per-window registration ──
+  // Register the main window so its dirty state and editor snapshot feed the
+  // aggregated quit guard and editor.state tool. Pop-out windows will also
+  // register here in Phase 1; entries are dropped on webContents destroy.
+  const mainWebContentsId = mainWindow.webContents.id
+  registerWindow(mainWebContentsId, 'main')
+  setMainWindowId(mainWebContentsId)
+  // Capture the id now — reading webContents off a destroyed window throws.
+  mainWindow.webContents.on('destroyed', () => {
+    unregisterWindow(mainWebContentsId)
+    dropEditorWindow(mainWebContentsId)
+  })
+
   // ── Dirty-tab quit guard ──
-  // The renderer pushes its dirty-tab count whenever the set changes.
-  // On window close, main reads the last-known value and prompts if > 0.
-  ipcMain.handle('editor:dirty-state', (_event, state: number | { count?: number; paths?: string[] }) => {
+  // Each renderer pushes its dirty-tab count whenever the set changes, keyed
+  // by sender webContents id. The quit guard and isDirtyOpenPath use the SUM
+  // and UNION across all windows respectively.
+  ipcMain.handle('editor:dirty-state', (event, state: number | { count?: number; paths?: string[] }) => {
+    const senderId = event.sender.id
     if (typeof state === 'number') {
-      lastDirtyTabCount = state >= 0 ? state : 0
-      dirtyOpenFilePaths = new Set()
+      updateWindowDirtyState(senderId, state >= 0 ? state : 0, [])
       return
     }
     if (!state || typeof state !== 'object') {
-      lastDirtyTabCount = 0
-      dirtyOpenFilePaths = new Set()
+      updateWindowDirtyState(senderId, 0, [])
       return
     }
-    lastDirtyTabCount = typeof state.count === 'number' && state.count >= 0 ? state.count : 0
-    dirtyOpenFilePaths = new Set(
-      Array.isArray(state.paths)
-        ? state.paths.filter((path): path is string => typeof path === 'string' && path.length > 0)
-        : [],
-    )
+    const count = typeof state.count === 'number' && state.count >= 0 ? state.count : 0
+    const paths = Array.isArray(state.paths)
+      ? state.paths.filter((path): path is string => typeof path === 'string' && path.length > 0)
+      : []
+    updateWindowDirtyState(senderId, count, paths)
   })
 
   // ── Editor tab snapshot ──
-  // The renderer pushes open tabs + active document whenever they change; the
-  // editor.state tool (MCP: editor_state) serves the cached snapshot.
-  ipcMain.handle('editor:state', (_event, state: unknown) => {
-    updateEditorState(state)
+  // Each renderer pushes open tabs + active document whenever they change,
+  // keyed by sender webContents id. The editor.state tool merges all windows.
+  ipcMain.handle('editor:state', (event, state: unknown) => {
+    updateWindowEditorState(event.sender.id, state)
   })
 
+  // Track which window was most recently focused so editor.state can pick
+  // the right activeDocument.
+  app.on('browser-window-focus', (_event, win) => {
+    noteWindowFocused(win.webContents.id)
+  })
+
+  // ── Pop-out window IPC ──
+
+  ipcMain.handle('popout:open-with-tab', async (_event, tab: unknown) => {
+    try {
+      const popout = createPopoutWindow()
+      const popoutId = popout.webContents.id
+
+      // Register in the window registry and track
+      registerWindow(popoutId, 'popout')
+      popoutWindows.set(popoutId, popout)
+
+      // Capture id before destroyed callback
+      popout.webContents.on('destroyed', () => {
+        unregisterWindow(popoutId)
+        dropEditorWindow(popoutId)
+        popoutWindows.delete(popoutId)
+      })
+
+      // Per-popout close guard
+      popout.on('close', (e) => {
+        const dirtyState = getWindowDirtyState(popoutId)
+        const guard = popoutCloseGuardMessage(dirtyState?.count ?? 0)
+        if (guard.shouldPrompt && !popout.isDestroyed()) {
+          const choice = dialog.showMessageBoxSync(popout, {
+            type: 'warning',
+            buttons: ['Close', 'Cancel'],
+            defaultId: 1,
+            cancelId: 1,
+            title: 'Unsaved changes',
+            message: guard.message,
+          })
+          if (choice === 1) {
+            e.preventDefault()
+          }
+        }
+      })
+
+      // Focus main window when popout closes
+      popout.on('closed', () => {
+        removeReadyResolver(popoutId)
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.focus()
+        }
+      })
+
+      // Load the popout renderer
+      if (is.dev && process.env.ELECTRON_RENDERER_URL) {
+        popout.loadURL(`${process.env.ELECTRON_RENDERER_URL}/popout.html`)
+      } else {
+        popout.loadFile(join(__dirname, '../renderer/popout.html'))
+      }
+
+      // Wait for the popout shell to signal readiness (or timeout)
+      const ready = await new Promise<boolean>((resolve) => {
+        addReadyResolver(popoutId, resolve)
+      })
+
+      if (!ready) {
+        if (!popout.isDestroyed()) popout.destroy()
+        return { ok: false }
+      }
+
+      // Deliver the tab to the popout, then show the window
+      popout.webContents.send('editor:adopt-tab', tab)
+      if (!popout.isDestroyed()) popout.show()
+      return { ok: true }
+    } catch {
+      return { ok: false }
+    }
+  })
+
+  ipcMain.handle('popout:return-tab', async (_event, tab: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false }
+    mainWindow.webContents.send('editor:adopt-tab', tab)
+    return { ok: true }
+  })
+
+  ipcMain.handle('popout:ready', (event) => {
+    resolveReady(event.sender.id)
+  })
+
+  ipcMain.handle('popout:set-edited', (event, state: unknown) => {
+    const payload = normalizeSetEditedPayload(state)
+    if (!payload) return
+    const senderWindow = BrowserWindow.fromWebContents(event.sender)
+    if (!senderWindow || senderWindow.isDestroyed()) return
+    try {
+      if (payload.title) senderWindow.setTitle(payload.title)
+      if (process.platform === 'darwin') {
+        senderWindow.setDocumentEdited(payload.dirty)
+      }
+      if (payload.path) {
+        const ws = tools.getWorkspacePath()
+        if (ws && process.platform === 'darwin') {
+          senderWindow.setRepresentedFilename(join(ws, payload.path))
+        }
+      } else if (process.platform === 'darwin') {
+        senderWindow.setRepresentedFilename('')
+      }
+    } catch {
+      // Best-effort; tolerate Electron API failures
+    }
+  })
+
+  ipcMain.handle('popout:forward', async (_event, command: unknown) => {
+    if (!command || typeof command !== 'object' || Array.isArray(command)) return { ok: false }
+    const cmd = command as Record<string, unknown>
+    if (typeof cmd.type !== 'string') return { ok: false }
+    if (!mainWindow || mainWindow.isDestroyed()) return { ok: false }
+
+    if (cmd.type === 'terminal.send') {
+      mainWindow.webContents.send('popout:main-command', { type: 'terminal.send', payload: cmd.payload })
+      return { ok: true }
+    }
+    if (cmd.type === 'chat.prepareDraft') {
+      mainWindow.webContents.send('popout:main-command', { type: 'chat.prepareDraft', payload: cmd.payload })
+      mainWindow.show()
+      mainWindow.focus()
+      return { ok: true }
+    }
+    return { ok: false }
+  })
+
+  // ── Main window close: aggregate guard + close popouts ──
+
   mainWindow.on('close', (e) => {
-    const decision = closeGuardDecision(lastDirtyTabCount, packageJobs.activeRunCount(), agentSessions.activeSessionCount())
+    const decision = closeGuardDecision(totalDirtyCount(), packageJobs.activeRunCount(), agentSessions.activeSessionCount())
     if (decision.shouldPrompt && mainWindow && !mainWindow.isDestroyed()) {
       const choice = dialog.showMessageBoxSync(mainWindow, {
         type: 'warning',
@@ -1028,8 +1289,11 @@ async function boot(): Promise<void> {
       })
       if (choice === 1) {
         e.preventDefault()
+        return
       }
     }
+    // Close all popouts when the main window closes
+    closeAllPopouts()
   })
 
   rebuildApplicationMenu()

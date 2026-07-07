@@ -14,6 +14,8 @@ export type KeyAction =
   | { action: 'session-prev' }
   | { action: 'activity-next' }
   | { action: 'activity-prev' }
+  | { action: 'editor-tab-next' }
+  | { action: 'editor-tab-prev' }
   | null
 
 export interface KeyContext {
@@ -76,10 +78,15 @@ export function routeKeyEvent(ctx: KeyContext): KeyAction {
     return ctx.shift ? { action: 'session-prev' } : { action: 'session-next' }
   }
 
-  // Cmd+Option+ArrowLeft / Cmd+Option+ArrowRight → cycle all activity rows
-  // (Chrome tab-switching convention, extended to cover chat, app, and agent
-  // sessions). Fires even when editor/terminal is focused.
+  // Cmd+Option+ArrowLeft / Cmd+Option+ArrowRight → tab cycling, scoped to the
+  // focused surface (Chrome tab-switching convention): the editor pane cycles
+  // its own document tabs; everywhere else (chat, terminal, activity) cycles
+  // the activity rows. Editor scope keys off the whole Artifact pane, not just
+  // CodeMirror, so PDF/table/file-card tabs behave the same as text tabs.
   if (metaOrCtrl && ctx.altKey && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+    if (editorFocused || ctx.focusedPane === 'artifact') {
+      return key === 'ArrowLeft' ? { action: 'editor-tab-prev' } : { action: 'editor-tab-next' }
+    }
     return key === 'ArrowLeft' ? { action: 'activity-prev' } : { action: 'activity-next' }
   }
 
