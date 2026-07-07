@@ -217,6 +217,14 @@ describe('WorkHost', () => {
     vi.restoreAllMocks()
   })
 
+  function demoPackages() {
+    return [{
+      manifest: { id: 'demo', name: 'Demo', icon: '*', views: [{ id: 'main', label: 'Main', src: './index.html', role: 'work' }] },
+      dir: '/packages/demo',
+      source: 'global',
+    }]
+  }
+
   function mountHost(activeHost: WorkHostKind, activeWork: WorkEntry | null = null, listeners = {}) {
     return mountReactiveHost(ref(activeHost), ref(activeWork), listeners)
   }
@@ -225,6 +233,9 @@ describe('WorkHost', () => {
     activeHost: ReturnType<typeof ref<WorkHostKind>>,
     activeWork: ReturnType<typeof ref<WorkEntry | null>>,
     listeners = {},
+    // Stable across re-renders, like the `packages` ref App.vue binds;
+    // its identity only changes on packages:changed.
+    packages = ref(demoPackages()),
   ) {
     app = createApp({
       setup() {
@@ -232,11 +243,7 @@ describe('WorkHost', () => {
           ref: hostRef,
           activeHost: activeHost.value,
           activeWork: activeWork.value,
-          packages: [{
-            manifest: { id: 'demo', name: 'Demo', icon: '*', views: [{ id: 'main', label: 'Main', src: './index.html', role: 'work' }] },
-            dir: '/packages/demo',
-            source: 'global',
-          }],
+          packages: packages.value,
           port: 1234,
           recentFiles: [{ path: 'notes.md', name: 'notes.md' }],
           ...listeners,
@@ -244,7 +251,7 @@ describe('WorkHost', () => {
       },
     })
     app.mount(root)
-    return { activeHost, activeWork }
+    return { activeHost, activeWork, packages }
   }
 
   it('forwards chat and terminal commands through exposed host methods', async () => {
@@ -482,6 +489,58 @@ describe('WorkHost', () => {
     await flushUi()
 
     expect(root.querySelector('[data-testid="package-frame"]')?.textContent).toBe('demo:1')
+  })
+
+  it('keeps app frames in the DOM when navigating away so iframes never reload', async () => {
+    const activeWork = ref<WorkEntry | null>({
+      id: 'work:package-view:demo:main',
+      kind: 'package-view',
+      title: 'Demo',
+      packageId: 'demo',
+      viewId: 'main',
+    })
+    const activeHost = ref<WorkHostKind>('package-view')
+    mountReactiveHost(activeHost, activeWork)
+    await flushUi()
+
+    const frame = root.querySelector<HTMLElement>('[data-testid="package-frame"]')
+    expect(frame).not.toBeNull()
+
+    activeHost.value = 'files'
+    activeWork.value = { id: 'work:files', kind: 'files', title: 'Files' }
+    await flushUi()
+
+    // Still mounted (a detached iframe resets its browsing context), just hidden.
+    const hidden = root.querySelector<HTMLElement>('[data-testid="package-frame"]')
+    expect(hidden).not.toBeNull()
+    expect(hidden?.style.display).toBe('none')
+  })
+
+  it('remounts app frames when the packages list changes and drops removed packages', async () => {
+    const activeWork = ref<WorkEntry | null>({
+      id: 'work:package-view:demo:main',
+      kind: 'package-view',
+      title: 'Demo',
+      packageId: 'demo',
+      viewId: 'main',
+    })
+    const activeHost = ref<WorkHostKind>('package-view')
+    const { packages } = mountReactiveHost(activeHost, activeWork)
+    await flushUi()
+
+    root.querySelector<HTMLButtonElement>('[data-testid="package-frame"]')?.click()
+    await flushUi()
+    expect(root.querySelector('[data-testid="package-frame"]')?.textContent).toBe('demo:1')
+
+    // Same package reloaded (new list identity): frame remounts on fresh code.
+    packages.value = demoPackages()
+    await flushUi()
+    expect(root.querySelector('[data-testid="package-frame"]')?.textContent).toBe('demo:0')
+
+    // Package removed: its frame is dropped entirely.
+    packages.value = []
+    await flushUi()
+    expect(root.querySelector('[data-testid="package-frame"]')).toBeNull()
   })
 
   it('shows agent sessions as Work and re-emits relaunch navigation upward', async () => {

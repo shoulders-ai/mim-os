@@ -43,7 +43,11 @@ watch(
     if (!props.packageId || !props.port) return
 
     try {
-      url.value = await window.kernel.getPackageLaunchUrl(props.packageId, props.viewId)
+      const base = await window.kernel.getPackageLaunchUrl(props.packageId, props.viewId)
+      // Theme rides along in the fragment so the app can paint with the
+      // host theme from its very first frame; the postMessage in sendTheme
+      // only arrives after the iframe has loaded (and covers live changes).
+      url.value = `${base}#mim-theme=${encodeURIComponent(JSON.stringify(readThemeTokens()))}`
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     }

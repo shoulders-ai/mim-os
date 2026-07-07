@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import ChatView from '../chat/ChatView.vue'
 import TerminalPanel from '../terminal/TerminalPanel.vue'
 import FilesWorkView from '../files/FilesWorkView.vue'
@@ -63,11 +63,22 @@ const filesMounted = ref(false)
 const activityTrustMounted = ref(false)
 const archiveMounted = ref(false)
 
-const activePackage = computed(() => {
-  const work = props.activeWork
-  if (work?.kind !== 'package-view') return null
-  return props.packages.find(pkg => pkg.manifest.id === work.packageId) ?? null
-})
+interface MountedPackageView {
+  id: string
+  packageId: string
+  viewId?: string
+  title?: string
+}
+
+// App view iframes must stay in the DOM once opened: KeepAlive detaches the
+// subtree, and re-inserting an iframe resets its browsing context — every
+// visit would reboot the whole app. Frames are hidden with v-show instead.
+const mountedPackageViews = ref<MountedPackageView[]>([])
+const packageFrameEpoch = ref(0)
+
+function packageManifest(packageId: string) {
+  return props.packages.find(pkg => pkg.manifest.id === packageId)?.manifest ?? null
+}
 
 watch(
   () => [props.activeHost, props.activeWork?.id] as const,
@@ -76,6 +87,15 @@ watch(
     if (props.activeHost === 'files') filesMounted.value = true
     if (props.activeHost === 'activity-trust') activityTrustMounted.value = true
     if (props.activeHost === 'archive') archiveMounted.value = true
+    const work = props.activeWork
+    if (work?.kind === 'package-view' && !mountedPackageViews.value.some(view => view.id === work.id)) {
+      mountedPackageViews.value = [...mountedPackageViews.value, {
+        id: work.id,
+        packageId: work.packageId,
+        viewId: work.viewId,
+        title: work.title,
+      }]
+    }
     if (props.activeHost === 'terminal') {
       await nextTick()
       terminalRef.value?.activate?.()
@@ -83,6 +103,15 @@ watch(
   },
   { immediate: true },
 )
+
+// A new packages list means app code or availability changed (install,
+// app.reload, workspace switch): drop frames whose package vanished and
+// remount the rest so iframes pick up fresh code.
+watch(() => props.packages, () => {
+  const ids = new Set(props.packages.map(pkg => pkg.manifest.id))
+  mountedPackageViews.value = mountedPackageViews.value.filter(view => ids.has(view.packageId))
+  packageFrameEpoch.value += 1
+})
 
 async function sendExternalMessage(message: string) {
   await nextTick()
@@ -198,17 +227,16 @@ defineExpose({
     @open-package-run="(packageId, runId) => emit('openPackageRun', packageId, runId)"
     @open-agent-session="(agentId, sessionId) => emit('openAgentSession', agentId, sessionId)"
   />
-  <KeepAlive>
-    <PackageFrame
-      v-if="activeWork?.kind === 'package-view'"
-      :key="activeWork.id"
-      :package-id="activeWork.packageId"
-      :view-id="activeWork.viewId"
-      :port="port"
-      :title="activePackage?.manifest.name ?? activeWork.title"
-      :icon="activePackage?.manifest.icon"
-    />
-  </KeepAlive>
+  <PackageFrame
+    v-for="view in mountedPackageViews"
+    :key="`${view.id}:${packageFrameEpoch}`"
+    v-show="activeWork?.kind === 'package-view' && activeWork.id === view.id"
+    :package-id="view.packageId"
+    :view-id="view.viewId"
+    :port="port"
+    :title="packageManifest(view.packageId)?.name ?? view.title"
+    :icon="packageManifest(view.packageId)?.icon ?? undefined"
+  />
   <KeepAlive>
     <PackageRunView
       v-if="activeWork?.kind === 'package-run'"
