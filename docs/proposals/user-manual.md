@@ -1,6 +1,6 @@
 # User Manual & Public Docs — Implementation Plan
 
-Status: **implemented** (phases 0-4; phase 5 drift automation deferred). Manual source lives in `manual/` (12 chapters + `_style.md` + `_specs/`), developer pages in `manual/develop/` (7 hand-written + 3 generated), generators and claim lint in `scripts/docs-gen/` and `scripts/docs-lint.mjs` (`npm run docs:gen` / `docs:lint`), rendering pipeline in mim-web (`scripts/build-docs.mjs` → `data/docs-compiled.json` → `/manual` + `/develop` routes, per-page markdown, `/manual/llms.txt`). Covers positioning, information architecture, content pipeline, authoring process, writing voice, and the design guide (§6, implemented as specified).
+Status: **implemented** (phases 0-4; phase 5 drift automation deferred). Manual source lives in `manual/` (12 chapters + `_style.md` + `_specs/`), developer pages in `manual/develop/` (7 hand-written + 3 generated), generators and claim lint in `scripts/docs-gen/` and `scripts/docs-lint.mjs` (`npm run docs:gen` / `docs:lint`), rendering pipeline in mim-web (`scripts/build-docs.mjs` → `data/docs-compiled.json` → `/manual` + `/develop` routes, per-page markdown, `/manual/llms.txt`, and a site-root `/llms.txt` index built from per-page `description` fields the compiler extracts). Covers positioning, information architecture, content pipeline, authoring process, writing voice, and the design guide (§6, implemented as specified).
 
 ---
 
