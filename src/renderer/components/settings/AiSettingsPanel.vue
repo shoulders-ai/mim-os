@@ -21,8 +21,8 @@ const settings = useSettingsStore()
 const inputs = ref<Record<string, string>>({})
 const saving = ref<string | null>(null)
 const saved = ref<string | null>(null)
-// Providers whose configured key is being replaced; the input is hidden for
-// configured providers until Replace is clicked.
+// Providers whose configured key is being replaced or overridden; the input
+// is hidden for configured providers until Replace/Override is clicked.
 const editing = ref<Set<string>>(new Set())
 
 const aiProviders = [
@@ -35,16 +35,20 @@ function keyStatusFor(provider: string) {
   return settings.keyStatuses.find(s => s.provider === provider)
 }
 
-// Env-sourced keys are owned by the environment: writing ~/.mim/keys.env would
-// have no effect (env wins in the resolver), so those rows are display-only.
 function keyInputVisible(provider: string): boolean {
   const status = keyStatusFor(provider)
   if (!status?.configured) return true
-  return status.source === 'file' && editing.value.has(provider)
+  return editing.value.has(provider)
 }
 
 function startReplace(provider: string) {
   editing.value.add(provider)
+  editing.value = new Set(editing.value)
+}
+
+function cancelEdit(provider: string) {
+  inputs.value[provider] = ''
+  editing.value.delete(provider)
   editing.value = new Set(editing.value)
 }
 
@@ -237,29 +241,50 @@ onMounted(async () => {
                 :class="keyStatusFor(prov.id)?.configured ? 'bg-add' : 'bg-ink-4'"
               />
               <span class="text-[12px] font-medium text-ink">{{ prov.label }}</span>
-              <code class="rounded-[3px] bg-chrome-mid px-1.5 py-px font-mono text-[9px] text-ink-3">{{ prov.envVar }}</code>
+              <code
+                v-if="keyStatusFor(prov.id)?.masked"
+                class="truncate font-mono text-[10px] text-ink-3"
+                :data-testid="`key-masked-${prov.id}`"
+              >{{ keyStatusFor(prov.id)?.masked }}</code>
             </div>
             <div class="flex shrink-0 items-center gap-2">
               <span v-if="saved === prov.id" class="text-[10px] text-add">Key saved</span>
               <template v-if="keyStatusFor(prov.id)?.configured">
-                <!-- env keys are owned by the shell: removing/replacing from
-                     here would be a lie (the env var wins on next launch). -->
-                <span
-                  v-if="keyStatusFor(prov.id)?.source === 'env'"
-                  class="text-[10px] text-ink-3"
-                  :title="`Set by ${prov.envVar} in your environment — change or remove it there`"
-                >From environment</span>
-                <template v-else>
+                <button
+                  v-if="editing.has(prov.id)"
+                  type="button"
+                  class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
+                  :data-testid="`key-cancel-${prov.id}`"
+                  :disabled="saving === prov.id"
+                  @click="cancelEdit(prov.id)"
+                >Cancel</button>
+                <!-- env keys are owned by the shell: the app cannot unset them,
+                     but a key saved here (keys.env) takes priority. -->
+                <template v-else-if="keyStatusFor(prov.id)?.source === 'env'">
+                  <span
+                    class="text-[10px] text-ink-3"
+                    :title="`Set by ${prov.envVar} in the shell that launched Mim`"
+                  >From environment</span>
                   <button
-                    v-if="!editing.has(prov.id)"
                     type="button"
                     class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
+                    :data-testid="`key-replace-${prov.id}`"
+                    :disabled="saving === prov.id"
+                    @click="startReplace(prov.id)"
+                  >Replace</button>
+                </template>
+                <template v-else>
+                  <button
+                    type="button"
+                    class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-40"
+                    :data-testid="`key-replace-${prov.id}`"
                     :disabled="saving === prov.id"
                     @click="startReplace(prov.id)"
                   >Replace</button>
                   <button
                     type="button"
                     class="h-6 rounded-[5px] border border-rule-light bg-surface px-2 text-[10.5px] font-medium text-ink-2 hover:border-rem/40 hover:bg-rem/10 hover:text-rem disabled:opacity-40"
+                    :data-testid="`key-remove-${prov.id}`"
                     :disabled="saving === prov.id"
                     @click="clearKey(prov.id)"
                   >Remove</button>
@@ -276,10 +301,12 @@ onMounted(async () => {
               :placeholder="prov.placeholder"
               :aria-label="`${prov.label} API key`"
               @keydown.enter="saveKey(prov.id)"
+              @keydown.esc="cancelEdit(prov.id)"
             />
             <button
               type="button"
               class="h-7 shrink-0 rounded-[5px] bg-accent px-3 text-[11px] font-medium text-accent-ink hover:opacity-85 disabled:opacity-40"
+              :data-testid="`key-save-${prov.id}`"
               :disabled="!inputs[prov.id]?.trim() || saving === prov.id"
               @click="saveKey(prov.id)"
             >{{ saving === prov.id ? '…' : 'Save' }}</button>

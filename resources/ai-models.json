@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "providers": {
     "anthropic": {
       "url": "https://api.anthropic.com/v1/messages",
@@ -19,29 +19,53 @@
     }
   },
   "defaults": {
-    "chat": ["claude-sonnet-4-6", "gemini-3.5-flash", "gpt-5.4"],
-    "agent": ["claude-sonnet-4-6", "gemini-3.5-flash", "gpt-5.4"],
-    "rewrite": ["claude-sonnet-4-6", "gemini-3.5-flash", "gpt-5.4"],
-    "inline": ["claude-sonnet-4-6", "gemini-3.5-flash", "gpt-5.4"],
+    "chat": ["claude-sonnet-5", "gemini-3.5-flash", "gpt-5.4"],
+    "agent": ["claude-sonnet-5", "gemini-3.5-flash", "gpt-5.4"],
+    "rewrite": ["claude-sonnet-5", "gemini-3.5-flash", "gpt-5.4"],
+    "inline": ["claude-sonnet-5", "gemini-3.5-flash", "gpt-5.4"],
     "ghost": ["claude-haiku-4-5-20251001", "gemini-3.1-flash-lite", "gpt-5.4-nano"],
     "extract": ["claude-haiku-4-5-20251001", "gemini-3.1-flash-lite", "gpt-5.4-nano"]
   },
   "models": [
     {
-      "id": "claude-opus-4-7",
-      "name": "Claude Opus 4.7",
-      "displayName": "Claude Opus 4.7",
-      "shortLabel": "Opus 4.7",
+      "id": "claude-fable-5",
+      "name": "Claude Fable 5",
+      "displayName": "Claude Fable 5",
+      "shortLabel": "Fable 5",
       "providerLabel": "Anthropic",
       "provider": "anthropic",
-      "model": "claude-opus-4-7",
-      "contextWindow": 200000,
+      "model": "claude-fable-5",
+      "contextWindow": 1000000,
+      "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
+      "pricing": { "inputPerMillion": 10.0, "cacheReadInputPerMillion": 1.0, "cacheWriteInputPerMillion": 12.5, "outputPerMillion": 50.0 },
+      "control": {
+        "kind": "effort",
+        "label": "Effort",
+        "default": "high",
+        "options": [
+          { "id": "low", "label": "Low" },
+          { "id": "medium", "label": "Medium" },
+          { "id": "high", "label": "High" },
+          { "id": "xhigh", "label": "XHigh" },
+          { "id": "max", "label": "Max" }
+        ]
+      }
+    },
+    {
+      "id": "claude-opus-4-8",
+      "name": "Claude Opus 4.8",
+      "displayName": "Claude Opus 4.8",
+      "shortLabel": "Opus 4.8",
+      "providerLabel": "Anthropic",
+      "provider": "anthropic",
+      "model": "claude-opus-4-8",
+      "contextWindow": 1000000,
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
       "pricing": { "inputPerMillion": 5.0, "cacheReadInputPerMillion": 0.5, "cacheWriteInputPerMillion": 6.25, "outputPerMillion": 25.0 },
       "control": {
         "kind": "effort",
         "label": "Effort",
-        "default": "xhigh",
+        "default": "high",
         "options": [
           { "id": "none", "label": "None" },
           { "id": "low", "label": "Low" },
@@ -53,16 +77,16 @@
       }
     },
     {
-      "id": "claude-sonnet-4-6",
-      "name": "Claude Sonnet 4.6",
-      "displayName": "Claude Sonnet 4.6",
-      "shortLabel": "Sonnet 4.6",
+      "id": "claude-sonnet-5",
+      "name": "Claude Sonnet 5",
+      "displayName": "Claude Sonnet 5",
+      "shortLabel": "Sonnet 5",
       "providerLabel": "Anthropic",
       "provider": "anthropic",
-      "model": "claude-sonnet-4-6",
-      "contextWindow": 200000,
+      "model": "claude-sonnet-5",
+      "contextWindow": 1000000,
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
-      "pricing": { "inputPerMillion": 3.0, "cacheReadInputPerMillion": 0.3, "cacheWriteInputPerMillion": 3.75, "outputPerMillion": 15.0 },
+      "pricing": { "inputPerMillion": 2.0, "cacheReadInputPerMillion": 0.2, "cacheWriteInputPerMillion": 2.5, "outputPerMillion": 10.0 },
       "control": {
         "kind": "effort",
         "label": "Effort",
@@ -72,6 +96,7 @@
           { "id": "low", "label": "Low" },
           { "id": "medium", "label": "Medium" },
           { "id": "high", "label": "High" },
+          { "id": "xhigh", "label": "XHigh" },
           { "id": "max", "label": "Max" }
         ]
       }
@@ -177,7 +202,7 @@
       "providerLabel": "OpenAI",
       "provider": "openai",
       "model": "gpt-5.5",
-      "contextWindow": 200000,
+      "contextWindow": 1000000,
 
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
       "pricing": { "inputPerMillion": 5.0, "cacheReadInputPerMillion": 0.5, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 30.0 },
@@ -201,7 +226,7 @@
       "providerLabel": "OpenAI",
       "provider": "openai",
       "model": "gpt-5.4",
-      "contextWindow": 200000,
+      "contextWindow": 1000000,
 
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
       "pricing": { "inputPerMillion": 2.5, "cacheReadInputPerMillion": 0.25, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 15.0 },
@@ -225,7 +250,7 @@
       "providerLabel": "OpenAI",
       "provider": "openai",
       "model": "gpt-5.4-mini",
-      "contextWindow": 200000,
+      "contextWindow": 400000,
 
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
       "pricing": { "inputPerMillion": 0.75, "cacheReadInputPerMillion": 0.075, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 4.5 },

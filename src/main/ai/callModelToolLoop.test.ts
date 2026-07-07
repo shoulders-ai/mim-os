@@ -48,7 +48,7 @@ describe('callModelToolLoop', () => {
 
   // --- provider / model resolution ---
   it('A1 routes an Anthropic model id to createAnthropic', async () => {
-    await callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'hi' }] })
+    await callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] })
     expect(createAnthropic).toHaveBeenCalledTimes(1)
     expect(createOpenAI).not.toHaveBeenCalled()
   })
@@ -64,13 +64,13 @@ describe('callModelToolLoop', () => {
   })
 
   it('A4 the deprecated `model` alias resolves like `modelId`', async () => {
-    const res = await callModelToolLoop({ model: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'hi' }] })
-    expect(res.modelId).toBe('claude-sonnet-4-6')
+    const res = await callModelToolLoop({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] })
+    expect(res.modelId).toBe('claude-sonnet-5')
     expect(res.provider).toBe('anthropic')
   })
 
   it('A5 honors an explicit provider override', async () => {
-    await callModelToolLoop({ modelId: 'claude-sonnet-4-6', provider: 'google', messages: [{ role: 'user', content: 'hi' }] })
+    await callModelToolLoop({ modelId: 'claude-sonnet-5', provider: 'google', messages: [{ role: 'user', content: 'hi' }] })
     expect(createGoogle).toHaveBeenCalledTimes(1)
     expect(createAnthropic).not.toHaveBeenCalled()
   })
@@ -85,7 +85,7 @@ describe('callModelToolLoop', () => {
     const savedHome = process.env.HOME
     process.env.HOME = mkdtempSync(join(tmpdir(), 'mim-nokeys-')) // no keys.env here
     try {
-      await expect(callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [] }))
+      await expect(callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [] }))
         .rejects.toThrow(/No API key configured for anthropic/)
     } finally {
       process.env.HOME = savedHome
@@ -95,7 +95,7 @@ describe('callModelToolLoop', () => {
   // --- tool adaptation ---
   it('A8/A9 adapts app tools and sanitizes the name as the key', async () => {
     await callModelToolLoop({
-      modelId: 'claude-sonnet-4-6',
+      modelId: 'claude-sonnet-5',
       messages: [{ role: 'user', content: 'hi' }],
       tools: [{ name: 'submit.review', description: 'd', input_schema: { type: 'object' }, execute: () => ({}) }],
     })
@@ -107,7 +107,7 @@ describe('callModelToolLoop', () => {
   it('A10 the adapted execute forwards input and returns the app value', async () => {
     const execute = vi.fn(async (input: Record<string, unknown>) => ({ echoed: input.x }))
     await callModelToolLoop({
-      modelId: 'claude-sonnet-4-6',
+      modelId: 'claude-sonnet-5',
       messages: [{ role: 'user', content: 'hi' }],
       tools: [{ name: 't', description: 'd', input_schema: {}, execute }],
     })
@@ -119,7 +119,7 @@ describe('callModelToolLoop', () => {
 
   it('A11 a throwing tool returns an {error} result instead of rejecting the loop', async () => {
     await callModelToolLoop({
-      modelId: 'claude-sonnet-4-6',
+      modelId: 'claude-sonnet-5',
       messages: [{ role: 'user', content: 'hi' }],
       tools: [{ name: 't', description: 'd', input_schema: {}, execute: () => { throw new Error('boom') } }],
     })
@@ -128,15 +128,15 @@ describe('callModelToolLoop', () => {
   })
 
   it('A12 passes no tools when none are supplied', async () => {
-    await callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'hi' }] })
+    await callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] })
     expect(generateText.mock.calls[0][0].tools).toBeUndefined()
   })
 
   // --- multi-step ---
   it('A13 maps maxSteps to stopWhen: stepCountIs(n) (default 1)', async () => {
-    await callModelToolLoop({ modelId: 'claude-sonnet-4-6', maxSteps: 10, messages: [{ role: 'user', content: 'hi' }] })
+    await callModelToolLoop({ modelId: 'claude-sonnet-5', maxSteps: 10, messages: [{ role: 'user', content: 'hi' }] })
     expect(generateText.mock.calls[0][0].stopWhen).toEqual({ __stepCountIs: 10 })
-    await callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'hi' }] })
+    await callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] })
     expect(generateText.mock.calls[1][0].stopWhen).toEqual({ __stepCountIs: 1 })
   })
 
@@ -146,7 +146,7 @@ describe('callModelToolLoop', () => {
       toolCalls: [{ toolCallId: 'c1', toolName: 'submit_review', input: { a: 1 } }],
       usage: { inputTokens: 1, outputTokens: 1 },
     })
-    const res = await callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'hi' }] })
+    const res = await callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] })
     expect(res.steps).toBe(3)
     expect(res.text).toBe('final')
     expect(res.content).toEqual([
@@ -157,13 +157,13 @@ describe('callModelToolLoop', () => {
 
   // --- messages / vision ---
   it('A15 passes string content through unchanged', async () => {
-    await callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'plain' }] })
+    await callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [{ role: 'user', content: 'plain' }] })
     expect(generateText.mock.calls[0][0].messages).toEqual([{ role: 'user', content: 'plain' }])
   })
 
   it('A16/A17 converts a base64 image block to an SDK image part, preserving order', async () => {
     await callModelToolLoop({
-      modelId: 'claude-sonnet-4-6',
+      modelId: 'claude-sonnet-5',
       messages: [{ role: 'user', content: [
         { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
         { type: 'text', text: 'caption' },
@@ -176,7 +176,7 @@ describe('callModelToolLoop', () => {
   })
 
   it('A18 preserves the assistant role', async () => {
-    await callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [
+    await callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [
       { role: 'user', content: 'hi' }, { role: 'assistant', content: 'yo' },
     ] })
     const msgs = generateText.mock.calls[0][0].messages
@@ -186,19 +186,19 @@ describe('callModelToolLoop', () => {
   // --- usage ---
   it('A19 maps SDK usage to {input,output,cacheRead,cacheCreation}', async () => {
     generateText.mockResolvedValue({ ...OK, usage: { inputTokens: 100, outputTokens: 40, cachedInputTokens: 10, cacheCreationInputTokens: 5 } })
-    const res = await callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'hi' }] })
+    const res = await callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] })
     expect(res.usage).toEqual({ input: 100, output: 40, cacheRead: 10, cacheCreation: 5 })
   })
 
   it('A20 falls back to prompt/completion token names', async () => {
     generateText.mockResolvedValue({ ...OK, usage: { promptTokens: 7, completionTokens: 3 } })
-    const res = await callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'hi' }] })
+    const res = await callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] })
     expect(res.usage).toMatchObject({ input: 7, output: 3 })
   })
 
   it('A21 missing usage yields zeros, no throw', async () => {
     generateText.mockResolvedValue({ ...OK, usage: undefined })
-    const res = await callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'hi' }] })
+    const res = await callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] })
     expect(res.usage).toEqual({ input: 0, output: 0, cacheRead: 0, cacheCreation: 0 })
   })
 
@@ -210,7 +210,7 @@ describe('callModelToolLoop', () => {
         args.abortSignal.addEventListener('abort', () => resolve({ ...OK, text: 'ABORTED' }))
         setTimeout(() => resolve(OK), 200_000)
       }))
-      const p = callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'hi' }] })
+      const p = callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] })
       await vi.advanceTimersByTimeAsync(150_000)
       await vi.advanceTimersByTimeAsync(60_000)
       const res = await p
@@ -224,7 +224,7 @@ describe('callModelToolLoop', () => {
     generateText.mockImplementation((args: { abortSignal: AbortSignal }) => new Promise((_, reject) => {
       args.abortSignal.addEventListener('abort', () => reject(args.abortSignal.reason))
     }))
-    await expect(callModelToolLoop({ modelId: 'claude-sonnet-4-6', timeoutMs: 30, messages: [{ role: 'user', content: 'hi' }] }))
+    await expect(callModelToolLoop({ modelId: 'claude-sonnet-5', timeoutMs: 30, messages: [{ role: 'user', content: 'hi' }] }))
       .rejects.toThrow(/timed out/)
   })
 
@@ -234,22 +234,22 @@ describe('callModelToolLoop', () => {
       else args.abortSignal.addEventListener('abort', () => reject(args.abortSignal.reason))
     }))
     const parent = AbortSignal.abort(new Error('parent gone'))
-    await expect(callModelToolLoop({ modelId: 'claude-sonnet-4-6', signal: parent, messages: [{ role: 'user', content: 'hi' }] }))
+    await expect(callModelToolLoop({ modelId: 'claude-sonnet-5', signal: parent, messages: [{ role: 'user', content: 'hi' }] }))
       .rejects.toThrow(/parent gone/)
   })
 
   // --- provider options ---
   it('A26 Anthropic gets ephemeral cacheControl provider options', async () => {
-    await callModelToolLoop({ modelId: 'claude-sonnet-4-6', messages: [{ role: 'user', content: 'hi' }] })
+    await callModelToolLoop({ modelId: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] })
     const opts = generateText.mock.calls[0][0].providerOptions as { anthropic?: { cacheControl?: { type?: string } } }
     expect(opts?.anthropic?.cacheControl?.type).toBe('ephemeral')
   })
 
   it('passes system + maxOutputTokens through and returns provider/modelId/finishReason', async () => {
-    const res = await callModelToolLoop({ modelId: 'claude-sonnet-4-6', system: 'SYS', maxTokens: 12345, messages: [{ role: 'user', content: 'hi' }] })
+    const res = await callModelToolLoop({ modelId: 'claude-sonnet-5', system: 'SYS', maxTokens: 12345, messages: [{ role: 'user', content: 'hi' }] })
     const args = generateText.mock.calls[0][0]
     expect(args.system).toBe('SYS')
     expect(args.maxOutputTokens).toBe(12345)
-    expect(res).toMatchObject({ provider: 'anthropic', modelId: 'claude-sonnet-4-6', finishReason: 'stop' })
+    expect(res).toMatchObject({ provider: 'anthropic', modelId: 'claude-sonnet-5', finishReason: 'stop' })
   })
 })

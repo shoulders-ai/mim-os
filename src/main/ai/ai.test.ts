@@ -90,8 +90,8 @@ describe('resolveGenerationModel + config.yaml cascade', () => {
     process.env.ANTHROPIC_API_KEY = 'sk-ant'
     const registry = loadRegistry()
     const model = resolveGenerationModel(registry)
-    // registry.defaults.chat[0] is claude-sonnet-4-6
-    expect(model.id).toBe('claude-sonnet-4-6')
+    // registry.defaults.chat[0] is claude-sonnet-5
+    expect(model.id).toBe('claude-sonnet-5')
   })
 })
 
@@ -138,6 +138,52 @@ describe('ai.setKey emits a key-change signal', () => {
     expect(emit).toHaveBeenCalledWith('ai:keys-changed')
     expect(resolveKey('anthropic').key).toBeNull()
   })
+
+  it('setKey overrides an env-sourced key so Settings edits take effect', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-from-env'
+    const tools = createToolRegistry(createTraceLog())
+    registerAiTools(tools, vi.fn())
+
+    await tools.call('ai.setKey', { provider: 'anthropic', key: 'sk-new' }, { actor: 'user' })
+
+    expect(resolveKey('anthropic')).toEqual({ key: 'sk-new', source: 'file' })
+  })
+
+  it('keyStatus carries a masked tail for configured keys, never the full key', async () => {
+    const tools = createToolRegistry(createTraceLog())
+    registerAiTools(tools, vi.fn())
+
+    await tools.call('ai.setKey', { provider: 'anthropic', key: 'sk-ant-api03-abcdefX4Q2' }, { actor: 'user' })
+    const result = await tools.call('ai.keyStatus', {}, { actor: 'user' }) as {
+      statuses: Array<{ provider: string; configured: boolean; masked: string | null }>
+    }
+
+    const anthropic = result.statuses.find(s => s.provider === 'anthropic')!
+    expect(anthropic.masked).toBe('sk-ant…X4Q2')
+    expect(JSON.stringify(result)).not.toContain('sk-ant-api03-abcdefX4Q2')
+  })
+
+  it('keyStatus masked is null when a provider is not configured', async () => {
+    const tools = createToolRegistry(createTraceLog())
+    registerAiTools(tools, vi.fn())
+
+    const result = await tools.call('ai.keyStatus', {}, { actor: 'user' }) as {
+      statuses: Array<{ provider: string; configured: boolean; masked: string | null }>
+    }
+
+    expect(result.statuses.find(s => s.provider === 'anthropic')!.masked).toBeNull()
+  })
+
+  it('clearKey falls back to the environment key when one is exported', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-from-env'
+    const tools = createToolRegistry(createTraceLog())
+    registerAiTools(tools, vi.fn())
+
+    await tools.call('ai.setKey', { provider: 'anthropic', key: 'sk-new' }, { actor: 'user' })
+    await tools.call('ai.clearKey', { provider: 'anthropic' }, { actor: 'user' })
+
+    expect(resolveKey('anthropic')).toEqual({ key: 'sk-from-env', source: 'env' })
+  })
 })
 
 describe('resolveKey ignores config.yaml', () => {
@@ -160,19 +206,39 @@ describe('resolveKey ignores config.yaml', () => {
     resetUserConfig()
   })
 
-  it('uses env var first', () => {
+  it('prefers ~/.mim/keys.env over the launch environment', () => {
+    // Settings must stay authoritative: a stale key exported in the user's
+    // shell must not shadow a key saved (or rotated) from the app.
+    process.env.ANTHROPIC_API_KEY = 'sk-from-env'
+    mkdirSync(join(home, '.mim'), { recursive: true })
+    writeFileSync(join(home, '.mim', 'keys.env'), 'ANTHROPIC_API_KEY=sk-from-file\n')
+    const { key, source } = resolveKey('anthropic')
+    expect(key).toBe('sk-from-file')
+    expect(source).toBe('file')
+  })
+
+  it('falls back to the environment when the file has no entry', () => {
     process.env.ANTHROPIC_API_KEY = 'sk-from-env'
     const { key, source } = resolveKey('anthropic')
     expect(key).toBe('sk-from-env')
     expect(source).toBe('env')
   })
 
-  it('falls back to ~/.mim/keys.env when env var absent', () => {
+  it('reads ~/.mim/keys.env when env var absent', () => {
     mkdirSync(join(home, '.mim'), { recursive: true })
     writeFileSync(join(home, '.mim', 'keys.env'), 'ANTHROPIC_API_KEY=sk-from-file\n')
     const { key, source } = resolveKey('anthropic')
     expect(key).toBe('sk-from-file')
     expect(source).toBe('file')
+  })
+
+  it('treats an empty file entry as absent and falls back to env', () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-from-env'
+    mkdirSync(join(home, '.mim'), { recursive: true })
+    writeFileSync(join(home, '.mim', 'keys.env'), 'ANTHROPIC_API_KEY=\n')
+    const { key, source } = resolveKey('anthropic')
+    expect(key).toBe('sk-from-env')
+    expect(source).toBe('env')
   })
 
   it('never reads a key placed in config.yaml', () => {

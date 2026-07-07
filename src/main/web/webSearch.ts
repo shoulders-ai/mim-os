@@ -34,18 +34,22 @@ function userHomeDir(): string {
 
 export function resolveExaKey(): { key: string | null; source: string } {
   const envVar = 'EXA_API_KEY'
-  if (process.env[envVar]) return { key: process.env[envVar]!, source: 'env' }
 
+  // Same precedence as resolveKey in ai.ts: the app-managed ~/.mim/keys.env
+  // wins over the launch environment so in-app key changes always take effect.
   const dotenvPath = join(userHomeDir(), '.mim', 'keys.env')
   if (existsSync(dotenvPath)) {
     const content = readFileSync(dotenvPath, 'utf-8')
     for (const line of content.split(/\r\n|\n|\r/)) {
       const [k, ...rest] = line.split('=')
       if (k?.trim() === envVar && rest.length) {
-        return { key: rest.join('=').trim().replace(/^["']|["']$/g, ''), source: 'file' }
+        const value = rest.join('=').trim().replace(/^["']|["']$/g, '')
+        if (value) return { key: value, source: 'file' }
       }
     }
   }
+
+  if (process.env[envVar]) return { key: process.env[envVar]!, source: 'env' }
 
   return { key: null, source: 'missing' }
 }

@@ -20,6 +20,9 @@ interface KeyStatus {
   provider: string
   configured: boolean
   source: string
+  // Recognition fragment for the settings UI (e.g. "sk-ant…X4Q2"); the full
+  // key never leaves the main process.
+  masked: string | null
 }
 
 let cachedRegistry: ModelRegistry | null = null
@@ -62,22 +65,39 @@ export function resolveKey(provider: string): { key: string | null; source: stri
   if (!providerConfig) return { key: null, source: 'missing' }
 
   const envVar = providerConfig.apiKeyEnv
-  if (envVar && process.env[envVar]) {
+  if (!envVar) return { key: null, source: 'missing' }
+
+  // App-managed keys (~/.mim/keys.env) win over the launch environment.
+  // Settings is the user's control plane: a key exported in the shell that
+  // launched the app must not shadow a key saved or rotated from the app.
+  const fileKey = readKeysEnvValue(envVar)
+  if (fileKey) return { key: fileKey, source: 'file' }
+
+  if (process.env[envVar]) {
     return { key: process.env[envVar]!, source: 'env' }
   }
 
+  return { key: null, source: 'missing' }
+}
+
+function maskKey(key: string): string {
+  if (key.length >= 14) return `${key.slice(0, 6)}…${key.slice(-4)}`
+  if (key.length >= 8) return `…${key.slice(-4)}`
+  return '…'
+}
+
+function readKeysEnvValue(envVar: string): string | null {
   const dotenvPath = join(userHomeDir(), '.mim', 'keys.env')
-  if (existsSync(dotenvPath)) {
-    const content = readFileSync(dotenvPath, 'utf-8')
-    for (const line of content.split(/\r\n|\n|\r/)) {
-      const [k, ...rest] = line.split('=')
-      if (k?.trim() === envVar && rest.length) {
-        return { key: rest.join('=').trim().replace(/^["']|["']$/g, ''), source: 'file' }
-      }
+  if (!existsSync(dotenvPath)) return null
+  const content = readFileSync(dotenvPath, 'utf-8')
+  for (const line of content.split(/\r\n|\n|\r/)) {
+    const [k, ...rest] = line.split('=')
+    if (k?.trim() === envVar && rest.length) {
+      const value = rest.join('=').trim().replace(/^["']|["']$/g, '')
+      if (value) return value
     }
   }
-
-  return { key: null, source: 'missing' }
+  return null
 }
 
 export function registerAiTools(tools: ToolRegistry, emit: (channel: string) => void = () => {}): void {
@@ -95,7 +115,7 @@ export function registerAiTools(tools: ToolRegistry, emit: (channel: string) => 
       const statuses: KeyStatus[] = []
       for (const provider of Object.keys(registry.providers)) {
         const { key, source } = resolveKey(provider)
-        statuses.push({ provider, configured: !!key, source })
+        statuses.push({ provider, configured: !!key, source, masked: key ? maskKey(key) : null })
       }
       return { statuses }
     }
@@ -272,7 +292,7 @@ export async function generateObjectWithAi(params: {
 }
 
 export async function callAnthropicToolLoop({
-  model = 'claude-sonnet-4-6',
+  model = 'claude-sonnet-5',
   system,
   messages,
   tools,
@@ -573,7 +593,7 @@ function makeLoopSignal(parent: AbortSignal | null, timeoutMs: number): { signal
 }
 
 export async function callGeminiText({
-  model = 'gemini-3.1-flash-lite-preview',
+  model = 'gemini-3.1-flash-lite',
   system,
   messages,
   maxTokens = 4096,
