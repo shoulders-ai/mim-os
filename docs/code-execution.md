@@ -266,7 +266,7 @@ cached service). Clicking it calls `code.run` with `capture_plots: false`.
 The card shows:
 
 - Command line (the `command` string)
-- Status indicator (running/ok/failed/timed-out/sent)
+- Status indicator (running/ok/failed/timed-out/error/sent)
 - Duration label
 - Collapsible output text (stdout + stderr)
 - Truncation notice when output was capped

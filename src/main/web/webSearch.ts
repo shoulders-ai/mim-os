@@ -78,7 +78,7 @@ export async function webSearch(
   if (!apiKey) {
     throw new Error(
       'Web search requires an Exa API key. ' +
-      'Add one in Settings → Models, or set EXA_API_KEY in your environment. ' +
+      'Add one in Settings → Connections, or set EXA_API_KEY in your environment. ' +
       'Get a free key at https://dashboard.exa.ai/api-keys',
     )
   }
@@ -105,7 +105,7 @@ export async function webSearch(
     if (!response.ok) {
       const body = await response.text().catch(() => '')
       if (response.status === 401) {
-        throw new Error('Exa API key is invalid. Check your key in Settings → Models.')
+        throw new Error('Exa API key is invalid. Check your key in Settings → Connections.')
       }
       if (response.status === 429) {
         throw new Error('Exa rate limit exceeded. Try again in a moment.')

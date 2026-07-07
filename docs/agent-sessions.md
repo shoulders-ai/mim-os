@@ -25,7 +25,7 @@ archive/History membership. `agentSessions.ts` deliberately mirrors
 `packageJobs.ts` shapes. Agents are **not** apps: no `app.status` rows,
 no trust layers. Launcher visibility is **opt-in**: a row appears iff the
 binary is installed on this machine **and** the user enabled the agent in
-Settings → Agents (the `enabledAgents` workspace setting,
+Settings → Apps, under Coding agents (the `enabledAgents` workspace setting,
 default `[]` — detection alone never surfaces a launcher). The toggle gates
 visibility only: it never installs or launches anything, and existing session
 records, resume, Activity rows, and History are unaffected by toggling off.
@@ -223,7 +223,7 @@ and the hard-deny branches in `src/main/security/gate.ts`; see
 
 ## UX surfaces
 
-- **Settings → Agents**: one row per catalog agent (name, `binPath` or
+- **Settings → Apps › Coding agents**: one row per catalog agent (name, `binPath` or
   "Not installed"), a toggle per installed agent writing `enabledAgents`.
   Not-installed agents render dimmed with a disabled toggle. Each installed
   agent has a collapsed "Flags" disclosure with a free-text input for custom
