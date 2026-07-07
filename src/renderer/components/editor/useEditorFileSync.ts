@@ -89,11 +89,16 @@ export function useEditorFileSync(options: UseEditorFileSyncOptions) {
     tab.externalState = undefined
   }
 
+  // External state and dirtiness are separate facts: externalState drives the
+  // conflict bar, dirty stays "buffer differs from last save". A clean buffer
+  // whose file changed or vanished on disk has nothing unsaved — its content
+  // is recoverable from the OS trash and .mim/history — so it must not trip
+  // save prompts or the quit guard.
   function markTabChangedOnDisk(tab: TabState, state: 'changed' | 'deleted') {
     if (tab.readOnly) return
     if (tab.kind !== 'text' && tab.kind !== 'table') return
     tab.externalState = state
-    tab.dirty = true
+    if (tab.kind === 'text') tab.dirty = tab.content !== tab.originalContent
     options.notifyCurrentDocumentChanged()
   }
 
@@ -107,7 +112,7 @@ export function useEditorFileSync(options: UseEditorFileSyncOptions) {
       clearAutoSave()
     }
     tab.externalState = state
-    tab.dirty = true
+    tab.dirty = tab.content !== tab.originalContent
     if (index === options.activeTabIndex.value) options.notifyCurrentDocumentChanged()
   }
 

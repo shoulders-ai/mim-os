@@ -47,6 +47,11 @@ const SKIP_RECURSIVE_DIRS = new Set([
 export interface FileToolOptions {
   openNativeFile?: (path: string) => Promise<string> | string
   trashItem?: (path: string) => Promise<void>
+  // Called only for user-actor trashes (a deliberate UI gesture, e.g. the
+  // Files pane delete). Lets the editor close clean tabs instead of treating
+  // the deletion as an external surprise. Agent/package deletes stay silent
+  // here so their tabs keep the deleted-on-disk conflict banner.
+  onUserTrashed?: (paths: string[]) => void
 }
 
 export function registerFileTools(tools: ToolRegistry, options: FileToolOptions = {}): void {
@@ -197,12 +202,14 @@ export function registerFileTools(tools: ToolRegistry, options: FileToolOptions 
     name: 'fs.trash',
     description: 'Move a workspace file or directory to the OS trash (recoverable).',
     inputSchema: objectSchema({ path: { type: 'string' } }, ['path']),
-    execute: async (params) => {
+    execute: async (params, ctx) => {
       if (!options.trashItem) throw new Error('Trash is not available')
       const path = resolveWorkspacePath(tools, requireString(params, 'path'))
       if (!existsSync(path)) throw new Error(`Path does not exist: ${params.path}`)
       await options.trashItem(path)
-      return { trashed: toSlashPath(relative(tools.getWorkspacePath()!, path)) }
+      const trashed = toSlashPath(relative(tools.getWorkspacePath()!, path))
+      if (ctx.actor === 'user') options.onUserTrashed?.([trashed])
+      return { trashed }
     }
   })
 

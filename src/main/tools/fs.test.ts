@@ -12,6 +12,7 @@ describe('File tools', () => {
   let tools: ReturnType<typeof createToolRegistry>
   let openNativeFile: ReturnType<typeof vi.fn>
   let trashItem: ReturnType<typeof vi.fn>
+  let onUserTrashed: ReturnType<typeof vi.fn>
   const ctx = { actor: 'user' as const }
 
   beforeEach(() => {
@@ -21,7 +22,8 @@ describe('File tools', () => {
     tools.setWorkspacePath(dir)
     openNativeFile = vi.fn(async () => '')
     trashItem = vi.fn(async (path: string) => { rmSync(path, { recursive: true, force: true }) })
-    registerFileTools(tools, { openNativeFile, trashItem })
+    onUserTrashed = vi.fn()
+    registerFileTools(tools, { openNativeFile, trashItem, onUserTrashed })
   })
 
   afterEach(() => {
@@ -354,6 +356,25 @@ describe('File tools', () => {
     expect(trashItem).toHaveBeenCalledTimes(2)
     expect(trashItem).toHaveBeenCalledWith(join(dir, 'doomed.md'))
     expect(trashItem).toHaveBeenCalledWith(join(dir, 'doomed-dir'))
+  })
+
+  it('fs.trash reports user-initiated trashes so the editor can close clean tabs', async () => {
+    writeFileSync(join(dir, 'gone.md'), 'bye')
+    mkdirSync(join(dir, 'gone-dir'), { recursive: true })
+
+    await tools.call('fs.trash', { path: 'gone.md' }, ctx)
+    await tools.call('fs.trash', { path: 'gone-dir' }, ctx)
+
+    expect(onUserTrashed).toHaveBeenNthCalledWith(1, ['gone.md'])
+    expect(onUserTrashed).toHaveBeenNthCalledWith(2, ['gone-dir'])
+  })
+
+  it('fs.trash does not report agent-initiated trashes', async () => {
+    writeFileSync(join(dir, 'agent-gone.md'), 'bye')
+
+    await tools.call('fs.trash', { path: 'agent-gone.md' }, { actor: 'ai' })
+
+    expect(onUserTrashed).not.toHaveBeenCalled()
   })
 
   it('fs.trash requires an existing path and an available trash backend', async () => {
