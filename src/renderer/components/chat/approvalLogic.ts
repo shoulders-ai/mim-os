@@ -62,6 +62,7 @@ const ACTION_PHRASES: Record<string, string> = {
   'app.disable': 'turn off an app',
   'web.read': 'read a web page',
   'code.run': 'run a script',
+  'shell.run': 'run a shell command',
 }
 
 const CATEGORY_PHRASES: Record<string, string> = {
@@ -98,6 +99,12 @@ function asString(value: unknown): string {
 export function targetDisplay(approval: ApprovalLike): string {
   const params = approval.params ?? {}
   if (approval.toolName === 'web.read' || approval.toolName === 'web.live.open') return asString(params.url) || asString(approval.target)
+  if (approval.toolName === 'shell.run') {
+    const cmd = asString(params.command)
+    if (cmd) return cmd
+    // terminal mode fallback
+    return asString(approval.target)
+  }
   if (approval.toolName === 'code.run') {
     const argv = params.argv
     if (Array.isArray(argv) && argv.length > 0) return argv.join(' ')
@@ -121,6 +128,7 @@ export function targetIsCommand(approval: ApprovalLike): boolean {
     || approval.toolName === 'terminal.write'
     || approval.toolName === 'terminal.spawn'
     || approval.toolName === 'code.run'
+    || approval.toolName === 'shell.run'
 }
 
 // For actions with no diff but a payload worth seeing — chiefly outbound sends —
@@ -216,6 +224,7 @@ export function rememberLabel(approval: ApprovalLike): string {
   const tool = approval.toolName
   if (tool.startsWith('fs.') || approval.category === 'write') return 'Always allow file changes in this chat'
   if (tool.startsWith('terminal.')) return 'Always allow terminal commands in this chat'
+  if (tool === 'shell.run') return 'Always allow shell commands in this chat'
   if (approval.category === 'network') return 'Always allow outside requests in this chat'
   return 'Always allow this action in this chat'
 }

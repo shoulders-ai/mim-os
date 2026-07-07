@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { EditorState, EditorSelection } from '@codemirror/state'
-import { computeSendSelection, languageFromPath, computeChunkSend } from './sendToTerminal.js'
+import { computeSendSelection, languageFromPath, computeChunkSend, computeSourceCommand } from './sendToTerminal.js'
 import { markdownLanguageExtension } from './language.js'
 
 describe('computeSendSelection', () => {
@@ -163,5 +163,43 @@ describe('computeChunkSend', () => {
     expect(result).not.toBeNull()
     expect(result!.text).toBe('x <- 1\ny <- 2')
     expect(result!.language).toBe('r')
+  })
+})
+
+describe('computeSourceCommand', () => {
+  it('returns source() expression for language r', () => {
+    expect(computeSourceCommand('analysis/fit.R', 'r')).toBe(
+      "source('analysis/fit.R', echo = TRUE)",
+    )
+  })
+
+  it('escapes single quotes in the path', () => {
+    expect(computeSourceCommand("it's a file.R", 'r')).toBe(
+      "source('it\\'s a file.R', echo = TRUE)",
+    )
+  })
+
+  it('escapes backslashes in the path', () => {
+    expect(computeSourceCommand('path\\to\\file.R', 'r')).toBe(
+      "source('path\\\\to\\\\file.R', echo = TRUE)",
+    )
+  })
+
+  it('handles paths with spaces', () => {
+    expect(computeSourceCommand('my analysis/model fit.R', 'r')).toBe(
+      "source('my analysis/model fit.R', echo = TRUE)",
+    )
+  })
+
+  it('returns null for language python', () => {
+    expect(computeSourceCommand('main.py', 'python')).toBeNull()
+  })
+
+  it('returns null for null language', () => {
+    expect(computeSourceCommand('foo.ts', null)).toBeNull()
+  })
+
+  it('returns null for unrecognized language', () => {
+    expect(computeSourceCommand('foo.jl', 'julia')).toBeNull()
   })
 })

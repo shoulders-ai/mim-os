@@ -209,6 +209,7 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'workspace.orient': { category: 'general', risk: 'low' },
   'toolchain.status': { category: 'read', risk: 'low' },
   'code.run': { category: 'system', risk: 'high', targetParam: 'argv' },
+  'shell.run': { category: 'system', risk: 'high', targetParam: 'command' },
   'log.append': { category: 'write', risk: 'low', targetParam: 'message' },
   'log.read': { category: 'read', risk: 'low' },
   'slack.setToken': { category: 'secrets', risk: 'high', targetParam: 'account' },

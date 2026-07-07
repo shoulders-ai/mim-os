@@ -138,4 +138,22 @@ describe('approval logic', () => {
   it('offers remember for code.run with a session', () => {
     expect(canRemember({ toolName: 'code.run', sessionId: 's1' })).toBe(true)
   })
+
+  it('phrases shell.run as "run a shell command"', () => {
+    expect(approvalQuestion({ toolName: 'shell.run', category: 'system' })).toBe('Allow Mim to run a shell command?')
+  })
+
+  it('displays shell.run target as the command string', () => {
+    expect(targetDisplay({ toolName: 'shell.run', params: { command: 'npm install' } }))
+      .toBe('npm install')
+  })
+
+  it('renders shell.run as a command block', () => {
+    expect(targetIsCommand({ toolName: 'shell.run' })).toBe(true)
+  })
+
+  it('offers remember for shell.run with a session', () => {
+    expect(canRemember({ toolName: 'shell.run', sessionId: 's1' })).toBe(true)
+    expect(rememberLabel({ toolName: 'shell.run' })).toBe('Always allow shell commands in this chat')
+  })
 })

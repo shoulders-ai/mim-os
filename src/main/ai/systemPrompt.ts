@@ -42,7 +42,7 @@ export const TOOL_CATALOG = `File operations:
 
 Cross-surface actions:
 - editor_open(path) — open a file in the Editor
-- terminal_run(command) — run a shell command in the scratch Terminal without switching away from Chat; returns when sent, not with stdout
+- bash(command, terminal?, timeout_ms?, capture_plots?) — run a shell command with captured output (exit code, stdout/stderr tails, products). Set terminal:true to type into the visible terminal instead (no capture). Running \`Rscript file.R\` captures plots automatically.
 
 Search:
 - search(query, scope?, file_pattern?, max_results?) — full-text search across workspace files and/or session message history. scope: "files", "sessions", or "all" (default). file_pattern: glob filter like "*.md".

@@ -1,6 +1,7 @@
 // @ts-check
 import { EditorState } from '@codemirror/state'
 import { syntaxTree } from '@codemirror/language'
+import { escapeForRString } from '../../../services/renderDocument.js'
 
 /**
  * Given an EditorState, compute what text to send to the terminal and where
@@ -191,4 +192,20 @@ export function computeChunkSend(state, mode) {
   }
 
   return { text: line.text, language: chunk.language, nextPos }
+}
+
+/**
+ * Compute the source/run-file command for a given language.
+ * For R: `source('<escaped path>', echo = TRUE)`
+ * For other languages: null (caller sends the whole buffer instead).
+ *
+ * @param {string} path - workspace-relative file path
+ * @param {string | null} language
+ * @returns {string | null}
+ */
+export function computeSourceCommand(path, language) {
+  if (language === 'r') {
+    return `source('${escapeForRString(path)}', echo = TRUE)`
+  }
+  return null
 }

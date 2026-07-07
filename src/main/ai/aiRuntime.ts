@@ -562,27 +562,23 @@ export async function createAiSdkTools({
       execute: async ({ path }) => call('editor.open', { path }),
     }),
 
-    terminal_run: tool({
-      description: 'Run a shell command in the scratch Terminal without switching away from Chat. Returns when the command has been sent, not with stdout.',
-      inputSchema: z.object({ command: z.string() }),
-      execute: async ({ command }) => call('terminal.run', { command }),
-    }),
-
-    code_run: tool({
+    bash: tool({
       description:
-        'Run a script with a detected interpreter (Rscript, R, quarto) in the workspace. ' +
-        'Write code to a real file first, then run it — do not pass code inline. ' +
-        'Returns exit code, output tails, and files the run created or changed (products). ' +
-        'After a successful run that produced a figure, PDF, or table, open the most ' +
-        'relevant product with editor_open so the user sees it. ' +
-        'If the run fails, read the stderr tail, fix the script, and re-run. ' +
-        'To render an R Markdown or Quarto document, run quarto render (or rmarkdown::render) on the file, then open the produced PDF.',
+        'Run a shell command in the workspace and return its captured output: exit code, stdout/stderr tails, ' +
+        'and files the run created or changed (products). Write code to real files and run them — do not inline ' +
+        'long scripts with -e. After a run that produced a figure, PDF, or table, open the best product with ' +
+        'editor_open. If a run fails, read the stderr tail, fix, re-run. Running the exact form `Rscript file.R` ' +
+        'captures base-graphics plots automatically. To render R Markdown/Quarto, run quarto render (or ' +
+        'rmarkdown::render) and open the produced PDF. Set terminal:true to type the command into the user\'s ' +
+        'visible terminal instead (no output capture) — use that for dev servers, watch modes, and anything the ' +
+        'user should own and watch.',
       inputSchema: z.object({
-        argv: z.array(z.string()).min(1),
+        command: z.string().min(1),
+        terminal: z.boolean().optional(),
         timeout_ms: z.number().optional(),
         capture_plots: z.boolean().optional(),
       }),
-      execute: async (params) => call('code.run', params),
+      execute: async (params) => call('shell.run', params),
     }),
 
     package_create: tool({
@@ -1506,7 +1502,7 @@ export function aiToolTimeoutMs(name: string, params: Record<string, unknown> = 
     if (requested == null) return WEB_READ_TOOL_DEFAULT_TIMEOUT_MS
     return Math.min(Math.max(requested + WEB_READ_TOOL_TIMEOUT_BUFFER_MS, WEB_READ_TOOL_DEFAULT_TIMEOUT_MS), WEB_READ_TOOL_MAX_TIMEOUT_MS)
   }
-  if (name === 'code.run') return 510_000
+  if (name === 'code.run' || name === 'shell.run') return 510_000
   return DEFAULT_AI_TOOL_TIMEOUT_MS
 }
 

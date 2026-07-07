@@ -143,7 +143,7 @@ function getToolOutput(part) {
 }
 
 function isCodeRunPart(part) {
-  return part.type === 'tool-code_run'
+  return part.type === 'tool-bash'
 }
 
 function skillPartName(part) {
@@ -473,7 +473,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- code_run card -->
+        <!-- bash run card -->
         <ChatCodeRunCard v-else-if="isCodeRunPart(entry.part)" :part="entry.part" @open-file="openFile" />
 
         <!-- Tool call (generic) -->

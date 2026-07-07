@@ -410,7 +410,8 @@ describe('code.run tool', () => {
       expect(row).toBeDefined()
       expect(row!.domain).toBe('code')
       expect(row!.toolIds).toContain('code.run')
-      expect(row!.aiToolKeys).toContain('code_run')
+      // code.run no longer has an AI tool key — the bash key is on the shell.run row
+      expect(row!.aiToolKeys).toBeUndefined()
       expect(row!.risk).toBe('sensitive')
     })
   })

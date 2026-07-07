@@ -100,7 +100,7 @@ const SKILL_TEMPLATES: SkillTemplateDefinition[] = [
     summary: 'Run R analyses, fit models, and render R Markdown/Quarto reports.',
     defaultName: 'r-modelling',
     defaultDescription: 'Use when running R analyses, fitting models, or rendering R Markdown/Quarto reports.',
-    tools: ['code_run', 'editor_open', 'fs_read', 'fs_write'],
+    tools: ['bash', 'editor_open', 'fs_read', 'fs_write'],
     unlocks: [],
     title: 'R Modelling',
     body: [
@@ -112,7 +112,7 @@ const SKILL_TEMPLATES: SkillTemplateDefinition[] = [
       '',
       '## Execution Rules',
       '',
-      '- Every analysis is a self-contained script run end-to-end via `code_run`. Never pass inline `-e` snippets.',
+      '- Every analysis is a self-contained script run end-to-end via `bash`. Never pass inline `-e` snippets.',
       '- Set a seed (`set.seed(...)`) at the top of any script involving randomness.',
       '- Save keeper figures explicitly (`ggsave("outputs/fig.png")` or `pdf()`/`dev.off()`). The auto-captured PNGs in `.mim/code-runs/` are previews only.',
       '- After a successful run, open the headline product with `editor_open`.',

@@ -7,7 +7,7 @@ import TerminalSurface from './TerminalSurface.vue'
 import MimContextMenu from '../ui/MimContextMenu.vue'
 import MimMenuItem from '../ui/MimMenuItem.vue'
 import { shortcutLabel } from '../../services/shortcutLabels.js'
-import { joinForTerminal } from './terminalSendText.js'
+import { joinForTerminal, chunkPayload, PAYLOAD_MAX_CHARS } from './terminalSendText.js'
 import { useToastStore } from '../../stores/toasts.js'
 
 const toastStore = useToastStore()
@@ -25,6 +25,7 @@ interface TermTab {
   ptyId: number | null
   exited: boolean
   keybindingProfile: 'terminal' | 'terminal-zsh'
+  program?: string
 }
 
 type SurfaceHandle = InstanceType<typeof TerminalSurface>
@@ -345,7 +346,7 @@ async function runCommand(command: string) {
 async function addProgramTab(opts: { program: string; args?: string[]; label?: string }) {
   const id = nextTabId++
   const label = opts.label ?? opts.program.toUpperCase()
-  const tab: TermTab = { id, label, ptyId: null, exited: false, keybindingProfile: 'terminal' }
+  const tab: TermTab = { id, label, ptyId: null, exited: false, keybindingProfile: 'terminal', program: opts.program }
   tabs.value.push(tab)
   activeTabId.value = id
 
@@ -359,13 +360,19 @@ async function addProgramTab(opts: { program: string; args?: string[]; label?: s
 }
 
 async function sendText(text: string, opts?: { spawn?: { program: string } }) {
+  // Payload cap — reject oversized pastes before any work
+  if (text.length > PAYLOAD_MAX_CHARS) {
+    toastStore.push({ kind: 'error', message: 'Selection too large to paste — use Source (Cmd+Shift+Enter) instead' })
+    return
+  }
+
   const wantProgram = opts?.spawn?.program
 
   // Ensure a tab exists; program-label tabs are preferred when spawning R etc.
   if (tabs.value.length === 0) {
     const id = nextTabId++
     const label = wantProgram ? wantProgram.toUpperCase() : `Tab ${id}`
-    const tab: TermTab = { id, label, ptyId: null, exited: false, keybindingProfile: 'terminal' }
+    const tab: TermTab = { id, label, ptyId: null, exited: false, keybindingProfile: 'terminal', program: wantProgram }
     tabs.value.push(tab)
     activeTabId.value = id
     await nextTick()
@@ -380,7 +387,11 @@ async function sendText(text: string, opts?: { spawn?: { program: string } }) {
     let spawned = false
     if (wantProgram) {
       spawned = await spawnPty(tab.id, { program: wantProgram })
-      if (!spawned) {
+      if (spawned) {
+        // Record the program on the tab for downstream decisions (bracketed paste)
+        const liveTab = tabs.value.find(t => t.id === tab!.id)
+        if (liveTab && !liveTab.program) liveTab.program = wantProgram
+      } else {
         // Program not available — fall back to default shell + toast
         toastStore.push({ kind: 'info', message: `${wantProgram.toUpperCase()} not found — sent to shell` })
         spawned = await spawnPty(tab.id)
@@ -393,8 +404,15 @@ async function sendText(text: string, opts?: { spawn?: { program: string } }) {
   }
 
   if (tab?.ptyId != null) {
-    const payload = joinForTerminal(text)
-    await window.kernel.call('terminal.write', { id: tab.ptyId, data: payload })
+    // Enable bracketed paste for multi-line sends to R program tabs
+    const useBracketedPaste = tab.program === 'r'
+    const payload = joinForTerminal(text, { bracketedPaste: useBracketedPaste })
+
+    // Chunked writes for large payloads
+    const chunks = chunkPayload(payload)
+    for (const chunk of chunks) {
+      await window.kernel.call('terminal.write', { id: tab.ptyId, data: chunk })
+    }
   }
 }
 

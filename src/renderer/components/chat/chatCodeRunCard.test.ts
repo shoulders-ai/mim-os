@@ -10,9 +10,9 @@ import {
 
 function makePart(overrides: Record<string, unknown> = {}) {
   return {
-    type: 'tool-code_run',
+    type: 'tool-bash',
     state: 'output-available',
-    input: { argv: ['Rscript', 'analysis/fit.R'], timeout_ms: 120000 },
+    input: { command: 'Rscript analysis/fit.R', timeout_ms: 120000 },
     output: {
       exitCode: 0,
       timedOut: false,
@@ -31,25 +31,25 @@ function makePart(overrides: Record<string, unknown> = {}) {
 // ---------------------------------------------------------------------------
 
 describe('parseCodeRunCard', () => {
-  // -- argv line --
-  it('joins argv into a displayable command line', () => {
+  // -- command line --
+  it('uses the command string as the displayable command line', () => {
     const vm = parseCodeRunCard(makePart())
     expect(vm.argvLine).toBe('Rscript analysis/fit.R')
   })
 
   it('returns a placeholder when input is missing or malformed', () => {
     const vm = parseCodeRunCard(makePart({ input: null }))
-    expect(vm.argvLine).toBe('code_run')
+    expect(vm.argvLine).toBe('bash')
   })
 
-  it('handles empty argv array', () => {
-    const vm = parseCodeRunCard(makePart({ input: { argv: [] } }))
-    expect(vm.argvLine).toBe('code_run')
+  it('returns a placeholder when command is empty', () => {
+    const vm = parseCodeRunCard(makePart({ input: { command: '' } }))
+    expect(vm.argvLine).toBe('bash')
   })
 
-  it('handles argv with non-strings gracefully', () => {
-    const vm = parseCodeRunCard(makePart({ input: { argv: [42, true] } }))
-    expect(vm.argvLine).toBe('42 true')
+  it('returns a placeholder when command is missing or non-string', () => {
+    const vm = parseCodeRunCard(makePart({ input: { command: 42 } }))
+    expect(vm.argvLine).toBe('bash')
   })
 
   // -- status --
@@ -241,7 +241,7 @@ describe('parseCodeRunCard', () => {
   // -- fully malformed part --
   it('never throws on a completely empty part', () => {
     const vm = parseCodeRunCard({})
-    expect(vm.argvLine).toBe('code_run')
+    expect(vm.argvLine).toBe('bash')
     expect(vm.status).toBe('running')
     expect(vm.durationLabel).toBe('')
     expect(vm.outputText).toBe('')

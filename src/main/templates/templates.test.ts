@@ -59,7 +59,7 @@ describe('starter templates', () => {
 
     expect(meta.name).toBe('r-modelling')
     expect(meta.description).toBe('Use when running R analyses, fitting models, or rendering R Markdown/Quarto reports.')
-    expect(meta.tools).toEqual(['code_run', 'editor_open', 'fs_read', 'fs_write'])
+    expect(meta.tools).toEqual(['bash', 'editor_open', 'fs_read', 'fs_write'])
     expect(meta.unlocks).toEqual([])
     expect(rendered.content).toContain('# R Modelling')
     expect(rendered.content.length).toBeGreaterThan(200)

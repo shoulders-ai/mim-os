@@ -27,15 +27,15 @@ describe('ChatCodeRunCard (smoke)', () => {
     root?.remove()
   })
 
-  it('renders a successful run with argv, green dot, duration, and product chips', async () => {
+  it('renders a successful run with the command line, green dot, duration, and product chips', async () => {
     root = document.createElement('div')
     document.body.appendChild(root)
     const onOpenFile = vi.fn()
     app = createApp(ChatCodeRunCard, {
       part: {
-        type: 'tool-code_run',
+        type: 'tool-bash',
         state: 'output-available',
-        input: { argv: ['Rscript', 'analysis/fit.R'] },
+        input: { command: 'Rscript analysis/fit.R' },
         output: {
           exitCode: 0,
           timedOut: false,
@@ -76,9 +76,9 @@ describe('ChatCodeRunCard (smoke)', () => {
     document.body.appendChild(root)
     app = createApp(ChatCodeRunCard, {
       part: {
-        type: 'tool-code_run',
+        type: 'tool-bash',
         state: 'input-available',
-        input: { argv: ['quarto', 'render', 'report.qmd'] },
+        input: { command: 'quarto render report.qmd' },
       },
     })
     app.mount(root)
@@ -94,9 +94,9 @@ describe('ChatCodeRunCard (smoke)', () => {
     document.body.appendChild(root)
     app = createApp(ChatCodeRunCard, {
       part: {
-        type: 'tool-code_run',
+        type: 'tool-bash',
         state: 'output-available',
-        input: { argv: ['Rscript', 'broken.R'] },
+        input: { command: 'Rscript broken.R' },
         output: {
           exitCode: 1,
           timedOut: false,
@@ -119,9 +119,9 @@ describe('ChatCodeRunCard (smoke)', () => {
     document.body.appendChild(root)
     app = createApp(ChatCodeRunCard, {
       part: {
-        type: 'tool-code_run',
+        type: 'tool-bash',
         state: 'output-available',
-        input: { argv: ['Rscript', 'run.R'] },
+        input: { command: 'Rscript run.R' },
         output: {
           exitCode: 0,
           timedOut: false,

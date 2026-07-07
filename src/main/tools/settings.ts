@@ -149,7 +149,10 @@ function writeSettings(tools: ToolRegistry, settings: Settings): void {
   atomicWriteJson(settingsPath(tools), settings)
 }
 
-export function registerSettingsTools(tools: ToolRegistry): void {
+export function registerSettingsTools(
+  tools: ToolRegistry,
+  options?: { onChange?: () => void },
+): void {
 
   tools.register({
     name: 'settings.get',
@@ -185,6 +188,7 @@ export function registerSettingsTools(tools: ToolRegistry): void {
       const settings = readSettings(tools)
       ;(settings as Record<string, unknown>)[key] = value
       writeSettings(tools, settings)
+      options?.onChange?.()
       return { ok: true, key, value }
     }
   })

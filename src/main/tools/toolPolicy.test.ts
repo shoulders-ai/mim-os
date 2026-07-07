@@ -207,13 +207,16 @@ describe('tool availability policy', () => {
   it('includes code.run in a code domain row with sensitive risk', () => {
     const policy = readToolsPolicy(dir)
     expect(policy.isEnabled('code.run')).toBe(true)
-    expect(aiToolKeyEnabled(policy, 'code_run')).toBe(true)
+    // code.run no longer has an AI key; bash is on the shell.run row
+    expect(aiToolKeyEnabled(policy, 'bash')).toBe(true)
   })
 
-  it('disabling code.run blocks the code_run AI tool key', () => {
-    writeSettings({ tools: { disabled: ['code.run'] } })
+  it('disabling shell.run blocks the bash AI tool key', () => {
+    writeSettings({ tools: { disabled: ['shell.run'] } })
     const policy = readToolsPolicy(dir)
-    expect(policy.isEnabled('code.run')).toBe(false)
-    expect(aiToolKeyEnabled(policy, 'code_run')).toBe(false)
+    expect(policy.isEnabled('shell.run')).toBe(false)
+    expect(aiToolKeyEnabled(policy, 'bash')).toBe(false)
+    // code.run remains enabled (Render button path)
+    expect(policy.isEnabled('code.run')).toBe(true)
   })
 })

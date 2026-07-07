@@ -49,6 +49,7 @@ function kindIcon(kind) {
       <span class="font-medium truncate">{{ vm.argvLine }}</span>
       <!-- Status indicator -->
       <span v-if="vm.status === 'ok'" class="w-[5px] h-[5px] rounded-full bg-add shrink-0" title="Success" />
+      <span v-else-if="vm.status === 'sent'" class="w-[5px] h-[5px] rounded-full bg-accent shrink-0" title="Sent to terminal" />
       <span v-else-if="vm.status === 'failed'" class="w-[5px] h-[5px] rounded-full bg-rem shrink-0" title="Failed" />
       <span v-else-if="vm.status === 'timed-out'" class="w-[5px] h-[5px] rounded-full bg-warn shrink-0" title="Timed out" />
       <span v-else-if="vm.status === 'error'" class="w-[5px] h-[5px] rounded-full bg-rem shrink-0" title="Error" />
@@ -66,6 +67,7 @@ function kindIcon(kind) {
         v-if="vm.outputText"
         class="font-mono text-[11px] leading-[1.4] text-ink-2 bg-chrome border border-rule-light rounded-[4px] px-2 py-1.5 m-0 overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all"
       >{{ vm.outputText }}</pre>
+      <div v-else-if="vm.status === 'sent'" class="font-sans text-[11px] text-ink-4 italic">Sent to terminal</div>
       <div v-else-if="vm.status === 'running'" class="font-sans text-[11px] text-ink-4 italic">Waiting for output...</div>
     </div>
 

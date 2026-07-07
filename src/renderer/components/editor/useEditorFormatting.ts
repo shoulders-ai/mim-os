@@ -7,7 +7,7 @@ import {
   toggleBlockquote, insertLink, insertImage, insertHorizontalRule,
   insertCitation,
 } from './codemirror/formatting.js'
-import { computeSendSelection, languageFromPath, computeChunkSend } from './codemirror/sendToTerminal.js'
+import { computeSendSelection, languageFromPath, computeChunkSend, computeSourceCommand } from './codemirror/sendToTerminal.js'
 
 interface UseEditorFormattingOptions {
   activeIsMarkdown: ComputedRef<boolean>
@@ -70,12 +70,37 @@ export function useEditorFormatting(options: UseEditorFormattingOptions) {
     if (options.historyPreviewActive.value) return false
     if (options.activeTabReadOnly.value) return false
     if (!options.sendToTerminal) return false
-    if (!options.activeIsMarkdown.value) return false
 
-    const result = computeChunkSend(view.state, 'chunk')
-    if (!result) return false
-    options.sendToTerminal(result.text, result.language)
-    view.dispatch({ selection: { anchor: result.nextPos } })
+    const filePath = options.activeFilePath.value
+    const isMarkdown = options.activeIsMarkdown.value
+
+    if (isMarkdown) {
+      // Markdown files: send chunk body (existing behavior unchanged)
+      const result = computeChunkSend(view.state, 'chunk')
+      if (!result) return false
+      options.sendToTerminal(result.text, result.language)
+      view.dispatch({ selection: { anchor: result.nextPos } })
+      return true
+    }
+
+    // Non-markdown code files: source/run the whole file
+    const lang = languageFromPath(filePath)
+    const sourceCmd = computeSourceCommand(filePath, lang)
+
+    if (sourceCmd) {
+      // R files: save first, then send source() expression
+      ;(async () => {
+        const saved = await options.saveActiveFile()
+        if (!saved) return
+        options.sendToTerminal!(sourceCmd, lang)
+      })()
+      return true
+    }
+
+    // Other code files: send entire buffer text
+    const text = view.state.doc.toString()
+    if (!text) return false
+    options.sendToTerminal(text, lang)
     return true
   }
 

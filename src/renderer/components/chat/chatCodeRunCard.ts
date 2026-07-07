@@ -1,4 +1,4 @@
-// Pure view-model for the code_run tool card. All functions are side-effect
+// Pure view-model for the bash tool card. All functions are side-effect
 // free and never throw — malformed inputs degrade gracefully.
 
 export interface CodeRunProduct {
@@ -10,7 +10,7 @@ export interface CodeRunProduct {
 
 export interface CodeRunCardVM {
   argvLine: string
-  status: 'running' | 'ok' | 'failed' | 'timed-out' | 'error'
+  status: 'running' | 'ok' | 'failed' | 'timed-out' | 'error' | 'sent'
   durationLabel: string
   outputText: string
   truncated: boolean
@@ -46,11 +46,9 @@ export function parseCodeRunCard(part: Record<string, unknown>): CodeRunCardVM {
 // ---------------------------------------------------------------------------
 
 function buildArgvLine(input: Record<string, unknown> | null): string {
-  if (!input) return 'code_run'
-  const argv = input.argv
-  if (!Array.isArray(argv) || argv.length === 0) return 'code_run'
-  const line = argv.map(String).join(' ')
-  return line || 'code_run'
+  if (!input) return 'bash'
+  if (typeof input.command === 'string' && input.command.length > 0) return input.command
+  return 'bash'
 }
 
 function resolveStatus(
@@ -60,6 +58,9 @@ function resolveStatus(
 ): CodeRunCardVM['status'] {
   if (errorText) return 'error'
   if (state === 'error') return 'error'
+
+  // Terminal mode — shell.run returns { sent: true }
+  if (output && output.sent === true) return 'sent'
 
   if (!output) return 'running'
 

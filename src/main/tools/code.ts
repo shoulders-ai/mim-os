@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from 'fs'
 import { extname, join, relative, resolve } from 'path'
 import { randomUUID } from 'crypto'
 import { atomicWriteJson } from '@main/atomicJson.js'
+import { defaultShell } from '@main/platform.js'
 import { resolveInterpreter, type ToolchainEntry, type ToolchainDetectDeps } from '@main/toolchain/toolchain.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
 
@@ -39,6 +40,7 @@ export interface CodeToolDeps {
   resolveInterpreter?: (name: string) => Promise<ToolchainEntry | null>
   readSetting?: (key: string) => unknown
   resolveHarnessPath?: () => string | null
+  sendTerminalCommand?: (command: string) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +294,135 @@ function killProcessTree(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM'
 }
 
 // ---------------------------------------------------------------------------
+// Shared execution core
+// ---------------------------------------------------------------------------
+
+export interface ExecuteCaptureOpts {
+  spawnArgv: string[]        // [binary, ...args]
+  workspacePath: string
+  timeoutMs: number
+  runId: string
+  runDir: string
+  runJsonPath: string
+  beforeSnapshot: Map<string, { mtimeMs: number; size: number }>
+  spawnFn: typeof spawn
+  // Extra fields merged into run.json (e.g. { argv } or { shell, command })
+  runJsonExtra?: Record<string, unknown>
+}
+
+export function executeCapture(opts: ExecuteCaptureOpts): Promise<CodeRunResult> {
+  const {
+    spawnArgv,
+    workspacePath,
+    timeoutMs,
+    runId,
+    runDir,
+    runJsonPath,
+    beforeSnapshot,
+    spawnFn: spawnFunc,
+    runJsonExtra,
+  } = opts
+
+  const startedAt = new Date().toISOString()
+  const startMs = Date.now()
+
+  return new Promise<CodeRunResult>((resolveResult) => {
+    let stdoutBuf = ''
+    let stderrBuf = ''
+    let timedOut = false
+    let finished = false
+
+    const child = spawnFunc(spawnArgv[0], spawnArgv.slice(1), {
+      shell: false,
+      cwd: workspacePath,
+      env: { ...process.env, MIM_RUN_DIR: runDir },
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    // --- Streaming tail capture ---
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdoutBuf += chunk.toString()
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderrBuf += chunk.toString()
+    })
+
+    // --- Timeout handling ---
+    const timer = setTimeout(() => {
+      if (finished) return
+      timedOut = true
+      killProcessTree(child, 'SIGTERM')
+      // SIGKILL after 2s grace
+      setTimeout(() => {
+        if (!finished) {
+          killProcessTree(child, 'SIGKILL')
+        }
+      }, 2_000)
+    }, timeoutMs)
+
+    child.on('close', (exitCode) => {
+      if (finished) return
+      finished = true
+      clearTimeout(timer)
+      const durationMs = Date.now() - startMs
+
+      // --- Tail truncation ---
+      const stdout = truncateTail(stdoutBuf, STDOUT_CAP)
+      const stderr = truncateTail(stderrBuf, STDERR_CAP)
+
+      // --- Products capture ---
+      const products = detectProducts(beforeSnapshot, workspacePath, runDir, runJsonPath)
+
+      const runResult: CodeRunResult = {
+        exitCode: timedOut ? null : (exitCode ?? 0),
+        timedOut,
+        durationMs,
+        stdout,
+        stderr,
+        products,
+        runId,
+        runDir: `.mim/code-runs/${runId}`,
+      }
+
+      // --- Write run.json atomically ---
+      try {
+        atomicWriteJson(runJsonPath, {
+          ...runJsonExtra,
+          startedAt,
+          durationMs,
+          exitCode: runResult.exitCode,
+          timedOut: runResult.timedOut,
+          products: runResult.products,
+        })
+      } catch {
+        // Best-effort — don't fail the tool if run.json write fails
+      }
+
+      resolveResult(runResult)
+    })
+
+    child.on('error', (err) => {
+      if (finished) return
+      finished = true
+      clearTimeout(timer)
+      const durationMs = Date.now() - startMs
+
+      resolveResult({
+        exitCode: null,
+        timedOut: false,
+        durationMs,
+        stdout: truncateTail(stdoutBuf, STDOUT_CAP),
+        stderr: truncateTail(stderrBuf + `\nSpawn error: ${err.message}`, STDERR_CAP),
+        products: [],
+        runId,
+        runDir: `.mim/code-runs/${runId}`,
+      })
+    })
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -408,105 +539,119 @@ export function registerCodeTools(tools: ToolRegistry, deps?: CodeToolDeps): voi
       // --- Products: pre-spawn snapshot ---
       const beforeSnapshot = snapshotWorkspace(workspacePath)
 
-      // --- Spawn ---
-      const startedAt = new Date().toISOString()
-      const startMs = Date.now()
-
-      const result = await new Promise<CodeRunResult>((resolveResult) => {
-        let stdoutBuf = ''
-        let stderrBuf = ''
-        let timedOut = false
-        let finished = false
-
-        const child = spawnFn(spawnArgv[0], spawnArgv.slice(1), {
-          shell: false,
-          cwd: workspacePath,
-          env: { ...process.env, MIM_RUN_DIR: runDir },
-          detached: process.platform !== 'win32',
-          stdio: ['ignore', 'pipe', 'pipe'],
-        })
-
-        // --- Streaming tail capture ---
-        child.stdout?.on('data', (chunk: Buffer) => {
-          stdoutBuf += chunk.toString()
-        })
-        child.stderr?.on('data', (chunk: Buffer) => {
-          stderrBuf += chunk.toString()
-        })
-
-        // --- Timeout handling (Rule 4) ---
-        const timer = setTimeout(() => {
-          if (finished) return
-          timedOut = true
-          killProcessTree(child, 'SIGTERM')
-          // SIGKILL after 2s grace
-          setTimeout(() => {
-            if (!finished) {
-              killProcessTree(child, 'SIGKILL')
-            }
-          }, 2_000)
-        }, timeoutMs)
-
-        child.on('close', (exitCode) => {
-          if (finished) return
-          finished = true
-          clearTimeout(timer)
-          const durationMs = Date.now() - startMs
-
-          // --- Rule 5: Tail truncation ---
-          const stdout = truncateTail(stdoutBuf, STDOUT_CAP)
-          const stderr = truncateTail(stderrBuf, STDERR_CAP)
-
-          // --- Products capture ---
-          const products = detectProducts(beforeSnapshot, workspacePath, runDir, runJsonPath)
-
-          const runResult: CodeRunResult = {
-            exitCode: timedOut ? null : (exitCode ?? 0),
-            timedOut,
-            durationMs,
-            stdout,
-            stderr,
-            products,
-            runId,
-            runDir: runDirOutput ? `.mim/code-runs/${runId}` : undefined,
-          }
-
-          // --- Rule 6: Write run.json atomically ---
-          try {
-            atomicWriteJson(runJsonPath, {
-              argv: argvStrings,
-              startedAt,
-              durationMs,
-              exitCode: runResult.exitCode,
-              timedOut: runResult.timedOut,
-              products: runResult.products,
-            })
-          } catch {
-            // Best-effort — don't fail the tool if run.json write fails
-          }
-
-          resolveResult(runResult)
-        })
-
-        child.on('error', (err) => {
-          if (finished) return
-          finished = true
-          clearTimeout(timer)
-          const durationMs = Date.now() - startMs
-
-          resolveResult({
-            exitCode: null,
-            timedOut: false,
-            durationMs,
-            stdout: truncateTail(stdoutBuf, STDOUT_CAP),
-            stderr: truncateTail(stderrBuf + `\nSpawn error: ${err.message}`, STDERR_CAP),
-            products: [],
-            runId,
-            runDir: runDirOutput ? `.mim/code-runs/${runId}` : undefined,
-          })
-        })
+      // --- Execute via shared helper ---
+      const result = await executeCapture({
+        spawnArgv,
+        workspacePath,
+        timeoutMs,
+        runId,
+        runDir,
+        runJsonPath,
+        beforeSnapshot,
+        spawnFn,
+        runJsonExtra: { argv: argvStrings },
       })
 
+      return result
+    },
+  })
+
+  // -------------------------------------------------------------------------
+  // shell.run — run a shell command with captured output
+  // -------------------------------------------------------------------------
+
+  tools.register({
+    name: 'shell.run',
+    description: 'Run a shell command in the workspace with captured output.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', minLength: 1, description: 'Shell command to execute' },
+        terminal: { type: 'boolean', description: 'Type into visible terminal instead of capturing (default false)' },
+        timeout_ms: { type: 'number', description: 'Execution timeout in milliseconds (default 120000, max 480000)' },
+        capture_plots: { type: 'boolean', description: 'Enable R plot-capture for bare Rscript file.R commands (default true)' },
+      },
+      required: ['command'],
+    },
+    execute: async (params) => {
+      // Validate
+      const workspacePath = tools.getWorkspacePath()
+      if (!workspacePath) throw new Error('No workspace open')
+      const command = params.command
+      if (typeof command !== 'string' || command.trim().length === 0) {
+        throw new Error('command must be a non-empty string')
+      }
+
+      // Terminal mode
+      const terminal = params.terminal === true
+      if (terminal) {
+        const sender = deps?.sendTerminalCommand
+        if (!sender) throw new Error('terminal mode requires the desktop app')
+        sender(command)
+        return { sent: true }
+      }
+
+      // Captured mode
+      const rawTimeout = typeof params.timeout_ms === 'number' ? params.timeout_ms : 120_000
+      const timeoutMs = Math.max(1_000, Math.min(480_000, rawTimeout))
+      const capturePlots = params.capture_plots !== false
+
+      // R plot-capture fast path: Rscript file.R exact form
+      const rscriptMatch = capturePlots ? /^\s*Rscript\s+(\S+\.[rR])\s*$/.exec(command) : null
+      if (rscriptMatch) {
+        const entry = await resolveInterpreterFn('rscript')
+        if (entry && entry.installed && entry.binPath) {
+          const harnessPath = resolveHarnessFn()
+          if (harnessPath) {
+            // Bypass shell, spawn directly
+            const runId = generateId()
+            const runDir = join(workspacePath, '.mim', 'code-runs', runId)
+            mkdirSync(runDir, { recursive: true })
+            const runJsonPath = join(runDir, 'run.json')
+            const beforeSnapshot = snapshotWorkspace(workspacePath)
+            const spawnArgv = [entry.binPath, harnessPath, rscriptMatch[1]]
+            const result = await executeCapture({
+              spawnArgv,
+              workspacePath,
+              timeoutMs,
+              runId,
+              runDir,
+              runJsonPath,
+              beforeSnapshot,
+              spawnFn,
+              runJsonExtra: { shell: true, command },
+            })
+            return result
+          }
+        }
+      }
+
+      // Normal shell execution
+      const shell = defaultShell(process.env, process.platform)
+      let spawnArgv: string[]
+      if (process.platform === 'win32') {
+        spawnArgv = [shell, '/d', '/s', '/c', command]
+      } else {
+        spawnArgv = [shell, '-lc', command]
+      }
+
+      const runId = generateId()
+      const runDir = join(workspacePath, '.mim', 'code-runs', runId)
+      mkdirSync(runDir, { recursive: true })
+      const runJsonPath = join(runDir, 'run.json')
+      const beforeSnapshot = snapshotWorkspace(workspacePath)
+
+      const result = await executeCapture({
+        spawnArgv,
+        workspacePath,
+        timeoutMs,
+        runId,
+        runDir,
+        runJsonPath,
+        beforeSnapshot,
+        spawnFn,
+        runJsonExtra: { shell: true, command },
+      })
       return result
     },
   })
