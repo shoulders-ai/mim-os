@@ -491,6 +491,10 @@ Tool descriptor fields:
 | `audience` | No | Defaults to `["chat"]`. |
 | `execute(ctx, input)` | Yes | Runs under app identity. |
 
+The runtime validates tool input against the declared schema before calling
+`execute`. Use native JSON values that match the schema; for example, array
+fields must be arrays, not JSON-encoded strings.
+
 Public chat tool names are collision-safe by default:
 
 ```txt

@@ -140,6 +140,75 @@ describe('app runtime capabilities', () => {
     })
   })
 
+  it('validates app tool input against declared schemas before executing handlers', async () => {
+    const pkgDir = join(dir, 'packages', 'board')
+    mkdirSync(join(pkgDir, 'backend'), { recursive: true })
+    mkdirSync(join(pkgDir, 'ui'), { recursive: true })
+    writeFileSync(join(pkgDir, 'ui', 'index.html'), '<h1>Board</h1>')
+    writeFileSync(join(pkgDir, 'backend', 'index.mjs'), `
+      export const tools = {
+        update: {
+          name: 'issues.update',
+          description: 'Update issue',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              labels: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    name: { type: 'string' },
+                    color: { type: 'string' }
+                  },
+                  required: ['name']
+                }
+              },
+              relatedIds: { type: 'array', items: { type: 'string' } }
+            },
+            required: ['id']
+          },
+          async execute() {
+            throw new Error('handler should not run')
+          }
+        }
+      }
+    `)
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({
+      name: '@mim/board',
+      version: '1.0.0',
+      type: 'module',
+      mim: {
+        manifestVersion: 1,
+        id: 'board',
+        name: 'Board',
+        views: [],
+        backend: './backend/index.mjs',
+        permissions: {},
+        provides: { tools: [{ name: 'issues.*', category: 'write', risk: 'medium' }] },
+      },
+    }))
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('board', true)
+    enablement.ackTrust(packages.get('board')!)
+    await runtime.listCapabilities()
+
+    await expect(
+      runtime.executeTool('issues.update', {
+        id: 'issue-1700000000-ab12',
+        labels: '[{"name":"bug"}]',
+      }, { actor: 'ai' }),
+    ).rejects.toThrow('Invalid input for issues.update: labels must be an array')
+
+    await expect(
+      runtime.executeTool('issues.update', {
+        id: 'issue-1700000000-ab12',
+        relatedIds: '["issue-1"]',
+      }, { actor: 'ai' }),
+    ).rejects.toThrow('Invalid input for issues.update: relatedIds must be an array')
+  })
+
   it('builds runtime contexts with frozen inputs and app-scoped tool calls', async () => {
     writePackage('stats-checker', 'export const jobs = {}')
     const { enablement, runtime, packages, tools } = await makeRuntime()

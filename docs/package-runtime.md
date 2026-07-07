@@ -180,7 +180,7 @@ EnabledPackageStore
 PackageRuntime
   imports enabled backend modules on demand
   validates exported jobs and tools
-  builds app-scoped runtime ctx
+  validates tool inputs and builds app-scoped runtime ctx
 
 CapabilityRegistry
   indexes enabled app jobs/tools
@@ -419,4 +419,3 @@ Settled for v1:
   real requirement.
 - Store app data and run history as workspace-scoped JSON files first.
 - Use launch tokens for app iframe identity.
-

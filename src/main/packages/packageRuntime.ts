@@ -277,6 +277,10 @@ export function createPackageRuntime(options: PackageRuntimeOptions): PackageRun
       if (ctx.actor === 'package' && ctx.package_id && ctx.package_id !== entry.pkg.manifest.id) {
         throw new Error(`Package ${ctx.package_id} cannot execute tools owned by package ${entry.pkg.manifest.id}`)
       }
+      const validationErrors = validateJsonSchema(entry.tool.inputSchema, input)
+      if (validationErrors.length > 0) {
+        throw new Error(`Invalid input for ${publicName}: ${validationErrors.join('; ')}`)
+      }
       const runtimeCtx = createRuntimeContext(options, {
         pkg: entry.pkg,
         caller: ctx,
@@ -585,6 +589,140 @@ function readSchema(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined
+}
+
+function validateJsonSchema(schema: Record<string, unknown>, value: unknown): string[] {
+  return validateSchemaValue(schema, value, '')
+}
+
+function validateSchemaValue(schema: Record<string, unknown>, value: unknown, path: string): string[] {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return []
+
+  if ('const' in schema && !jsonEqual(value, schema.const)) {
+    return [`${formatPath(path)} must equal ${formatSchemaValue(schema.const)}`]
+  }
+
+  if (Array.isArray(schema.enum) && !schema.enum.some(item => jsonEqual(item, value))) {
+    return [`${formatPath(path)} must be one of: ${schema.enum.map(formatSchemaValue).join(', ')}`]
+  }
+
+  const type = schema.type
+  if (typeof type === 'string') {
+    if (!matchesJsonType(value, type)) return [`${formatPath(path)} must be ${jsonTypeLabel(type)}`]
+  } else if (Array.isArray(type) && type.every(item => typeof item === 'string')) {
+    if (!type.some(item => matchesJsonType(value, item))) {
+      return [`${formatPath(path)} must be ${type.map(jsonTypeLabel).join(' or ')}`]
+    }
+  }
+
+  const errors: string[] = []
+  if (isPlainRecord(value)) {
+    const required = Array.isArray(schema.required)
+      ? schema.required.filter((item): item is string => typeof item === 'string')
+      : []
+    for (const key of required) {
+      if (!(key in value) || value[key] === undefined) errors.push(`${formatPropertyPath(path, key)} is required`)
+    }
+
+    const properties = isPlainRecord(schema.properties) ? schema.properties : {}
+    for (const [key, childSchema] of Object.entries(properties)) {
+      if (!(key in value) || value[key] === undefined) continue
+      if (isPlainRecord(childSchema)) errors.push(...validateSchemaValue(childSchema, value[key], formatPropertyPath(path, key)))
+    }
+
+    if (schema.additionalProperties === false) {
+      for (const key of Object.keys(value)) {
+        if (!(key in properties)) errors.push(`${formatPropertyPath(path, key)} is not allowed`)
+      }
+    }
+  }
+
+  if (Array.isArray(value)) {
+    if (typeof schema.minItems === 'number' && value.length < schema.minItems) {
+      errors.push(`${formatPath(path)} must contain at least ${schema.minItems} item${schema.minItems === 1 ? '' : 's'}`)
+    }
+    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) {
+      errors.push(`${formatPath(path)} must contain at most ${schema.maxItems} item${schema.maxItems === 1 ? '' : 's'}`)
+    }
+    if (isPlainRecord(schema.items)) {
+      value.forEach((item, index) => {
+        errors.push(...validateSchemaValue(schema.items as Record<string, unknown>, item, `${formatPath(path)}[${index}]`))
+      })
+    }
+  }
+
+  if (typeof value === 'string') {
+    if (typeof schema.minLength === 'number' && value.length < schema.minLength) {
+      errors.push(`${formatPath(path)} must be at least ${schema.minLength} character${schema.minLength === 1 ? '' : 's'}`)
+    }
+    if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) {
+      errors.push(`${formatPath(path)} must be at most ${schema.maxLength} character${schema.maxLength === 1 ? '' : 's'}`)
+    }
+  }
+
+  return errors
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function matchesJsonType(value: unknown, type: string): boolean {
+  switch (type) {
+    case 'object':
+      return isPlainRecord(value)
+    case 'array':
+      return Array.isArray(value)
+    case 'string':
+      return typeof value === 'string'
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value)
+    case 'integer':
+      return typeof value === 'number' && Number.isInteger(value)
+    case 'boolean':
+      return typeof value === 'boolean'
+    case 'null':
+      return value === null
+    default:
+      return true
+  }
+}
+
+function jsonTypeLabel(type: string): string {
+  switch (type) {
+    case 'object':
+      return 'an object'
+    case 'array':
+      return 'an array'
+    case 'string':
+      return 'a string'
+    case 'number':
+      return 'a number'
+    case 'integer':
+      return 'an integer'
+    case 'boolean':
+      return 'a boolean'
+    case 'null':
+      return 'null'
+    default:
+      return type
+  }
+}
+
+function formatPath(path: string): string {
+  return path || 'input'
+}
+
+function formatPropertyPath(base: string, key: string): string {
+  return base ? `${base}.${key}` : key
+}
+
+function formatSchemaValue(value: unknown): string {
+  return typeof value === 'string' ? JSON.stringify(value) : String(value)
+}
+
+function jsonEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 export function publicToolName(packageId: string, toolId: string): string {

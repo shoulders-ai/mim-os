@@ -107,7 +107,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 ### Main Process — App System
 
 - **App loader.** Workspace > global precedence, version pins, manifest validation. `src/main/packages/packages.ts`, `packageManifest.ts`, `packageEnablement.ts`.
-- **App runtime.** Backend jobs, app data, `ctx.http` (host allowlist), `ctx.secrets` (keychain), named tools. `src/main/packages/packageRuntime.ts`, `packageJobs.ts`, `packageData.ts`, `packageHttp.ts`, `packageSecrets.ts`, `namedPackageTools.ts`. Docs: [app-system-api.md](app-system-api.md).
+- **App runtime.** Backend jobs, app data, JSON Schema tool input validation, `ctx.http` (host allowlist), `ctx.secrets` (keychain), named tools. `src/main/packages/packageRuntime.ts`, `packageJobs.ts`, `packageData.ts`, `packageHttp.ts`, `packageSecrets.ts`, `namedPackageTools.ts`. Docs: [app-system-api.md](app-system-api.md).
 - **Registry & install.** Multi-source resolution with ownership rule, trust gating, archive/git/local installs, and active-workspace package update checks. `src/main/packages/registrySources.ts`, `registryIndex.ts`, `updateCheck.ts`, `tools/registryTools.ts`, `tools/install.ts`. Docs: [private-registry.md](private-registry.md) for the authenticated account registry.
 - **Core-app tools.** `app.status/enable/disable/remove/trust` for personal enablement. `src/main/tools/coreApps.ts`.
 - **App authoring.** Starter templates, create/validate/reload authoring loop. `src/main/tools/packages.ts`, `templates/appTemplates.ts`.
