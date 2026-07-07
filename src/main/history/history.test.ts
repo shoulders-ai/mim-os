@@ -171,7 +171,8 @@ describe('workspace history store', () => {
     expect(stats.versionCount).toBe(2)
   })
 
-  it('folds a thousand saves into a short default rail', () => {
+  // 1000 real file writes: crosses the default 5s timeout under full-suite load.
+  it('folds a thousand saves into a short default rail', { timeout: 20000 }, () => {
     writeFileSync(join(root, 'analysis.md'), 'v0')
     const start = now - 90 * 86400000
     for (let i = 0; i < 1000; i++) {
@@ -225,7 +226,8 @@ describe('workspace history store', () => {
     expect(readFileSync(join(root, 'paper.md'), 'utf-8')).toBe('new')
   })
 
-  it('physically prunes folded versions and garbage-collects unused blobs', () => {
+  // 1000 real file writes: crosses the default 5s timeout under full-suite load.
+  it('physically prunes folded versions and garbage-collects unused blobs', { timeout: 20000 }, () => {
     writeFileSync(join(root, 'analysis.md'), 'v0')
     const start = now - 90 * 86400000
     for (let i = 0; i < 1000; i++) {
