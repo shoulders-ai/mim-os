@@ -26,6 +26,8 @@
     "dist:mac": "electron-vite build && electron-builder --config electron-builder.config.mjs --mac",
     "dist:win": "electron-vite build && electron-builder --config electron-builder.config.mjs --win",
     "dist:linux": "electron-vite build && electron-builder --config electron-builder.config.mjs --linux",
+    "docs:gen": "node scripts/docs-gen/index.mjs",
+    "docs:lint": "node scripts/docs-lint.mjs",
     "postinstall": "electron-rebuild"
   },
   "dependencies": {

@@ -83,6 +83,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Model registry.** Model catalog, key resolution (`~/.mim/keys.env` → env), model-default cascade. `src/main/ai/ai.ts`, `resources/ai-models.json`.
 - **AI runtime.** Vercel AI SDK provider calls, ToolLoopAgent profiles, ghost generation, tool wrapping, usage/context tracking, and browser-tool message compaction. `src/main/ai/aiRuntime.ts`, `src/main/ai/messageCompaction.ts`.
 - **System prompt.** Template-based from `AGENTS.md` with `{{TOOL_SET}}`, `{{SKILL_CATALOG}}`, `{{WORKSPACE_TREE}}`, `{{PROJECT_LOG}}` etc. `src/main/ai/systemPrompt.ts`, `workspaceTree.ts`.
+- **Agent mounts.** Resolve app `agents` exports into `AgentProfile`s, build constrained instructions context, template-var resolution, tool-allowlist intersection, per-turn skill pre-activation. `src/main/ai/agentMounts.ts`.
 - **Agent context.** Deterministic `.mim/agent-context.md` digest with workspace/app/git health. `src/main/ai/agentContext.ts`, `packages/packageContributions.ts`.
 
 ### Main Process — Execution & Terminal
@@ -107,7 +108,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 ### Main Process — App System
 
 - **App loader.** Workspace > global precedence, version pins, manifest validation. `src/main/packages/packages.ts`, `packageManifest.ts`, `packageEnablement.ts`.
-- **App runtime.** Backend jobs, app data, JSON Schema tool input validation, `ctx.http` (host allowlist), `ctx.secrets` (keychain), named tools. `src/main/packages/packageRuntime.ts`, `packageJobs.ts`, `packageData.ts`, `packageHttp.ts`, `packageSecrets.ts`, `namedPackageTools.ts`. Docs: [app-system-api.md](app-system-api.md).
+- **App runtime.** Backend jobs, app data, JSON Schema tool input validation, agent descriptor parsing, `ctx.http` (host allowlist), `ctx.secrets` (keychain), named tools. `src/main/packages/packageRuntime.ts`, `packageJobs.ts`, `packageData.ts`, `packageHttp.ts`, `packageSecrets.ts`, `namedPackageTools.ts`. Docs: [app-system-api.md](app-system-api.md).
 - **Registry & install.** Multi-source resolution with ownership rule, trust gating, archive/git/local installs, and active-workspace package update checks. `src/main/packages/registrySources.ts`, `registryIndex.ts`, `updateCheck.ts`, `tools/registryTools.ts`, `tools/install.ts`. Docs: [private-registry.md](private-registry.md) for the authenticated account registry.
 - **Core-app tools.** `app.status/enable/disable/remove/trust` for personal enablement. `src/main/tools/coreApps.ts`.
 - **App authoring.** Starter templates, create/validate/reload authoring loop. `src/main/tools/packages.ts`, `templates/appTemplates.ts`.
@@ -175,6 +176,11 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 - **References** — DOI/PDF capture, managed library, `references.*` tools.
 - **Import-MD** — file import UI over core `documents.importMarkdown`.
 
+### Documentation Pipeline
+
+- **Docs generators.** Deterministic scripts that generate developer documentation pages from source data. `scripts/docs-gen/`. Run via `npm run docs:gen` (requires `npm run build` for the tool catalog). Proposal: [proposals/user-manual.md](proposals/user-manual.md) §4.
+- **Claim lint.** Validates manual page claims (tool names, shortcuts, settings refs, internal links) against source of truth. `scripts/docs-lint.mjs`. Run via `npm run docs:lint`.
+
 ### Docs Index
 
 | Doc | What it covers |
@@ -219,6 +225,8 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/popout-editor-window.md](proposals/popout-editor-window.md) — **implemented** (phases 0-3; phase 4 deferred). Pop-out editor windows: move any editor tab into its own OS window and back, with full tab-state transfer, per-window close guards, focused-window menu routing, and macOS native touches.
 - [proposals/tools-settings-tab.md](proposals/tools-settings-tab.md) — Settings > Tools plan for unified AI/MCP tool availability policy.
+- [proposals/agents-as-apps.md](proposals/agents-as-apps.md) — **implemented** (phases 0-4; phase 5 deferred). Agents as an app contribution type: `AgentProfile` primitive extracted from the chat runtime, `export const agents` mounting, agent sessions in the native chat surface, starter template and authoring docs.
+- [proposals/user-manual.md](proposals/user-manual.md) — user manual + developer docs for mim-web: positioning, IA, content pipeline, subagent authoring process, design guide.
 
 ## File Tree
 
@@ -253,6 +261,7 @@ src/
       ai.ts                     # Model registry, key resolver
       aiRuntime.ts              # Central AI runtime + tools
       agentContext.ts           # Runtime workspace digest
+      agentMounts.ts            # App agent → AgentProfile resolution
       systemPrompt.ts           # Dynamic AI system prompt
       workspaceTree.ts          # Bounded workspace tree prompt context
     packages/
@@ -361,6 +370,7 @@ src/
       runs.ts                   # Aggregated run status
       pings.ts                  # Ping-when-done chime + indicators
       agents.ts                 # CLI agent catalog mirror
+      appAgents.ts              # App-mounted agent state (package agents)
       coreApps.ts               # Resolved per-app state
       toasts.ts                 # Toast notifications
       resources.ts              # Resource collections
@@ -461,6 +471,25 @@ resources/
   ai-models.json                # Model catalog
   r/mim-run.R                   # Plot-capture harness for code.run
   icon.png                      # macOS dev dock icon
+
+scripts/
+  docs-gen/                     # Manual documentation generators
+    index.mjs                   # Orchestrator — runs all generators
+    toolCatalog.mjs             # Tool catalog from headless registry + gate.ts
+    shortcuts.mjs               # Shortcuts from ShortcutsDialog.vue
+    models.mjs                  # Models from resources/ai-models.json
+    apps.mjs                    # Apps from mim-apps manifests
+  docs-lint.mjs                 # Claim lint for manual pages
+
+manual/
+  _style.md                     # Voice + design rules contract
+  _specs/                       # One spec per chapter: outline + sources
+  _generated/
+    shortcuts.md                # Generated shortcuts fragment (include)
+  develop/
+    tools.md                    # Generated tool catalog
+    models.md                   # Generated models page
+    apps.md                     # Generated apps page
 
 docs/                           # Implementation docs (see Docs Index above)
 ```

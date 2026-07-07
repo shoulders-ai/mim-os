@@ -4,6 +4,10 @@ Logged items that require a separate effort. Fix small things inline; log larger
 
 ## Open
 
+- **Draft vocabulary leaked into two docs ahead of the code.** `docs/workbench-navigation.md` and `docs/observability.md` call the fourth sidebar surface "Review", but the shipped UI label is "Monitor" (`ShellSidebar.vue`). Since the ontology/vocabulary migration is drafted but not approved, either revert the docs to shipped terms or execute the migration — do not leave the layers disagreeing. The user manual (`manual/`) follows the shipped UI.
+- **History rail attributes agent edits to "assistant".** `HistoryRail.vue` detail lines read "Edited by assistant"; everywhere else the product says "agent". Rename the label (and update `manual/history-recovery.md`, which quotes it).
+- **Connections settings copy mixes "websites" and "domains".** `ConnectionsSettingsPanel.vue` has group titles "Website Access" and "Domains" and a caption "granted websites" for the same concept. Pick one term.
+- **mim-apps registry contains duplicate app `word-count-2`** — identical name-and-description copy of `word-count` in `index.json`. Delete from the registry (external repo).
 - **Electron is behind on security patches (`^35.0.0`).** A major-version upgrade is needed — it rebuilds all native modules (better-sqlite3, node-pty, keytar) and may touch BrowserWindow/security APIs. Do as a focused upgrade with a full app smoke test.
 - **`keytar.node` arch drift after `electron-rebuild`.** If test collection failures appear across files importing keytar, rebuild keytar for the host arch or mock it at the test boundary.
 - **No single-instance or workspace lock.** Two app instances can open the same workspace and corrupt `.mim/` state. Needs a lockfile or IPC-based single-instance guard.
