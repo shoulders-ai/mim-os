@@ -1,5 +1,8 @@
-import { describe, expect, it, vi } from 'vitest'
-import { webSearch } from './webSearch.js'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { join } from 'path'
+import { tmpdir } from 'os'
+import { webSearch, resolveExaKey } from './webSearch.js'
 
 const EXA_RESPONSE = {
   results: [
@@ -30,6 +33,59 @@ function mockFetchOk(data: unknown) {
     text: () => Promise.resolve(JSON.stringify(data)),
   })
 }
+
+describe('resolveExaKey precedence', () => {
+  let home: string
+  const origHome = process.env.HOME
+  const savedKey = process.env.EXA_API_KEY
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'mim-exakey-home-'))
+    process.env.HOME = home
+    delete process.env.EXA_API_KEY
+  })
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true })
+    process.env.HOME = origHome
+    if (savedKey === undefined) delete process.env.EXA_API_KEY
+    else process.env.EXA_API_KEY = savedKey
+  })
+
+  it('prefers ~/.mim/keys.env over the launch environment', () => {
+    process.env.EXA_API_KEY = 'exa-from-env'
+    mkdirSync(join(home, '.mim'), { recursive: true })
+    writeFileSync(join(home, '.mim', 'keys.env'), 'EXA_API_KEY=exa-from-file\n')
+
+    const { key, source } = resolveExaKey()
+    expect(key).toBe('exa-from-file')
+    expect(source).toBe('file')
+  })
+
+  it('falls back to the environment when the file has no entry', () => {
+    process.env.EXA_API_KEY = 'exa-from-env'
+
+    const { key, source } = resolveExaKey()
+    expect(key).toBe('exa-from-env')
+    expect(source).toBe('env')
+  })
+
+  it('treats an empty file entry as absent and falls back to env', () => {
+    process.env.EXA_API_KEY = 'exa-from-env'
+    mkdirSync(join(home, '.mim'), { recursive: true })
+    writeFileSync(join(home, '.mim', 'keys.env'), 'EXA_API_KEY=\n')
+
+    const { key, source } = resolveExaKey()
+    expect(key).toBe('exa-from-env')
+    expect(source).toBe('env')
+  })
+
+  it('reports missing when neither is set', () => {
+    const { key, source } = resolveExaKey()
+    expect(key).toBeNull()
+    expect(source).toBe('missing')
+  })
+})
 
 describe('webSearch', () => {
   it('returns parsed Exa results with highlights as snippets', async () => {

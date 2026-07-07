@@ -184,8 +184,8 @@ Runtime:
 - Package server + `sdk/mim.js` for the iframe UI.
 - Package permissions: workspace read/write, AI, and HTTP hosts for reference
   search.
-- API keys in environment or `~/.mim/keys.env` for the selected review model's
-  provider.
+- API keys in `~/.mim/keys.env` or the environment for the selected review
+  model's provider (the file takes priority).
 
 Document engine:
 
