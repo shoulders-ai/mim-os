@@ -286,6 +286,31 @@ describe('FilesWorkView', () => {
     expect(pathBar().textContent).toContain('Search results')
   })
 
+  it('navigates to an ancestor directory when its breadcrumb is clicked', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    const pathBar = () => mounted!.root.querySelector<HTMLElement>('[data-testid="files-path-bar"]')!
+    const upButton = () => pathBar().querySelector<HTMLButtonElement>('[aria-label="Up one folder"]')!
+    expect(upButton().disabled).toBe(true)
+
+    const docsRow = rowButtons(mounted.root).find(row => row.textContent?.includes('docs'))!
+    docsRow.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    await flushUi()
+    expect(upButton().disabled).toBe(false)
+    call.mockClear()
+
+    const workspaceCrumb = Array.from(pathBar().querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.trim() === 'workspace')!
+    workspaceCrumb.click()
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('fs.list', { path: '.', max_entries: 500, include_last_changed_by: true })
+    expect(pathBar().textContent).not.toContain('docs')
+    expect(mounted.root.textContent).toContain('README.md')
+    expect(upButton().disabled).toBe(true)
+  })
+
   it('refreshes the current directory and workspace index when it becomes active again', async () => {
     const active = ref(false)
     mounted = mountReactiveFiles({ active })
@@ -934,6 +959,280 @@ describe('FilesWorkView', () => {
     // The docs folder should still be expanded with beta.md visible
     expect(mounted.root.textContent).toContain('beta.md')
     expect(mounted.root.textContent).not.toContain('alpha.md')
+  })
+
+  describe('multi-select', () => {
+    function fourFileMock() {
+      call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
+        if (tool === 'fs.list' && params?.path === '.') {
+          return {
+            entries: ['a.md', 'b.md', 'c.md', 'd.md'].map((name, i) => ({
+              path: name,
+              name,
+              type: 'file',
+              size: 100,
+              modifiedAt: `2026-06-0${4 - i}T09:00:00.000Z`,
+              createdAt: '2026-01-01T09:00:00.000Z',
+            })),
+            truncated: false,
+          }
+        }
+        if (tool === 'search.files') return { results: [] }
+        return { entries: [] }
+      })
+    }
+
+    function clickRow(root: HTMLElement, name: string, init: MouseEventInit = {}) {
+      const row = rowButtons(root).find(item => item.textContent?.includes(name))!
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init }))
+    }
+
+    function selectedNames(root: HTMLElement) {
+      return rowButtons(root)
+        .filter(row => row.dataset.selected === 'true')
+        .map(row => row.querySelector('[data-testid="files-row-name"]')?.textContent ?? '')
+    }
+
+    it('toggles rows with cmd/ctrl+click without opening them', async () => {
+      const onOpenFile = vi.fn()
+      fourFileMock()
+      mounted = mountFiles({}, { onOpenFile })
+      await flushUi()
+
+      clickRow(mounted.root, 'a.md', { metaKey: true })
+      await flushUi()
+      clickRow(mounted.root, 'c.md', { ctrlKey: true })
+      await flushUi()
+
+      expect(selectedNames(mounted.root)).toEqual(['a.md', 'c.md'])
+      expect(onOpenFile).not.toHaveBeenCalled()
+
+      clickRow(mounted.root, 'a.md', { metaKey: true })
+      await flushUi()
+      expect(selectedNames(mounted.root)).toEqual(['c.md'])
+    })
+
+    it('selects everything in between on cmd/ctrl+shift+click', async () => {
+      const onOpenFile = vi.fn()
+      fourFileMock()
+      mounted = mountFiles({}, { onOpenFile })
+      await flushUi()
+
+      clickRow(mounted.root, 'a.md', { metaKey: true })
+      await flushUi()
+      clickRow(mounted.root, 'c.md', { metaKey: true, shiftKey: true })
+      await flushUi()
+
+      expect(selectedNames(mounted.root)).toEqual(['a.md', 'b.md', 'c.md'])
+      expect(onOpenFile).not.toHaveBeenCalled()
+    })
+
+    it('replaces the selection with the range on plain shift+click', async () => {
+      fourFileMock()
+      mounted = mountFiles({}, { onOpenFile: vi.fn() })
+      await flushUi()
+
+      clickRow(mounted.root, 'd.md', { metaKey: true })
+      await flushUi()
+      clickRow(mounted.root, 'a.md', { metaKey: true })
+      await flushUi()
+      clickRow(mounted.root, 'b.md', { shiftKey: true })
+      await flushUi()
+
+      expect(selectedNames(mounted.root)).toEqual(['a.md', 'b.md'])
+    })
+
+    it('collapses the selection on plain click and opens as usual', async () => {
+      const onOpenFile = vi.fn()
+      fourFileMock()
+      mounted = mountFiles({}, { onOpenFile })
+      await flushUi()
+
+      clickRow(mounted.root, 'a.md', { metaKey: true })
+      clickRow(mounted.root, 'c.md', { metaKey: true })
+      await flushUi()
+      clickRow(mounted.root, 'b.md')
+      await flushUi()
+
+      expect(onOpenFile).toHaveBeenCalledWith('b.md')
+      expect(selectedNames(mounted.root)).toEqual(['b.md'])
+    })
+
+    it('clears the selection with Escape', async () => {
+      fourFileMock()
+      mounted = mountFiles()
+      await flushUi()
+
+      clickRow(mounted.root, 'a.md', { metaKey: true })
+      clickRow(mounted.root, 'b.md', { metaKey: true })
+      await flushUi()
+      expect(selectedNames(mounted.root)).toHaveLength(2)
+
+      input(mounted.root).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+      await flushUi()
+      expect(selectedNames(mounted.root)).toHaveLength(0)
+    })
+
+    it('offers bulk delete from the context menu of a selected row', async () => {
+      fourFileMock()
+      mounted = mountFiles()
+      await flushUi()
+
+      clickRow(mounted.root, 'a.md', { metaKey: true })
+      clickRow(mounted.root, 'c.md', { metaKey: true })
+      await flushUi()
+
+      const row = rowButtons(mounted.root).find(item => item.textContent?.includes('a.md'))!
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 24 }))
+      await flushUi()
+
+      expect(document.body.textContent).toContain('Delete 2 items')
+      expect(document.body.textContent).toContain('Copy 2 paths')
+      expect(document.body.textContent).not.toContain('Rename')
+
+      modeButton(document.body, 'Delete 2 items').click()
+      await flushUi()
+      expect(call).not.toHaveBeenCalledWith('fs.trash', expect.anything())
+      expect(document.body.textContent).toContain('Delete 2 items?')
+
+      modeButton(document.body, 'Delete 2 items').click()
+      await flushUi()
+      expect(call).toHaveBeenCalledWith('fs.trash', { path: 'a.md' })
+      expect(call).toHaveBeenCalledWith('fs.trash', { path: 'c.md' })
+    })
+
+    it('copies all selected paths from the bulk menu', async () => {
+      const writeText = vi.fn()
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+      fourFileMock()
+      mounted = mountFiles()
+      await flushUi()
+
+      clickRow(mounted.root, 'a.md', { metaKey: true })
+      clickRow(mounted.root, 'c.md', { metaKey: true })
+      await flushUi()
+
+      const row = rowButtons(mounted.root).find(item => item.textContent?.includes('c.md'))!
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 24 }))
+      await flushUi()
+      modeButton(document.body, 'Copy 2 paths').click()
+      await flushUi()
+
+      expect(writeText).toHaveBeenCalledWith('a.md\nc.md')
+    })
+
+    it('shows the single-row menu when right-clicking outside the selection', async () => {
+      fourFileMock()
+      mounted = mountFiles()
+      await flushUi()
+
+      clickRow(mounted.root, 'a.md', { metaKey: true })
+      clickRow(mounted.root, 'b.md', { metaKey: true })
+      await flushUi()
+
+      const row = rowButtons(mounted.root).find(item => item.textContent?.includes('d.md'))!
+      row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 12, clientY: 24 }))
+      await flushUi()
+
+      expect(document.body.textContent).toContain('Rename')
+      expect(document.body.textContent).not.toContain('Delete 2 items')
+      expect(selectedNames(mounted.root)).toEqual(['d.md'])
+    })
+
+    it('moves the whole selection when a selected row is dragged onto a folder', async () => {
+      const onPathMoved = vi.fn()
+      mounted = mountFiles({}, { onPathMoved })
+      await flushUi()
+
+      clickRow(mounted.root, 'README.md', { metaKey: true })
+      clickRow(mounted.root, 'docs', { metaKey: true })
+      await flushUi()
+      expect(call).not.toHaveBeenCalledWith('fs.list', expect.objectContaining({ path: 'docs' }))
+
+      const readmeRow = rowButtons(mounted.root).find(row => row.textContent?.includes('README.md'))!
+      const docsRow = rowButtons(mounted.root).find(row => row.textContent?.includes('docs'))!
+      const transfer = dataTransfer()
+
+      const start = new Event('dragstart', { bubbles: true, cancelable: true }) as DragEvent
+      Object.defineProperty(start, 'dataTransfer', { value: transfer })
+      readmeRow.dispatchEvent(start)
+
+      const over = new Event('dragover', { bubbles: true, cancelable: true }) as DragEvent
+      Object.defineProperty(over, 'dataTransfer', { value: transfer })
+      docsRow.dispatchEvent(over)
+
+      const drop = new Event('drop', { bubbles: true, cancelable: true }) as DragEvent
+      Object.defineProperty(drop, 'dataTransfer', { value: transfer })
+      docsRow.dispatchEvent(drop)
+      await flushUi()
+
+      // docs cannot move into itself; README.md still moves.
+      expect(call).toHaveBeenCalledWith('fs.rename', {
+        old_path: 'README.md',
+        new_path: 'docs/README.md',
+      })
+      expect(call).not.toHaveBeenCalledWith('fs.rename', expect.objectContaining({ old_path: 'docs' }))
+      expect(onPathMoved).toHaveBeenCalledTimes(1)
+    })
+
+    it('selects every selectable row with cmd/ctrl+A while the search box is empty', async () => {
+      fourFileMock()
+      mounted = mountFiles()
+      await flushUi()
+
+      input(mounted.root).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true, cancelable: true }),
+      )
+      await flushUi()
+
+      expect(selectedNames(mounted.root)).toEqual(['a.md', 'b.md', 'c.md', 'd.md'])
+    })
+
+    it('leaves cmd/ctrl+A to the browser default while the search box has text', async () => {
+      fourFileMock()
+      mounted = mountFiles()
+      await flushUi()
+      await type(mounted.root, 'a')
+
+      input(mounted.root).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true, cancelable: true }),
+      )
+      await flushUi()
+
+      expect(selectedNames(mounted.root)).toEqual([])
+    })
+
+    it('excludes disabled resource-collection rows from select-all and range selection', async () => {
+      call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
+        if (tool === 'fs.list' && params?.path === '.') {
+          return { entries: [{ path: 'README.md', name: 'README.md', type: 'file' }], truncated: false }
+        }
+        if (tool === 'fs.list') return { entries: [], truncated: false }
+        if (tool === 'resources.collections') {
+          return { collections: [
+            { id: 'brand', name: 'Brand', mountPath: '.mim/resources/brand', write: 'direct', status: 'not-synced' },
+          ] }
+        }
+        if (tool === 'search.files') return { results: [] }
+        return { entries: [] }
+      })
+      mounted = mountFiles()
+      await flushUi()
+
+      // Clicking a disabled row (even with a modifier) is a no-op for
+      // selection: it never joins, and it never clears what's selected.
+      clickRow(mounted.root, 'README.md', { metaKey: true })
+      clickRow(mounted.root, 'Brand', { shiftKey: true })
+      await flushUi()
+      expect(selectedNames(mounted.root)).toEqual(['README.md'])
+
+      // Select-all only picks up selectable rows.
+      input(mounted.root).dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true, cancelable: true }),
+      )
+      await flushUi()
+      expect(selectedNames(mounted.root)).toEqual(['README.md'])
+    })
   })
 
   it('keeps secondary file commands in the More menu', async () => {

@@ -5,12 +5,16 @@ import MimContextMenu from '../ui/MimContextMenu.vue'
 import MimMenuItem from '../ui/MimMenuItem.vue'
 import type { FileRow } from './fileTypes.js'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   row: FileRow
   x: number
   y: number
   expanded: boolean
-}>()
+  // ≥2 switches the menu to bulk actions over the whole multi-selection.
+  selectionCount?: number
+}>(), {
+  selectionCount: 0,
+})
 
 const emit = defineEmits<{
   close: []
@@ -25,7 +29,12 @@ const emit = defineEmits<{
   trash: []
   reveal: []
   copyPath: []
+  trashSelection: []
+  copySelectionPaths: []
+  clearSelection: []
 }>()
+
+const isBulk = computed(() => props.selectionCount >= 2)
 
 const isDirectory = computed(() => props.row.type === 'directory')
 
@@ -35,6 +44,7 @@ const showOpenNative = computed(() =>
 )
 
 const itemCount = computed(() => {
+  if (isBulk.value) return 3 // delete selection, copy paths, clear selection
   let count = 6 // open, rename, duplicate, trash, reveal, copy path
   if (isDirectory.value) count += 3 // expand/collapse, new file, new folder
   else count += 1 // version history
@@ -54,6 +64,18 @@ const menuHeight = computed(() => itemCount.value * 28 + 10)
     panel-class="border-rule-light py-1 font-sans text-[12px] text-ink-2"
     @close="emit('close')"
   >
+    <template v-if="isBulk">
+      <MimMenuItem :headless="false" item-class="h-7 px-3 py-0" @select="emit('trashSelection')">
+        Delete {{ selectionCount }} items
+      </MimMenuItem>
+      <MimMenuItem :headless="false" item-class="h-7 px-3 py-0" @select="emit('copySelectionPaths')">
+        Copy {{ selectionCount }} paths
+      </MimMenuItem>
+      <MimMenuItem :headless="false" item-class="h-7 px-3 py-0" @select="emit('clearSelection')">
+        Clear selection
+      </MimMenuItem>
+    </template>
+    <template v-else>
     <MimMenuItem :headless="false" item-class="h-7 px-3 py-0" @select="emit('open')">
       {{ isDirectory ? 'Open folder' : defaultOpenLabelForPath(row.path) }}
     </MimMenuItem>
@@ -112,5 +134,6 @@ const menuHeight = computed(() => itemCount.value * 28 + 10)
     <MimMenuItem :headless="false" item-class="h-7 px-3 py-0" @select="emit('copyPath')">
       Copy path
     </MimMenuItem>
+    </template>
   </MimContextMenu>
 </template>

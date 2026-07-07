@@ -6,6 +6,7 @@ import {
   isWorkspaceDragRow,
   isWorkspaceDropDir,
   parseWorkspaceDragPayload,
+  pruneNestedDragItems,
 } from './fileMove.js'
 import type { FileRow } from './fileTypes.js'
 
@@ -24,12 +25,36 @@ function row(path: string, type: 'directory' | 'file' = 'file', extra: Partial<F
 }
 
 describe('fileMove', () => {
-  it('serializes a minimal workspace drag payload', () => {
-    const encoded = encodeWorkspaceDragPayload(row('README.md'))
+  it('serializes a multi-item workspace drag payload', () => {
+    const encoded = encodeWorkspaceDragPayload([
+      { path: 'README.md', type: 'file' },
+      { path: 'docs', type: 'directory' },
+    ])
 
     expect(WORKSPACE_DRAG_MIME).toContain('mim')
-    expect(parseWorkspaceDragPayload(encoded)).toEqual({ path: 'README.md', type: 'file' })
+    expect(parseWorkspaceDragPayload(encoded)).toEqual({
+      items: [
+        { path: 'README.md', type: 'file' },
+        { path: 'docs', type: 'directory' },
+      ],
+    })
     expect(parseWorkspaceDragPayload('nope')).toBeNull()
+    expect(parseWorkspaceDragPayload('{"items":[]}')).toBeNull()
+    expect(parseWorkspaceDragPayload('{"items":[{"path":1,"type":"file"}]}')).toBeNull()
+  })
+
+  it('prunes items nested under a dragged directory so moves never double-apply', () => {
+    expect(pruneNestedDragItems([
+      { path: 'docs', type: 'directory' },
+      { path: 'docs/a.md', type: 'file' },
+      { path: 'docs/nested', type: 'directory' },
+      { path: 'docs-notes.md', type: 'file' },
+      { path: 'README.md', type: 'file' },
+    ])).toEqual([
+      { path: 'docs', type: 'directory' },
+      { path: 'docs-notes.md', type: 'file' },
+      { path: 'README.md', type: 'file' },
+    ])
   })
 
   it('builds a move target without changing the basename', () => {

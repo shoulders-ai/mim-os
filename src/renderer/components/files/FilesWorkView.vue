@@ -35,7 +35,19 @@ import type {
   SortKey,
   TableMode,
 } from './fileTypes.js'
-import { buildWorkspaceMovePlan, type WorkspaceDragPayload, type WorkspaceMoveResult } from './fileMove.js'
+import {
+  buildWorkspaceMovePlan,
+  pruneNestedDragItems,
+  type WorkspaceDragItem,
+  type WorkspaceDragPayload,
+  type WorkspaceMoveResult,
+} from './fileMove.js'
+import {
+  emptySelection,
+  pruneSelection,
+  reduceRowClick,
+  type FileSelection,
+} from './fileSelection.js'
 
 const props = withDefaults(defineProps<{
   active?: boolean
@@ -75,6 +87,7 @@ const resourceRoots = ref<ResourceRoot[]>([])
 const directoryError = ref('')
 const directoryLoading = ref(false)
 const selectedIndex = ref(0)
+const selection = ref<FileSelection>(emptySelection())
 const expandedPaths = ref<Set<string>>(new Set())
 const expandedChildren = ref<Record<string, FsEntry[]>>({})
 const expandedLoading = ref<Set<string>>(new Set())
@@ -195,6 +208,8 @@ const rows = computed<FileRow[]>(() => {
 })
 
 const selectedRow = computed(() => rows.value.find(row => row.gi === selectedIndex.value) ?? null)
+const selectedPathSet = computed(() => new Set(selection.value.paths))
+const selectablePaths = computed(() => rows.value.filter(row => !row.disabled).map(row => row.path))
 const emptyText = computed(() => {
   if (tableMode.value === 'search') {
     if (contentSearchLoading.value) return 'Searching files'
@@ -206,6 +221,7 @@ const emptyText = computed(() => {
 })
 watch(currentDir, (path) => {
   selectedIndex.value = 0
+  selection.value = emptySelection()
   closeContextMenu()
   expandedPaths.value = new Set()
   expandedChildren.value = {}
@@ -215,7 +231,14 @@ watch(currentDir, (path) => {
 
 watch([query, mode], () => {
   selectedIndex.value = 0
+  selection.value = emptySelection()
   closeContextMenu()
+})
+
+// Rows change on refresh, collapse, delete, sort: keep only still-visible
+// paths so bulk actions never target hidden rows.
+watch(rows, (next) => {
+  selection.value = pruneSelection(selection.value, next.map(row => row.path))
 })
 
 watch(query, (value) => {
@@ -464,9 +487,21 @@ async function toggleFolder(row: FileRow) {
   }
 }
 
-async function handleRowClick(row: FileRow) {
+async function handleRowClick(row: FileRow, event?: MouseEvent) {
   selectRow(row.gi)
   if (row.disabled) return
+  const { selection: next, activate } = reduceRowClick(
+    selection.value,
+    selectablePaths.value,
+    row.path,
+    {
+      toggle: !!(event && (event.metaKey || event.ctrlKey)),
+      range: !!event?.shiftKey,
+    },
+  )
+  selection.value = next
+  // Modified clicks only adjust the selection; they never open or expand.
+  if (!activate) return
   if (row.type === 'directory') {
     await toggleFolder(row)
     return
@@ -475,8 +510,9 @@ async function handleRowClick(row: FileRow) {
   emit('openFile', row.path)
 }
 
-function handleRowDoubleClick(row: FileRow) {
+function handleRowDoubleClick(row: FileRow, event?: MouseEvent) {
   if (row.disabled) return
+  if (event && (event.metaKey || event.ctrlKey || event.shiftKey)) return
   if (row.type === 'directory') {
     activateRow(row)
     return
@@ -515,6 +551,21 @@ function moveSelection(delta: number) {
 
 function onKeydown(event: KeyboardEvent) {
   const meta = event.metaKey || event.ctrlKey
+  if (event.key === 'Escape' && selection.value.paths.length) {
+    event.preventDefault()
+    event.stopPropagation()
+    selection.value = emptySelection()
+    return
+  }
+  // Only hijack cmd/ctrl+A when the search box has no text to select — same
+  // guard shape as the Backspace-to-navigate-up case below.
+  if (meta && event.key === 'a' && !query.value) {
+    event.preventDefault()
+    event.stopPropagation()
+    const paths = selectablePaths.value
+    selection.value = { paths, anchorPath: paths[0] ?? null }
+    return
+  }
   if (meta && event.key === 'n') {
     event.preventDefault()
     event.stopPropagation()
@@ -564,9 +615,23 @@ function openContextMenu(row: FileRow, event: MouseEvent) {
   event.preventDefault()
   event.stopPropagation()
   selectRow(row.gi)
+  // Right-click inside a multi-selection keeps it (the menu acts on all of
+  // it); outside, the selection collapses to the clicked row.
+  if (!(selection.value.paths.length > 1 && selection.value.paths.includes(row.path))) {
+    selection.value = row.disabled
+      ? emptySelection()
+      : { paths: [row.path], anchorPath: row.path }
+  }
   contextRow.value = row
   contextMenuPos.value = { x: event.clientX, y: event.clientY }
 }
+
+const contextSelectionCount = computed(() => {
+  const row = contextRow.value
+  if (!row) return 0
+  const paths = selection.value.paths
+  return paths.length > 1 && paths.includes(row.path) ? paths.length : 0
+})
 
 function closeContextMenu() {
   contextRow.value = null
@@ -743,17 +808,51 @@ async function contextDuplicate() {
 }
 
 // Delete is confirmed first and always lands in the OS Trash (recoverable),
-// never a hard delete.
-const deleteTarget = ref<{ path: string; type: 'directory' | 'file' } | null>(null)
+// never a hard delete. Bulk deletes carry every selected item.
+const deleteTarget = ref<{ items: WorkspaceDragItem[] } | null>(null)
 const deleteError = ref('')
 const deleteBusy = ref(false)
+
+const deleteDialogLabel = computed(() => {
+  const items = deleteTarget.value?.items ?? []
+  if (items.length > 1) return `Delete ${items.length} items`
+  return items[0]?.type === 'directory' ? 'Delete folder' : 'Delete file'
+})
 
 function contextTrash() {
   const row = contextRow.value
   if (!row) return
   closeContextMenu()
   deleteError.value = ''
-  deleteTarget.value = { path: row.path, type: row.type }
+  deleteTarget.value = { items: [{ path: row.path, type: row.type }] }
+}
+
+// ── Bulk actions over the multi-selection ──
+
+function selectedItems(): WorkspaceDragItem[] {
+  return rows.value
+    .filter(row => selectedPathSet.value.has(row.path))
+    .map(row => ({ path: row.path, type: row.type }))
+}
+
+function contextTrashSelection() {
+  const items = pruneNestedDragItems(selectedItems())
+  closeContextMenu()
+  if (!items.length) return
+  deleteError.value = ''
+  deleteTarget.value = { items }
+}
+
+async function copySelectionPaths() {
+  const paths = selection.value.paths
+  closeContextMenu()
+  if (!paths.length) return
+  await navigator.clipboard?.writeText?.(paths.join('\n'))
+}
+
+function clearSelection() {
+  selection.value = emptySelection()
+  closeContextMenu()
 }
 
 function closeDeleteDialog() {
@@ -766,15 +865,18 @@ async function confirmDelete() {
   if (!target || deleteBusy.value) return
   deleteBusy.value = true
   deleteError.value = ''
-  try {
-    await window.kernel.call('fs.trash', { path: target.path })
-    deleteTarget.value = null
-    await refresh()
-  } catch (err) {
-    deleteError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    deleteBusy.value = false
+  let firstError = ''
+  for (const item of target.items) {
+    try {
+      await window.kernel.call('fs.trash', { path: item.path })
+    } catch (err) {
+      if (!firstError) firstError = err instanceof Error ? err.message : String(err)
+    }
   }
+  if (firstError) deleteError.value = firstError
+  else deleteTarget.value = null
+  await refresh()
+  deleteBusy.value = false
 }
 
 function openEmptyContextMenu(event: MouseEvent) {
@@ -811,25 +913,44 @@ async function handleExternalDrop(files: File[], targetDir: string | null) {
 }
 
 async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: string | null) {
-  const plan = buildWorkspaceMovePlan(source, targetDir ?? currentOpsDir())
-  if (!plan.ok) {
-    if (plan.reason !== 'Already in this folder.') {
-      toastStore.push({ kind: 'info', message: 'Move skipped', detail: plan.reason })
+  const dest = targetDir ?? currentOpsDir()
+  const moves: WorkspaceMoveResult[] = []
+  const blockedReasons: string[] = []
+  for (const item of pruneNestedDragItems(source.items)) {
+    const plan = buildWorkspaceMovePlan(item, dest)
+    if (plan.ok) moves.push(plan.move)
+    else if (plan.reason !== 'Already in this folder.') blockedReasons.push(plan.reason)
+  }
+  if (!moves.length) {
+    // Silent when every item was already in place; otherwise say why.
+    if (blockedReasons.length) {
+      toastStore.push({ kind: 'info', message: 'Move skipped', detail: blockedReasons[0] })
     }
     return
   }
-  try {
-    await window.kernel.call('fs.rename', {
-      old_path: plan.move.oldPath,
-      new_path: plan.move.newPath,
-    })
-    emit('pathMoved', plan.move)
-    await refresh()
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    toastStore.push({ kind: 'error', message: 'Move failed', detail: message })
-    console.error('[files] move', err)
+  let failed = 0
+  let failMessage = ''
+  for (const move of moves) {
+    try {
+      await window.kernel.call('fs.rename', {
+        old_path: move.oldPath,
+        new_path: move.newPath,
+      })
+      emit('pathMoved', move)
+    } catch (err) {
+      failed++
+      if (!failMessage) failMessage = err instanceof Error ? err.message : String(err)
+      console.error('[files] move', err)
+    }
   }
+  if (failed > 0) {
+    toastStore.push({
+      kind: 'error',
+      message: 'Move failed',
+      detail: moves.length === 1 ? failMessage : `${failed} item${failed === 1 ? '' : 's'} could not be moved.`,
+    })
+  }
+  if (failed < moves.length) await refresh()
 }
 </script>
 
@@ -867,6 +988,7 @@ async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: stri
       :sort-direction="sortDirection"
       :expanded-paths="expandedPaths"
       :expanded-loading="expandedLoading"
+      :selected-paths="selectedPathSet"
       @set-sort="setSort"
       @row-click="handleRowClick"
       @row-mouseenter="selectRow"
@@ -884,6 +1006,7 @@ async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: stri
       :x="contextMenuPos.x"
       :y="contextMenuPos.y"
       :expanded="isExpanded(contextRow.path)"
+      :selection-count="contextSelectionCount"
       @close="closeContextMenu"
       @open="contextOpen"
       @open-native="contextOpenNative"
@@ -896,6 +1019,9 @@ async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: stri
       @trash="contextTrash"
       @reveal="contextReveal"
       @copy-path="copySelectedPath"
+      @trash-selection="contextTrashSelection"
+      @copy-selection-paths="copySelectionPaths"
+      @clear-selection="clearSelection"
     />
 
     <MimContextMenu
@@ -960,15 +1086,22 @@ async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: stri
       :open="true"
       size="sm"
       role="alertdialog"
-      :title="deleteTarget.type === 'directory' ? 'Delete folder' : 'Delete file'"
+      :title="deleteDialogLabel"
       @close="closeDeleteDialog"
     >
       <div class="flex flex-col gap-3 px-5 pb-5 font-sans">
         <p class="m-0 text-[13px] text-ink">
-          Delete <span class="font-semibold">{{ baseName(deleteTarget.path) }}</span>?
+          Delete
+          <span class="font-semibold">{{
+            deleteTarget.items.length > 1
+              ? `${deleteTarget.items.length} items`
+              : baseName(deleteTarget.items[0].path)
+          }}</span>?
         </p>
         <p class="m-0 text-[12px] text-ink-3">
-          It moves to the Trash. You can put it back from there.
+          {{ deleteTarget.items.length > 1
+            ? 'They move to the Trash. You can put them back from there.'
+            : 'It moves to the Trash. You can put it back from there.' }}
         </p>
         <p v-if="deleteError" class="m-0 text-[12px] text-rem">{{ deleteError }}</p>
         <div class="flex items-center justify-end gap-2">
@@ -985,7 +1118,7 @@ async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: stri
             :disabled="deleteBusy"
             @click="confirmDelete"
           >
-            {{ deleteTarget.type === 'directory' ? 'Delete folder' : 'Delete file' }}
+            {{ deleteDialogLabel }}
           </button>
         </div>
       </div>

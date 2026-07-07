@@ -17,6 +17,7 @@ import {
   isWorkspaceDropDir,
   parseWorkspaceDragPayload,
   buildWorkspaceMovePlan,
+  type WorkspaceDragItem,
   type WorkspaceDragPayload,
 } from './fileMove.js'
 import {
@@ -43,13 +44,14 @@ const props = defineProps<{
   sortDirection: SortDirection
   expandedPaths: Set<string>
   expandedLoading: Set<string>
+  selectedPaths: Set<string>
 }>()
 
 const emit = defineEmits<{
   setSort: [key: SortKey]
-  rowClick: [row: FileRow]
+  rowClick: [row: FileRow, event: MouseEvent]
   rowMouseenter: [index: number]
-  rowDblclick: [row: FileRow]
+  rowDblclick: [row: FileRow, event: MouseEvent]
   rowContextmenu: [row: FileRow, event: MouseEvent]
   emptyContextmenu: [event: MouseEvent]
   dropExternal: [files: File[], targetDir: string | null]
@@ -133,11 +135,17 @@ function onRowDragover(row: FileRow, event: DragEvent) {
   event.stopPropagation()
   if (!isWorkspaceDropDir(row)) return
   const source = workspacePayloadFromEvent(event)
-  if (!source || !buildWorkspaceMovePlan(source, row.path).ok) return
+  if (!source || !canDropWorkspaceItems(source, row.path)) return
   event.preventDefault()
   event.dataTransfer!.dropEffect = 'move'
   dragKind.value = 'workspace'
   dropTargetDir.value = row.path
+}
+
+// A multi-item drop is offered as long as at least one item can move; the
+// parent skips the rest per item.
+function canDropWorkspaceItems(source: WorkspaceDragPayload, targetDir: string): boolean {
+  return source.items.some(item => buildWorkspaceMovePlan(item, targetDir).ok)
 }
 
 function onRowDrop(row: FileRow, event: DragEvent) {
@@ -152,7 +160,7 @@ function onRowDrop(row: FileRow, event: DragEvent) {
   event.stopPropagation()
   if (!isWorkspaceDropDir(row)) return
   const source = workspacePayloadFromEvent(event)
-  if (!source || !buildWorkspaceMovePlan(source, row.path).ok) return
+  if (!source || !canDropWorkspaceItems(source, row.path)) return
   event.preventDefault()
   emitWorkspaceDrop(event, row.path)
 }
@@ -169,17 +177,29 @@ function emitWorkspaceDrop(event: DragEvent, targetDir: string | null) {
   if (source) emit('dropWorkspace', source, targetDir)
 }
 
+// Dragging a row that is part of a multi-selection carries the whole
+// selection; a row outside it drags alone.
+function dragItemsFor(row: FileRow): WorkspaceDragItem[] {
+  if (props.selectedPaths.has(row.path) && props.selectedPaths.size > 1) {
+    const items = props.rows
+      .filter(item => props.selectedPaths.has(item.path) && isWorkspaceDragRow(item))
+      .map(item => ({ path: item.path, type: item.type }))
+    if (items.length) return items
+  }
+  return [{ path: row.path, type: row.type }]
+}
+
 function onRowDragstart(row: FileRow, event: DragEvent) {
   if (!isWorkspaceDragRow(row) || !event.dataTransfer) {
     event.preventDefault()
     return
   }
-  const payload = { path: row.path, type: row.type }
+  const payload = { items: dragItemsFor(row) }
   draggedWorkspaceRow.value = payload
   dragKind.value = 'workspace'
   event.dataTransfer.effectAllowed = 'move'
-  event.dataTransfer.setData(WORKSPACE_DRAG_MIME, encodeWorkspaceDragPayload(row))
-  event.dataTransfer.setData('text/plain', row.path)
+  event.dataTransfer.setData(WORKSPACE_DRAG_MIME, encodeWorkspaceDragPayload(payload.items))
+  event.dataTransfer.setData('text/plain', payload.items.map(item => item.path).join('\n'))
 }
 
 function onRowDragend() {
@@ -271,15 +291,17 @@ function fileIconClass(row: FileRow): string {
         type="button"
         data-testid="files-row"
         :data-active-file="isActiveFile(row) ? 'true' : undefined"
+        :data-selected="selectedPaths.has(row.path) ? 'true' : undefined"
         :aria-current="isActiveFile(row) ? 'true' : undefined"
+        :aria-selected="selectedPaths.has(row.path) ? 'true' : undefined"
         class="grid w-full items-center gap-2 border-b border-rule-light/70 px-3 text-left font-sans text-[12px] text-ink-2"
-        :class="[gridClass, row.searchSnippet ? 'h-[44px]' : 'h-[34px]', row.gi === selectedIndex || dropTargetDir === row.path ? 'bg-accent-tint text-ink' : '', row.disabled ? 'opacity-55' : 'hover:bg-chrome-high hover:text-ink']"
+        :class="[gridClass, row.searchSnippet ? 'h-[44px]' : 'h-[34px]', selectedPaths.has(row.path) || row.gi === selectedIndex || dropTargetDir === row.path ? 'bg-accent-tint text-ink' : '', row.disabled ? 'opacity-55' : 'hover:bg-chrome-high hover:text-ink']"
         :disabled="row.disabled"
         :draggable="isWorkspaceDragRow(row)"
         :title="rowTitle(row)"
-        @click="emit('rowClick', row)"
+        @click="emit('rowClick', row, $event)"
         @mouseenter="emit('rowMouseenter', row.gi)"
-        @dblclick="emit('rowDblclick', row)"
+        @dblclick="emit('rowDblclick', row, $event)"
         @contextmenu="emit('rowContextmenu', row, $event)"
         @dragstart="onRowDragstart(row, $event)"
         @dragend="onRowDragend"

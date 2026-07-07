@@ -35,6 +35,7 @@ function mountRows(rows: FileRow[], listeners: Record<string, unknown> = {}) {
     sortDirection: 'asc',
     expandedPaths: new Set<string>(),
     expandedLoading: new Set<string>(),
+    selectedPaths: new Set<string>(),
     activeFilePath: '',
     ...listeners,
   })
@@ -133,7 +134,9 @@ describe('FilesTable', () => {
     rows[0].dispatchEvent(start)
 
     expect(transfer.effectAllowed).toBe('move')
-    expect(JSON.parse(transfer.getData(WORKSPACE_DRAG_MIME))).toEqual({ path: 'README.md', type: 'file' })
+    expect(JSON.parse(transfer.getData(WORKSPACE_DRAG_MIME))).toEqual({
+      items: [{ path: 'README.md', type: 'file' }],
+    })
 
     const over = new Event('dragover', { bubbles: true, cancelable: true }) as DragEvent
     Object.defineProperty(over, 'dataTransfer', { value: transfer })
@@ -143,6 +146,85 @@ describe('FilesTable', () => {
     Object.defineProperty(drop, 'dataTransfer', { value: transfer })
     rows[1].dispatchEvent(drop)
 
-    expect(moved).toEqual([{ source: { path: 'README.md', type: 'file' }, targetDir: 'docs' }])
+    expect(moved).toEqual([{
+      source: { items: [{ path: 'README.md', type: 'file' }] },
+      targetDir: 'docs',
+    }])
+  })
+
+  it('highlights multi-selected rows persistently', () => {
+    mounted = mountRows([
+      row('a.md', 'a.md', 0),
+      row('b.md', 'b.md', 0),
+      row('c.md', 'c.md', 0),
+    ], {
+      selectedPaths: new Set(['a.md', 'c.md']),
+    })
+
+    const rows = Array.from(mounted.root.querySelectorAll<HTMLButtonElement>('[data-testid="files-row"]'))
+    expect(rows[0].dataset.selected).toBe('true')
+    expect(rows[0].className).toContain('bg-accent-tint')
+    expect(rows[1].dataset.selected).toBeUndefined()
+    expect(rows[1].className).not.toContain('bg-accent-tint')
+    expect(rows[2].dataset.selected).toBe('true')
+  })
+
+  it('forwards the mouse event with row clicks so modifiers reach the parent', () => {
+    const clicks: Array<{ path: string; meta: boolean; shift: boolean }> = []
+    mounted = mountRows([row('a.md', 'a.md', 0)], {
+      onRowClick: (clicked: FileRow, event: MouseEvent) =>
+        clicks.push({ path: clicked.path, meta: event.metaKey, shift: event.shiftKey }),
+    })
+
+    const rowEl = mounted.root.querySelector<HTMLButtonElement>('[data-testid="files-row"]')!
+    rowEl.dispatchEvent(new MouseEvent('click', { bubbles: true, metaKey: true }))
+    rowEl.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }))
+
+    expect(clicks).toEqual([
+      { path: 'a.md', meta: true, shift: false },
+      { path: 'a.md', meta: false, shift: true },
+    ])
+  })
+
+  it('drags the whole selection when a selected row is dragged', () => {
+    mounted = mountRows([
+      row('a.md', 'a.md', 0),
+      row('b.md', 'b.md', 0),
+      row('c.md', 'c.md', 0),
+    ], {
+      selectedPaths: new Set(['a.md', 'c.md']),
+    })
+
+    const rows = Array.from(mounted.root.querySelectorAll<HTMLButtonElement>('[data-testid="files-row"]'))
+    const transfer = dataTransfer()
+    const start = new Event('dragstart', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(start, 'dataTransfer', { value: transfer })
+    rows[0].dispatchEvent(start)
+
+    expect(JSON.parse(transfer.getData(WORKSPACE_DRAG_MIME))).toEqual({
+      items: [
+        { path: 'a.md', type: 'file' },
+        { path: 'c.md', type: 'file' },
+      ],
+    })
+  })
+
+  it('drags only the grabbed row when it is outside the selection', () => {
+    mounted = mountRows([
+      row('a.md', 'a.md', 0),
+      row('b.md', 'b.md', 0),
+    ], {
+      selectedPaths: new Set(['a.md']),
+    })
+
+    const rows = Array.from(mounted.root.querySelectorAll<HTMLButtonElement>('[data-testid="files-row"]'))
+    const transfer = dataTransfer()
+    const start = new Event('dragstart', { bubbles: true, cancelable: true }) as DragEvent
+    Object.defineProperty(start, 'dataTransfer', { value: transfer })
+    rows[1].dispatchEvent(start)
+
+    expect(JSON.parse(transfer.getData(WORKSPACE_DRAG_MIME))).toEqual({
+      items: [{ path: 'b.md', type: 'file' }],
+    })
   })
 })

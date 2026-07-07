@@ -3,9 +3,15 @@ import type { FileRow } from './fileTypes.js'
 
 export const WORKSPACE_DRAG_MIME = 'application/x-mim-workspace-path+json'
 
-export interface WorkspaceDragPayload {
+export interface WorkspaceDragItem {
   path: string
   type: 'directory' | 'file'
+}
+
+// A drag always carries the full list of items being moved: a single row, or
+// the whole multi-selection when the dragged row is part of one.
+export interface WorkspaceDragPayload {
+  items: WorkspaceDragItem[]
 }
 
 export interface WorkspaceMoveResult {
@@ -18,19 +24,32 @@ export type WorkspaceMovePlan =
   | { ok: true; move: WorkspaceMoveResult }
   | { ok: false; reason: string }
 
-export function encodeWorkspaceDragPayload(row: Pick<FileRow, 'path' | 'type'>): string {
-  return JSON.stringify({ path: row.path, type: row.type })
+export function encodeWorkspaceDragPayload(items: WorkspaceDragItem[]): string {
+  return JSON.stringify({ items: items.map(item => ({ path: item.path, type: item.type })) })
 }
 
 export function parseWorkspaceDragPayload(value: string): WorkspaceDragPayload | null {
   try {
-    const parsed = JSON.parse(value) as Partial<WorkspaceDragPayload>
-    if (typeof parsed.path !== 'string') return null
-    if (parsed.type !== 'directory' && parsed.type !== 'file') return null
-    return { path: parsed.path, type: parsed.type }
+    const parsed = JSON.parse(value) as { items?: unknown }
+    if (!Array.isArray(parsed.items) || parsed.items.length === 0) return null
+    const items: WorkspaceDragItem[] = []
+    for (const item of parsed.items as Array<Partial<WorkspaceDragItem>>) {
+      if (typeof item?.path !== 'string') return null
+      if (item.type !== 'directory' && item.type !== 'file') return null
+      items.push({ path: item.path, type: item.type })
+    }
+    return { items }
   } catch {
     return null
   }
+}
+
+// When a folder and its descendants are both selected, moving (or trashing)
+// the folder already covers the descendants; acting on them separately would
+// fail or double-apply.
+export function pruneNestedDragItems(items: WorkspaceDragItem[]): WorkspaceDragItem[] {
+  const dirs = items.filter(item => item.type === 'directory').map(item => item.path)
+  return items.filter(item => !dirs.some(dir => item.path !== dir && item.path.startsWith(`${dir}/`)))
 }
 
 export function isWorkspaceDragRow(row: FileRow): boolean {
@@ -45,7 +64,7 @@ export function isWorkspaceDropDir(row: FileRow): boolean {
 }
 
 export function buildWorkspaceMovePlan(
-  source: WorkspaceDragPayload,
+  source: WorkspaceDragItem,
   targetDir: string,
 ): WorkspaceMovePlan {
   const dir = normalizeDir(targetDir)
