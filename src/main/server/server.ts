@@ -9,12 +9,15 @@ import { v4 as uuid } from 'uuid'
 import type { ToolRegistry, ToolContext } from '@main/tools/registry.js'
 import type { PackageLoader } from '@main/packages/packages.js'
 import { createAiRuntime } from '@main/ai/aiRuntime.js'
+import { handleMcpRequest, type McpDesktopClient } from '@main/mcp/stdio.js'
 import { resolveInsidePackage } from '@main/packages/packageManifest.js'
 import {
   isToolPolicySettingWrite,
   mcpToolNameEnabled,
   readToolsPolicy,
 } from '@main/tools/toolPolicy.js'
+
+export type ServerMode = 'desktop' | 'serve'
 
 interface ServerHandle {
   port: number
@@ -124,8 +127,26 @@ export const GOOGLE_MCP_TOOL_SPECS: McpToolSpec[] = [
 const MCP_ALLOWED_TOOLS = new Set(MCP_TOOL_SPECS.map(tool => tool.mimName))
 
 export interface McpServerOptions {
+  mode?: ServerMode
+  host?: string
+  port?: number
   getNamedMcpTools?: () => McpToolSpec[]
   agentMounts?: { resolveProfile(agentId: string): Promise<import('@main/ai/aiRuntime.js').AgentProfile> }
+  authenticateMcpHttpToken?: (token: string) => McpHttpCaller | null | Promise<McpHttpCaller | null>
+  handleRoutineWebhook?: (
+    name: string,
+    delivery: {
+      rawBody: Buffer
+      body: unknown
+      headers: Record<string, string | string[] | undefined>
+    },
+  ) => Promise<{ status: number; ok: boolean; duplicate?: boolean; error?: string }>
+}
+
+export interface McpHttpCaller {
+  principal: string
+  callerName: string
+  sessionId?: string
 }
 
 export async function createServer(
@@ -133,25 +154,30 @@ export async function createServer(
   packages: PackageLoader,
   options?: McpServerOptions
 ): Promise<ServerHandle> {
+  const mode = options?.mode ?? 'desktop'
+  const listenHost = options?.host ?? '127.0.0.1'
+  const listenPort = options?.port ?? 0
   const app = express()
   const server = createHttpServer(app)
   const wss = new WebSocketServer({ server })
   const launchTokens = new Map<string, LaunchToken>()
   const mcpTokens = new Map<string, McpToken>()
   const mcpConnections = new Map<string, Set<WebSocket>>()
+  const mcpHttpEventStreams = new Set<express.Response>()
   const aiRuntime = createAiRuntime({ tools, agentMounts: options?.agentMounts })
   const getNamedMcpTools = options?.getNamedMcpTools ?? (() => [])
   const shellToken = randomUUID()
 
   for (const spec of MCP_TOOL_SPECS) {
     const tool = tools.get(spec.mimName)
-    if (!tool) console.error(`[server] MCP tool is not registered: ${spec.mimName}`)
-    else if (!tool.inputSchema) console.error(`[server] MCP tool is missing inputSchema: ${spec.mimName}`)
+    if (tool && !tool.inputSchema) console.error(`[server] MCP tool is missing inputSchema: ${spec.mimName}`)
   }
 
   function isMcpAllowed(method: string): boolean {
     const spec = mcpSpecForMethod(method, getNamedMcpTools())
     if (!spec) return false
+    const tool = tools.get(spec.mimName)
+    if (!tool?.inputSchema) return false
     const policy = readToolsPolicy(tools.getWorkspacePath(), {
       knownToolIds: tools.list().map(tool => tool.name),
     })
@@ -174,16 +200,93 @@ export async function createServer(
     // headers, so the browser blocks the response from foreign web pages.
     if (!origin || origin === 'null' || allowedOrigins.has(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin || 'null')
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-mim-shell-token')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-mim-shell-token, Authorization, x-mim-timestamp, x-mim-signature, x-mim-delivery')
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
     }
     if (req.method === 'OPTIONS') {
+      if (mode === 'serve') {
+        next()
+        return
+      }
       res.status(204).end()
       return
     }
     next()
   })
-  app.use(express.json({ limit: '25mb' }))
+  app.use(express.json({
+    limit: '25mb',
+    verify: (req, _res, buf) => {
+      ;(req as express.Request & { rawBody?: Buffer }).rawBody = Buffer.from(buf)
+    },
+  }))
+
+  if (mode === 'serve') {
+    app.get('/mcp/events', async (req, res) => {
+      const caller = await authenticateMcpHttpRequest(req, res, options?.authenticateMcpHttpToken)
+      if (!caller) return
+
+      res.status(200)
+      res.setHeader('Content-Type', 'text/event-stream')
+      res.setHeader('Cache-Control', 'no-cache, no-transform')
+      res.setHeader('Connection', 'keep-alive')
+      res.setHeader('X-Accel-Buffering', 'no')
+      res.write(`: connected ${caller.principal}\n\n`)
+      mcpHttpEventStreams.add(res)
+      req.on('close', () => {
+        mcpHttpEventStreams.delete(res)
+      })
+    })
+
+    app.post('/mcp', async (req, res) => {
+      try {
+        const caller = await authenticateMcpHttpRequest(req, res, options?.authenticateMcpHttpToken)
+        if (!caller) return
+
+        const sessionId = caller.sessionId ?? `mcp-http-${randomUUID()}`
+        const client: McpDesktopClient = {
+          tools: () => mcpToolMetadata(tools, getNamedMcpTools()),
+          async callTool(mimName, args) {
+            if (mimName === 'settings.set' && isToolPolicySettingWrite(args)) {
+              throw new Error('Tool policy cannot be changed over MCP')
+            }
+            if (!isMcpAllowed(mimName)) {
+              throw new Error(`Tool is not exposed over MCP: ${mimName}`)
+            }
+            return tools.call(mimName, args, {
+              actor: 'remote',
+              principal: caller.principal,
+              callerName: caller.callerName,
+              transport: 'mcp-http',
+              sessionId,
+            })
+          },
+          setClientName: () => {},
+          onClose: () => {},
+          close: () => {},
+        }
+
+        if (Array.isArray(req.body)) {
+          const responses = (await Promise.all(req.body.map(entry => handleMcpRequest(entry, client))))
+            .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+          if (responses.length === 0) {
+            res.status(202).end()
+            return
+          }
+          res.json(responses)
+          return
+        }
+
+        const response = await handleMcpRequest(req.body, client)
+        if (!response) {
+          res.status(202).end()
+          return
+        }
+        res.json(response)
+      } catch (err) {
+        sendError(res, err)
+      }
+    })
+  }
 
   // Shell token guard: every /api/ai/* request must carry the per-boot
   // token that only the trusted renderer shell (via preload bridge) can
@@ -191,6 +294,10 @@ export async function createServer(
   // blocked. OPTIONS preflight is handled by the CORS middleware above
   // (returns 204 before this middleware runs).
   app.use('/api/ai', (req, res, next) => {
+    if (mode === 'serve') {
+      sendServeModeNotFound(res)
+      return
+    }
     if (req.headers['x-mim-shell-token'] !== shellToken) {
       res.status(401).json({ error: 'Missing or invalid shell token' })
       return
@@ -199,7 +306,11 @@ export async function createServer(
   })
 
   // Serve SDK files
-  app.use('/sdk', express.static(sdkDir))
+  if (mode === 'serve') {
+    app.use('/sdk', (_req, res) => sendServeModeNotFound(res))
+  } else {
+    app.use('/sdk', express.static(sdkDir))
+  }
 
   app.post('/api/ai/chat', async (req, res) => {
     const abort = abortSignalForRequest(req, res)
@@ -281,10 +392,33 @@ export async function createServer(
     }
   })
 
+  app.post('/api/hooks/:routine', async (req, res) => {
+    if (!options?.handleRoutineWebhook) {
+      res.status(404).json({ ok: false, error: 'Routine webhooks are not available' })
+      return
+    }
+    try {
+      const rawBody = (req as express.Request & { rawBody?: Buffer }).rawBody ?? Buffer.alloc(0)
+      const result = await options.handleRoutineWebhook(req.params.routine, {
+        rawBody,
+        body: req.body,
+        headers: req.headers as Record<string, string | string[] | undefined>,
+      })
+      res.status(result.status).json({
+        ok: result.ok,
+        ...(result.duplicate ? { duplicate: true } : {}),
+        ...(result.error ? { error: result.error } : {}),
+      })
+    } catch (err) {
+      sendError(res, err)
+    }
+  })
+
   // Serve workspace files for renderer artifact viewers (e.g. the in-app PDF
   // viewer iframe). GET-only, workspace-scoped, traversal-guarded; same local
   // trust model as the other 127.0.0.1 endpoints.
   app.use('/workspace-files', (req, res) => {
+    if (mode === 'serve') return sendServeModeNotFound(res)
     if (req.method !== 'GET') return res.status(405).end()
     const workspace = tools.getWorkspacePath()
     if (!workspace) return res.status(404).send('No workspace open')
@@ -301,6 +435,7 @@ export async function createServer(
 
   // Serve app UI files
   app.use('/packages/:id', (req, res, next) => {
+    if (mode === 'serve') return sendServeModeNotFound(res)
     const pkg = packages.get(req.params.id)
     if (!pkg) return res.status(404).send('App not found')
 
@@ -329,6 +464,13 @@ export async function createServer(
 
   // WebSocket handler
   wss.on('connection', (ws) => {
+    if (mode === 'serve') {
+      setImmediate(() => {
+        if (ws.readyState === WebSocket.OPEN) ws.close(1008, 'WebSocket API disabled in serve mode')
+      })
+      return
+    }
+
     const clientId = uuid()
     let packageId: string | undefined
     let mcpSessionId: string | undefined
@@ -481,11 +623,12 @@ export async function createServer(
   // Broadcast to all connected WebSocket clients
   packages.onChange(() => {
     broadcast(wss, { event: 'packages:changed', data: packages.list() })
+    sendMcpHttpNotification(mcpHttpEventStreams, 'notifications/tools/list_changed')
   })
 
   // Find available port
   const port = await new Promise<number>((resolve) => {
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(listenPort, listenHost, () => {
       const addr = server.address()
       resolve(typeof addr === 'object' && addr ? addr.port : 0)
     })
@@ -493,11 +636,14 @@ export async function createServer(
 
   allowedOrigins.add(`http://127.0.0.1:${port}`)
   allowedOrigins.add(`http://localhost:${port}`)
+  if (listenHost !== '127.0.0.1' && listenHost !== '0.0.0.0' && listenHost !== '::') {
+    allowedOrigins.add(`http://${listenHost}:${port}`)
+  }
   // In dev, electron-vite serves the renderer from a separate port.
   if (process.env.ELECTRON_RENDERER_URL) {
     try { allowedOrigins.add(new URL(process.env.ELECTRON_RENDERER_URL).origin) } catch {}
   }
-  console.log(`[server] Listening on http://127.0.0.1:${port}`)
+  console.log(`[server] Listening on http://${listenHost}:${port}`)
 
   return {
     port,
@@ -523,6 +669,7 @@ export async function createServer(
       broadcast(wss, { event, data })
     },
     createPackageLaunchUrl: (packageId: string, viewId?: string) => {
+      if (mode === 'serve') throw new Error('App iframe routes are disabled in serve mode')
       pruneExpiredLaunchTokens(launchTokens)
       const pkg = packages.get(packageId)
       if (!pkg) throw new Error(`App not found: ${packageId}`)
@@ -604,6 +751,50 @@ function sendError(res: express.Response, err: unknown): void {
   })
 }
 
+function sendServeModeNotFound(res: express.Response): void {
+  res.status(404).send('Not found')
+}
+
+function bearerToken(req: express.Request): string | null {
+  const header = req.headers.authorization
+  if (typeof header !== 'string') return null
+  const match = /^Bearer\s+(.+)$/i.exec(header)
+  return match ? match[1].trim() : null
+}
+
+async function authenticateMcpHttpRequest(
+  req: express.Request,
+  res: express.Response,
+  authenticate: McpServerOptions['authenticateMcpHttpToken'],
+): Promise<McpHttpCaller | null> {
+  const token = bearerToken(req)
+  if (!token) {
+    res.status(401).json({ error: 'Missing bearer token' })
+    return null
+  }
+  if (!authenticate) {
+    res.status(503).json({ error: 'MCP HTTP auth is not configured' })
+    return null
+  }
+  const caller = await authenticate(token)
+  if (!caller) {
+    res.status(401).json({ error: 'Invalid bearer token' })
+    return null
+  }
+  return caller
+}
+
+function sendMcpHttpNotification(streams: Set<express.Response>, method: string): void {
+  const data = JSON.stringify({ jsonrpc: '2.0', method })
+  for (const stream of [...streams]) {
+    try {
+      stream.write(`event: message\ndata: ${data}\n\n`)
+    } catch {
+      streams.delete(stream)
+    }
+  }
+}
+
 function broadcast(wss: WebSocketServer, msg: Record<string, unknown>): void {
   for (const client of wss.clients) {
     sendWs(client, msg)
@@ -637,7 +828,7 @@ function mcpToolMetadata(tools: ToolRegistry, namedSpecs: McpToolSpec[] = []): A
   for (const spec of MCP_TOOL_SPECS) {
     if (!mcpToolNameEnabled(policy, spec.name, spec.mimName)) continue
     const tool = tools.get(spec.mimName)
-    if (!tool) throw new Error(`MCP tool is not registered: ${spec.mimName}`)
+    if (!tool) continue
     if (!tool.inputSchema) throw new Error(`MCP tool is missing inputSchema: ${spec.mimName}`)
     result.push({ ...spec, inputSchema: tool.inputSchema })
   }

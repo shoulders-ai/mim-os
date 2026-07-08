@@ -34,7 +34,8 @@ function isPrivateIpv4(a: number, b: number, c: number, d: number): boolean {
   if (a === 10) return true
   if (a === 192 && b === 168) return true
   if (a === 172 && b >= 16 && b <= 31) return true
-  if (a === 169 && b === 254 && c === 169 && d === 254) return true
+  if (a === 169 && b === 254) return true
+  if (a === 100 && b >= 64 && b <= 127) return true
   if (a === 0 && b === 0 && c === 0 && d === 0) return true
   return false
 }
@@ -49,14 +50,26 @@ function parseIpv4MappedHex(host: string): [number, number, number, number] | nu
 
 function isBlockedUrl(url: URL): boolean {
   if (BLOCKED_HOSTS.has(url.hostname)) return true
-  const host = url.hostname.replace(/^\[/, '').replace(/\]$/, '')
+  const host = url.hostname.replace(/^\[/, '').replace(/\]$/, '').toLowerCase()
   if (host === '::1') return true
+  if (host === '::') return true
   const mapped = parseIpv4MappedHex(host)
   if (mapped && isPrivateIpv4(...mapped)) return true
+  if (isPrivateIpv6(host)) return true
   const parts = host.split('.')
   if (parts.length === 4) {
     const nums = parts.map(p => parseInt(p, 10))
     if (nums.every(n => !isNaN(n)) && isPrivateIpv4(nums[0], nums[1], nums[2], nums[3])) return true
   }
+  return false
+}
+
+function isPrivateIpv6(host: string): boolean {
+  if (!host.includes(':')) return false
+  const firstHextet = parseInt(host.split(':')[0] || '0', 16)
+  if (!Number.isFinite(firstHextet)) return false
+  // fc00::/7 unique-local and fe80::/10 link-local.
+  if ((firstHextet & 0xfe00) === 0xfc00) return true
+  if ((firstHextet & 0xffc0) === 0xfe80) return true
   return false
 }

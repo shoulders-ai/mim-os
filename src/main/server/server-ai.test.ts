@@ -330,6 +330,41 @@ describe('shell token middleware', () => {
     })
   }
 
+  it('does not expose shell-token AI routes in serve mode', async () => {
+    server = await createServer(makeTools(), makePackages(), { mode: 'serve' })
+
+    for (const { path, mock } of AI_ROUTES) {
+      const response = await fetch(`http://127.0.0.1:${server.port}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-mim-shell-token': server.shellToken,
+          'X-Forwarded-For': '203.0.113.20',
+          'X-Forwarded-Proto': 'https',
+        },
+        body: JSON.stringify({}),
+      })
+
+      expect(response.status).toBe(404)
+      expect(aiRuntimeMock.runtime[mock]).not.toHaveBeenCalled()
+    }
+  })
+
+  it('does not allow AI route preflight in serve mode', async () => {
+    server = await createServer(makeTools(), makePackages(), { mode: 'serve' })
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/ai/chat`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: `http://127.0.0.1:${server.port}`,
+        'X-Forwarded-For': '203.0.113.21',
+        'X-Forwarded-Proto': 'https',
+      },
+    })
+
+    expect(response.status).toBe(404)
+  })
+
   it('allows OPTIONS preflight on /api/ai/* without a shell token', async () => {
     server = await createServer(makeTools(), makePackages())
 

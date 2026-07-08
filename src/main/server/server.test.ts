@@ -53,6 +53,18 @@ describe('app server', () => {
     }
   }
 
+  function makePackagesWithChange(packages: LoadedPackage[]): PackageLoader & { triggerChange(): void } {
+    let onChange: (() => void) | undefined
+    return {
+      list: () => packages,
+      get: (id) => packages.find((pkg) => pkg.manifest.id === id),
+      diagnostics: () => [],
+      onChange: (cb) => { onChange = cb },
+      rescan: async () => undefined,
+      triggerChange: () => onChange?.(),
+    }
+  }
+
   function makeTools(
     call = vi.fn(async () => ({ ok: true })),
     workspacePath: string | null = null,
@@ -97,6 +109,17 @@ describe('app server', () => {
   async function sendJson(socket: WebSocket, message: Record<string, unknown>): Promise<Record<string, unknown>> {
     socket.send(JSON.stringify(message))
     return nextMessage(socket)
+  }
+
+  async function postMcp(port: number, token: string, body: Record<string, unknown>): Promise<Response> {
+    return fetch(`http://127.0.0.1:${port}/mcp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    })
   }
 
   async function waitFor(predicate: () => boolean): Promise<void> {
@@ -195,6 +218,83 @@ describe('app server', () => {
     expect(response.status).toBe(404)
   })
 
+  it('returns 404 for routine webhooks when no handler is registered', async () => {
+    server = await createServer(makeTools(), makePackages([addPackage()]))
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/hooks/pulse`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ok: true }),
+    })
+
+    expect(response.status).toBe(404)
+    expect(await response.json()).toEqual({ ok: false, error: 'Routine webhooks are not available' })
+  })
+
+  it('delegates routine webhooks with raw body and signing headers', async () => {
+    const handleRoutineWebhook = vi.fn(async () => ({ status: 202, ok: true, duplicate: true }))
+    server = await createServer(makeTools(), makePackages([addPackage()]), { handleRoutineWebhook })
+    const rawBody = '{"z":1,"message":"hello"}'
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/api/hooks/incoming-report`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mim-timestamp': '2026-07-08T12:00:00.000Z',
+        'x-mim-signature': 'sha256=abc123',
+        'x-mim-delivery': 'delivery-1',
+      },
+      body: rawBody,
+    })
+
+    expect(response.status).toBe(202)
+    expect(await response.json()).toEqual({ ok: true, duplicate: true })
+    expect(handleRoutineWebhook).toHaveBeenCalledOnce()
+    const [name, delivery] = handleRoutineWebhook.mock.calls[0]
+    expect(name).toBe('incoming-report')
+    expect(delivery.rawBody.toString('utf-8')).toBe(rawBody)
+    expect(delivery.body).toEqual({ z: 1, message: 'hello' })
+    expect(delivery.headers['x-mim-timestamp']).toBe('2026-07-08T12:00:00.000Z')
+    expect(delivery.headers['x-mim-signature']).toBe('sha256=abc123')
+    expect(delivery.headers['x-mim-delivery']).toBe('delivery-1')
+  })
+
+  it('disables desktop-only HTTP routes in serve mode even for loopback proxy traffic', async () => {
+    const pkg = addPackage()
+    const workspace = join(dir, 'workspace')
+    mkdirSync(join(workspace, 'outputs'), { recursive: true })
+    writeFileSync(join(workspace, 'outputs', 'deck.pdf'), '%PDF-1.4 fake')
+    server = await createServer(makeTools(undefined, workspace), makePackages([pkg]), { mode: 'serve' })
+    const proxyHeaders = {
+      'X-Forwarded-For': '203.0.113.10',
+      'X-Forwarded-Proto': 'https',
+    }
+
+    const packageResponse = await fetch(`http://127.0.0.1:${server.port}/packages/pkg/`, {
+      headers: proxyHeaders,
+    })
+    const sdkResponse = await fetch(`http://127.0.0.1:${server.port}/sdk/mim.js`, {
+      headers: proxyHeaders,
+    })
+    const workspaceResponse = await fetch(`http://127.0.0.1:${server.port}/workspace-files/outputs/deck.pdf`, {
+      headers: proxyHeaders,
+    })
+    const aiResponse = await fetch(`http://127.0.0.1:${server.port}/api/ai/task-label`, {
+      method: 'POST',
+      headers: {
+        ...proxyHeaders,
+        'Content-Type': 'application/json',
+        'x-mim-shell-token': server.shellToken,
+      },
+      body: JSON.stringify({ userText: 'name this task' }),
+    })
+
+    expect(packageResponse.status).toBe(404)
+    expect(sdkResponse.status).toBe(404)
+    expect(workspaceResponse.status).toBe(404)
+    expect(aiResponse.status).toBe(404)
+  })
+
   it('resolves app UI paths without allowing sibling-prefix traversal', () => {
     const pkg = addPackage()
     mkdirSync(join(pkg.dir, 'ui-evil'), { recursive: true })
@@ -213,6 +313,21 @@ describe('app server', () => {
     await expect(nextMessage(socket)).resolves.toEqual({ error: 'Invalid JSON' })
   })
 
+  it('closes desktop WebSocket entry points in serve mode', async () => {
+    server = await createServer(makeTools(), makePackages([addPackage()]), { mode: 'serve' })
+    const socket = await openSocket(server.port)
+    const closed = new Promise<{ code: number; reason: string }>((resolveClose) => {
+      socket.once('close', (code, reason) => {
+        resolveClose({ code, reason: reason.toString() })
+      })
+    })
+
+    await expect(closed).resolves.toEqual({
+      code: 1008,
+      reason: 'WebSocket API disabled in serve mode',
+    })
+  })
+
   it('creates launch-token package URLs', async () => {
     const pkg = addPackage()
     server = await createServer(makeTools(), makePackages([pkg]))
@@ -221,6 +336,126 @@ describe('app server', () => {
 
     expect(url.pathname).toBe('/packages/pkg/index.html')
     expect(url.searchParams.get('launch')).toBeTruthy()
+  })
+
+  it('does not mint package launch URLs in serve mode', async () => {
+    const pkg = addPackage()
+    server = await createServer(makeTools(), makePackages([pkg]), { mode: 'serve' })
+
+    expect(() => server!.createPackageLaunchUrl('pkg')).toThrow('App iframe routes are disabled in serve mode')
+  })
+
+  it('requires bearer auth for serve-mode HTTP MCP', async () => {
+    server = await createServer(makeTools(), makePackages([addPackage()]), {
+      mode: 'serve',
+      authenticateMcpHttpToken: async () => null,
+    })
+
+    const missing = await fetch(`http://127.0.0.1:${server.port}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }),
+    })
+    const bad = await postMcp(server.port, 'bad', {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/list',
+    })
+
+    expect(missing.status).toBe(401)
+    expect(await missing.json()).toEqual({ error: 'Missing bearer token' })
+    expect(bad.status).toBe(401)
+    expect(await bad.json()).toEqual({ error: 'Invalid bearer token' })
+  })
+
+  it('serves MCP initialize, tools/list, and tools/call over HTTP as the remote actor', async () => {
+    const call = vi.fn(async (_name: string) => ({ ok: true }))
+    server = await createServer(makeTools(call, null, makeMcpToolDefs()), makePackages([addPackage()]), {
+      mode: 'serve',
+      authenticateMcpHttpToken: async (token) => token === 'good'
+        ? {
+            principal: 'caller_anna',
+            callerName: 'Anna',
+            grants: { effects: ['read'], tools: ['workspace.info', 'fs.read'], paths: ['.'] },
+          }
+        : null,
+    })
+
+    const initialize = await postMcp(server.port, 'good', {
+      jsonrpc: '2.0',
+      id: 'init-1',
+      method: 'initialize',
+      params: { clientInfo: { name: 'codex' } },
+    })
+    expect(initialize.status).toBe(200)
+    await expect(initialize.json()).resolves.toMatchObject({
+      jsonrpc: '2.0',
+      id: 'init-1',
+      result: { serverInfo: { name: 'mim' } },
+    })
+
+    const list = await postMcp(server.port, 'good', {
+      jsonrpc: '2.0',
+      id: 'list-1',
+      method: 'tools/list',
+    })
+    const listBody = await list.json() as { result: { tools: Array<{ name: string }> } }
+    expect(list.status).toBe(200)
+    expect(listBody.result.tools).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'fs_read' }),
+      expect.objectContaining({ name: 'workspace_info' }),
+    ]))
+
+    const callResponse = await postMcp(server.port, 'good', {
+      jsonrpc: '2.0',
+      id: 'call-1',
+      method: 'tools/call',
+      params: { name: 'fs_read', arguments: { path: 'README.md' } },
+    })
+    expect(callResponse.status).toBe(200)
+    await expect(callResponse.json()).resolves.toMatchObject({
+      jsonrpc: '2.0',
+      id: 'call-1',
+      result: { content: [expect.objectContaining({ type: 'text' })] },
+    })
+    expect(call).toHaveBeenCalledWith('fs.read', { path: 'README.md' }, {
+      actor: 'remote',
+      principal: 'caller_anna',
+      callerName: 'Anna',
+      transport: 'mcp-http',
+      sessionId: expect.any(String),
+    })
+  })
+
+  it('pushes tools/list_changed notifications to authenticated serve-mode MCP event streams', async () => {
+    const packages = makePackagesWithChange([addPackage()])
+    server = await createServer(makeTools(vi.fn(), null, makeMcpToolDefs()), packages, {
+      mode: 'serve',
+      authenticateMcpHttpToken: async (token) => token === 'good'
+        ? { principal: 'caller_anna', callerName: 'Anna' }
+        : null,
+    })
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/mcp/events`, {
+      headers: { Authorization: 'Bearer good' },
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/event-stream')
+    expect(response.body).toBeTruthy()
+
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+    let text = ''
+    const first = await reader.read()
+    text += decoder.decode(first.value ?? new Uint8Array(), { stream: true })
+    packages.triggerChange()
+    for (let attempt = 0; attempt < 20 && !text.includes('notifications/tools/list_changed'); attempt++) {
+      const chunk = await reader.read()
+      text += decoder.decode(chunk.value ?? new Uint8Array(), { stream: true })
+    }
+    await reader.cancel()
+
+    expect(text).toContain('notifications/tools/list_changed')
   })
 
   it('routes package WebSocket calls through the tool registry with package context', async () => {
@@ -335,6 +570,33 @@ describe('app server', () => {
     })
     expect(denied).toEqual({ id: 'open-1', error: 'Tool is not exposed over MCP: editor.open' })
     expect(call).not.toHaveBeenCalled()
+  })
+
+  it('omits unregistered static MCP tools instead of returning broken catalog entries', async () => {
+    const call = vi.fn()
+    const registeredToolDefs = MCP_TOOL_SPECS
+      .filter(spec => spec.mimName === 'fs.read' || spec.mimName === 'workspace.info')
+      .map(spec => ({
+        name: spec.mimName,
+        description: spec.description,
+        inputSchema: { type: 'object', properties: {} },
+        execute: async () => ({ ok: true }),
+      }))
+    server = await createServer(makeTools(call, null, registeredToolDefs), makePackages([addPackage()]))
+    const socket = await openSocket(server.port)
+    const token = server.createMcpToken('headless-catalog')
+    await sendJson(socket, {
+      id: 'identify-1',
+      method: 'identify',
+      params: { type: 'mcp', token },
+    })
+
+    const meta = await sendJson(socket, { id: 'meta-1', method: '__meta.tools' })
+
+    expect(call).not.toHaveBeenCalled()
+    expect(meta.id).toBe('meta-1')
+    const tools = (meta.result as { tools: Array<{ mimName: string }> }).tools
+    expect(tools.map(tool => tool.mimName)).toEqual(['fs.read', 'workspace.info'])
   })
 
   it('prevents MCP clients from rewriting the tool policy through settings.set', async () => {

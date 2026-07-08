@@ -17,12 +17,22 @@ export interface ToolDef {
 }
 
 export interface ToolContext {
-  actor: 'user' | 'ai' | 'package' | 'system'
+  actor: 'user' | 'ai' | 'package' | 'system' | 'remote'
   package_id?: string
   sessionId?: string
+  routine?: {
+    id: string
+    runId: string
+    approvalAllow?: string[]
+  }
   // Connected MCP client identity (e.g. 'claude-code'); used for attribution,
   // not authorization. The actor field stays the security boundary.
   agent?: string
+  // Network caller identity for serve-mode transports. These fields are
+  // attribution and policy inputs, never proof by themselves.
+  principal?: string
+  callerName?: string
+  transport?: string
   // Span hierarchy: a caller (chat turn, package run, nested tool) sets these
   // so this call's span parents correctly. Absent ids start a fresh trace.
   traceId?: string
@@ -116,8 +126,13 @@ export function createToolRegistry(
         actor: ctx.actor,
         tool: name,
         effect,
+        ...(ctx.principal ? { principal: ctx.principal } : {}),
+        ...(ctx.callerName ? { callerName: ctx.callerName } : {}),
+        ...(ctx.transport ? { transport: ctx.transport } : {}),
+        ...(ctx.agent ? { agent: ctx.agent } : {}),
         ...(ctx.package_id ? { packageId: ctx.package_id } : {}),
         ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
+        ...(ctx.routine ? { data: { routineId: ctx.routine.id, routineRunId: ctx.routine.runId } } : {}),
       }
 
       trace.append({

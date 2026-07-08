@@ -7,14 +7,19 @@ import { randomBytes } from 'crypto'
 // traceId/spanId/parentSpanId so a chat turn or package run renders as a
 // span tree. Identity is the principal -> agent (session/run) -> package
 // chain; it must be stamped at write time because it cannot be retrofitted.
+export type TraceActor = 'user' | 'ai' | 'package' | 'system' | 'remote'
+
 export interface TraceEvent {
   ts: string
   traceId: string
   spanId: string
   parentSpanId?: string
   kind: string
-  actor: 'user' | 'ai' | 'package' | 'system'
+  actor: TraceActor
   principal?: string
+  callerName?: string
+  transport?: string
+  agent?: string
   status?: 'ok' | 'error'
   durationMs?: number
   sessionId?: string
@@ -31,7 +36,7 @@ export interface TraceEvent {
   data?: Record<string, unknown>
 }
 
-export type TraceInput = Omit<TraceEvent, 'ts' | 'traceId' | 'spanId' | 'principal'> & {
+export type TraceInput = Omit<TraceEvent, 'ts' | 'traceId' | 'spanId'> & {
   traceId?: string
   spanId?: string
 }
@@ -89,8 +94,8 @@ export function createTraceLog(options: TraceLogOptions = {}): TraceLog {
   }
 
   function append(input: TraceInput): TraceEvent {
-    const principal = safePrincipal(options.getPrincipal)
-    const { traceId, spanId, ...rest } = input
+    const { traceId, spanId, principal: inputPrincipal, ...rest } = input
+    const principal = inputPrincipal ?? safePrincipal(options.getPrincipal)
     const now = currentDate(options.now)
     const event: TraceEvent = {
       ts: now.toISOString(),
