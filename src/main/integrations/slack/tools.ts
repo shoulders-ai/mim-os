@@ -252,6 +252,66 @@ export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}
   })
 
   tools.register({
+    name: 'slack.bot.status',
+    description: 'Check whether Slack bot and Socket Mode credentials are configured for an account.',
+    inputSchema: objectSchema({ account: { type: 'string' } }),
+    execute: async (params) => {
+      const account = resolveSlackAccount(tools, optionalString(params.account))
+      const status = await slack.hasBotTokens(account)
+      if (!status.botTokenConfigured) return { account, ...status }
+      const auth = await slack.botAuthTest({ account })
+      return { account, ...status, auth }
+    },
+  })
+
+  tools.register({
+    name: 'slack.bot.connect',
+    description: 'Store Slack bot and app-level Socket Mode tokens and verify both. Accepts a JSON file with bot_token and app_token, or inline token fields.',
+    inputSchema: objectSchema({
+      account: { type: 'string' },
+      file: { type: 'string' },
+      bot_token: { type: 'string' },
+      app_token: { type: 'string' },
+    }),
+    execute: async (params) => {
+      const account = resolveSlackAccount(tools, optionalString(params.account))
+      const filePath = optionalString(params.file)
+      const tokens = filePath
+        ? readSlackBotTokensFromFile(filePath)
+        : {
+            botToken: requireString(params, 'bot_token'),
+            appToken: requireString(params, 'app_token'),
+          }
+      await slack.setBotTokens(account, tokens)
+      try {
+        const auth = await slack.botAuthTest({ account })
+        await slack.connectionsOpen({ account })
+        return {
+          account,
+          configured: true,
+          botConfigured: true,
+          socketModeConfigured: true,
+          auth,
+        }
+      } catch (err) {
+        await slack.deleteBotTokens(account)
+        throw new Error(`Slack bot verification failed: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    },
+  })
+
+  tools.register({
+    name: 'slack.bot.disconnect',
+    description: 'Remove Slack bot and app-level Socket Mode tokens from the OS keychain.',
+    inputSchema: objectSchema({ account: { type: 'string' } }),
+    execute: async (params) => {
+      const account = resolveSlackAccount(tools, optionalString(params.account))
+      const deleted = await slack.deleteBotTokens(account)
+      return { account, disconnected: deleted }
+    },
+  })
+
+  tools.register({
     name: 'slack.replies',
     description: 'Read threaded Slack replies for a message.',
     captureResult: false,
@@ -306,6 +366,27 @@ function readSlackTokenFromFile(filePath: string): string {
   }
   if (!raw) throw new Error('Token file is empty')
   return raw
+}
+
+function readSlackBotTokensFromFile(filePath: string): { botToken: string; appToken: string } {
+  if (!existsSync(filePath)) throw new Error(`Token file not found: ${filePath}`)
+  const raw = readFileSync(filePath, 'utf-8').trim()
+  if (!raw) throw new Error('Token file is empty')
+  try {
+    const parsed = JSON.parse(raw)
+    const botToken = stringFrom(parsed, 'bot_token') ?? stringFrom(parsed, 'botToken')
+    const appToken = stringFrom(parsed, 'app_token') ?? stringFrom(parsed, 'appToken')
+    if (botToken && appToken) return { botToken, appToken }
+  } catch {
+    // Fall through to the uniform validation message below.
+  }
+  throw new Error('Slack bot token file must include bot_token and app_token')
+}
+
+function stringFrom(object: unknown, key: string): string | undefined {
+  if (!object || typeof object !== 'object') return undefined
+  const value = (object as Record<string, unknown>)[key]
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined
 }
 
 function requireString(params: Record<string, unknown>, key: string): string {

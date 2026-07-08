@@ -37,6 +37,7 @@ interface Window {
     }>>
     getWorkspace(): Promise<string | null>
     getPackageLaunchUrl(packageId: string, viewId?: string): Promise<string>
+    consumeSharedWorkspaceInvites(): Promise<string[]>
     downloadUpdate(): Promise<void>
     quitAndInstall(): Promise<void>
     openWorkspace(): Promise<string | null>

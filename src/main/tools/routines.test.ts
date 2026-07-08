@@ -91,6 +91,33 @@ describe('routine tools', () => {
     )
   })
 
+  it('manual start returns the routine session immediately and delegates to the starter', async () => {
+    const startRoutine = vi.fn(async () => ({
+      sessionId: 'session_routine',
+      routineRunId: 'routine_run_1',
+      status: 'working' as const,
+    }))
+    registerRoutineTools(tools, { startRoutine })
+
+    await tools.call('routine.create', {
+      name: 'draft',
+      description: 'Draft note.',
+      body: 'Draft the note.',
+    }, { actor: 'user' })
+
+    const result = await tools.call('routine.start', { name: 'draft' }, { actor: 'user' })
+
+    expect(result).toEqual({
+      sessionId: 'session_routine',
+      routineRunId: 'routine_run_1',
+      status: 'working',
+    })
+    expect(startRoutine).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'draft', body: 'Draft the note.' }),
+      expect.objectContaining({ trigger: 'manual' }),
+    )
+  })
+
   it('manages webhook signing secrets without exposing secret values', async () => {
     const secrets = createMemorySecretStore()
     registerRoutineTools(tools, { secrets })

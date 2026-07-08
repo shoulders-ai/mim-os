@@ -6,7 +6,7 @@ import { createTraceLog } from '@main/trace/trace.js'
 import { createMemorySecretStore, MIM_KEYCHAIN_SERVICE } from '@main/integrations/secrets.js'
 import { createToolRegistry } from '@main/tools/registry.js'
 import type { HttpClient } from '@main/integrations/http.js'
-import { slackSecretAccount } from './client.js'
+import { slackAppSecretAccount, slackBotSecretAccount, slackSecretAccount } from './client.js'
 import { registerSlackTools } from './tools.js'
 
 function fakeHttp(response: unknown, calls: Array<Record<string, unknown>> = []): HttpClient {
@@ -52,6 +52,9 @@ describe('Slack tools', () => {
       'slack.send',
       'slack.connect',
       'slack.disconnect',
+      'slack.bot.status',
+      'slack.bot.connect',
+      'slack.bot.disconnect',
       'slack.replies',
     ]) {
       expect(tools.get(name)?.inputSchema, name).toBeDefined()
@@ -187,6 +190,139 @@ describe('Slack tools', () => {
 
     expect(result.disconnected).toBe(true)
     expect(secrets.dump()).toEqual({})
+  })
+
+  it('bot status reports separate bot/app token configuration without opening Socket Mode', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackBotSecretAccount('default')}`]: 'xoxb-bot',
+      [`${MIM_KEYCHAIN_SERVICE}:${slackAppSecretAccount('default')}`]: 'xapp-socket',
+    })
+    registerSlackTools(tools, {
+      secrets,
+      http: fakeHttp({ ok: true, team: 'Shoulders', user: 'mim2', user_id: 'U1', bot_id: 'B1', team_id: 'T1' }, calls),
+    })
+
+    const result = await tools.call('slack.bot.status', {}, ctx) as Record<string, unknown>
+
+    expect(result).toEqual({
+      account: 'default',
+      configured: true,
+      botTokenConfigured: true,
+      appTokenConfigured: true,
+      auth: { ok: true, team: 'Shoulders', user: 'mim2', user_id: 'U1', bot_id: 'B1', team_id: 'T1' },
+    })
+    expect(calls).toHaveLength(1)
+    expect(String(calls[0].url)).toContain('auth.test')
+  })
+
+  it('bot connect reads bot and app tokens from JSON, verifies both, and hides the Socket Mode URL', async () => {
+    const secrets = createMemorySecretStore()
+    const calls: Array<Record<string, unknown>> = []
+    registerSlackTools(tools, {
+      secrets,
+      http: {
+        async request(input) {
+          calls.push(input)
+          if (String(input.url).includes('apps.connections.open')) {
+            return {
+              ok: true,
+              status: 200,
+              async json() { return { ok: true, url: 'wss://socket.slack.test/secret' } },
+              async text() { return '{"ok":true,"url":"wss://socket.slack.test/secret"}' },
+            }
+          }
+          return {
+            ok: true,
+            status: 200,
+            async json() { return { ok: true, team: 'Shoulders', user: 'mim2', user_id: 'U1', bot_id: 'B1', team_id: 'T1' } },
+            async text() { return '{"ok":true,"team":"Shoulders","user":"mim2","user_id":"U1","bot_id":"B1","team_id":"T1"}' },
+          }
+        },
+      },
+    })
+    const tokenFile = join(dir, 'slack-bot.json')
+    writeFileSync(tokenFile, JSON.stringify({
+      bot_token: 'xoxb-bot',
+      app_token: 'xapp-socket',
+    }))
+
+    const result = await tools.call('slack.bot.connect', { file: tokenFile }, ctx) as Record<string, unknown>
+
+    expect(result).toEqual({
+      account: 'default',
+      configured: true,
+      botConfigured: true,
+      socketModeConfigured: true,
+      auth: { ok: true, team: 'Shoulders', user: 'mim2', user_id: 'U1', bot_id: 'B1', team_id: 'T1' },
+    })
+    expect(JSON.stringify(result)).not.toContain('wss://')
+    expect(secrets.dump()).toEqual({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackBotSecretAccount('default')}`]: 'xoxb-bot',
+      [`${MIM_KEYCHAIN_SERVICE}:${slackAppSecretAccount('default')}`]: 'xapp-socket',
+    })
+    expect(calls.map(call => String(call.url))).toEqual([
+      'https://slack.com/api/auth.test',
+      'https://slack.com/api/apps.connections.open',
+    ])
+  })
+
+  it('bot connect rejects files missing either token', async () => {
+    registerSlackTools(tools, { secrets: createMemorySecretStore(), http: fakeHttp({ ok: true }) })
+    const tokenFile = join(dir, 'slack-bot.json')
+    writeFileSync(tokenFile, JSON.stringify({ bot_token: 'xoxb-bot' }))
+
+    await expect(tools.call('slack.bot.connect', { file: tokenFile }, ctx))
+      .rejects.toThrow('Slack bot token file must include bot_token and app_token')
+  })
+
+  it('bot connect rolls back bot tokens on verification failure', async () => {
+    const secrets = createMemorySecretStore()
+    registerSlackTools(tools, {
+      secrets,
+      http: {
+        async request(input) {
+          if (String(input.url).includes('apps.connections.open')) {
+            return {
+              ok: true,
+              status: 200,
+              async json() { return { ok: false, error: 'invalid_auth' } },
+              async text() { return '{"ok":false,"error":"invalid_auth"}' },
+            }
+          }
+          return {
+            ok: true,
+            status: 200,
+            async json() { return { ok: true, team: 'Shoulders', user: 'mim2' } },
+            async text() { return '{"ok":true,"team":"Shoulders","user":"mim2"}' },
+          }
+        },
+      },
+    })
+
+    await expect(tools.call('slack.bot.connect', {
+      account: 'bad',
+      bot_token: 'xoxb-bad',
+      app_token: 'xapp-bad',
+    }, ctx)).rejects.toThrow('Slack bot verification failed')
+
+    expect(secrets.dump()).toEqual({})
+  })
+
+  it('bot disconnect removes only bot credentials', async () => {
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]: 'xoxp-user',
+      [`${MIM_KEYCHAIN_SERVICE}:${slackBotSecretAccount('default')}`]: 'xoxb-bot',
+      [`${MIM_KEYCHAIN_SERVICE}:${slackAppSecretAccount('default')}`]: 'xapp-socket',
+    })
+    registerSlackTools(tools, { secrets, http: fakeHttp({ ok: true }) })
+
+    const result = await tools.call('slack.bot.disconnect', {}, ctx) as Record<string, unknown>
+
+    expect(result).toEqual({ account: 'default', disconnected: true })
+    expect(secrets.dump()).toEqual({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]: 'xoxp-user',
+    })
   })
 
   it('replies reads threaded messages', async () => {

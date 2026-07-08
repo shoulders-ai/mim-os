@@ -63,7 +63,7 @@ Core emitters:
 
 - `src/main/tools/registry.ts`: `tool.call`, `tool.result`, `tool.error`; one span per tool call.
 - `src/main/security/gate.ts`: `gate.decision`, parented to the gated tool span.
-- `src/main/ai/aiRuntime.ts`: `chat.turn`, per-step `model.call`, `chat.turn.done`, `chat.compaction`, plus single-shot model calls for ghost, task labels, and summaries. The `chat.turn` root span is created up front so the turn's pre-flight `skill.list`/`package.tools.list` listing, context-compaction checks, and closing `session.update` persistence nest under it — one chat send is one trace, not a scatter of orphan traces. Compaction summaries emit a `model.call` with `profile: "chat.compaction"` and a `chat.compaction` event containing the trigger, cut point, token counts, and saved ratio. The single-shot housekeeping calls (ghost/task-label/summary) trace on their own ids and are intentionally excluded from the Review Run feed; they remain visible in Audit Full log and trace statistics.
+- `src/main/ai/aiRuntime.ts`: `chat.turn`, per-step `model.call`, `chat.turn.done`, `chat.compaction`, plus single-shot model calls for ghost, task labels, and summaries. The `chat.turn` root span is created up front so the turn's pre-flight `skill.list`/`package.tools.list` listing, context-compaction checks, overflow-retry summaries, and closing `session.update` persistence nest under it — one chat send is one trace, not a scatter of orphan traces. Compaction summaries emit a `model.call` with `profile: "chat.compaction"` and a `chat.compaction` event containing the trigger, cut point, token counts, and saved ratio. The single-shot housekeeping calls (ghost/task-label/summary) trace on their own ids and are intentionally excluded from the Review Run feed; they remain visible in Audit Full log and trace statistics.
 - `src/main/packages/packageJobs.ts`: `job.started`, `job.step`, `job.progress`, `job.log`, `job.done`, `job.failed`, `job.cancelled`; the app run id is the trace id.
 - `src/main/packages/packageRuntime.ts`: app audit, HTTP, and app tool activity with app version.
 - `src/main/trace/outcomes.ts`: `outcome.edit` after user edits following AI/app file mutations.
@@ -190,7 +190,7 @@ Primary coverage:
 - `src/main/tools/trace.test.ts`: kernel tool behavior.
 - `src/main/tools/registry.test.ts`: tracing, remote caller attribution, and
   payload capture at dispatch.
-- `src/main/ai/aiRuntime.test.ts`: chat wrappers for `trace_query` and `trace_stats`, plus context-compaction record application and threshold-triggered summary writes.
+- `src/main/ai/aiRuntime.test.ts`: chat wrappers for `trace_query` and `trace_stats`, plus context-compaction record application, threshold-triggered summary writes, provider context-length classification, and overflow retry behavior.
 - `src/main/headless.test.ts`: headless tool surface registration.
 - `src/renderer/components/activity/ActivityTrustView.smoke.test.ts`: Review
   landing, narrated Run feed, Run drill-down, and important/full Audit rendering.

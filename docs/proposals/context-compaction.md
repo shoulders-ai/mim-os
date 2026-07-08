@@ -1,6 +1,6 @@
 # Context Compaction
 
-Status: Phase 1-3 implemented; Phase 4-5 planned.
+Status: Phase 1-4 implemented; Phase 5 planned.
 
 Long agentic sessions must not die of context exhaustion, and keeping the
 model alive must not destroy the transcript. Compaction is therefore **a view
@@ -60,16 +60,17 @@ The deterministic pass currently handles:
   URLs, paths, statuses, and other scalar identity fields;
 - exact duplicate large tool outputs beyond the first occurrence.
 
-The threshold backstop now writes append-only compaction records when real
+The threshold backstop writes append-only compaction records when real
 provider usage approaches the selected model's context window. Post-turn
 checks run after session persistence; pre-turn checks catch resumed sessions,
-model switches, and missed post-turn attempts. The model receives the latest
-historical summary plus the kept tail, while the session transcript remains
-unchanged.
+model switches, and missed post-turn attempts. If Anthropic, OpenAI, or Google
+rejects a turn with a recognized context-length error, Mim appends one
+`overflow` compaction record, rebuilds the model prompt from the summary plus
+tail, and retries once. Non-context provider errors and second context-length
+failures surface normally. The model receives the latest historical summary
+plus the kept tail, while the session transcript remains unchanged.
 
-The remaining runtime gap is overflow recovery: if a provider rejects a turn
-with a context-length error, Mim still needs provider-specific classification,
-one compaction attempt with trigger `overflow`, and one retry.
+The remaining planned work is the optional transcript divider UI.
 
 ## Motivation
 
@@ -383,12 +384,13 @@ Implemented coverage includes session normalization/storage, generic
 writes that leave `messages[]` untouched, stored-record model views, post-turn
 record creation, and pre-turn catch-up before provider prompting.
 
-### Phase 4: Overflow Recovery
+### Phase 4: Overflow Recovery - Implemented
 
 Add provider context-length error classification and retry-once behavior in
 the turn loop.
 
-Tests mock the provider boundary to return a context-length error and assert:
+Implemented coverage mocks the provider boundary to return a context-length
+error and asserts:
 
 - exactly one compaction attempt;
 - exactly one retry;

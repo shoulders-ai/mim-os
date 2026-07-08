@@ -123,6 +123,25 @@ describe('InlineApproval', () => {
     expect(root.textContent).toContain('sensitive')
   })
 
+  it('marks approvals that will affect a shared workspace', async () => {
+    app = createApp(InlineApproval, {
+      approval: {
+        toolName: 'issues.create',
+        category: 'network',
+        risk: 'medium',
+        sessionId: 's1',
+        label: 'Shared workspace team-server: issues.create',
+        source: { kind: 'sharedWorkspace', id: 'team-server', name: 'HTA Model' },
+        params: { title: 'Follow up' },
+      },
+    })
+    app.mount(root)
+    await flush()
+
+    expect(root.textContent).toContain('HTA Model')
+    expect(root.textContent).toContain('Allow Mim to use Shared workspace team-server: issues.create?')
+  })
+
   it('emits approve with the remembered choice, decline, and review', async () => {
     const onApprove = vi.fn()
     const onDecline = vi.fn()

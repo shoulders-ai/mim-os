@@ -203,8 +203,9 @@ pre-approved are different product concepts.
 
 The rendered body becomes the user message, and the runner calls
 `streamProfileResponse` and drains the stream. `persistSession` stays true:
-the run **is** a chat session, but session storage grows explicit routine
-metadata:
+the run **is** a chat session. UI starts return the chat session immediately and
+continue the stream in the background, while scheduler/headless runs can still
+wait for completion. Session storage grows explicit routine metadata:
 
 - `routineId` — the standing definition that fired.
 - `routineRunId` — this firing's run id.
@@ -287,9 +288,9 @@ machine that has been explicitly enabled as a scheduler for this workspace:
   (or `on: error`). Sourced from terminal trace events of the upstream run,
   which also makes any future run kind chainable without new plumbing. Cycles
   are a load-time diagnostic.
-- **Manual** — `routine.run` tool and a run-now affordance on the routine's
-  row. Manual runs are how you author: write the file, run it now, watch the
-  transcript, tighten the prompt.
+- **Manual** — `routine.start` for the run-now affordance on the routine's row,
+  plus blocking `routine.run` for headless callers. Manual starts are how you
+  author: write the file, run it now, watch the transcript, tighten the prompt.
 
 ### Permissions — unattended but supervised
 
@@ -349,7 +350,7 @@ enablement rather than inventing a new one:
   or switching to a more capable agent re-requires the ack. Prompt edits do
   not require a new ack, but the management surface should show "definition
   changed since enabled" so review is cheap.
-- Manual `routine.run` is available for disabled routines to support
+- Manual starts and runs are available for disabled routines to support
   authoring, but a disabled routine cannot fire from schedule, file, webhook,
   or chain triggers.
 - Pausing is two distinct acts: `enabled: false` in the file is the shared

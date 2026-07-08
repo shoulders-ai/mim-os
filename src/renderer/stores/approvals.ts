@@ -21,6 +21,11 @@ export interface ApprovalRequest {
   resourceCollectionId?: string
   // Human-readable action label from the resolved tool policy (package tools).
   label?: string
+  source?: {
+    kind: 'sharedWorkspace'
+    id: string
+    name?: string
+  }
   params: Record<string, unknown>
   preview?: ApprovalPreviewLike
   savedBrowserSession?: SavedBrowserSessionApprovalLike

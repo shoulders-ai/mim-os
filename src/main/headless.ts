@@ -63,6 +63,8 @@ import { registerTelemetryTools } from '@main/tools/telemetry.js'
 import type { HttpClient } from '@main/integrations/http.js'
 import { userHomeDir } from '@main/platform.js'
 import type { McpToolSpec } from '@main/server/server.js'
+import { openSharedWorkspaceToolMount, syncSharedWorkspaceToolMount } from '@main/workspace/sharedWorkspaceMount.js'
+import type { SharedWorkspaceToolMount } from '@main/workspace/sharedWorkspaceRemote.js'
 
 export interface HeadlessKernel {
   tools: ToolRegistry
@@ -123,12 +125,13 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   let packageEnablement: ReturnType<typeof createPackageEnablementStore> | null = null
   // Per-kernel, not module-scope: tests create several kernels in one process.
   let namedToolsRef: NamedPackageToolSync | null = null
+  let sharedWorkspaceToolsRef: SharedWorkspaceToolMount | null = null
   let agentMountsRef: ReturnType<typeof createAgentMounts> | null = null
   const gate = createHeadlessGate(
     () => tools.getWorkspacePath(),
     options,
     traceLog,
-    (name) => namedToolsRef?.getPolicy(name),
+    (name) => sharedWorkspaceToolsRef?.getPolicy(name) ?? namedToolsRef?.getPolicy(name),
     (sessionId, data) => {
       void tools.call('session.update', { id: sessionId, ...data }, { actor: 'system' }).catch(() => {})
     },
@@ -191,6 +194,10 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
     runtime: 'headless',
   })
 
+  function warnSharedWorkspace(message: string): void {
+    console.warn(`[shared-workspace] ${message}`)
+  }
+
   return {
     tools,
     getPackages() {
@@ -199,17 +206,23 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
     },
     getNamedMcpTools() {
       const specs: McpToolSpec[] = []
-      if (!namedToolsRef) return specs
-      for (const name of namedToolsRef.ownedNames()) {
+      const seen = new Set<string>()
+      const pushSpec = (name: string) => {
+        if (seen.has(name)) return
+        seen.add(name)
         const tool = tools.get(name)
         if (tool) specs.push({ name: name.replace(/\./g, '_'), mimName: name, description: tool.description })
       }
+      for (const name of namedToolsRef?.ownedNames() ?? []) pushSpec(name)
+      for (const name of sharedWorkspaceToolsRef?.ownedNames() ?? []) pushSpec(name)
       return specs
     },
     getAgentMounts() {
       return agentMountsRef
     },
     async openWorkspace(path: string) {
+      sharedWorkspaceToolsRef?.unmount()
+      sharedWorkspaceToolsRef = null
       await tools.call('workspace.open', { path }, { actor: 'system' })
       telemetry.track('workspace_open')
       const enablement = createPackageEnablementStore({
@@ -223,9 +236,13 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
 
       const namedTools = createNamedPackageToolSync({ runtime, tools, packages })
       namedToolsRef = namedTools
+      const syncNamedAndSharedTools = async () => {
+        await namedTools.sync()
+        await syncSharedWorkspaceToolMount(sharedWorkspaceToolsRef, warnSharedWorkspace)
+      }
       registerPackageTools(tools, packages, enablement, {
         invalidate: (id) => runtime.invalidate(id),
-        syncNamedTools: async () => { await namedTools.sync() },
+        syncNamedTools: syncNamedAndSharedTools,
       })
 
       const agentMounts = createAgentMounts({ runtime, packages, tools })
@@ -233,13 +250,19 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       registerCoreAppTools(tools, {
         packages,
         enablement,
-        invalidate: (id) => { runtime.invalidate(id); void namedTools.sync() },
+        invalidate: (id) => { runtime.invalidate(id); void syncNamedAndSharedTools() },
         agentMounts,
       })
 
       setAgentContextContributionsProvider(createAgentContextContributionsProvider({ runtime, packages }))
       setAgentContextLocalPackagesProvider(createLocalPackageStatusProvider({ runtime, packages, enablement }))
       await namedTools.sync()
+      sharedWorkspaceToolsRef = await openSharedWorkspaceToolMount({
+        workspacePath: tools.getWorkspacePath() ?? path,
+        tools,
+        canShadowTool: (name) => namedTools.ownedNames().includes(name),
+        onWarning: warnSharedWorkspace,
+      })
 
       const cacheRoot = DEFAULT_CACHE_ROOT
       const globalDir = join(HOME, '.mim', 'packages')
@@ -268,6 +291,8 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       })
     },
     async shutdown() {
+      sharedWorkspaceToolsRef?.unmount()
+      sharedWorkspaceToolsRef = null
       namedToolsRef = null
       agentMountsRef = null
       packageEnablement = null

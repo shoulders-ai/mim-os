@@ -3,9 +3,11 @@ import { ref } from 'vue'
 
 export interface RoutineDefinition {
   id: string
+  path?: string
   name: string
   description?: string
   trigger?: Record<string, unknown>
+  model?: string
   tools?: string[]
   approvalAllow?: string[]
   body?: string
@@ -31,10 +33,19 @@ export interface RoutineRunResult {
   status: string
 }
 
+export interface CreateRoutineInput {
+  name: string
+  description?: string
+  trigger?: Record<string, unknown>
+  model?: string
+  body: string
+}
+
 export const useRoutineStore = defineStore('routines', () => {
   const routines = ref<RoutineDefinition[]>([])
   const diagnostics = ref<RoutineDiagnostic[]>([])
   const loading = ref(false)
+  const loaded = ref(false)
   const error = ref('')
   const runningIds = ref(new Set<string>())
 
@@ -52,14 +63,21 @@ export const useRoutineStore = defineStore('routines', () => {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
       loading.value = false
+      loaded.value = true
     }
+  }
+
+  async function create(input: CreateRoutineInput): Promise<RoutineDefinition | null> {
+    const result = await window.kernel.call('routine.create', input) as { routine?: RoutineDefinition }
+    updateRoutine(result.routine)
+    return result.routine ?? null
   }
 
   async function runNow(name: string): Promise<RoutineRunResult> {
     if (runningIds.value.has(name)) throw new Error(`Routine is already running: ${name}`)
     runningIds.value = new Set([...runningIds.value, name])
     try {
-      return await window.kernel.call('routine.run', { name }) as RoutineRunResult
+      return await window.kernel.call('routine.start', { name }) as RoutineRunResult
     } finally {
       const next = new Set(runningIds.value)
       next.delete(name)
@@ -92,9 +110,11 @@ export const useRoutineStore = defineStore('routines', () => {
     routines,
     diagnostics,
     loading,
+    loaded,
     error,
     runningIds,
     load,
+    create,
     runNow,
     resume,
     pause,

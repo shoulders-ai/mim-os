@@ -10,6 +10,17 @@ export interface SlackRequest {
   account: string
 }
 
+export interface SlackBotTokens {
+  botToken: string
+  appToken: string
+}
+
+export interface SlackBotTokenStatus {
+  configured: boolean
+  botTokenConfigured: boolean
+  appTokenConfigured: boolean
+}
+
 export class SlackIntegration {
   private http: HttpClient
   private secrets: SecretStore
@@ -33,8 +44,53 @@ export class SlackIntegration {
     return (await this.secrets.get(MIM_KEYCHAIN_SERVICE, slackSecretAccount(account))) !== null
   }
 
+  async setBotTokens(account: string, tokens: SlackBotTokens): Promise<void> {
+    if (!account.trim()) throw new Error('Slack account is required')
+    if (!tokens.botToken.trim()) throw new Error('Slack bot token is required')
+    if (!tokens.appToken.trim()) throw new Error('Slack app token is required')
+    await this.secrets.set(MIM_KEYCHAIN_SERVICE, slackBotSecretAccount(account), tokens.botToken.trim())
+    await this.secrets.set(MIM_KEYCHAIN_SERVICE, slackAppSecretAccount(account), tokens.appToken.trim())
+  }
+
+  async deleteBotTokens(account: string): Promise<boolean> {
+    const [botDeleted, appDeleted] = await Promise.all([
+      this.secrets.delete(MIM_KEYCHAIN_SERVICE, slackBotSecretAccount(account)),
+      this.secrets.delete(MIM_KEYCHAIN_SERVICE, slackAppSecretAccount(account)),
+    ])
+    return botDeleted || appDeleted
+  }
+
+  async hasBotTokens(account: string): Promise<SlackBotTokenStatus> {
+    const [botToken, appToken] = await Promise.all([
+      this.secrets.get(MIM_KEYCHAIN_SERVICE, slackBotSecretAccount(account)),
+      this.secrets.get(MIM_KEYCHAIN_SERVICE, slackAppSecretAccount(account)),
+    ])
+    const botTokenConfigured = botToken !== null
+    const appTokenConfigured = appToken !== null
+    return {
+      configured: botTokenConfigured && appTokenConfigured,
+      botTokenConfigured,
+      appTokenConfigured,
+    }
+  }
+
   async authTest(input: SlackRequest): Promise<unknown> {
     return this.get(input.account, 'auth.test', {})
+  }
+
+  async botAuthTest(input: SlackRequest): Promise<unknown> {
+    const token = await this.requireBotToken(input.account)
+    return this.getWithToken(token, 'auth.test', {})
+  }
+
+  async connectionsOpen(input: SlackRequest): Promise<string> {
+    const token = await this.requireAppToken(input.account)
+    const data = await this.postWithToken(token, 'apps.connections.open', {})
+    const url = data && typeof data === 'object' ? (data as { url?: unknown }).url : undefined
+    if (typeof url !== 'string' || !url.startsWith('wss://')) {
+      throw new Error('Slack apps.connections.open did not return a websocket URL')
+    }
+    return url
   }
 
   async channels(input: SlackRequest & { limit?: number; cursor?: string; types?: string }): Promise<unknown> {
@@ -98,8 +154,24 @@ export class SlackIntegration {
     })
   }
 
+  async botPostThreadReply(input: SlackRequest & { channel: string; threadTs: string; text: string }): Promise<unknown> {
+    if (!input.channel) throw new Error('Slack channel is required')
+    if (!input.threadTs) throw new Error('Slack thread ts is required')
+    if (!input.text.trim()) throw new Error('Slack message text is required')
+    const token = await this.requireBotToken(input.account)
+    return this.postWithToken(token, 'chat.postMessage', {
+      channel: input.channel,
+      text: input.text,
+      thread_ts: input.threadTs,
+    })
+  }
+
   private async get(account: string, method: string, params: Record<string, string>): Promise<unknown> {
     const token = await this.requireToken(account)
+    return this.getWithToken(token, method, params)
+  }
+
+  private async getWithToken(token: string, method: string, params: Record<string, string>): Promise<unknown> {
     const url = new URL(`https://slack.com/api/${method}`)
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
     const doRequest = () => this.http.request({
@@ -112,6 +184,10 @@ export class SlackIntegration {
 
   private async post(account: string, method: string, body: Record<string, unknown>): Promise<unknown> {
     const token = await this.requireToken(account)
+    return this.postWithToken(token, method, body)
+  }
+
+  private async postWithToken(token: string, method: string, body: Record<string, unknown>): Promise<unknown> {
     const doRequest = () => this.http.request({
       url: `https://slack.com/api/${method}`,
       method: 'POST',
@@ -130,10 +206,30 @@ export class SlackIntegration {
     if (!token) throw new Error(`Slack token is not configured for account: ${account}`)
     return token
   }
+
+  private async requireBotToken(account: string): Promise<string> {
+    const token = await this.secrets.get(MIM_KEYCHAIN_SERVICE, slackBotSecretAccount(account))
+    if (!token) throw new Error(`Slack bot token is not configured for account: ${account}`)
+    return token
+  }
+
+  private async requireAppToken(account: string): Promise<string> {
+    const token = await this.secrets.get(MIM_KEYCHAIN_SERVICE, slackAppSecretAccount(account))
+    if (!token) throw new Error(`Slack app token is not configured for account: ${account}`)
+    return token
+  }
 }
 
 export function slackSecretAccount(account: string): string {
   return `slack:${account}`
+}
+
+export function slackBotSecretAccount(account: string): string {
+  return `slack-bot:${account}`
+}
+
+export function slackAppSecretAccount(account: string): string {
+  return `slack-app:${account}`
 }
 
 function clampLimit(value: number | undefined, fallback: number): number {

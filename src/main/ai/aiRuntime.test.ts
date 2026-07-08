@@ -18,6 +18,7 @@ import {
   normalizeFileUIParts,
   repairIncompleteToolMessages,
   providerBaseUrl,
+  isContextLengthError,
   summarizeTurnUsage,
   chatProfile,
   inlineProfile,
@@ -58,6 +59,8 @@ function mockRegistry(
   workspacePath: string | null = null,
   opts: {
     googleStatus?: Record<string, unknown>
+    routineList?: Record<string, unknown>
+    slackBotStatuses?: Record<string, Record<string, unknown>>
   } = {},
 ) {
   const calls: Array<{ name: string; params: Record<string, unknown>; ctx: Record<string, unknown> }> = []
@@ -76,6 +79,13 @@ function mockRegistry(
             'https://www.googleapis.com/auth/spreadsheets',
           ],
         }
+      }
+      if (name === 'routine.list') {
+        return opts.routineList ?? { routines: [], diagnostics: [] }
+      }
+      if (name === 'slack.bot.status') {
+        const account = typeof params.account === 'string' ? params.account : 'default'
+        return opts.slackBotStatuses?.[account] ?? { account, configured: false }
       }
       return { ok: true, name, params }
     }),
@@ -1147,9 +1157,39 @@ describe('central AI runtime tools', () => {
 
       expect(calls.some(c => c.name === 'google.status')).toBe(true)
       expect(calls.some(c => c.name === 'slack.status')).toBe(true)
+      expect(calls.some(c => c.name === 'slack.bot.status')).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  it('connections_status checks Slack bot accounts referenced by routines', async () => {
+    const { tools, calls } = mockRegistry(null, {
+      routineList: {
+        routines: [
+          { name: 'channel-bot', trigger: { slack: { account: 'bot', channels: [{ id: 'C1' }] } } },
+        ],
+        diagnostics: [],
+      },
+      slackBotStatuses: {
+        default: { account: 'default', configured: false },
+        bot: { account: 'bot', configured: true, botConfigured: true, socketModeConfigured: true },
+      },
+    })
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    const result = await aiTools.connections_status.execute?.({}, {}) as Record<string, unknown>
+
+    expect(result.slackBot).toEqual({ account: 'default', configured: false })
+    expect(result.slackBots).toEqual([
+      { account: 'bot', configured: true, botConfigured: true, socketModeConfigured: true },
+    ])
+    expect(calls).toContainEqual({
+      name: 'slack.bot.status',
+      params: { account: 'bot' },
+      ctx: { actor: 'ai', sessionId: 's1' },
+    })
   })
 
   it('always exposes connection auth tools regardless of policy', async () => {
@@ -1161,6 +1201,8 @@ describe('central AI runtime tools', () => {
     expect(aiTools.google_disconnect).toBeDefined()
     expect(aiTools.slack_connect).toBeDefined()
     expect(aiTools.slack_disconnect).toBeDefined()
+    expect(aiTools.slack_bot_connect).toBeDefined()
+    expect(aiTools.slack_bot_disconnect).toBeDefined()
     expect(aiTools.connections_configure).toBeDefined()
   })
 
@@ -1207,6 +1249,34 @@ describe('central AI runtime tools', () => {
     expect(calls).toEqual([{
       name: 'slack.connect',
       params: { file: '/path/to/token.txt' },
+      ctx: { actor: 'ai', sessionId: 's1' },
+    }])
+  })
+
+  it('routes slack_bot_connect with file through the registry', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    await aiTools.slack_bot_connect.execute?.({ file: '/path/to/slack-bot.json', account: 'default' }, {})
+
+    expect(calls).toEqual([{
+      name: 'slack.bot.connect',
+      params: { file: '/path/to/slack-bot.json', account: 'default' },
+      ctx: { actor: 'ai', sessionId: 's1' },
+    }])
+  })
+
+  it('routes slack_bot_disconnect through the registry', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    await aiTools.slack_bot_disconnect.execute?.({ account: 'default' }, {})
+
+    expect(calls).toEqual([{
+      name: 'slack.bot.disconnect',
+      params: { account: 'default' },
       ctx: { actor: 'ai', sessionId: 's1' },
     }])
   })
@@ -2061,6 +2131,209 @@ describe('AgentProfile', () => {
     }
   })
 
+  it('classifies provider context-length errors without matching ordinary failures', () => {
+    expect(isContextLengthError({
+      statusCode: 400,
+      responseBody: {
+        error: {
+          type: 'invalid_request_error',
+          message: 'prompt is too long: maximum context length exceeded',
+        },
+      },
+    }, 'anthropic')).toBe(true)
+    expect(isContextLengthError({
+      status: 400,
+      code: 'context_length_exceeded',
+      message: 'This model maximum context length is 128000 tokens.',
+    }, 'openai')).toBe(true)
+    expect(isContextLengthError(new Error('The input token count exceeds the maximum number of tokens allowed.'), 'google')).toBe(true)
+    expect(isContextLengthError(new Error('rate limit exceeded'), 'anthropic')).toBe(false)
+  })
+
+  it('compacts and retries once when the provider rejects the prompt for context length', async () => {
+    mockedLoadRegistry
+      .mockReturnValueOnce(registryWithModels([
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+      ]))
+      .mockReturnValueOnce(registryWithModels([
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+      ]))
+    const mockedGenerateObject = vi.mocked(generateObject)
+    mockedGenerateObject.mockResolvedValueOnce({
+      object: { summary: 'Goal: recover from context overflow.\nDone: old transcript was summarized.' },
+      usage: { totalTokens: 100, promptTokens: 70, completionTokens: 30 },
+    } as never)
+    const generateObjectCallCount = mockedGenerateObject.mock.calls.length
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+    const streamMock = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('maximum context length exceeded'), { statusCode: 400 }))
+      .mockResolvedValueOnce({
+        toUIMessageStreamResponse: vi.fn().mockReturnValue(new Response('retry ok')),
+      })
+    MockAgent.mockImplementationOnce(() => ({ stream: streamMock }) as any)
+    const dir = mkdtempSync(join(tmpdir(), 'mim-compaction-overflow-'))
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+    registerSessionTools(tools)
+    tools.register({ name: 'google.status', description: 'test', execute: async () => ({ configured: false, tokenConfigured: false, grantedScopes: [] }) })
+    tools.register({ name: 'slack.status', description: 'test', execute: async () => ({ configured: false }) })
+    tools.register({ name: 'skill.list', description: 'test', execute: async () => ({ skills: [] }) })
+    tools.register({ name: 'package.tools.list', description: 'test', execute: async () => ({ tools: [] }) })
+    const created = await tools.call('session.create', { label: 'Overflow chat' }, { actor: 'user' }) as { id: string }
+    const messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'start' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old '.repeat(900) }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'middle request' }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'middle '.repeat(900) }] },
+      { id: 'u3', role: 'user', parts: [{ type: 'text', text: 'latest request' }] },
+    ] as any
+    const profile: AgentProfile = {
+      id: 'compaction-overflow',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: true,
+      stepCap: 4,
+      sendReasoning: true,
+      buildInstructions: () => 'test instructions',
+    }
+
+    try {
+      await tools.call('session.update', { id: created.id, messages }, { actor: 'user' })
+
+      const response = await streamProfileResponse({
+        profile,
+        tools,
+        request: { id: created.id, messages },
+      })
+
+      expect(await response.text()).toBe('retry ok')
+      expect(mockedGenerateObject.mock.calls.length).toBe(generateObjectCallCount + 1)
+      expect(streamMock).toHaveBeenCalledTimes(2)
+      const retryPromptJson = JSON.stringify(streamMock.mock.calls[1][0].prompt)
+      expect(retryPromptJson).toContain('Goal: recover from context overflow.')
+      expect(retryPromptJson).toContain('latest request')
+      expect(retryPromptJson).not.toContain('middle '.repeat(50))
+
+      const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
+        messages: typeof messages
+        compactions: Array<{ summary: string; trigger: string }>
+      }
+      expect(got.messages).toEqual(messages)
+      expect(got.compactions).toHaveLength(1)
+      expect(got.compactions[0]).toMatchObject({
+        summary: 'Goal: recover from context overflow.\nDone: old transcript was summarized.',
+        trigger: 'overflow',
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not retry ordinary provider errors', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+    ]))
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+    const streamMock = vi.fn().mockRejectedValueOnce(new Error('rate limit exceeded'))
+    MockAgent.mockImplementationOnce(() => ({ stream: streamMock }) as any)
+    const generateObjectCallCount = vi.mocked(generateObject).mock.calls.length
+    const { tools } = mockRegistryWithTrace()
+    const profile: AgentProfile = {
+      id: 'ordinary-error',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: true,
+      stepCap: 4,
+      sendReasoning: true,
+      buildInstructions: () => 'test instructions',
+    }
+
+    await expect(streamProfileResponse({
+      profile,
+      tools,
+      request: { id: 's1', messages: simpleRequest.messages },
+    })).rejects.toThrow('rate limit exceeded')
+    expect(streamMock).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(generateObject).mock.calls.length).toBe(generateObjectCallCount)
+  })
+
+  it('surfaces a second context-length failure after one overflow retry', async () => {
+    mockedLoadRegistry
+      .mockReturnValueOnce(registryWithModels([
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+      ]))
+      .mockReturnValueOnce(registryWithModels([
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+      ]))
+    const mockedGenerateObject = vi.mocked(generateObject)
+    mockedGenerateObject.mockResolvedValueOnce({
+      object: { summary: 'Goal: retry once.\nDone: history was summarized.' },
+      usage: { totalTokens: 100, promptTokens: 70, completionTokens: 30 },
+    } as never)
+    const generateObjectCallCount = mockedGenerateObject.mock.calls.length
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+    const retryError = Object.assign(new Error('context window still exceeded'), { statusCode: 400 })
+    const streamMock = vi.fn()
+      .mockRejectedValueOnce(Object.assign(new Error('context window exceeded'), { statusCode: 400 }))
+      .mockRejectedValueOnce(retryError)
+    MockAgent.mockImplementationOnce(() => ({ stream: streamMock }) as any)
+    const dir = mkdtempSync(join(tmpdir(), 'mim-compaction-overflow-second-'))
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+    registerSessionTools(tools)
+    tools.register({ name: 'google.status', description: 'test', execute: async () => ({ configured: false, tokenConfigured: false, grantedScopes: [] }) })
+    tools.register({ name: 'slack.status', description: 'test', execute: async () => ({ configured: false }) })
+    tools.register({ name: 'skill.list', description: 'test', execute: async () => ({ skills: [] }) })
+    tools.register({ name: 'package.tools.list', description: 'test', execute: async () => ({ tools: [] }) })
+    const created = await tools.call('session.create', { label: 'Second overflow chat' }, { actor: 'user' }) as { id: string }
+    const messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'start' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old '.repeat(900) }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'middle request' }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'middle '.repeat(900) }] },
+      { id: 'u3', role: 'user', parts: [{ type: 'text', text: 'latest request' }] },
+    ] as any
+    const profile: AgentProfile = {
+      id: 'second-overflow',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: true,
+      stepCap: 4,
+      sendReasoning: true,
+      buildInstructions: () => 'test instructions',
+    }
+
+    try {
+      await tools.call('session.update', { id: created.id, messages }, { actor: 'user' })
+
+      await expect(streamProfileResponse({
+        profile,
+        tools,
+        request: { id: created.id, messages },
+      })).rejects.toThrow('context window still exceeded')
+
+      expect(mockedGenerateObject.mock.calls.length).toBe(generateObjectCallCount + 1)
+      expect(streamMock).toHaveBeenCalledTimes(2)
+      const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
+        messages: typeof messages
+        compactions: Array<{ trigger: string }>
+      }
+      expect(got.messages).toEqual(messages)
+      expect(got.compactions).toHaveLength(1)
+      expect(got.compactions[0]).toMatchObject({ trigger: 'overflow' })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('passes populated skillCatalog and selectedSkillsSection when useCatalogs is true, empty/null when false', async () => {
     const testSkills = [
       { name: 'test-skill', description: 'A test skill', body: 'Skill body', tools: [], unlocks: [] },
@@ -2272,6 +2545,7 @@ describe('canonicalToolIdToAiKey', () => {
 
   it('maps google.setOAuthClient to google_set_oauth_client', () => {
     expect(canonicalToolIdToAiKey('google.setOAuthClient')).toBe('google_set_oauth_client')
+    expect(canonicalToolIdToAiKey('slack.bot.connect')).toBe('slack_bot_connect')
   })
 
   it('falls back to aiToolKey for standard dotted names', () => {

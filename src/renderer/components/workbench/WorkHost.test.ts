@@ -191,6 +191,32 @@ vi.mock('../archive/ArchiveBrowser.vue', async () => {
   }
 })
 
+vi.mock('../routines/RoutinesWorkView.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    default: defineComponent({
+      name: 'RoutinesWorkViewStub',
+      props: ['active'],
+      emits: ['openFile', 'openSession'],
+      setup(props, { emit }) {
+        return () => h('div', {
+          'data-testid': 'routines-view',
+          'data-active': props.active ? 'true' : 'false',
+        }, [
+          h('button', {
+            'data-testid': 'routines-open-file',
+            onClick: () => emit('openFile', 'routines/new-routine.md'),
+          }, 'Open routine file'),
+          h('button', {
+            'data-testid': 'routines-open-session',
+            onClick: () => emit('openSession', 'routine-session'),
+          }, 'Open routine session'),
+        ])
+      },
+    }),
+  }
+})
+
 async function flushUi() {
   await Promise.resolve()
   await nextTick()
@@ -433,6 +459,24 @@ describe('WorkHost', () => {
     const view = root.querySelector<HTMLElement>('[data-testid="activity-trust-view"]')
     expect(view).not.toBeNull()
     expect(view?.dataset.active).toBe('true')
+  })
+
+  it('forwards Routines surface file and session opens', async () => {
+    const onOpenFile = vi.fn()
+    const onOpenSession = vi.fn()
+    mountHost('routines', {
+      id: 'work:routines',
+      kind: 'routines',
+      title: 'Routines',
+    }, { onOpenFile, onOpenSession })
+    await flushUi()
+
+    expect(root.querySelector<HTMLElement>('[data-testid="routines-view"]')?.dataset.active).toBe('true')
+    root.querySelector<HTMLButtonElement>('[data-testid="routines-open-file"]')?.click()
+    root.querySelector<HTMLButtonElement>('[data-testid="routines-open-session"]')?.click()
+
+    expect(onOpenFile).toHaveBeenCalledWith('routines/new-routine.md')
+    expect(onOpenSession).toHaveBeenCalledWith('routine-session')
   })
 
   it('shows app runs as Work without reopening the app launcher', async () => {

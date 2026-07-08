@@ -87,6 +87,8 @@ import { createKeytarSecretStore } from '@main/integrations/secrets.js'
 import { registerResourceTools } from '@main/tools/resources.js'
 import { resolveCollections, readResourceBindings, syncMounts } from '@main/resources/resourceModel.js'
 import { parseMimYaml, readCommittedApp, classifyWorkspace, scaffoldWorkspace } from '@main/workspace/workspaceContract.js'
+import { openSharedWorkspaceToolMount, syncSharedWorkspaceToolMount } from '@main/workspace/sharedWorkspaceMount.js'
+import type { SharedWorkspaceToolMount } from '@main/workspace/sharedWorkspaceRemote.js'
 import { setAgentContextResourceReader, setAgentContextAppsResolver, setAgentContextContributionsProvider, setAgentContextLocalPackagesProvider, type AgentContextResource, type AgentContextApp } from '@main/ai/agentContext.js'
 import { resolveBootWorkspace, recordLastWorkspace, isDefaultWorkspace } from '@main/workspace/workspaceBoot.js'
 import { deleteMcpDiscoveryFile, writeMcpDiscoveryFile } from '@main/mcp/discovery.js'
@@ -131,6 +133,7 @@ let appUpdateInterval: ReturnType<typeof setInterval> | null = null
 let historyBaselineTimer: ReturnType<typeof setTimeout> | null = null
 let routineTickerInterval: ReturnType<typeof setInterval> | null = null
 let routineAutomationStop: (() => Promise<void>) | null = null
+const pendingSharedWorkspaceInvites: string[] = []
 
 export const OPEN_DIRECTORY_DIALOG_PROPERTIES = ['openDirectory', 'createDirectory'] as const
 
@@ -221,6 +224,20 @@ function sendToRenderer(channel: string, ...args: unknown[]): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, ...args)
   }
+}
+
+function enqueueSharedWorkspaceInvite(value: string): void {
+  if (!isSharedWorkspaceInvite(value)) return
+  pendingSharedWorkspaceInvites.push(value)
+  sendToRenderer('shared-workspace:invite', value)
+}
+
+function consumePendingSharedWorkspaceInvites(): string[] {
+  return pendingSharedWorkspaceInvites.splice(0)
+}
+
+function isSharedWorkspaceInvite(value: string): boolean {
+  return value.startsWith('mim-invite-') || value.startsWith('mim://join/')
 }
 
 /**
@@ -394,6 +411,7 @@ async function boot(): Promise<void> {
   let server: Awaited<ReturnType<typeof createServer>> | null = null
   let packages: Awaited<ReturnType<typeof createPackageLoader>> | null = null
   let namedPackageTools: NamedPackageToolSync | null = null
+  let sharedWorkspaceTools: SharedWorkspaceToolMount | null = null
   let agentMountsRef: ReturnType<typeof createAgentMounts> | null = null
   let packageEnablement: ReturnType<typeof createPackageEnablementStore> | null = null
   let appUpdater: ReturnType<typeof initAutoUpdater> | null = null
@@ -444,11 +462,33 @@ async function boot(): Promise<void> {
     void tools.call('session.update', { id: sessionId, ...data }, { actor: 'system' }).catch(() => {})
   }
 
+  function warnSharedWorkspace(message: string): void {
+    console.warn(`[shared-workspace] ${message}`)
+  }
+
+  async function syncNamedAndSharedTools(): Promise<void> {
+    await namedPackageTools?.sync()
+    await syncSharedWorkspaceToolMount(sharedWorkspaceTools, warnSharedWorkspace)
+  }
+
+  async function remountSharedWorkspaceTools(): Promise<void> {
+    const workspacePath = tools.getWorkspacePath()
+    sharedWorkspaceTools?.unmount()
+    sharedWorkspaceTools = null
+    if (!workspacePath) return
+    sharedWorkspaceTools = await openSharedWorkspaceToolMount({
+      workspacePath,
+      tools,
+      canShadowTool: (name) => namedPackageTools?.ownedNames().includes(name) ?? false,
+      onWarning: warnSharedWorkspace,
+    })
+  }
+
   const gate = createPermissionGate({
     getApprovalMode: () => readApprovalMode(tools),
     getWorkspacePath: () => tools.getWorkspacePath(),
     getPackagePermissions: (packageId) => packages?.get(packageId)?.manifest.permissions,
-    getDynamicToolPolicy: (name) => namedPackageTools?.getPolicy(name),
+    getDynamicToolPolicy: (name) => sharedWorkspaceTools?.getPolicy(name) ?? namedPackageTools?.getPolicy(name),
     resolveSavedBrowserSessionGrant: (toolName, params) => {
       if ((toolName !== 'web.read' && toolName !== 'web.live.open') || params.stateful !== true || typeof params.url !== 'string') return null
       const ws = tools.getWorkspacePath()
@@ -786,7 +826,7 @@ async function boot(): Promise<void> {
   packageJobs.reconcileStaleRuns()
   registerPackageTools(tools, packages, packageEnablement, {
     invalidate: (id) => packageRuntime.invalidate(id),
-    syncNamedTools: async () => { await namedPackageTools?.sync() },
+    syncNamedTools: syncNamedAndSharedTools,
     emit: (channel, payload) => {
       mainWindow?.webContents.send(channel, payload)
       server?.broadcast(channel, payload ?? {})
@@ -818,7 +858,7 @@ async function boot(): Promise<void> {
   registerCoreAppTools(tools, {
     packages,
     enablement: packageEnablement,
-    invalidate: (id) => { packageRuntime.invalidate(id); void namedPackageTools?.sync() },
+    invalidate: (id) => { packageRuntime.invalidate(id); void syncNamedAndSharedTools() },
     emit: (channel) => {
       broadcastToRenderers(channel)
       server?.broadcast(channel, {})
@@ -852,6 +892,12 @@ async function boot(): Promise<void> {
     secretStore: packageSecretStore,
   })
   await namedPackageTools.sync()
+  sharedWorkspaceTools = await openSharedWorkspaceToolMount({
+    workspacePath: bootWorkspace,
+    tools,
+    canShadowTool: (name) => namedPackageTools?.ownedNames().includes(name) ?? false,
+    onWarning: warnSharedWorkspace,
+  })
   registerArchiveTools(tools, packageJobs)
 
   const agentSessions = createAgentSessions({
@@ -890,12 +936,15 @@ async function boot(): Promise<void> {
   server = await createServer(tools, packages, {
     getNamedMcpTools: () => {
       const specs: Array<{ name: string; mimName: string; description: string }> = []
-      if (namedPackageTools) {
-        for (const name of namedPackageTools.ownedNames()) {
-          const tool = tools.get(name)
-          if (tool) specs.push({ name: name.replace(/\./g, '_'), mimName: name, description: tool.description })
-        }
+      const seen = new Set<string>()
+      const pushSpec = (name: string) => {
+        if (seen.has(name)) return
+        seen.add(name)
+        const tool = tools.get(name)
+        if (tool) specs.push({ name: name.replace(/\./g, '_'), mimName: name, description: tool.description })
       }
+      for (const name of namedPackageTools?.ownedNames() ?? []) pushSpec(name)
+      for (const name of sharedWorkspaceTools?.ownedNames() ?? []) pushSpec(name)
       if (slackMcp.connected) specs.push(...SLACK_MCP_TOOL_SPECS)
       if (googleMcp.connected) specs.push(...GOOGLE_MCP_TOOL_SPECS)
       return specs
@@ -946,6 +995,8 @@ async function boot(): Promise<void> {
   refreshAppUpdates(tools.getWorkspacePath())
 
   async function openWorkspacePath(path: string): Promise<string> {
+    sharedWorkspaceTools?.unmount()
+    sharedWorkspaceTools = null
     await tools.call('workspace.open', { path }, { actor: 'user' })
     telemetry.track('workspace_open')
     // Drop the previous workspace's tab snapshot; the remounted editor re-pushes.
@@ -959,7 +1010,13 @@ async function boot(): Promise<void> {
     setImmediate(() => { try { rebuildIndex(path) } catch { /* search index non-fatal */ } })
     await packages!.rescan()
     packageRuntime.invalidate()
-    await namedPackageTools!.sync()
+    await syncNamedAndSharedTools()
+    sharedWorkspaceTools = await openSharedWorkspaceToolMount({
+      workspacePath: path,
+      tools,
+      canShadowTool: (name) => namedPackageTools?.ownedNames().includes(name) ?? false,
+      onWarning: warnSharedWorkspace,
+    })
     await routineAutomation?.refresh()
     await routineAutomation?.tick().catch((err) => {
       console.error('[routines] workspace tick failed', err)
@@ -1111,10 +1168,17 @@ async function boot(): Promise<void> {
     params: Record<string, unknown> = {},
     options: { sessionId?: string } = {},
   ) => {
-    return tools.call(tool, params, {
+    const result = await tools.call(tool, params, {
       actor: 'user',
       sessionId: typeof options.sessionId === 'string' ? options.sessionId : undefined,
     })
+    if (tool === 'workspace.sharedWorkspace.join') {
+      await remountSharedWorkspaceTools()
+      const path = tools.getWorkspacePath()
+      broadcastToRenderers('workspace:changed', path)
+      server?.broadcast('workspace:changed', { path })
+    }
+    return result
   })
   ipcMain.handle('gate:respond', async (
     _event,
@@ -1136,6 +1200,7 @@ async function boot(): Promise<void> {
   ipcMain.handle('kernel:package-launch-url', (_event, packageId: string, viewId?: string) =>
     server!.createPackageLaunchUrl(packageId, viewId),
   )
+  ipcMain.handle('kernel:consume-shared-workspace-invites', () => consumePendingSharedWorkspaceInvites())
   ipcMain.handle('kernel:download-update', async () => {
     if (!appUpdater) throw new Error('App updates are unavailable in this build')
     await appUpdater.downloadUpdate()
@@ -1147,7 +1212,7 @@ async function boot(): Promise<void> {
 
   packages.onChange(() => {
     packageRuntime.invalidate()
-    void namedPackageTools!.sync()
+    void syncNamedAndSharedTools()
     mainWindow?.webContents.send('packages:changed', packages.list())
   })
 
@@ -1402,7 +1467,18 @@ function readApprovalMode(tools: ToolRegistry): ApprovalMode {
 app.setName('Mim')
 configureLinuxCommandLine(app.commandLine)
 
+app.on('open-url', (event, url) => {
+  event.preventDefault()
+  enqueueSharedWorkspaceInvite(url)
+})
+
 app.whenReady().then(() => {
+  try {
+    app.setAsDefaultProtocolClient('mim')
+  } catch {
+    // Protocol registration is best-effort; paste-string join remains available.
+  }
+  for (const arg of process.argv) enqueueSharedWorkspaceInvite(arg)
   // Dev dock icon (packaged builds get the icon from electron-builder config).
   if (process.platform === 'darwin' && app.dock) {
     const iconPath = join(__dirname, '../../resources/icon.png')

@@ -25,10 +25,16 @@ export interface RoutineRunResult {
 
 export interface RegisterRoutineToolsOptions {
   runRoutine?: (routine: RoutineDefinition, context: RoutineRunContext) => Promise<RoutineRunResult>
+  startRoutine?: (routine: RoutineDefinition, context: RoutineRunContext) => Promise<RoutineRunResult>
   getAgentMounts?: () => { resolveProfile(agentId: string): Promise<AgentProfile> } | null | undefined
   knownTools?: () => Set<string>
   secrets?: SecretStore
   onChange?: () => void | Promise<void>
+}
+
+export interface StartedRoutineRun {
+  result: RoutineRunResult
+  completion: Promise<RoutineRunResult>
 }
 
 export function registerRoutineTools(tools: ToolRegistry, options: RegisterRoutineToolsOptions = {}): void {
@@ -131,7 +137,7 @@ export function registerRoutineTools(tools: ToolRegistry, options: RegisterRouti
 
   tools.register({
     name: 'routine.run',
-    description: 'Run a workspace routine once as a normal chat turn',
+    description: 'Run a workspace routine once as a normal chat turn and wait for completion',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string' } },
@@ -143,6 +149,23 @@ export function registerRoutineTools(tools: ToolRegistry, options: RegisterRouti
       const runner = runtimeOptions.runRoutine ?? ((definition, context) =>
         runRoutineOnce(tools, definition, context, runtimeOptions))
       return runner(routine, { trigger: 'manual' })
+    },
+  })
+
+  tools.register({
+    name: 'routine.start',
+    description: 'Start a workspace routine once and return its chat session immediately',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+    },
+    execute: async (params) => {
+      const ws = requireWorkspace(tools)
+      const routine = requireRoutine(ws, String(params.name ?? ''), runtimeOptions)
+      const starter = runtimeOptions.startRoutine ?? ((definition, context) =>
+        startRoutineRunInBackground(tools, definition, context, runtimeOptions))
+      return starter(routine, { trigger: 'manual' })
     },
   })
 
@@ -209,6 +232,16 @@ export async function runRoutineOnce(
   context: RoutineRunContext,
   options: Pick<RegisterRoutineToolsOptions, 'getAgentMounts'> = {},
 ): Promise<RoutineRunResult> {
+  const started = await startRoutineRun(tools, routine, context, options)
+  return started.completion
+}
+
+export async function startRoutineRun(
+  tools: ToolRegistry,
+  routine: RoutineDefinition,
+  context: RoutineRunContext,
+  options: Pick<RegisterRoutineToolsOptions, 'getAgentMounts'> = {},
+): Promise<StartedRoutineRun> {
   const routineRunId = `routine_run_${Date.now()}_${randomUUID().slice(0, 8)}`
   const firedAt = new Date().toISOString()
   const profile = await resolveRoutineProfile(routine, options.getAgentMounts?.())
@@ -237,58 +270,77 @@ export async function runRoutineOnce(
     },
   })
 
-  try {
-    const response = await streamProfileResponse({
-      profile,
-      tools,
-      request: {
-        id: session.id,
-        modelId: routine.model ?? profile.defaultModelId,
-        messages: [routinePromptMessageForContext(routine, context)],
-        routine: {
-          id: routine.id,
-          runId: routineRunId,
-          approvalAllow: routine.approvalAllow,
+  const result: RoutineRunResult = { sessionId: session.id, routineRunId, status: 'working' }
+  const completion = (async (): Promise<RoutineRunResult> => {
+    try {
+      const response = await streamProfileResponse({
+        profile,
+        tools,
+        request: {
+          id: session.id,
+          modelId: routine.model ?? profile.defaultModelId,
+          messages: [routinePromptMessageForContext(routine, context)],
+          routine: {
+            id: routine.id,
+            runId: routineRunId,
+            approvalAllow: routine.approvalAllow,
+          },
+          trace: { traceId, spanId },
         },
-        trace: { traceId, spanId },
-      },
-    })
-    await drainResponse(response)
-    await tools.call('session.update', {
-      id: session.id,
-      routineStatus: 'done',
-      routineCompletedAt: new Date().toISOString(),
-      routineError: '',
-    }, { actor: 'system' })
-    tools.trace.append({
-      kind: 'routine.done',
-      actor: 'ai',
-      traceId,
-      parentSpanId: spanId,
-      sessionId: session.id,
-      status: 'ok',
-      data: { routineId: routine.id, routineRunId },
-    })
-    return { sessionId: session.id, routineRunId, status: 'done' }
-  } catch (err) {
+      })
+      await drainResponse(response)
+      await tools.call('session.update', {
+        id: session.id,
+        routineStatus: 'done',
+        routineCompletedAt: new Date().toISOString(),
+        routineError: '',
+      }, { actor: 'system' })
+      tools.trace.append({
+        kind: 'routine.done',
+        actor: 'ai',
+        traceId,
+        parentSpanId: spanId,
+        sessionId: session.id,
+        status: 'ok',
+        data: { routineId: routine.id, routineRunId },
+      })
+      return { sessionId: session.id, routineRunId, status: 'done' }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      await tools.call('session.update', {
+        id: session.id,
+        routineStatus: 'error',
+        routineError: message,
+        routineCompletedAt: new Date().toISOString(),
+      }, { actor: 'system' }).catch(() => {})
+      tools.trace.append({
+        kind: 'routine.error',
+        actor: 'ai',
+        traceId,
+        parentSpanId: spanId,
+        sessionId: session.id,
+        status: 'error',
+        data: { routineId: routine.id, routineRunId, error: message },
+      })
+      throw err
+    }
+  })()
+
+  return { result, completion }
+}
+
+async function startRoutineRunInBackground(
+  tools: ToolRegistry,
+  routine: RoutineDefinition,
+  context: RoutineRunContext,
+  options: Pick<RegisterRoutineToolsOptions, 'getAgentMounts'> = {},
+): Promise<RoutineRunResult> {
+  const started = await startRoutineRun(tools, routine, context, options)
+  void started.completion.catch((err) => {
     const message = err instanceof Error ? err.message : String(err)
-    await tools.call('session.update', {
-      id: session.id,
-      routineStatus: 'error',
-      routineError: message,
-      routineCompletedAt: new Date().toISOString(),
-    }, { actor: 'system' }).catch(() => {})
-    tools.trace.append({
-      kind: 'routine.error',
-      actor: 'ai',
-      traceId,
-      parentSpanId: spanId,
-      sessionId: session.id,
-      status: 'error',
-      data: { routineId: routine.id, routineRunId, error: message },
-    })
-    throw err
-  }
+    console.error(`[routines] Background routine run failed: ${message}`)
+  })
+  return started.result
 }
 
 function requireWorkspace(tools: ToolRegistry): string {

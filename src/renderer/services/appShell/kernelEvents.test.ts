@@ -82,6 +82,7 @@ describe('app shell kernel events', () => {
       'menu:clear-recent',
       'menu:close-tab',
       'menu:settings',
+      'shared-workspace:invite',
       'menu:shortcuts',
       'menu:welcome',
       'bridge:terminal:run',
@@ -97,7 +98,7 @@ describe('app shell kernel events', () => {
 
     unregister()
 
-    expect(kernel.off).toHaveBeenCalledTimes(30)
+    expect(kernel.off).toHaveBeenCalledTimes(31)
     expect(registeredChannels()).toEqual([])
     expect(deps.refreshApps).not.toHaveBeenCalled()
   })
@@ -169,6 +170,7 @@ describe('app shell kernel events', () => {
     emit('menu:clear-recent')
     emit('menu:close-tab')
     emit('menu:settings')
+    emit('shared-workspace:invite', 'mim-invite-demo')
     emit('menu:shortcuts')
     emit('menu:welcome')
     emit('package:job:event', packageEvent)
@@ -182,7 +184,8 @@ describe('app shell kernel events', () => {
     expect(deps.openExportDialog).toHaveBeenCalledOnce()
     expect(deps.clearRecentFiles).toHaveBeenCalledOnce()
     expect(deps.handleCloseTab).toHaveBeenCalledOnce()
-    expect(deps.openSettings).toHaveBeenCalledOnce()
+    expect(deps.openSettings).toHaveBeenNthCalledWith(1)
+    expect(deps.openSettings).toHaveBeenNthCalledWith(2, 'workspace')
     expect(deps.openShortcuts).toHaveBeenCalledOnce()
     expect(deps.openWelcome).toHaveBeenCalledOnce()
     expect(deps.onPackageJobEvent).toHaveBeenCalledWith(packageEvent)

@@ -221,6 +221,7 @@ defineExpose({
     v-if="routinesMounted"
     v-show="activeHost === 'routines'"
     :active="activeHost === 'routines'"
+    @open-file="emit('openFile', $event)"
     @open-session="emit('openSession', $event)"
   />
   <ActivityTrustView

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createMemorySecretStore, MIM_KEYCHAIN_SERVICE } from '@main/integrations/secrets.js'
 import type { HttpClient } from '@main/integrations/http.js'
-import { SlackIntegration, slackSecretAccount } from './client.js'
+import { SlackIntegration, slackAppSecretAccount, slackBotSecretAccount, slackSecretAccount } from './client.js'
 
 function fakeHttp(response: unknown, calls: Array<Record<string, unknown>> = []): HttpClient {
   return {
@@ -26,6 +26,24 @@ describe('SlackIntegration', () => {
 
     expect(secrets.dump()).toEqual({
       [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('dark-peak')}`]: 'xoxb-secret',
+    })
+  })
+
+  it('stores bot and Socket Mode app tokens beside personal Slack tokens', async () => {
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('dark-peak')}`]: 'xoxp-user',
+    })
+    const slack = new SlackIntegration({ secrets, http: fakeHttp({ ok: true }) })
+
+    await slack.setBotTokens('dark-peak', {
+      botToken: 'xoxb-bot',
+      appToken: 'xapp-socket',
+    })
+
+    expect(secrets.dump()).toEqual({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('dark-peak')}`]: 'xoxp-user',
+      [`${MIM_KEYCHAIN_SERVICE}:${slackBotSecretAccount('dark-peak')}`]: 'xoxb-bot',
+      [`${MIM_KEYCHAIN_SERVICE}:${slackAppSecretAccount('dark-peak')}`]: 'xapp-socket',
     })
   })
 
@@ -61,6 +79,43 @@ describe('SlackIntegration', () => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ channel: 'C1', text: 'Hello' }),
+    })
+  })
+
+  it('uses bot and app tokens for bot auth, Socket Mode, and thread replies', async () => {
+    const calls: Array<Record<string, unknown>> = []
+    const secrets = createMemorySecretStore({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackBotSecretAccount('default')}`]: 'xoxb-bot',
+      [`${MIM_KEYCHAIN_SERVICE}:${slackAppSecretAccount('default')}`]: 'xapp-socket',
+    })
+    const slack = new SlackIntegration({ secrets, http: fakeHttp({ ok: true, url: 'wss://socket.slack.test' }, calls) })
+
+    await slack.botAuthTest({ account: 'default' })
+    const socketUrl = await slack.connectionsOpen({ account: 'default' })
+    await slack.botPostThreadReply({ account: 'default', channel: 'C1', threadTs: '123.456', text: 'Done' })
+
+    expect(socketUrl).toBe('wss://socket.slack.test')
+    expect(calls[0]).toMatchObject({
+      url: 'https://slack.com/api/auth.test',
+      headers: { Authorization: 'Bearer xoxb-bot' },
+    })
+    expect(calls[1]).toMatchObject({
+      url: 'https://slack.com/api/apps.connections.open',
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer xapp-socket',
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+    })
+    expect(calls[2]).toMatchObject({
+      url: 'https://slack.com/api/chat.postMessage',
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer xoxb-bot',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ channel: 'C1', text: 'Done', thread_ts: '123.456' }),
     })
   })
 

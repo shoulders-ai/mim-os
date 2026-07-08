@@ -70,21 +70,21 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Local file history.** Per-file recovery under `.mim/history/`, independent of git, with bounded automatic baselines. `src/main/history/`, `tools/history.ts`. UI: `HistoryRail.vue`. Docs: [history.md](history.md).
 - **Sessions.** Chat session CRUD, atomic JSON in `.mim/sessions/`, manifest cache. `src/main/sessions.ts`, `sessionManifest.ts`.
 - **Routines.** Workspace-local routine definitions under `routines/`, machine-local enablement/run state under `.mim/routines/`, manual chat-turn runs, desktop schedule/file/webhook automation, webhook secret tools, routine run metadata on sessions, Navigator run rows, and the Routines work surface. `src/main/routines/`, `tools/routines.ts`, `server/server.ts`, `sessions.ts`, `src/renderer/components/routines/`, `src/renderer/stores/routines.ts`. Docs: [routines.md](routines.md).
-- **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
+- **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold, shared-workspace client config), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
 - **Git tools.** Status/diff/log/commit/pull/push and opt-in managed sync. `src/main/git.ts`, `tools/git.ts`, `tools/sync.ts`.
 - **User-global config.** `~/.mim/config.yaml` (identity, model defaults, skill sources). Never holds keys or tokens. `src/main/userConfig.ts`.
 - **Settings tools.** Workspace settings persistence in `.mim/settings.json`; agent tool availability policy for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
 - **Editor state tool.** `editor.state` (MCP: `editor_state`): open tabs + active document snapshot, pushed by the renderer and cached in main. `src/main/tools/editorState.ts`.
 - **Headless CLI.** `mim` command over the shared tool registry; no Electron. `src/main/cli.ts`, `headless.ts`. Docs: [cli.md](cli.md).
-- **Mim Serve.** Headless shared-workspace host over authenticated MCP HTTP, with token store, denial ledger, state migration, and backup/restore helpers. `src/main/serve/`, `server/server.ts`. Docs: [serve.md](serve.md).
+- **Mim Serve.** Headless shared-workspace host over authenticated MCP HTTP, with token store, single-use invite store, denial ledger, state migration, backup/restore helpers, desktop/headless remote named-tool mounting, invite join, and live remote catalog refresh. `src/main/serve/`, `server/server.ts`, `workspace/sharedWorkspace*.ts`. Docs: [serve.md](serve.md).
 - **MCP bridge.** Stdio bridge from external CLI agents to the running desktop plus serve-mode HTTP MCP. `src/main/mcp/`, `src/main/server/server.ts`. Docs: [mcp.md](mcp.md).
 - **Preload bridge.** `window.kernel` IPC gateway. `src/preload/index.ts`.
 
 ### Main Process — AI
 
 - **Model registry.** Model catalog, key resolution (`~/.mim/keys.env` → env), model-default cascade. `src/main/ai/ai.ts`, `resources/ai-models.json`.
-- **AI runtime.** Vercel AI SDK provider calls, ToolLoopAgent profiles, ghost generation, tool wrapping, usage/context tracking, model-context compaction views, and threshold-triggered historical summaries. `src/main/ai/aiRuntime.ts`, `src/main/ai/compaction.ts`, `src/main/ai/messageCompaction.ts`.
+- **AI runtime.** Vercel AI SDK provider calls, ToolLoopAgent profiles, ghost generation, tool wrapping, usage/context tracking, model-context compaction views, and threshold/overflow-triggered historical summaries. `src/main/ai/aiRuntime.ts`, `src/main/ai/compaction.ts`, `src/main/ai/messageCompaction.ts`.
 - **System prompt.** Template-based from `AGENTS.md` with `{{TOOL_SET}}`, `{{SKILL_CATALOG}}`, `{{WORKSPACE_TREE}}`, `{{PROJECT_LOG}}` etc. `src/main/ai/systemPrompt.ts`, `workspaceTree.ts`.
 - **Agent mounts.** Resolve app `agents` exports into `AgentProfile`s, build constrained instructions context, template-var resolution, tool-allowlist intersection, per-turn skill pre-activation. `src/main/ai/agentMounts.ts`.
 - **Agent context.** Deterministic `.mim/agent-context.md` digest with workspace/app/git health. `src/main/ai/agentContext.ts`, `packages/packageContributions.ts`.
@@ -121,7 +121,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Main Process — Integrations
 
-- **Slack & Google.** Keychain-backed connectors, Google browser OAuth, kernel tools, AI tool builders, and Settings > Tools availability policy. Slack also has routine-listener foundations: a metadata-only event ledger and socket-free routine dispatcher helpers. Data tools are exposed over MCP when connected and enabled. AI agent can manage connection lifecycle (connect, disconnect, configure policy) via `connections_status`, `google_set_oauth_client`, `google_connect`, `slack_connect`, `connections_configure` tools. File-based credential ingestion reads secrets server-side so they never enter model context. `src/main/integrations/`, `src/main/tools/toolPolicy.ts`. Docs: [integrations.md](integrations.md), [proposals/slack-listener.md](proposals/slack-listener.md).
+- **Slack & Google.** Keychain-backed connectors, Google browser OAuth, kernel tools, AI tool builders, and Settings > Tools availability policy. Slack also has routine-listener foundations: bot/app-token credential tools, a metadata-only event ledger, and socket-free routine dispatcher helpers. Data tools are exposed over MCP when connected and enabled. AI agent can manage connection lifecycle (connect, disconnect, configure policy) via `connections_status`, `google_set_oauth_client`, `google_connect`, `slack_connect`, `slack_bot_connect`, `connections_configure` tools. File-based credential ingestion reads secrets server-side so they never enter model context. `src/main/integrations/`, `src/main/tools/toolPolicy.ts`. Docs: [integrations.md](integrations.md), [proposals/slack-listener.md](proposals/slack-listener.md).
 - **Account tokens.** Org registry token management in `~/.mim/keys.env`. `src/main/tools/account.ts`.
 
 ### Main Process — Observability
@@ -232,7 +232,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 - [proposals/tools-settings-tab.md](proposals/tools-settings-tab.md) — Settings > Tools plan for unified AI/MCP tool availability policy.
 - [proposals/agents-as-apps.md](proposals/agents-as-apps.md) — **implemented** (phases 0-4; phase 5 deferred). Agents as an app contribution type: `AgentProfile` primitive extracted from the chat runtime, `export const agents` mounting, agent sessions in the native chat surface, starter template and authoring docs.
 - [proposals/user-manual.md](proposals/user-manual.md) — user manual + developer docs for mim-web: positioning, IA, content pipeline, subagent authoring process, design guide.
-- [proposals/mim-serve.md](proposals/mim-serve.md) — `mim serve`: shared workspace host proposal (MCP streamable HTTP, route/auth matrix, issued caller tokens, `remote` actor, declarative approval policy, executable-workspace deny floor, SSRF defense, structured-state migration, backups, grant UX) plus the service-with-shells north star and strategic-direction track sketches.
+- [proposals/mim-serve.md](proposals/mim-serve.md) — `mim serve`: shared workspace host proposal with current implementation status, installed-app onboarding gap, Phase 2b invite-led join and scope chrome, Phase 2.5 UX acceptance gate, MCP streamable HTTP, route/auth matrix, issued caller tokens, `remote` actor, declarative approval policy, executable-workspace deny floor, SSRF defense, structured-state migration, backups, grant UX, service-with-shells north star, and strategic-direction track sketches.
 - [proposals/routines.md](proposals/routines.md) — Routines: workspace-owned standing prompts that create runs; headless chat-turn runner, visible tools plus approval grants, scheduler ownership.
 - [proposals/slack-listener.md](proposals/slack-listener.md) — Slack-triggered routines over Socket Mode: implemented trigger/ledger/dispatcher foundations, proposed listener socket, responder bound as a routine with a `slack` trigger, per-thread sessions, pinned thread reply, explicit Slack transcript retention.
 - [proposals/context-compaction.md](proposals/context-compaction.md) — context compaction as a view over the immutable session log: `buildModelContext`, deterministic pre-pass, append-only LLM summary records, overflow recovery.
@@ -309,6 +309,7 @@ src/
     workspace/
       workspaceBoot.ts          # Last-workspace restore
       workspaceContract.ts      # mim.yaml schema/parser/scaffold
+      sharedWorkspace*.ts       # shared-workspace token storage, invite join, remote tool mounting, event refresh
       workspaceFileWatcher.ts   # File-change events
     integrations/
       secrets.ts                # OS keychain boundary

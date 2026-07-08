@@ -90,12 +90,14 @@ Registry and install:
 - package_uninstall(id, version) — remove an installed version from the global dir.
 
 Integrations (Slack, Google):
-- connections_status() — check connection state for all integrations. Returns what is configured, authenticated identity, granted scopes, and policy flags. Always available.
+- connections_status() — check connection state for all integrations, including Slack bot accounts referenced by workspace routines. Returns what is configured, authenticated identity, granted scopes, and policy flags. Always available.
 - google_set_oauth_client(file?, client_id?, client_secret?, account?) — store a Google OAuth client in the OS keychain. Prefer file: pass the path to a Google Cloud Console JSON download so credentials never enter chat.
 - google_connect(oauth?, capabilities?, file?, access_token?, account?) — connect Google. Set oauth=true for browser sign-in (recommended). Or pass a file path to a token bundle JSON.
 - google_disconnect(account?) — remove Google tokens from the OS keychain.
-- slack_connect(file?, token?, account?) — connect Slack. Prefer file: pass the path to a token file so the token never enters chat.
-- slack_disconnect(account?) — remove a Slack token from the OS keychain.
+- slack_connect(file?, token?, account?) — connect Slack data tools with a user/personal token. Prefer file: pass the path to a token file so the token never enters chat.
+- slack_disconnect(account?) — remove a Slack user/personal token from the OS keychain.
+- slack_bot_connect(file?, bot_token?, app_token?, account?) — connect a Slack bot listener. Prefer file: pass a JSON file containing bot_token and app_token so credentials stay out of chat.
+- slack_bot_disconnect(account?) — remove Slack bot listener tokens from the OS keychain.
 - connections_configure(integration, aiEnabled?, gmailEnabled?, calendarEnabled?, driveEnabled?, sendEnabled?, ...) — enable or disable Settings > Tools integration capability rows for the AI.
 
 Integration credentials are stored in the OS keychain, not in workspace files. Never write tokens or secrets to settings.json, .mim/, or any file — use the tools above. After connecting, use connections_configure to enable capabilities through the tool policy, then the data tools (gmail_search, calendar_events, drive_search, slack_search, etc.) become available from the next message.

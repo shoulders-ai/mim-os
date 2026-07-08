@@ -29,10 +29,20 @@ export interface ApprovalLike {
   resourceCollectionId?: string
   // Human-readable action label from the resolved tool policy (package tools).
   label?: string
+  source?: {
+    kind: 'sharedWorkspace'
+    id: string
+    name?: string
+  }
   sessionId?: string
   params?: Record<string, unknown>
   preview?: ApprovalPreviewLike
   savedBrowserSession?: SavedBrowserSessionApprovalLike
+}
+
+export function sourceChipLabel(approval: ApprovalLike): string {
+  if (approval.source?.kind !== 'sharedWorkspace') return ''
+  return approval.source.name || approval.source.id
 }
 
 export function formatToolName(name: string): string {

@@ -21,7 +21,14 @@ workspace artifacts can be restored without Mim touching the user's `.git`
 repository. Workspaces can also opt into managed git sync when a user wants Mim
 to handle the ordinary save, pull, and push loop.
 
-Desktop-only. Local-first. File-based. Built with Electron + Vue 3 + Vercel AI SDK + CodeMirror 6.
+Mim can also run headless with `mim serve`, exposing a shared workspace over
+authenticated MCP HTTP. Human desktop users join from a single-use invite link
+or paste string; CLI agents and automation use issued MCP tokens. Desktop and
+headless workspaces can mount selected remote named-tool namespaces, such as
+`issues.*` and `knowledge.*`, while keeping durable serve tokens outside the
+workspace.
+
+Desktop-first. Local-first. File-based. Built with Electron + Vue 3 + Vercel AI SDK + CodeMirror 6.
 
 
 ## Quick Start
@@ -64,6 +71,7 @@ The app-managed file wins so keys set, replaced, or removed in Settings always t
 - `localStorage` keys use `mim:` prefix.
 - Workspace data lives in `~/mim-workspace/.mim/`.
 - API keys live in `~/.mim/keys.env`.
+- Shared workspace client tokens also live in `~/.mim/keys.env`.
 - Integration tokens live in the OS keychain.
 
 ## Apps

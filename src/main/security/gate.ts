@@ -29,6 +29,11 @@ export interface ToolPolicy {
   category: ToolCategory
   risk: ToolRisk
   label?: string
+  source?: {
+    kind: 'sharedWorkspace'
+    id: string
+    name?: string
+  }
   ownerPackageId?: string
   pathParam?: string
   // A second path-bearing param (e.g. fs.rename new_path) that must also pass
@@ -59,6 +64,7 @@ export interface PermissionApprovalRequest {
   resourceCollectionId?: string
   // Human-readable action label from the resolved tool policy (e.g. "Board: Delete issue").
   label?: string
+  source?: ToolPolicy['source']
   params: Record<string, unknown>
   preview?: ApprovalPreview
   savedBrowserSession?: SavedBrowserSessionApproval
@@ -267,6 +273,9 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'slack.connect': { category: 'secrets', risk: 'high', targetParam: 'account' },
   'slack.disconnect': { category: 'secrets', risk: 'high', targetParam: 'account' },
   'slack.replies': { category: 'network', risk: 'medium', targetParam: 'channel' },
+  'slack.bot.status': { category: 'network', risk: 'low', targetParam: 'account' },
+  'slack.bot.connect': { category: 'secrets', risk: 'high', targetParam: 'account' },
+  'slack.bot.disconnect': { category: 'secrets', risk: 'high', targetParam: 'account' },
   'google.setOAuthClient': { category: 'secrets', risk: 'high', targetParam: 'account' },
   'google.setTokenBundle': { category: 'secrets', risk: 'high', targetParam: 'account' },
   'google.connect': { category: 'secrets', risk: 'high', targetParam: 'account' },
@@ -563,6 +572,7 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
         pathKind: pathInfo?.kind,
         resourceCollectionId: pathInfo?.resourceCollectionId,
         label: policy.label,
+        source: policy.source,
         params: redactedParams,
         preview: buildApprovalPreview(tool.name, params),
         ...(savedBrowserSession ? { savedBrowserSession } : {}),
@@ -831,6 +841,7 @@ const EFFECT_OVERRIDES: Record<string, ToolEffect> = {
   'sync.status': 'read',
   'log.append': 'read',
   'slack.status': 'read',
+  'slack.bot.status': 'read',
   'google.status': 'read',
   'google.authUrl': 'read',
   'google.exchangeCode': 'external',

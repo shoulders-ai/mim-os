@@ -9,7 +9,9 @@ Secrets use `src/main/integrations/secrets.ts`.
 - `createKeytarSecretStore()` stores values in the OS keychain via `keytar`.
 - `createMemorySecretStore()` is only for tests.
 - Keychain service name: `Mim`.
-- Slack token account: `slack:{account}`.
+- Slack user/personal token account: `slack:{account}`.
+- Slack bot token account: `slack-bot:{account}`.
+- Slack app-level Socket Mode token account: `slack-app:{account}`.
 - Google OAuth client account: `google-client:{account}`.
 - Google token bundle account: `google:{account}`.
 - Package secret account: `package:{packageId}:{name}` (see `src/main/packages/packageSecrets.ts` and [app-system-api.md](app-system-api.md)).
@@ -56,9 +58,17 @@ Tools:
 
 - `slack.setToken`, `slack.deleteToken`, `slack.status`
 - `slack.connect` (accepts `file` for file-based token ingestion), `slack.disconnect`
+- `slack.bot.status`, `slack.bot.connect`, `slack.bot.disconnect`
 - `slack.channels`, `slack.users`, `slack.dms`
 - `slack.history`, `slack.search`, `slack.replies`
 - `slack.send`
+
+`slack.connect` is the user/personal-token path for Slack API data tools.
+`slack.bot.connect` is the Slack-triggered routine setup path. It stores both
+the bot token and app-level Socket Mode token, verifies the bot with
+`auth.test`, verifies Socket Mode with `apps.connections.open`, and never
+returns the websocket URL. The live Socket Mode listener and thread reply loop
+are still listener-runtime work; credential setup is implemented.
 
 ### Tool Policy
 
@@ -91,8 +101,9 @@ Settings > Tools policy before calls reach the registry.
 
 ### MCP Exposure
 
-`slack.status`, `slack.connect`, and `slack.disconnect` are present unless
-disabled in Settings > Tools. Data tools (`slack.channels`, `slack.users`,
+`slack.status`, `slack.connect`, `slack.disconnect`, `slack.bot.status`,
+`slack.bot.connect`, and `slack.bot.disconnect` are present unless disabled in
+Settings > Tools. Data tools (`slack.channels`, `slack.users`,
 `slack.dms`, `slack.history`, `slack.replies`, `slack.search`, `slack.send`)
 appear conditionally when a token is configured and the corresponding tool row
 is enabled. MCP calls use the `user` actor; the server-side MCP allowlist plus
@@ -147,12 +158,14 @@ pointing to a token bundle JSON) are advanced/manual setup paths.
 The AI agent can manage the full Google and Slack connection lifecycle through
 always-present tools in the chat profile:
 
-- `connections_status()` — check connection state for all integrations
+- `connections_status()` — check connection state for all integrations and Slack bot accounts referenced by workspace routines
 - `google_set_oauth_client(file?)` — store OAuth client from file (credentials never enter chat)
 - `google_connect(oauth?, file?)` — browser sign-in or file-based token bundle
 - `google_disconnect()` — remove tokens
-- `slack_connect(file?)` — store and verify a Slack token from file
-- `slack_disconnect()` — remove tokens
+- `slack_connect(file?)` — store and verify a Slack user/personal token from file
+- `slack_disconnect()` — remove the Slack user/personal token
+- `slack_bot_connect(file?)` — store and verify Slack bot and Socket Mode tokens from file
+- `slack_bot_disconnect()` — remove Slack bot listener tokens
 - `connections_configure(integration, ...)` — update Settings > Tools capability rows
 
 File-based credential ingestion reads secrets server-side in the main process —
@@ -230,7 +243,7 @@ approval card's caution styling. All Slack/Google integration tools are
 
 - Integration reads (search, history, channels, replies, events, Gmail/Drive/Docs/Sheets reads) are `external` → approval in Normal and Strict.
 - Outbound send/create/write tools (`gmail.send`, `calendar.create`, `sheets.write`, `sheets.append`, kernel `slack.send`) are `external` and additionally `high` risk, so the card adds a caution treatment.
-- Secret setup and OAuth exchange tools mutate stored credentials; `google.exchangeCode` is `external`. `slack.connect`, `slack.disconnect`, `google.connect`, and `google.disconnect` are `secrets`/`high`.
+- Secret setup and OAuth exchange tools mutate stored credentials; `google.exchangeCode` is `external`. `slack.connect`, `slack.disconnect`, `slack.bot.connect`, `slack.bot.disconnect`, `google.connect`, and `google.disconnect` are `secrets`/`high`.
 - Status checks (`slack.status`, `google.status`) are treated as reads and do not prompt.
 - Packages cannot call personal Slack or Google integration tools in runtime v1.
 

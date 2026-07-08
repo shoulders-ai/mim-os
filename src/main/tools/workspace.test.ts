@@ -2,9 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createToolRegistry } from '@main/tools/registry.js'
 import { createTraceLog } from '@main/trace/trace.js'
 import { registerWorkspaceTools } from '@main/tools/workspace.js'
-import { mkdtempSync, existsSync, readFileSync, rmSync } from 'fs'
+import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { writeSharedWorkspaceToken } from '@main/workspace/sharedWorkspaceTokens.js'
 
 describe('Workspace tools', () => {
   let dir: string
@@ -161,5 +162,39 @@ describe('Workspace contract tools (status / init / info)', () => {
     const result = await tools.call('workspace.info', {}, ctx) as { name?: string; config?: { name?: string } }
     const name = result.name ?? result.config?.name
     expect(name).toBe(dir.split('/').pop())
+  })
+
+  it('workspace.sharedWorkspace.status reports config and token presence without exposing the token', async () => {
+    const oldHome = process.env.HOME
+    const home = mkdtempSync(join(tmpdir(), 'mim-ws-home-'))
+    process.env.HOME = home
+    try {
+      writeFileSync(join(dir, 'mim.yaml'), [
+        'name: shared-status-test',
+        'sharedWorkspace:',
+        '  id: team-server',
+        '  url: https://mim.example.com/mcp',
+        '  namespaces:',
+        '    - issues.*',
+        '',
+      ].join('\n'))
+      writeSharedWorkspaceToken('team-server', 'tok_secret', { home })
+
+      const result = await tools.call('workspace.sharedWorkspace.status', {}, ctx)
+
+      expect(result).toEqual({
+        configured: true,
+        id: 'team-server',
+        url: 'https://mim.example.com/mcp',
+        namespaces: ['issues.*'],
+        tokenConfigured: true,
+        tokenKey: 'MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN',
+      })
+      expect(JSON.stringify(result)).not.toContain('tok_secret')
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME
+      else process.env.HOME = oldHome
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 })

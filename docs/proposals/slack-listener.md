@@ -1,10 +1,10 @@
 # Slack Listener
 
 Status: proposal with foundations in place. Routine `slack` trigger validation,
-duplicate binding diagnostics, a metadata-only event ledger, and socket-free
-dispatch helpers are implemented. Socket Mode, bot credentials, threaded
-sessions, and replies remain proposal work. [mim-serve.md](mim-serve.md)
-remains the future always-on host.
+duplicate binding diagnostics, bot/app-token credential tools, a metadata-only
+event ledger, and socket-free dispatch helpers are implemented. Live Socket
+Mode lifecycle, threaded sessions, and replies remain proposal work.
+[mim-serve.md](mim-serve.md) remains the future always-on host.
 
 Mim hosts a Slack-triggered routine: a Socket Mode listener in the main
 process watches configured channels and answers by running a mounted agent,
@@ -208,6 +208,12 @@ the routine runner and gate mechanics come from routines phases 1 and 3.
 ## Phases
 
 ### Phase 0 — Bot credentials and internal client
+
+Implemented: token-kind-aware storage, bot auth, Socket Mode URL verification,
+internal bot thread reply helper, `slack.bot.status`, `slack.bot.connect`,
+`slack.bot.disconnect`, `slack_bot_connect`, `slack_bot_disconnect`, gate
+policy, and trace secret handling. The live listener does not consume these
+credentials yet.
 
 - `SlackIntegration` (`client.ts`) gains token-kind-aware storage
   (`slack:{account}` existing personal/user token,

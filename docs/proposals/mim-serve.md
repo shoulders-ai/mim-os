@@ -41,6 +41,53 @@ Phases 0-4 below are deliberately incremental and are the committed plan.
 The strategic-direction section sketches the rest of the road so near-term
 decisions don't foreclose it.
 
+## Current Status - 2026-07-08
+
+This proposal is no longer a pure future plan. The repo now contains a large
+part of the serve and shared-workspace plumbing, but the product is not ready
+for ordinary installed-app users. The current gap is user-facing clarity, not
+another server primitive.
+
+Phase status:
+
+- [x] Phase 0 core server safety is substantially implemented: serve mode,
+  route restrictions, remote actor attribution, and serve-mode MCP HTTP tests
+  exist.
+- [x] Phase 1 runtime foundations are substantially implemented: serve token
+  commands, authenticated `/mcp`, `/mcp/events`, remote grants, executable and
+  sensitive deny floors, SSRF blocking, denied-request ledger, per-package app
+  tool serialization, structured-state migration, backup/restore helpers, and
+  caller attribution are present.
+- [ ] Phase 1 operator readiness is not complete as a product experience:
+  first-run hosting docs, private-overlay guidance, reverse-proxy streaming
+  guidance, monitoring/rotation expectations, and "what should I send a
+  teammate" need a pass.
+- [x] Phase 2 infrastructure is substantially implemented: `mim.yaml`
+  `sharedWorkspace` config, local token storage, desktop/headless remote
+  named-tool mounting, local named-tool shadowing for server-owned namespaces,
+  version/capability warnings, and a read-only workspace status surface exist.
+- [ ] Phase 2 is not product-complete for desktop users: the ordinary join
+  journey now exists, but broader source-of-execution chrome and user testing
+  still need to prove the experience.
+- [ ] Phase 2b invite-led join is substantially implemented: invite
+  mint/list/revoke, single-use `/join` exchange, `mim://`/paste handling,
+  Settings join card, local-only/connected status language, approval-card
+  shared-workspace chip, and live catalog refresh exist. Remaining work is
+  broader scope chrome across chat tool rows and app views, plus final
+  Phase 2.5 acceptance testing.
+- [ ] Phase 3 mim-web identity is not implemented.
+- [ ] Phase 4 unattended server-hosted agent runs are not implemented.
+
+User confusion report:
+
+A user with Mim installed locally can open a folder on their desktop, but the
+shared-workspace story is opaque after that. They cannot tell whether they are
+done, whether they need to host something, whether they need an invite, whether
+files are local or remote, or why concepts like `mim serve`, MCP, tokens,
+namespaces, and `mim.yaml` matter. This is a missing phase step. It must be
+handled as product onboarding and role clarity before later phases add more
+capability.
+
 ## Principles
 
 - **One kernel.** `mim serve` = `createHeadlessKernel()` + `createServer()` with
@@ -581,6 +628,137 @@ policy-checked.
 Outcome: a teammate can ask local chat to file an issue, and the issue exists
 in the shared workspace immediately.
 
+### Phase 2b - join by invite, scope by chrome
+
+Phase 2 makes remote mounting work; it does not make it legible. Today a
+teammate joins by hand-editing a `sharedWorkspace` block into `mim.yaml` and
+hand-placing a bearer token into `~/.mim/keys.env`, and Settings > Workspace
+only reports the resulting state. That is the confusion report in product
+form. This phase is the design that fixes it, built on two ideas: **joining is
+one artifact** (the invite carries everything, like a Slack invite link or a
+Tailscale login) and **scope is one visual rule** (local is unmarked, remote
+is marked). It changes no permission semantics — it is a writer and a renderer
+for the contracts phases 1-2 already ship.
+
+**The invite is the entire join surface.**
+
+- `mim serve invite create --name anna [--expires 7d]` mints a single-use
+  invite in two equivalent forms: a paste string (`mim-invite-…`) and a
+  `mim://join/…` deep link. Both encode the server URL, workspace id and
+  display name, caller name, and a one-time redemption secret. `mim serve
+  invite list/revoke` mirror the token commands; invite secrets are
+  hash-stored beside `callers.json` like everything else.
+- Redemption is an exchange, not a handoff. The client presents the invite
+  once at a redemption endpoint and receives the durable bearer token, which
+  lands directly in `~/.mim/keys.env` under the existing
+  `MIM_SHARED_WORKSPACE_<ID>_TOKEN` key. The durable token never transits
+  Slack, is never rendered in any UI, and the invite dies on first use or
+  expiry — a link sitting in chat scrollback is worthless after the teammate
+  clicks it. The redemption route is the one endpoint reachable without a
+  bearer token: it accepts only invite exchange, is rate-limited, compares
+  hashes in constant time, and joins the phase-one route matrix and its tests.
+- The operator's job collapses to sending one Slack message containing one
+  link. Phase 1's client snippets remain the answer for CLI agents and
+  automation; the invite is the answer for humans with Mim installed.
+
+**Join by paste, not by config.**
+
+- The desktop app registers the `mim://` protocol. Clicking an invite opens
+  Mim on a single confirmation card: workspace display name, host, caller
+  name, and the data model in one plain line — "Files stay on this machine.
+  Issues and Knowledge come from *hta-model*." One primary action: Join. The
+  same card opens by pasting the invite string into Settings > Workspace, for
+  clients that strip links.
+- Join writes the `sharedWorkspace` block through the existing `mim.yaml`
+  contract and the token through the existing keys.env store. The user sees
+  neither file. Hand-edited configs keep working unchanged — the invite is a
+  writer of the same contract, not a second mechanism.
+- Joining takes effect live: remote tools mount without an app restart, and
+  the mounted catalog refreshes on `tools/list_changed` (this closes the
+  phase-2 live-refresh gap).
+- Failure states are specific, and each carries its one next action: invite
+  already used or expired (request a new invite from the person who sent it),
+  host unreachable (retry), version skew (the phase-2 handshake warning).
+
+**Scope chrome: local is unmarked, remote is marked.**
+
+- One rule, applied everywhere, never inverted: any surface that reads or
+  writes the shared workspace carries its chip — display name plus a status
+  dot. Chat tool-call rows and approval prompts for remote-routed calls,
+  Board/Knowledge views backed by remote namespaces, and the workspace title
+  all carry it; purely local surfaces never do. A solo user's Mim contains no
+  shared-workspace chrome at all — absence is the answer to "am I done?".
+- Connection status is one word on the chip — Connected, Offline, Denied,
+  Invite needed — each with one next action. Denied names the missing grant,
+  fed by the phase-1 denied-request ledger, so a denial reads "ask your
+  operator to grant `issues.create`", not "permission denied".
+- No instruction text in chrome. The interface shape answers the question;
+  sentences live on the join card and in docs.
+
+**Roles split by entry artifact, not by menu.**
+
+- Solo user: opening a folder is the whole journey. Nothing invites them to
+  host or join; the Settings row reads as an optional join point, not an
+  incomplete setup.
+- Teammate: enters through an invite link and never meets MCP, bearer
+  headers, YAML, or namespaces.
+- Operator: enters through hosting docs and `mim serve`. The app never
+  proposes hosting as a next step for ordinary users.
+
+Acceptance:
+
+- Invite-to-connected in under one minute, without the user encountering the
+  words MCP, bearer, token, YAML, or namespace.
+- Invites are single-use, expiring, revocable, and hash-stored; the durable
+  token is never displayed anywhere.
+- Server-side revocation flips the desktop chip to "Invite needed" with a
+  working re-join path (a fresh invite), not a dead config.
+- Every remote-routed tool call shows the shared-workspace chip before and
+  during execution, including in approval prompts.
+- Joining mounts remote tools without restart; catalogs update live on
+  `tools/list_changed`.
+- The redemption endpoint passes route-matrix tests: it is the only
+  tokenless route, exchanges each invite at most once, and rate-limits.
+
+Outcome: the operator pastes one link into Slack; the teammate clicks it,
+reads one card, clicks Join, and asks a question against team memory — and
+from then on can always see, at a glance, which workspace any action touches.
+
+### Phase 2.5 - installed-app onboarding and role clarity
+
+This phase is a product acceptance gate inserted because Phase 2's technical
+mounting model does not answer the installed user's basic question: "I opened a
+folder in Mim; what now?" Phase 2b above is the design intended to pass this
+gate; the gate is graded against the requirements below regardless of
+mechanism.
+
+Requirements:
+
+- The local-only path is first-class. A solo user should understand that
+  opening a folder is enough, and shared workspace setup is optional.
+- The join path is invite-led. A teammate should be able to start from a
+  shared-workspace invite and end in a connected state without learning MCP,
+  bearer headers, environment files, YAML, or namespace routing.
+- The host path is clearly separate. Running `mim serve`, issuing tokens,
+  backups, revocation, and deployment are operator responsibilities, not the
+  default next step for everyone who installed Mim.
+- The app and docs explain the data model in plain language: files can remain
+  local, while selected team tools such as issues or knowledge may use the
+  shared workspace when configured.
+- Status language is concrete: local only, connected to a named shared
+  workspace, missing invite/token, remote unavailable, or permission denied
+  with a clear next action.
+- The user can see when a tool action will affect the local workspace versus
+  the shared workspace before or during the action.
+- First-run and sharing copy give opinionated defaults by role: solo user,
+  teammate joining a workspace, operator hosting a workspace, and automation or
+  CLI caller.
+
+Outcome: a person who installed Mim and opened a folder can tell within one
+minute whether they are finished, should paste an invite, or should hand the
+hosting instructions to an operator. No later phase may rely on users learning
+the protocol vocabulary as the way to discover this.
+
 ### Phase 3 - mim-web issued identity
 
 - mim-web grows caller management beside registry clients: mint, entitle,
@@ -617,6 +795,9 @@ files comments/issues, and leaves a normal session and trace.
 
 ## Product Requirements
 
+- **Installed-app clarity.** The default desktop experience is local-first:
+  install Mim, open a folder, and work. Shared workspace concepts appear only
+  when the user chooses to join or host one.
 - **Time to first value.** Token creation prints exact client setup snippets.
   The operator should be able to send one message; the teammate pastes one
   command/config block and asks a question against team memory.

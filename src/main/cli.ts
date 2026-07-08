@@ -14,10 +14,22 @@ import {
   revokeServeToken,
   rotateServeToken,
 } from '@main/serve/tokens.js'
+import {
+  createServeInvite,
+  listServeInvites,
+  revokeServeInvite,
+  type ServeInviteResult,
+} from '@main/serve/invites.js'
 import { listServeDeniedRequests } from '@main/serve/denials.js'
 import { migrateServeStructuredState } from '@main/serve/stateMigration.js'
 import { createServeBackup, restoreServeBackup } from '@main/serve/backup.js'
 import { startMimServe } from '@main/serve/start.js'
+import {
+  clearSharedWorkspaceToken,
+  readSharedWorkspaceToken,
+  sharedWorkspaceTokenEnvKey,
+  writeSharedWorkspaceToken,
+} from '@main/workspace/sharedWorkspaceTokens.js'
 
 export interface CliIO {
   cwd: string
@@ -53,11 +65,17 @@ Usage:
   mim list-tools [--json]
   mim go [--workspace path] [-- command ...]
   mim mcp
+  mim shared-workspace token set <id> <token|--stdin> [--json]
+  mim shared-workspace token status <id> [--json]
+  mim shared-workspace token clear <id> [--json]
   mim serve [--host host] [--port port] [--workspace path]
   mim serve token create --name name [--workspace path] [--json]
   mim serve token list [--workspace path] [--json]
   mim serve token rotate <id> [--workspace path] [--json]
   mim serve token revoke <id> [--workspace path]
+  mim serve invite create --name name [--url url] [--expires 7d] [--workspace path] [--json]
+  mim serve invite list [--workspace path] [--json]
+  mim serve invite revoke <id> [--workspace path]
   mim serve denials list [--workspace path] [--json]
   mim serve state migrate --from workspace [--apps ids] [--workspace path] [--json]
   mim serve backup create --output dir [--workspace path] [--json]
@@ -92,6 +110,10 @@ export async function runCli(argv: string[], io: CliIO = defaultIO()): Promise<n
 
     if (parsed.command === 'serve') {
       return runServeCommand(parsed, io)
+    }
+
+    if (parsed.command === 'shared-workspace') {
+      return runSharedWorkspaceCommand(parsed, io)
     }
 
     if (parsed.command === 'init') {
@@ -288,6 +310,9 @@ async function runServeCommand(parsed: ParsedArgs, io: CliIO): Promise<number> {
   if (parsed.args[0] === 'token') {
     return runServeTokenCommand(parsed, io, workspacePath, parsed.args.slice(1))
   }
+  if (parsed.args[0] === 'invite') {
+    return runServeInviteCommand(parsed, io, workspacePath, parsed.args.slice(1))
+  }
   if (parsed.args[0] === 'denials') {
     return runServeDenialsCommand(parsed, io, workspacePath, parsed.args.slice(1))
   }
@@ -314,6 +339,64 @@ async function runServeCommand(parsed: ParsedArgs, io: CliIO): Promise<number> {
     home: io.home,
     stdout: io.stdout,
   })
+}
+
+async function runServeInviteCommand(
+  parsed: ParsedArgs,
+  io: CliIO,
+  workspacePath: string,
+  args: string[],
+): Promise<number> {
+  const subcommand = args[0]
+  if (subcommand === 'create') {
+    const opts = parseServeInviteCreateArgs(args.slice(1), workspacePath)
+    const result = createServeInvite({ home: io.home, workspacePath, ...opts })
+    writeServeInviteResult(io, parsed, result)
+    return 0
+  }
+  if (subcommand === 'list') {
+    if (args.length !== 1) throw new Error('Usage: mim serve invite list')
+    writeResult(io, parsed, { invites: listServeInvites({ home: io.home, workspacePath }) })
+    return 0
+  }
+  if (subcommand === 'revoke') {
+    const id = args[1]
+    if (!id || args.length > 2) throw new Error('Usage: mim serve invite revoke <id>')
+    const revoked = revokeServeInvite({ home: io.home, workspacePath, id })
+    if (!revoked) throw new Error(`Unknown serve invite: ${id}`)
+    writeResult(io, parsed, { revoked: id })
+    return 0
+  }
+  throw new Error('Usage: mim serve invite <create|list|revoke>')
+}
+
+async function runSharedWorkspaceCommand(parsed: ParsedArgs, io: CliIO): Promise<number> {
+  const [noun, subcommand, id, token, ...rest] = parsed.args
+  if (noun !== 'token') throw new Error('Usage: mim shared-workspace token <set|status|clear>')
+  if (subcommand === 'set') {
+    if (!id || !token || rest.length > 0) throw new Error('Usage: mim shared-workspace token set <id> <token|--stdin>')
+    const value = token === '--stdin' ? (await readStdin(io)).trim() : token
+    if (!value) throw new Error('Missing shared workspace token')
+    writeSharedWorkspaceToken(id, value, { home: io.home })
+    writeResult(io, parsed, { saved: true, id, key: sharedWorkspaceTokenEnvKey(id) })
+    return 0
+  }
+  if (subcommand === 'status') {
+    if (!id || token !== undefined || rest.length > 0) throw new Error('Usage: mim shared-workspace token status <id>')
+    writeResult(io, parsed, {
+      configured: readSharedWorkspaceToken(id, { home: io.home }) !== null,
+      id,
+      key: sharedWorkspaceTokenEnvKey(id),
+    })
+    return 0
+  }
+  if (subcommand === 'clear') {
+    if (!id || token !== undefined || rest.length > 0) throw new Error('Usage: mim shared-workspace token clear <id>')
+    clearSharedWorkspaceToken(id, { home: io.home })
+    writeResult(io, parsed, { cleared: true, id, key: sharedWorkspaceTokenEnvKey(id) })
+    return 0
+  }
+  throw new Error('Usage: mim shared-workspace token <set|status|clear>')
 }
 
 async function runServeTokenCommand(
@@ -513,6 +596,92 @@ function parseServeTokenCreateArgs(args: string[]): { name: string; url?: string
   return { name, url }
 }
 
+function parseServeInviteCreateArgs(
+  args: string[],
+  workspacePath: string,
+): {
+  name: string
+  url: string
+  workspaceId?: string
+  workspaceName?: string
+  namespaces?: string[]
+  expiresAt?: string
+} {
+  const rest = [...args]
+  let name = ''
+  let url = 'http://127.0.0.1:4780/mcp'
+  let workspaceId: string | undefined
+  let workspaceName: string | undefined
+  let namespaces: string[] | undefined
+  let expiresAt: string | undefined
+  for (let i = 0; i < rest.length;) {
+    const arg = rest[i]
+    if (arg === '--name') {
+      const value = rest[i + 1]
+      if (!value || value.startsWith('-')) throw new Error('Missing value for --name')
+      name = value
+      rest.splice(i, 2)
+      continue
+    }
+    if (arg === '--url') {
+      const value = rest[i + 1]
+      if (!value || value.startsWith('-')) throw new Error('Missing value for --url')
+      url = value
+      rest.splice(i, 2)
+      continue
+    }
+    if (arg === '--workspace-id') {
+      const value = rest[i + 1]
+      if (!value || value.startsWith('-')) throw new Error('Missing value for --workspace-id')
+      workspaceId = value
+      rest.splice(i, 2)
+      continue
+    }
+    if (arg === '--workspace-name') {
+      const value = rest[i + 1]
+      if (!value || value.startsWith('-')) throw new Error('Missing value for --workspace-name')
+      workspaceName = value
+      rest.splice(i, 2)
+      continue
+    }
+    if (arg === '--namespaces') {
+      const value = rest[i + 1]
+      if (!value || value.startsWith('-')) throw new Error('Missing value for --namespaces')
+      namespaces = value.split(',').map(item => item.trim()).filter(Boolean)
+      rest.splice(i, 2)
+      continue
+    }
+    if (arg === '--expires') {
+      const value = rest[i + 1]
+      if (!value || value.startsWith('-')) throw new Error('Missing value for --expires')
+      expiresAt = new Date(Date.now() + parseDurationMs(value)).toISOString()
+      rest.splice(i, 2)
+      continue
+    }
+    i++
+  }
+  if (rest.length > 0 || !name) throw new Error('Usage: mim serve invite create --name name')
+  return {
+    name,
+    url,
+    workspaceId,
+    workspaceName: workspaceName ?? basename(workspacePath),
+    namespaces,
+    expiresAt,
+  }
+}
+
+function parseDurationMs(value: string): number {
+  const match = value.match(/^(\d+)(m|h|d)$/)
+  if (!match) throw new Error('--expires must use m, h, or d, for example 30m, 12h, or 7d')
+  const amount = Number(match[1])
+  const unit = match[2]
+  if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('--expires must be positive')
+  if (unit === 'm') return amount * 60_000
+  if (unit === 'h') return amount * 60 * 60_000
+  return amount * 24 * 60 * 60_000
+}
+
 function writeServeTokenResult(io: CliIO, parsed: ParsedArgs, result: ReturnType<typeof createServeToken>): void {
   if (parsed.json) {
     writeResult(io, parsed, result)
@@ -531,6 +700,22 @@ function writeServeTokenResult(io: CliIO, parsed: ParsedArgs, result: ReturnType
     '',
     'curl:',
     result.snippets.curl,
+    '',
+  ].join('\n'))
+}
+
+function writeServeInviteResult(io: CliIO, parsed: ParsedArgs, result: ServeInviteResult): void {
+  if (parsed.json) {
+    writeResult(io, parsed, result)
+    return
+  }
+  io.stdout([
+    `Created invite for ${result.record.name}`,
+    '',
+    result.deepLink,
+    '',
+    'Paste string:',
+    result.invite,
     '',
   ].join('\n'))
 }

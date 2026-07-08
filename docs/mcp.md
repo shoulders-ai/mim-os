@@ -125,6 +125,9 @@ enabled in Settings > Tools:
 | `slack_status` | `slack.status` |
 | `slack_connect` | `slack.connect` |
 | `slack_disconnect` | `slack.disconnect` |
+| `slack_bot_status` | `slack.bot.status` |
+| `slack_bot_connect` | `slack.bot.connect` |
+| `slack_bot_disconnect` | `slack.bot.disconnect` |
 | `google_status` | `google.status` |
 | `google_set_oauth_client` | `google.setOAuthClient` |
 | `google_connect` | `google.connect` |
@@ -139,11 +142,11 @@ change; the tool serves the cached snapshot and returns `available: false` when
 no editor is reporting. A dirty tab means the file on disk may be behind the
 buffer the user sees.
 
-Connection management tools (`slack_connect`, `google_connect`, etc.) and
-`settings_get`/`settings_set` are part of the curated MCP surface so CLI agents
-can set up integrations. `settings_set` cannot write `tools`, `tools.enabled`,
-or `tools.disabled`; tool availability is user-controlled through Settings >
-Tools.
+Connection management tools (`slack_connect`, `slack_bot_connect`,
+`google_connect`, etc.) and `settings_get`/`settings_set` are part of the
+curated MCP surface so CLI agents can set up integrations. `settings_set`
+cannot write `tools`, `tools.enabled`, or `tools.disabled`; tool availability is
+user-controlled through Settings > Tools.
 
 The live browser tools use the desktop Electron runtime. `browser_open` creates
 or reuses the MCP session's live browser context, and `browser_act` observes,
@@ -197,6 +200,14 @@ only the tools they actually registered. Named tools from enabled apps are
 exposed dynamically alongside the core set — the server queries the active named
 tool registrations at request time. Named tools without an `inputSchema` are
 silently excluded from the MCP catalog.
+
+When a workspace declares `sharedWorkspace` in `mim.yaml`, desktop and headless
+Mim mount the configured remote named-tool namespaces into the local registry.
+Mounted remote tools use the same underscore MCP naming convention and appear in
+the dynamic MCP catalog. They shadow local app-provided named tools for the
+configured server-owned namespaces, but do not replace local core tools. The
+mount listens to the shared workspace's `/mcp/events` stream and refreshes when
+it receives `notifications/tools/list_changed`.
 
 ## Client Config
 

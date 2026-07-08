@@ -1,4 +1,5 @@
 import type { LoadedPackage } from './types.js'
+import type { SettingsSection } from '../../components/settings/sections.js'
 
 export interface KernelEventBus {
   on(channel: string, cb: (...args: unknown[]) => void): void
@@ -39,7 +40,7 @@ export interface AppKernelEventDeps {
   openExportDialog(): void
   clearRecentFiles(): void
   handleCloseTab(): void
-  openSettings(): void
+  openSettings(section?: SettingsSection): void
   openShortcuts(): void
   openWelcome(): void
   dispatchTerminalRun(command: string, options?: { reveal?: boolean }): Promise<unknown> | unknown
@@ -103,6 +104,7 @@ export function registerAppKernelEvents(
     ['menu:clear-recent', () => { deps.clearRecentFiles() }],
     ['menu:close-tab', () => { deps.handleCloseTab() }],
     ['menu:settings', () => { deps.openSettings() }],
+    ['shared-workspace:invite', () => { deps.openSettings('workspace') }],
     ['menu:shortcuts', () => { deps.openShortcuts() }],
     ['menu:welcome', () => { deps.openWelcome() }],
     ['bridge:terminal:run', (data: unknown) => {

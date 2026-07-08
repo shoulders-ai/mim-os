@@ -27,7 +27,7 @@ surface for the run; omitting it exposes the normal chat tool surface.
 `tools` when `tools` is present. Omitting `approval.allow` means the routine has
 no unattended consequential grants.
 
-`trigger` is optional. Manual `routine.run` is always available; when a routine
+`trigger` is optional. Manual starts are always available; when a routine
 declares an automatic trigger it must declare exactly one of:
 
 - `schedule: "0 8 * * *"` — five-field cron expression.
@@ -51,7 +51,7 @@ authority hash over trigger/model/agent/tools/approval/steps/missed fields. If
 those fields change, the routine needs enablement again before scheduled
 execution can trust its authority.
 
-Manual `routine.run` is allowed for disabled routines so authors can test a
+Manual starts and runs are allowed for disabled routines so authors can test a
 routine before enabling it.
 
 ## Tools
@@ -64,12 +64,16 @@ The main-process routine tools are:
 - `routine.pause`
 - `routine.resume`
 - `routine.run`
+- `routine.start`
 - `routine.webhook.secret.status`
 - `routine.webhook.secret.set`
 - `routine.webhook.secret.delete`
 
-`routine.run` creates a session with `routineId`, `routineRunId`,
-`routineStatus`, `routineFiredAt`, and eventual completion/error metadata. The
+`routine.start` creates a session with `routineId`, `routineRunId`,
+`routineStatus`, and `routineFiredAt`, returns that session immediately, then
+continues the run in the background. Completion or error metadata is persisted
+on the session when the stream finishes. `routine.run` uses the same runner but
+waits for completion, which is useful for schedulers and headless callers. The
 renderer maps these sessions to `routine` runs in the Navigator.
 
 Webhook secret tools take a routine name. They resolve the routine's
@@ -80,9 +84,14 @@ they never return the signing secret itself.
 
 The Navigator has a Routines surface. It lists valid routine files plus
 diagnostics, shows trigger/tool/enablement state, and provides Run, Pause, and
-Resume controls. Run creates a routine chat session and opens that transcript.
-Routine sessions appear in Activity as routine run rows, not duplicate ordinary
-chat rows.
+Resume controls. If the workspace has no routines, the surface shows a compact
+new-routine form; the header plus button opens the same form later. Creating a
+routine chooses a model, uses plain-language run choices such as daily, weekly,
+simple interval, file changes, or external request, writes `routines/<name>.md`,
+and opens the file for editing. The UI may generate `schedule` frontmatter
+internally; users do not need to write cron syntax. Run creates a routine chat
+session and opens that transcript. Routine sessions appear in Activity as
+routine run rows, not duplicate ordinary chat rows.
 
 ## Automation
 
@@ -102,7 +111,7 @@ for that workspace.
   idempotency.
 
 Automatic triggers only fire enabled routines. If a routine is already running,
-the overlapping fire is skipped and traced. Manual `routine.run` still works for
+the overlapping fire is skipped and traced. Manual starts still work for
 disabled routines.
 
 ## Permissions
@@ -125,8 +134,8 @@ gating, the Routines work surface, desktop lifecycle ticker, file watchers,
 signed local webhooks, webhook secret tools, run state persistence, and trace
 events for fires/skips/completions/errors.
 
-Slack trigger validation, duplicate binding diagnostics, a dispatcher, and a
-metadata-only event ledger exist as foundations. Slack Socket Mode lifecycle
-wiring, bot replies, chained routines, scheduler ownership across multiple
-hosts, durable parked approvals, and `mim serve` ownership are still outside the
-current runtime.
+Slack trigger validation, duplicate binding diagnostics, bot/app-token
+credential tools, a dispatcher, and a metadata-only event ledger exist as
+foundations. Slack Socket Mode lifecycle wiring, bot replies, chained routines,
+scheduler ownership across multiple hosts, durable parked approvals, and
+`mim serve` ownership are still outside the current runtime.

@@ -30,6 +30,11 @@ nothing.
   `transport: "mcp-http"` attribution. Remote calls never enter the interactive
   approval queue and are never treated as `user`.
 
+Serve mode has one tokenless exception: `POST /join` redeems a single-use,
+expiring shared-workspace invite. It accepts only the invite exchange body,
+rate-limits attempts, stores invite secrets as hashes, and returns the durable
+caller token only to the joining Mim process.
+
 App-mounted agents (`export const agents` in a backend) execute as actor `ai`
 through the same gate. Agents are backend exports, so the workspace trust ack
 already applies — no separate exemption.
@@ -250,10 +255,12 @@ clears the approval store queue so inline cards disappear immediately.
   and `null`, denies foreign origins; `packages.list` refused before WS
   identification; MCP identify, metadata, server-side allowlist, app-only
   app listing, desktop/serve-mode route separation, and AI actor/session
-  routing; serve-mode HTTP MCP auth, `remote` actor attribution, and MCP
-  `tools/list_changed` event stream.
+  routing; serve-mode HTTP MCP auth, tokenless invite redemption, `remote`
+  actor attribution, and MCP `tools/list_changed` event stream.
 - `src/main/serve/tokens.test.ts` — serve token hashing/rotation/revocation,
   remote grant enforcement, path scopes, and executable workspace floors.
+- `src/main/serve/invites.test.ts` — single-use invite hashing,
+  redemption-to-token, revocation, and expiry.
 - `src/main/serve/denials.test.ts` — serve denial ledger entries.
 - `src/main/web/urlPolicy.test.ts` — private, loopback, link-local, unique-local,
   and cloud metadata URL blocking.

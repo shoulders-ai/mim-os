@@ -91,8 +91,11 @@ export const MCP_TOOL_SPECS: McpToolSpec[] = [
   { name: 'settings_get', mimName: 'settings.get', description: 'Read a workspace setting' },
   { name: 'settings_set', mimName: 'settings.set', description: 'Write a workspace setting' },
   { name: 'slack_status', mimName: 'slack.status', description: 'Check Slack connection status' },
-  { name: 'slack_connect', mimName: 'slack.connect', description: 'Store and verify a Slack token' },
-  { name: 'slack_disconnect', mimName: 'slack.disconnect', description: 'Remove a Slack token from the OS keychain' },
+  { name: 'slack_connect', mimName: 'slack.connect', description: 'Store and verify a Slack user token' },
+  { name: 'slack_disconnect', mimName: 'slack.disconnect', description: 'Remove a Slack user token from the OS keychain' },
+  { name: 'slack_bot_status', mimName: 'slack.bot.status', description: 'Check Slack bot listener connection status' },
+  { name: 'slack_bot_connect', mimName: 'slack.bot.connect', description: 'Store and verify Slack bot and Socket Mode tokens' },
+  { name: 'slack_bot_disconnect', mimName: 'slack.bot.disconnect', description: 'Remove Slack bot and Socket Mode tokens from the OS keychain' },
   { name: 'google_status', mimName: 'google.status', description: 'Check Google connection status' },
   { name: 'google_set_oauth_client', mimName: 'google.setOAuthClient', description: 'Store a Google OAuth client in the OS keychain' },
   { name: 'google_connect', mimName: 'google.connect', description: 'Connect Google through browser OAuth or token bundle' },
@@ -133,6 +136,7 @@ export interface McpServerOptions {
   getNamedMcpTools?: () => McpToolSpec[]
   agentMounts?: { resolveProfile(agentId: string): Promise<import('@main/ai/aiRuntime.js').AgentProfile> }
   authenticateMcpHttpToken?: (token: string) => McpHttpCaller | null | Promise<McpHttpCaller | null>
+  redeemSharedWorkspaceInvite?: (invite: string) => Promise<unknown> | unknown
   handleRoutineWebhook?: (
     name: string,
     delivery: {
@@ -164,6 +168,7 @@ export async function createServer(
   const mcpTokens = new Map<string, McpToken>()
   const mcpConnections = new Map<string, Set<WebSocket>>()
   const mcpHttpEventStreams = new Set<express.Response>()
+  const joinRateLimit = new Map<string, { count: number; resetAt: number }>()
   const aiRuntime = createAiRuntime({ tools, agentMounts: options?.agentMounts })
   const getNamedMcpTools = options?.getNamedMcpTools ?? (() => [])
   const shellToken = randomUUID()
@@ -221,6 +226,27 @@ export async function createServer(
   }))
 
   if (mode === 'serve') {
+    app.post('/join', async (req, res) => {
+      if (!checkJoinRateLimit(joinRateLimit, req.ip || req.socket.remoteAddress || 'unknown')) {
+        res.status(429).json({ error: 'Too many join attempts' })
+        return
+      }
+      if (!options?.redeemSharedWorkspaceInvite) {
+        res.status(404).json({ error: 'Shared workspace invites are not available' })
+        return
+      }
+      const invite = typeof req.body?.invite === 'string' ? req.body.invite : ''
+      if (!invite.trim()) {
+        res.status(400).json({ error: 'Missing invite' })
+        return
+      }
+      try {
+        res.json(await options.redeemSharedWorkspaceInvite(invite))
+      } catch (err) {
+        res.status(400).json({ error: errorMessage(err) })
+      }
+    })
+
     app.get('/mcp/events', async (req, res) => {
       const caller = await authenticateMcpHttpRequest(req, res, options?.authenticateMcpHttpToken)
       if (!caller) return
@@ -711,6 +737,20 @@ export async function createServer(
       }
     },
   }
+}
+
+function checkJoinRateLimit(
+  buckets: Map<string, { count: number; resetAt: number }>,
+  key: string,
+): boolean {
+  const now = Date.now()
+  const current = buckets.get(key)
+  if (!current || current.resetAt <= now) {
+    buckets.set(key, { count: 1, resetAt: now + 60_000 })
+    return true
+  }
+  current.count += 1
+  return current.count <= 30
 }
 
 function abortSignalForRequest(req: express.Request, res: express.Response): AbortController {

@@ -122,6 +122,14 @@ describe('app server', () => {
     })
   }
 
+  async function postJoin(port: number, body: Record<string, unknown>): Promise<Response> {
+    return fetch(`http://127.0.0.1:${port}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  }
+
   async function waitFor(predicate: () => boolean): Promise<void> {
     for (let attempt = 0; attempt < 50; attempt++) {
       if (predicate()) return
@@ -425,6 +433,39 @@ describe('app server', () => {
       transport: 'mcp-http',
       sessionId: expect.any(String),
     })
+  })
+
+  it('redeems shared workspace invites through the only tokenless serve-mode join route', async () => {
+    const redeemSharedWorkspaceInvite = vi.fn(async (invite: string) => ({
+      callerName: 'Anna',
+      token: 'mim_serve_durable',
+      sharedWorkspace: {
+        id: 'team-server',
+        name: 'HTA Model',
+        url: 'https://mim.example.com/mcp',
+        namespaces: ['issues.*'],
+      },
+      seenInvite: invite,
+    }))
+    server = await createServer(makeTools(vi.fn(), null, makeMcpToolDefs()), makePackages([addPackage()]), {
+      mode: 'serve',
+      authenticateMcpHttpToken: async () => null,
+      redeemSharedWorkspaceInvite,
+    })
+
+    const missing = await postJoin(server.port, {})
+    expect(missing.status).toBe(400)
+    expect(await missing.json()).toEqual({ error: 'Missing invite' })
+
+    const response = await postJoin(server.port, { invite: 'mim-invite-demo' })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      callerName: 'Anna',
+      token: 'mim_serve_durable',
+      sharedWorkspace: { id: 'team-server', name: 'HTA Model' },
+      seenInvite: 'mim-invite-demo',
+    })
+    expect(redeemSharedWorkspaceInvite).toHaveBeenCalledWith('mim-invite-demo')
   })
 
   it('pushes tools/list_changed notifications to authenticated serve-mode MCP event streams', async () => {

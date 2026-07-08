@@ -795,14 +795,29 @@ export async function createAiSdkTools({
     }),
 
     connections_status: tool({
-      description: 'Check connection status for all integrations (Google, Slack). Returns what is configured, who is authenticated, granted scopes, and setup guidance. Always available regardless of policy.',
+      description: 'Check connection status for all integrations (Google, Slack). Returns what is configured, who is authenticated, granted scopes, and setup guidance. Also checks Slack bot accounts referenced by workspace routines. Always available regardless of policy.',
       inputSchema: z.object({}),
       execute: async () => {
-        const [google, slack] = await Promise.all([
+        const routineSlackAccountsPromise = call('routine.list', {})
+          .then(routineSlackAccounts)
+          .catch(() => [])
+        const [google, slack, slackBot, routineSlackAccountLabels] = await Promise.all([
           call('google.status', {}).catch(() => null),
           call('slack.status', {}).catch(() => null),
+          call('slack.bot.status', {}).catch(() => null),
+          routineSlackAccountsPromise,
         ])
-        return { google, slack }
+        const slackBots = await Promise.all(
+          routineSlackAccountLabels
+            .filter(account => account !== 'default')
+            .map(account => call('slack.bot.status', { account }).catch(() => null)),
+        )
+        return {
+          google,
+          slack,
+          slackBot,
+          ...(slackBots.length ? { slackBots: slackBots.filter(Boolean) } : {}),
+        }
       },
     }),
 
@@ -853,6 +868,23 @@ export async function createAiSdkTools({
       description: 'Remove a Slack token from the OS keychain.',
       inputSchema: z.object({ account: z.string().optional() }),
       execute: async (params) => call('slack.disconnect', dropEmpty(params)),
+    }),
+
+    slack_bot_connect: tool({
+      description: 'Connect a Slack bot listener. Pass a JSON file path with bot_token and app_token (recommended), or inline bot_token and app_token. Stores both in the OS keychain and verifies bot auth plus Socket Mode.',
+      inputSchema: z.object({
+        file: z.string().optional(),
+        bot_token: z.string().optional(),
+        app_token: z.string().optional(),
+        account: z.string().optional(),
+      }),
+      execute: async (params) => call('slack.bot.connect', dropEmpty(params)),
+    }),
+
+    slack_bot_disconnect: tool({
+      description: 'Remove Slack bot and Socket Mode tokens from the OS keychain.',
+      inputSchema: z.object({ account: z.string().optional() }),
+      execute: async (params) => call('slack.bot.disconnect', dropEmpty(params)),
     }),
 
     connections_configure: tool({
@@ -1195,7 +1227,7 @@ export async function streamProfileResponse({
     ? createSkillActiveToolPolicy(Object.keys(aiTools), activatedSkillTools, gatedToolNames)
     : null
   const normalizedMessages = normalizeFileUIParts(request.messages || [])
-  const sessionCompactions = profile.persistSession && sessionId
+  let sessionCompactions = profile.persistSession && sessionId
     ? await prepareSessionCompactionsBeforeTurn({
         tools,
         sessionId,
@@ -1204,23 +1236,28 @@ export async function streamProfileResponse({
         trace: turnTrace,
       })
     : []
-  const modelContext = buildModelContext({
-    messages: normalizedMessages,
-    compactions: sessionCompactions,
-    modelWindow: modelConfig.contextWindow,
-  })
-  const preparedMessages = modelContext.messages
-  const uiMessages = await validateUIMessages({
-    messages: preparedMessages,
-    tools: aiTools,
-    dataSchemas: { context: contextDataSchema },
-  })
-  const estimatedContextTokens = estimateMessagesTokens(uiMessages)
-  const modelMessages = await convertToModelMessages(uiMessages, {
-    tools: aiTools,
-    ignoreIncompleteToolCalls: true,
-    convertDataPart: convertMimDataPart,
-  })
+  const preparePrompt = async (compactions: ContextCompactionRecord[]) => {
+    const modelContext = buildModelContext({
+      messages: normalizedMessages,
+      compactions,
+      modelWindow: modelConfig.contextWindow,
+    })
+    const uiMessages = await validateUIMessages({
+      messages: modelContext.messages,
+      tools: aiTools,
+      dataSchemas: { context: contextDataSchema },
+    })
+    const modelMessages = await convertToModelMessages(uiMessages, {
+      tools: aiTools,
+      ignoreIncompleteToolCalls: true,
+      convertDataPart: convertMimDataPart,
+    })
+    return {
+      modelMessages,
+      estimatedContextTokens: estimateMessagesTokens(uiMessages),
+    }
+  }
+  let preparedPrompt = await preparePrompt(sessionCompactions)
   const turnUsageSteps: UsageSummary[] = []
 
   const instructions = await profile.buildInstructions({
@@ -1264,10 +1301,55 @@ export async function streamProfileResponse({
     },
   })
 
-  const result = await agent.stream({
-    prompt: modelMessages,
-    abortSignal: request.abortSignal,
-  })
+  let result: Awaited<ReturnType<typeof agent.stream>>
+  try {
+    result = await agent.stream({
+      prompt: preparedPrompt.modelMessages,
+      abortSignal: request.abortSignal,
+    })
+  } catch (error) {
+    if (
+      !profile.persistSession ||
+      !sessionId ||
+      !isContextLengthError(error, modelConfig.provider)
+    ) {
+      throw error
+    }
+
+    const compaction = await maybeCompactSessionAfterTurn({
+      tools,
+      sessionId,
+      messages: normalizedMessages,
+      modelConfig,
+      contextTokens: overflowContextTokens(preparedPrompt.estimatedContextTokens, modelConfig.contextWindow),
+      trigger: 'overflow',
+      trace: turnTrace,
+      force: true,
+    }).catch(compactionError => {
+      tools.trace.append({
+        kind: 'chat.compaction',
+        actor: 'ai',
+        traceId: turnTraceId,
+        parentSpanId: turnSpanId,
+        status: 'error',
+        sessionId,
+        model: modelConfig.model,
+        data: {
+          trigger: 'overflow',
+          error: compactionError instanceof Error ? compactionError.message : String(compactionError),
+        },
+      })
+      return null
+    })
+    if (!compaction) throw error
+
+    sessionCompactions = [...sessionCompactions, compaction.record]
+    preparedPrompt = await preparePrompt(sessionCompactions)
+    result = await agent.stream({
+      prompt: preparedPrompt.modelMessages,
+      abortSignal: request.abortSignal,
+    })
+  }
 
   return result.toUIMessageStreamResponse({
     originalMessages: normalizedMessages,
@@ -1297,7 +1379,7 @@ export async function streamProfileResponse({
         ...(messagesRef ? { payloadRef: messagesRef } : {}),
       })
       if (!profile.persistSession || !sessionId) return
-      const turnUsage = summarizeTurnUsage(turnUsageSteps, estimatedContextTokens)
+      const turnUsage = summarizeTurnUsage(turnUsageSteps, preparedPrompt.estimatedContextTokens)
       await persistChatSession(tools, sessionId, messages, turnUsage.usage, turnUsage.contextTokens, turnTrace)
       await maybeCompactSessionAfterTurn({
         tools,
@@ -1587,6 +1669,7 @@ export async function maybeCompactSessionAfterTurn({
   contextTokens,
   trigger,
   trace,
+  force = false,
   now = new Date(),
 }: {
   tools: ToolRegistry
@@ -1596,9 +1679,10 @@ export async function maybeCompactSessionAfterTurn({
   contextTokens: number
   trigger: 'post_turn' | 'pre_turn' | 'overflow'
   trace?: { traceId: string; spanId: string }
+  force?: boolean
   now?: Date
 }): Promise<{ record: ContextCompactionRecord } | null> {
-  if (!shouldCompactForContextWindow(contextTokens, modelConfig.contextWindow)) return null
+  if (!force && !shouldCompactForContextWindow(contextTokens, modelConfig.contextWindow)) return null
 
   const cut = selectCompactionCut({ messages, modelWindow: modelConfig.contextWindow })
   if (!cut || cut.summarizedMessageCount <= 0) return null
@@ -1622,13 +1706,19 @@ export async function maybeCompactSessionAfterTurn({
   if (!summary.trim()) return null
 
   const createdAt = now.toISOString()
+  const estimatedTokensBefore = estimateMessagesTokens(messages)
+  const tokensBefore = force
+    ? Math.max(Math.max(0, Math.floor(contextTokens)), estimatedTokensBefore)
+    : contextTokens > 0
+      ? Math.floor(contextTokens)
+      : estimatedTokensBefore
   const draftRecord: ContextCompactionRecord = {
     id: `cmp_${createdAt.replace(/\D/g, '').slice(0, 14)}_${randomUUID().slice(0, 8)}`,
     firstKeptMessageId: cut.firstKeptMessageId,
     firstKeptMessageIndex: cut.firstKeptMessageIndex,
     summarizedMessageCount: cut.summarizedMessageCount,
     summary,
-    tokensBefore: Math.max(0, Math.floor(contextTokens)),
+    tokensBefore,
     tokensAfter: 0,
     savedRatio: 0,
     modelId: modelConfig.id,
@@ -1641,9 +1731,6 @@ export async function maybeCompactSessionAfterTurn({
     compactions: [...existingCompactions, draftRecord],
     modelWindow: modelConfig.contextWindow,
   }).estimatedTokens
-  const tokensBefore = contextTokens > 0
-    ? Math.floor(contextTokens)
-    : estimateMessagesTokens(messages)
   const savedRatio = tokensBefore > 0
     ? Math.max(0, (tokensBefore - afterTokens) / tokensBefore)
     : 0
@@ -1778,6 +1865,11 @@ function shouldCompactForContextWindow(contextTokens: number, contextWindow: unk
 
 function finiteTokenCount(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+}
+
+function overflowContextTokens(estimatedTokens: number, contextWindow: unknown): number {
+  const windowTokens = finiteTokenCount(contextWindow)
+  return Math.max(finiteTokenCount(estimatedTokens), windowTokens)
 }
 
 function hasFreshCompactionForModel(state: SessionCompactionState, modelId: string): boolean {
@@ -2056,6 +2148,80 @@ export function providerBaseUrl(provider: string, rawUrl: unknown): string {
   return url
 }
 
+export function isContextLengthError(error: unknown, provider: string): boolean {
+  const text = collectErrorText(error).toLowerCase()
+  const providerKey = provider.toLowerCase()
+  if (!text) return false
+  if (text.includes('context_length_exceeded')) return true
+
+  if (providerKey === 'anthropic') {
+    return [
+      /prompt is too long/,
+      /maximum context length/,
+      /context (window|length).*exceed/,
+      /(input|prompt).*too many tokens/,
+      /too many input tokens/,
+      /input length.*context/,
+    ].some(pattern => pattern.test(text))
+  }
+
+  if (providerKey === 'openai') {
+    return [
+      /maximum context length/,
+      /context (window|length).*exceed/,
+      /tokens?.*exceed.*context/,
+      /(input|prompt|messages?).*too many tokens/,
+      /too many input tokens/,
+    ].some(pattern => pattern.test(text))
+  }
+
+  if (providerKey === 'google') {
+    return [
+      /input token count exceeds/,
+      /exceeds the maximum number of tokens/,
+      /context (window|length).*exceed/,
+      /(input|prompt).*too many tokens/,
+      /too many input tokens/,
+    ].some(pattern => pattern.test(text))
+  }
+
+  return [
+    /maximum context length/,
+    /context (window|length).*exceed/,
+    /prompt is too long/,
+    /input token count exceeds/,
+  ].some(pattern => pattern.test(text))
+}
+
+function collectErrorText(value: unknown, seen = new Set<unknown>()): string {
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.map(item => collectErrorText(item, seen)).filter(Boolean).join(' ')
+  if (seen.has(value)) return ''
+  if (typeof value !== 'object') return ''
+  seen.add(value)
+
+  const record = value as Record<string, unknown>
+  const fields = [
+    record.name,
+    record.code,
+    record.type,
+    record.status,
+    record.statusCode,
+    record.message,
+    record.responseBody,
+    record.body,
+    record.response,
+    record.error,
+    record.errors,
+    record.cause,
+    record.details,
+    record.data,
+  ]
+  return fields.map(item => collectErrorText(item, seen)).filter(Boolean).join(' ')
+}
+
 function resolveRequestModel(registry: ModelRegistry, feature: string, modelId?: string): ModelConfig {
   const explicit = normalizeModelId(modelId)
   if (explicit) {
@@ -2230,6 +2396,23 @@ function dropEmpty(params: Record<string, unknown>): Record<string, unknown> {
     if (value !== undefined && value !== null) out[key] = value
   }
   return out
+}
+
+function routineSlackAccounts(value: unknown): string[] {
+  if (!value || typeof value !== 'object') return []
+  const routines = (value as { routines?: unknown }).routines
+  if (!Array.isArray(routines)) return []
+  const accounts = new Set<string>()
+  for (const routine of routines) {
+    if (!routine || typeof routine !== 'object') continue
+    const trigger = (routine as { trigger?: unknown }).trigger
+    if (!trigger || typeof trigger !== 'object') continue
+    const slack = (trigger as { slack?: unknown }).slack
+    if (!slack || typeof slack !== 'object') continue
+    const account = (slack as { account?: unknown }).account
+    if (typeof account === 'string' && account.trim()) accounts.add(account.trim())
+  }
+  return [...accounts].sort()
 }
 
 function escapePromptXml(text: string) {

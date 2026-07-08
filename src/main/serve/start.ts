@@ -5,6 +5,7 @@ import {
   hasActiveServeCallers,
   validateServeToken,
 } from '@main/serve/tokens.js'
+import { hasRedeemableServeInvites, redeemServeInvite } from '@main/serve/invites.js'
 import { recordServeDeniedRequest } from '@main/serve/denials.js'
 
 export interface StartMimServeOptions {
@@ -16,8 +17,8 @@ export interface StartMimServeOptions {
 }
 
 export async function startMimServe(options: StartMimServeOptions): Promise<number> {
-  if (!hasActiveServeCallers(options)) {
-    throw new Error('No active serve tokens. Run `mim serve token create --name <name>` first.')
+  if (!hasActiveServeCallers(options) && !hasRedeemableServeInvites(options)) {
+    throw new Error('No active serve callers or invites. Run `mim serve invite create --name <name>` first.')
   }
 
   const kernel = createHeadlessKernel({
@@ -45,6 +46,11 @@ export async function startMimServe(options: StartMimServeOptions): Promise<numb
       home: options.home,
       workspacePath: options.workspacePath,
       token,
+    }),
+    redeemSharedWorkspaceInvite: (invite) => redeemServeInvite({
+      home: options.home,
+      workspacePath: options.workspacePath,
+      invite,
     }),
   })
 

@@ -4,6 +4,12 @@ import type { ToolRegistry } from '@main/tools/registry.js'
 import { classifyWorkspace, scaffoldWorkspace, parseMimYaml, DEFAULT_AGENTS_MD } from '@main/workspace/workspaceContract.js'
 import { writeAgentContext } from '@main/ai/agentContext.js'
 import { atomicWriteJson } from '@main/atomicJson.js'
+import { readSharedWorkspaceConfig } from '@main/workspace/sharedWorkspaceMount.js'
+import { readSharedWorkspaceToken, sharedWorkspaceTokenEnvKey } from '@main/workspace/sharedWorkspaceTokens.js'
+import {
+  inspectSharedWorkspaceInvite,
+  joinSharedWorkspaceFromInvite,
+} from '@main/workspace/sharedWorkspaceInvite.js'
 
 interface WorkspaceConfig {
   name: string
@@ -109,6 +115,51 @@ export function registerWorkspaceTools(tools: ToolRegistry): void {
 
       return { open: true, path, name, initialized: contract.initialized, missing: contract.missing, config }
     }
+  })
+
+  tools.register({
+    name: 'workspace.sharedWorkspace.status',
+    description: 'Report the configured shared workspace client mount without exposing its bearer token.',
+    inputSchema: objectSchema({}),
+    execute: async () => {
+      const path = tools.getWorkspacePath()
+      if (!path) return { configured: false }
+      const config = readSharedWorkspaceConfig(path)
+      if (!config) return { configured: false }
+      return {
+        configured: true,
+        id: config.id,
+        name: config.name,
+        url: config.url,
+        namespaces: config.namespaces,
+        tokenConfigured: readSharedWorkspaceToken(config.id) !== null,
+        tokenKey: sharedWorkspaceTokenEnvKey(config.id),
+      }
+    },
+  })
+
+  tools.register({
+    name: 'workspace.sharedWorkspace.inspectInvite',
+    description: 'Inspect a shared workspace invite for confirmation without redeeming it.',
+    inputSchema: objectSchema({ invite: { type: 'string' } }, ['invite']),
+    execute: async (params) => {
+      const invite = typeof params.invite === 'string' ? params.invite : ''
+      if (!invite.trim()) throw new Error('Shared workspace invite is required')
+      return inspectSharedWorkspaceInvite(invite)
+    },
+  })
+
+  tools.register({
+    name: 'workspace.sharedWorkspace.join',
+    description: 'Redeem a shared workspace invite and configure this workspace without exposing the token.',
+    inputSchema: objectSchema({ invite: { type: 'string' } }, ['invite']),
+    execute: async (params) => {
+      const path = tools.getWorkspacePath()
+      if (!path) throw new Error('No workspace is open')
+      const invite = typeof params.invite === 'string' ? params.invite : ''
+      if (!invite.trim()) throw new Error('Shared workspace invite is required')
+      return joinSharedWorkspaceFromInvite({ workspacePath: path, invite })
+    },
   })
 
   tools.register({

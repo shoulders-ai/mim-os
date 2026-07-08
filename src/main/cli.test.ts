@@ -209,6 +209,46 @@ describe('mim CLI', () => {
     expect(stderr.join('')).toBe('')
   })
 
+  it('stores, reports, and clears a shared workspace client token', async () => {
+    const home = join(dir, 'home')
+
+    const set = await runCli(['shared-workspace', 'token', 'set', 'team-server', 'tok_remote', '--json'], io(dir, undefined, { home }))
+    expect(set).toBe(0)
+    const keysPath = join(home, '.mim', 'keys.env')
+    expect(readFileSync(keysPath, 'utf-8')).toContain('MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN=tok_remote')
+    expect(stdout.join('')).not.toContain('tok_remote')
+    expect(JSON.parse(stdout.join(''))).toEqual({
+      saved: true,
+      id: 'team-server',
+      key: 'MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN',
+    })
+
+    stdout = []
+    const setFromStdin = await runCli(['shared-workspace', 'token', 'set', 'team-server', '--stdin', '--json'], io(dir, 'tok_stdin\n', { home }))
+    expect(setFromStdin).toBe(0)
+    expect(readFileSync(keysPath, 'utf-8')).toContain('MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN=tok_stdin')
+    expect(stdout.join('')).not.toContain('tok_stdin')
+
+    stdout = []
+    const status = await runCli(['shared-workspace', 'token', 'status', 'team-server', '--json'], io(dir, undefined, { home }))
+    expect(status).toBe(0)
+    expect(JSON.parse(stdout.join(''))).toEqual({
+      configured: true,
+      id: 'team-server',
+      key: 'MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN',
+    })
+
+    stdout = []
+    const clear = await runCli(['shared-workspace', 'token', 'clear', 'team-server', '--json'], io(dir, undefined, { home }))
+    expect(clear).toBe(0)
+    expect(JSON.parse(stdout.join(''))).toEqual({
+      cleared: true,
+      id: 'team-server',
+      key: 'MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN',
+    })
+    expect(readFileSync(keysPath, 'utf-8')).not.toContain('MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN')
+  })
+
   it('creates and lists serve tokens for the selected workspace', async () => {
     await runCli(['init', '--name', 'demo'], io())
     stdout = []
@@ -230,6 +270,51 @@ describe('mim CLI', () => {
     const listed = JSON.parse(stdout.join('')) as { callers: Array<{ id: string; name: string; hash?: string }> }
     expect(listed.callers).toEqual([expect.objectContaining({ id: created.record.id, name: 'anna' })])
     expect(listed.callers[0].hash).toBeUndefined()
+  })
+
+  it('creates, lists, and revokes serve invites for human desktop join', async () => {
+    await runCli(['init', '--name', 'demo'], io())
+    const home = join(dir, 'home')
+    stdout = []
+
+    const create = await runCli([
+      'serve',
+      'invite',
+      'create',
+      '--name',
+      'anna',
+      '--url',
+      'https://mim.example.com/mcp',
+      '--workspace-id',
+      'team-server',
+      '--workspace-name',
+      'HTA Model',
+      '--namespaces',
+      'issues.*,knowledge.*',
+      '--json',
+    ], io(dir, undefined, { home }))
+    expect(create).toBe(0)
+    const created = JSON.parse(stdout.join('')) as {
+      invite: string
+      deepLink: string
+      record: { id: string; name: string; hash: string; workspaceName: string }
+    }
+    expect(created.invite).toMatch(/^mim-invite-/)
+    expect(created.deepLink).toMatch(/^mim:\/\/join\//)
+    expect(created.record).toMatchObject({ name: 'anna', workspaceName: 'HTA Model' })
+
+    stdout = []
+    const list = await runCli(['serve', 'invite', 'list', '--json'], io(dir, undefined, { home }))
+    expect(list).toBe(0)
+    const listed = JSON.parse(stdout.join('')) as { invites: Array<{ id: string; hash?: string; invite?: string; name: string }> }
+    expect(listed.invites).toEqual([expect.objectContaining({ id: created.record.id, name: 'anna' })])
+    expect(listed.invites[0].hash).toBeUndefined()
+    expect(listed.invites[0].invite).toBeUndefined()
+
+    stdout = []
+    const revoke = await runCli(['serve', 'invite', 'revoke', created.record.id, '--json'], io(dir, undefined, { home }))
+    expect(revoke).toBe(0)
+    expect(JSON.parse(stdout.join(''))).toEqual({ revoked: created.record.id })
   })
 
   it('starts serve mode through the injected runner with host and port', async () => {
