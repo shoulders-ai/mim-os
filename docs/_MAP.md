@@ -31,6 +31,7 @@ Electron App
     ├─ search/        SQLite FTS, file content search, text matching
     ├─ security/      permission gate and path classifier
     ├─ server/        Express + WebSocket for apps/AI/MCP
+    ├─ serve/         headless shared-workspace host helpers
     ├─ workspace/     boot, mim.yaml contract, file watcher
     ├─ tools/         registry + all tool modules
     ├─ integrations/  Slack, Google, keychain secrets, HTTP boundary
@@ -64,10 +65,11 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 - **Electron shell.** App lifecycle, window creation, IPC, quit guard. `src/main/index.ts`, `closeGuard.ts`, `platform.ts`, `menu.ts`.
 - **Tool registry.** Universal dispatch with actor context and trace logging. `src/main/tools/registry.ts`.
-- **Permission gate.** Approval policy for AI/app tool calls, keyed on effect (read/mutate/external). `src/main/security/gate.ts`, `gate-paths.ts`. Docs: [security.md](security.md).
+- **Permission gate.** Approval policy for AI/app tool calls, keyed on effect (read/mutate/external), with serve-mode remote grant resolution. `src/main/security/gate.ts`, `gate-paths.ts`. Docs: [security.md](security.md).
 - **File tools.** read/write/edit/create/delete/list/rename/copy/trash, workspace-scoped, stale-write protection via content hashes. `src/main/tools/fs.ts`, `workspaceFileWatcher.ts`.
 - **Local file history.** Per-file recovery under `.mim/history/`, independent of git, with bounded automatic baselines. `src/main/history/`, `tools/history.ts`. UI: `HistoryRail.vue`. Docs: [history.md](history.md).
 - **Sessions.** Chat session CRUD, atomic JSON in `.mim/sessions/`, manifest cache. `src/main/sessions.ts`, `sessionManifest.ts`.
+- **Routines.** Workspace-local routine definitions under `routines/`, machine-local enablement/run state under `.mim/routines/`, manual chat-turn runs, desktop schedule/file/webhook automation, webhook secret tools, routine run metadata on sessions, Navigator run rows, and the Routines work surface. `src/main/routines/`, `tools/routines.ts`, `server/server.ts`, `sessions.ts`, `src/renderer/components/routines/`, `src/renderer/stores/routines.ts`. Docs: [routines.md](routines.md).
 - **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
 - **Git tools.** Status/diff/log/commit/pull/push and opt-in managed sync. `src/main/git.ts`, `tools/git.ts`, `tools/sync.ts`.
 - **User-global config.** `~/.mim/config.yaml` (identity, model defaults, skill sources). Never holds keys or tokens. `src/main/userConfig.ts`.
@@ -75,13 +77,14 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
 - **Editor state tool.** `editor.state` (MCP: `editor_state`): open tabs + active document snapshot, pushed by the renderer and cached in main. `src/main/tools/editorState.ts`.
 - **Headless CLI.** `mim` command over the shared tool registry; no Electron. `src/main/cli.ts`, `headless.ts`. Docs: [cli.md](cli.md).
-- **MCP bridge.** Stdio bridge from external CLI agents to the running desktop. `src/main/mcp/`. Docs: [mcp.md](mcp.md).
+- **Mim Serve.** Headless shared-workspace host over authenticated MCP HTTP, with token store, denial ledger, state migration, and backup/restore helpers. `src/main/serve/`, `server/server.ts`. Docs: [serve.md](serve.md).
+- **MCP bridge.** Stdio bridge from external CLI agents to the running desktop plus serve-mode HTTP MCP. `src/main/mcp/`, `src/main/server/server.ts`. Docs: [mcp.md](mcp.md).
 - **Preload bridge.** `window.kernel` IPC gateway. `src/preload/index.ts`.
 
 ### Main Process — AI
 
 - **Model registry.** Model catalog, key resolution (`~/.mim/keys.env` → env), model-default cascade. `src/main/ai/ai.ts`, `resources/ai-models.json`.
-- **AI runtime.** Vercel AI SDK provider calls, ToolLoopAgent profiles, ghost generation, tool wrapping, usage/context tracking, and browser-tool message compaction. `src/main/ai/aiRuntime.ts`, `src/main/ai/messageCompaction.ts`.
+- **AI runtime.** Vercel AI SDK provider calls, ToolLoopAgent profiles, ghost generation, tool wrapping, usage/context tracking, model-context compaction views, and threshold-triggered historical summaries. `src/main/ai/aiRuntime.ts`, `src/main/ai/compaction.ts`, `src/main/ai/messageCompaction.ts`.
 - **System prompt.** Template-based from `AGENTS.md` with `{{TOOL_SET}}`, `{{SKILL_CATALOG}}`, `{{WORKSPACE_TREE}}`, `{{PROJECT_LOG}}` etc. `src/main/ai/systemPrompt.ts`, `workspaceTree.ts`.
 - **Agent mounts.** Resolve app `agents` exports into `AgentProfile`s, build constrained instructions context, template-var resolution, tool-allowlist intersection, per-turn skill pre-activation. `src/main/ai/agentMounts.ts`.
 - **Agent context.** Deterministic `.mim/agent-context.md` digest with workspace/app/git health. `src/main/ai/agentContext.ts`, `packages/packageContributions.ts`.
@@ -108,22 +111,22 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 ### Main Process — App System
 
 - **App loader.** Workspace > global precedence, version pins, manifest validation. `src/main/packages/packages.ts`, `packageManifest.ts`, `packageEnablement.ts`.
-- **App runtime.** Backend jobs, app data, JSON Schema tool input validation, agent descriptor parsing, `ctx.http` (host allowlist), `ctx.secrets` (keychain), named tools. `src/main/packages/packageRuntime.ts`, `packageJobs.ts`, `packageData.ts`, `packageHttp.ts`, `packageSecrets.ts`, `namedPackageTools.ts`. Docs: [app-system-api.md](app-system-api.md).
+- **App runtime.** Backend jobs, app data, JSON Schema tool input validation, per-package app-tool serialization, agent descriptor parsing, `ctx.http` (host allowlist), `ctx.secrets` (keychain), named tools. `src/main/packages/packageRuntime.ts`, `packageJobs.ts`, `packageData.ts`, `packageHttp.ts`, `packageSecrets.ts`, `namedPackageTools.ts`. Docs: [app-system-api.md](app-system-api.md).
 - **Registry & install.** Multi-source resolution with ownership rule, trust gating, archive/git/local installs, and active-workspace package update checks. `src/main/packages/registrySources.ts`, `registryIndex.ts`, `updateCheck.ts`, `tools/registryTools.ts`, `tools/install.ts`. Docs: [private-registry.md](private-registry.md) for the authenticated account registry.
 - **Core-app tools.** `app.status/enable/disable/remove/trust` for personal enablement. `src/main/tools/coreApps.ts`.
 - **App authoring.** Starter templates, create/validate/reload authoring loop. `src/main/tools/packages.ts`, `templates/appTemplates.ts`.
-- **App server.** Express + WebSocket, SDK file serving, app/MCP tool dispatch. `src/main/server/server.ts`.
+- **App server.** Express + WebSocket for desktop app/AI/MCP routes, explicit desktop vs serve-mode route gating, SDK file serving, app/MCP tool dispatch. `src/main/server/server.ts`.
 - **App SDK.** WebSocket client for iframes. `sdk/mim.js`, `sdk/tokens.css`.
 - **Skills.** Filesystem `SKILL.md` loader, authored + app-bundled skills, progressive tool gating. `src/main/skills.ts`, `tools/skills.ts`. Docs: [skills.md](skills.md), [custom-apps.md](custom-apps.md).
 
 ### Main Process — Integrations
 
-- **Slack & Google.** Keychain-backed connectors, Google browser OAuth, kernel tools, AI tool builders, and Settings > Tools availability policy. Data tools are exposed over MCP when connected and enabled. AI agent can manage connection lifecycle (connect, disconnect, configure policy) via `connections_status`, `google_set_oauth_client`, `google_connect`, `slack_connect`, `connections_configure` tools. File-based credential ingestion reads secrets server-side so they never enter model context. `src/main/integrations/`, `src/main/tools/toolPolicy.ts`. Docs: [integrations.md](integrations.md).
+- **Slack & Google.** Keychain-backed connectors, Google browser OAuth, kernel tools, AI tool builders, and Settings > Tools availability policy. Slack also has routine-listener foundations: a metadata-only event ledger and socket-free routine dispatcher helpers. Data tools are exposed over MCP when connected and enabled. AI agent can manage connection lifecycle (connect, disconnect, configure policy) via `connections_status`, `google_set_oauth_client`, `google_connect`, `slack_connect`, `connections_configure` tools. File-based credential ingestion reads secrets server-side so they never enter model context. `src/main/integrations/`, `src/main/tools/toolPolicy.ts`. Docs: [integrations.md](integrations.md), [proposals/slack-listener.md](proposals/slack-listener.md).
 - **Account tokens.** Org registry token management in `~/.mim/keys.env`. `src/main/tools/account.ts`.
 
 ### Main Process — Observability
 
-- **Trace stream.** Unified audit + observability, span-tree JSONL day files, payload blobs, outcome tracking. `src/main/trace/`, `tools/trace.ts`. Docs: [observability.md](observability.md).
+- **Trace stream.** Unified audit + observability, span-tree JSONL day files, caller/principal attribution, payload blobs, outcome tracking. `src/main/trace/`, `tools/trace.ts`. Docs: [observability.md](observability.md).
 - **Telemetry.** Anonymous usage telemetry, redacted trace-sink projection. `src/main/telemetry/`, `tools/telemetry.ts`. Docs: [telemetry.md](telemetry.md).
 - **Search.** SQLite FTS5 for sessions, async file content walker. `src/main/search/`.
 
@@ -192,7 +195,8 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [security.md](security.md) | Permission gate, trust model, actor modes |
 | [design-system.md](design-system.md) | Visual language, tokens, interaction rules |
 | [cli.md](cli.md) | Headless CLI commands |
-| [mcp.md](mcp.md) | MCP stdio bridge to the desktop |
+| [serve.md](serve.md) | Headless shared-workspace serving over MCP HTTP |
+| [mcp.md](mcp.md) | MCP stdio bridge and serve-mode HTTP MCP |
 | [integrations.md](integrations.md) | Slack/Google tools, keychain, policy |
 | [web-reading.md](web-reading.md) | Web/PDF reading, website access, evaluation harness |
 | [html-markdown.md](html-markdown.md) | HTML-to-Markdown parser |
@@ -205,6 +209,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [telemetry.md](telemetry.md) | Anonymous usage telemetry |
 | [logbook.md](logbook.md) | Human-readable activity log |
 | [resources.md](resources.md) | Shared resource collections |
+| [routines.md](routines.md) | Workspace routine definitions, automation triggers, enablement, runs, routine permissions |
 | [skills.md](skills.md) | Filesystem skill system |
 | [custom-apps.md](custom-apps.md) | Building workspace apps/skills |
 | [granola-private-app.md](granola-private-app.md) | Private Granola app rationale, implementation, and operations |
@@ -227,10 +232,10 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 - [proposals/tools-settings-tab.md](proposals/tools-settings-tab.md) — Settings > Tools plan for unified AI/MCP tool availability policy.
 - [proposals/agents-as-apps.md](proposals/agents-as-apps.md) — **implemented** (phases 0-4; phase 5 deferred). Agents as an app contribution type: `AgentProfile` primitive extracted from the chat runtime, `export const agents` mounting, agent sessions in the native chat surface, starter template and authoring docs.
 - [proposals/user-manual.md](proposals/user-manual.md) — user manual + developer docs for mim-web: positioning, IA, content pipeline, subagent authoring process, design guide.
-- [proposals/mim-serve.md](proposals/mim-serve.md) — `mim serve`: shared workspace host proposal (MCP streamable HTTP, route/auth matrix, issued caller tokens, `remote` actor, declarative approval policy).
+- [proposals/mim-serve.md](proposals/mim-serve.md) — `mim serve`: shared workspace host proposal (MCP streamable HTTP, route/auth matrix, issued caller tokens, `remote` actor, declarative approval policy, executable-workspace deny floor, SSRF defense, structured-state migration, backups, grant UX) plus the service-with-shells north star and strategic-direction track sketches.
 - [proposals/routines.md](proposals/routines.md) — Routines: workspace-owned standing prompts that create runs; headless chat-turn runner, visible tools plus approval grants, scheduler ownership.
-- [proposals/slack-listener.md](proposals/slack-listener.md) — Slack-triggered routines over Socket Mode: listener socket in main, durable event ledger, responder bound as a routine with a `slack` trigger, per-thread sessions, pinned thread reply, explicit Slack transcript retention.
-- [proposals/context-compaction.md](proposals/context-compaction.md) — context compaction as a view over the immutable session log: `buildModelContext`, deterministic pre-pass, LLM summaries, overflow recovery.
+- [proposals/slack-listener.md](proposals/slack-listener.md) — Slack-triggered routines over Socket Mode: implemented trigger/ledger/dispatcher foundations, proposed listener socket, responder bound as a routine with a `slack` trigger, per-thread sessions, pinned thread reply, explicit Slack transcript retention.
+- [proposals/context-compaction.md](proposals/context-compaction.md) — context compaction as a view over the immutable session log: `buildModelContext`, deterministic pre-pass, append-only LLM summary records, overflow recovery.
 
 ## File Tree
 
@@ -264,6 +269,7 @@ src/
     ai/
       ai.ts                     # Model registry, key resolver
       aiRuntime.ts              # Central AI runtime + tools
+      compaction.ts             # Model-context view repair and compaction
       agentContext.ts           # Runtime workspace digest
       agentMounts.ts            # App agent → AgentProfile resolution
       systemPrompt.ts           # Dynamic AI system prompt
@@ -291,6 +297,9 @@ src/
       search.ts                 # SQLite FTS5 session search
       fileSearch.ts             # Workspace file content search
       textMatch.ts              # Deterministic text matching
+    routines/
+      routines.ts               # Routine definitions, trigger validation, enablement/run state
+      automation.ts             # Schedule/file/webhook automation, watcher roots, webhook verification
     security/
       gate.ts                   # Permission gate
       gate-paths.ts             # Path classifier
@@ -304,7 +313,7 @@ src/
     integrations/
       secrets.ts                # OS keychain boundary
       http.ts                   # HTTP boundary
-      slack/                    # Slack client, tools, AI tools, policy
+      slack/                    # Slack client/tools plus listener ledger and dispatcher foundations
       google/                   # Google client, tools, AI tools, policy
     comments/model.ts           # Markdown inline comment parser
     comments/codeModel.ts       # @mim line-marker comments for code files
@@ -350,6 +359,7 @@ src/
       comments.ts               # Comment tools
       references.ts             # Bibliography tools
       resources.ts              # Resource collection tools
+      routines.ts               # Routine definition/manual run/webhook secret tools
       account.ts                # Account token tools
       telemetry.ts              # Telemetry tools
     templates/

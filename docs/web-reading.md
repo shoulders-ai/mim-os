@@ -10,10 +10,11 @@ Mim exposes two model-facing web access modes:
 Chat and MCP share this public naming: `web_read`, `web_search`,
 `browser_open`, and `browser_act`.
 
-`web.read` accepts an `http` or `https` URL, blocks private and loopback
-addresses, follows redirects manually so every hop is checked by the same URL
-policy, and returns a cleaned text payload for the agent to interpret. It does
-not classify pages as blocked, logged out, consent-gated, partial, or ready.
+`web.read` accepts an `http` or `https` URL, blocks private, loopback,
+link-local, unique-local, unspecified, and cloud metadata addresses, follows
+redirects manually so every hop is checked by the same URL policy, and returns a
+cleaned text payload for the agent to interpret. It does not classify pages as
+blocked, logged out, consent-gated, partial, or ready.
 
 The live browser opens a real Electron `BrowserWindow`, hidden by default unless
 `browser_open(..., visible: true)` is requested. The same window can be shown
@@ -90,8 +91,8 @@ The current settings key is `browserSession`.
 
 Fetch and Chromium-rendered reads share the same URL policy. Initial URLs and
 redirect targets must be public `http` or `https` URLs. Hidden Chromium sessions
-also install a request blocker so subresource requests to private, loopback, or
-otherwise disallowed targets are cancelled.
+also install a request blocker so subresource requests to private, loopback,
+link-local, or otherwise disallowed targets are cancelled.
 
 Website Access reads add a second request boundary: sign-in, consent, and
 cookies may only be used on domains covered by the approved domain patterns for

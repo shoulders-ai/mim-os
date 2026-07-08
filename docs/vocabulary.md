@@ -40,7 +40,7 @@ verification).
 | 9 | **status words** | one RunStatus set | `completed`→`done`, `failed`→`error`, `cancelled`/`interrupted`→`stopped` across the five enums; collapse to shared types (see Wave 5 bonus) | ~247 | persisted status literals in run/chat records → migrate on read |
 | 10 | **project / folder** (= workspace) | **workspace** | `AddProjectDialog.vue`→`WorkspaceDialog.vue`; titles "New Folder"/"Clone Repository"→"New Workspace"/"Clone Workspace"; switcher "Open Folder..."→"Open Workspace...", event `add-project`→`add-workspace`; labels.ts "Project" fallbacks ⚖ D10 | ~55 real | none |
 | 11 | **Control** (effort picker) | **Effort** ⚖ D7 | `ControlPicker.vue`→`EffortPicker.vue`, label/aria "Control"→"Effort"; `modelControls.js` naming | ~78 targeted | persisted `controlId` in chat records → `effortId`, migrate on read |
-| 12 | **workflow** (RunKind) | delete | `stores/runs.ts:18` union member | 1 real | none |
+| 12 | **workflow** (RunKind) | deleted | `stores/runs.ts` now uses `routine` for routine sessions and has no `workflow` member | done | none |
 | 13 | **Activity** (sidebar section) | **Runs** ⚖ D2 | ShellSidebar section header, "No activity"→"No runs", "New activity" aria, "Toggle Activity" | small | none |
 | 14 | **"Review"** (diff/status overloads) | free the word for the surface | InlineApproval "Review change"→"View change"; DiffReviewBar visible labels "Review all"→"All changes"; status chip "Review"→"Changes" ⚖ D8; lowercase verb "review" in prose stays legal | small | none |
 

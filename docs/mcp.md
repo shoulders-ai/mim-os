@@ -1,6 +1,11 @@
 # MCP Server
 
-Mim exposes a local MCP stdio server through:
+Mim exposes two MCP transports:
+
+- `mim mcp` — a local stdio bridge to the running desktop app.
+- `mim serve` — authenticated HTTP MCP for a headless shared workspace.
+
+The local desktop bridge starts through:
 
 ```bash
 mim mcp
@@ -11,6 +16,9 @@ headless kernel and does not open a workspace by itself. The desktop owns the
 workspace, renderer bridge tools, approval gate, trace logging, local history,
 and export renderer.
 
+`createServer({ mode: "serve" })` disables the desktop WebSocket MCP surface and
+serves MCP over HTTP instead. See [serve.md](serve.md) for operator commands.
+
 ## Connection Model
 
 ```
@@ -20,6 +28,15 @@ mim mcp
     WebSocket JSON-RPC
 Mim Desktop
     Tool registry
+```
+
+Serve mode:
+
+```
+Claude Code / Codex / Gemini CLI / curl
+    HTTP JSON-RPC 2.0 + bearer token
+mim serve
+    Headless Tool registry
 ```
 
 On desktop start, Mim writes `~/.mim/server.json`:
@@ -57,6 +74,14 @@ The MCP stdio bridge returns Mim's supported MCP protocol version during
 are bounded by a per-call timeout so a hung desktop request fails the MCP call
 instead of blocking stdin processing forever.
 
+Serve-mode HTTP MCP authenticates every request with
+`Authorization: Bearer <token>` and binds tool calls as `actor: "remote"` with
+`principal`, `callerName`, and `transport: "mcp-http"` attribution. Remote
+authorization is the serve grant resolver, not the desktop MCP allowlist alone.
+`GET /mcp/events` is an authenticated SSE stream and emits
+`notifications/tools/list_changed` when package reloads or named-tool changes
+invalidate cached tool catalogs.
+
 ## Tool Surface
 
 MCP tool names avoid dots. The desktop returns metadata from `__meta.tools`; the
@@ -65,7 +90,8 @@ tool names.
 
 ### Static Tools
 
-Present in the MCP catalog when enabled in Settings > Tools:
+Present in the MCP catalog when the underlying Mim tool is registered and
+enabled in Settings > Tools:
 
 | MCP Tool | Mim Tool |
 |---|---|
@@ -128,8 +154,10 @@ session.
 
 Slack and Google data tools appear in the MCP catalog only when the corresponding
 token is configured in the OS keychain and the corresponding row is enabled in
-Settings > Tools. MCP calls use the `user` actor; the MCP allowlist plus tool
-policy is the security boundary, and CLI agents have their own permission gates.
+Settings > Tools. Desktop MCP calls use the `user` actor; serve-mode HTTP calls
+use the `remote` actor and must satisfy serve grants. The MCP allowlist plus
+tool policy is the desktop security boundary, and CLI agents have their own
+permission gates.
 
 **Slack** (when token is configured):
 
@@ -162,8 +190,10 @@ policy is the security boundary, and CLI agents have their own permission gates.
 
 ### Dynamic App Tools
 
-Each exposed Mim tool must have an `inputSchema`; missing schemas fail MCP
-metadata generation loudly for core tools. Named tools from enabled apps are
+Each exposed Mim tool must have an `inputSchema`. Registered core MCP tools
+without schemas fail MCP metadata generation loudly; static specs whose Mim tool
+is absent in the current kernel are omitted, which lets headless kernels expose
+only the tools they actually registered. Named tools from enabled apps are
 exposed dynamically alongside the core set — the server queries the active named
 tool registrations at request time. Named tools without an `inputSchema` are
 silently excluded from the MCP catalog.

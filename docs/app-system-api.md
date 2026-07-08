@@ -495,6 +495,11 @@ The runtime validates tool input against the declared schema before calling
 `execute`. Use native JSON values that match the schema; for example, array
 fields must be arrays, not JSON-encoded strings.
 
+Backend tool execution is serialized per app package. Two concurrent calls to
+tools owned by the same app run one after the other, so `ctx.data` update
+sequences cannot lose writes under multiple MCP callers. Different apps can
+still run concurrently.
+
 Public chat tool names are collision-safe by default:
 
 ```txt
