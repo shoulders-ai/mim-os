@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { basename, resolve } from 'path'
 import { atomicWriteJson } from '@main/atomicJson.js'
-import { createServeToken, serveStateDir, type ServeGrant } from './tokens.js'
+import { createServeToken, defaultServeGrant, serveStateDir, type ServeGrant } from './tokens.js'
 import type { MimSharedWorkspaceConfig } from '@main/workspace/workspaceContract.js'
 import { SHARED_WORKSPACE_ID_PATTERN } from '@main/workspace/workspaceContract.js'
 
@@ -20,6 +20,7 @@ export interface ServeInviteRecord {
   redeemedAt?: string
   callerId?: string
   token?: string
+  grants?: ServeGrant
 }
 
 export interface ListedServeInvite extends Omit<ServeInviteRecord, 'hash' | 'token'> {
@@ -118,6 +119,7 @@ export function createServeInvite(options: CreateServeInviteOptions): ServeInvit
     createdAt: now,
     ...(options.expiresAt ? { expiresAt: options.expiresAt } : {}),
     ...(options.token ? { token: options.token } : {}),
+    grants: cloneGrant(options.grants ?? inviteNamespaceGrant(namespaces)),
   }
 
   const storePath = serveInvitesPath(options)
@@ -167,6 +169,7 @@ export function redeemServeInvite(options: RedeemServeInviteOptions): RedeemedSe
     workspacePath: options.workspacePath,
     name: record.name,
     url: record.url,
+    grants: cloneGrant(record.grants ?? inviteNamespaceGrant(record.namespaces)),
     ...(record.token ? { token: record.token } : {}),
   })
   record.redeemedAt = now
@@ -323,6 +326,23 @@ function normalizeMcpUrl(url: string): string {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Invite URL must be http(s)')
   if (parsed.username || parsed.password) throw new Error('Invite URL must not include credentials')
   return parsed.toString()
+}
+
+function inviteNamespaceGrant(namespaces: string[]): ServeGrant {
+  const base = defaultServeGrant()
+  return {
+    effects: ['read', 'mutate'],
+    tools: [...new Set([...base.tools, ...normalizeNamespaces(namespaces)])],
+    ...(base.paths ? { paths: [...base.paths] } : {}),
+  }
+}
+
+function cloneGrant(grant: ServeGrant): ServeGrant {
+  return {
+    effects: [...grant.effects],
+    tools: [...grant.tools],
+    ...(grant.paths ? { paths: [...grant.paths] } : {}),
+  }
 }
 
 function hashInviteSecret(secret: string): string {

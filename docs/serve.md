@@ -99,6 +99,12 @@ reads, file search, skill reads, log reads, and trace queries. The serve grant
 resolver enforces effect, tool, and path scopes. Remote calls never use the
 interactive approval queue.
 
+Invite-created human callers keep those orientation grants and also receive
+read/write grants for the shared tool namespaces advertised by the invite, such
+as `issues.*`, `knowledge.*`, and `references.*`. The shared workspace config
+and the caller grant are therefore aligned: if Settings says a namespace is
+shared, the remote caller can actually use it unless a hard deny floor applies.
+
 Remote writes to executable or prompt-bearing workspace surfaces are hard-denied
 even if a grant accidentally includes them. The floor covers `AGENTS.md`,
 `CLAUDE.md`, `mim.yaml`, `skills/`, `routines/`, workspace package directories,

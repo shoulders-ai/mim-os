@@ -122,6 +122,10 @@ export function createServeToken(options: CreateServeTokenOptions): ServeTokenRe
   }
 }
 
+export function defaultServeGrant(): ServeGrant {
+  return cloneGrant(DEFAULT_GRANT)
+}
+
 export function listServeCallers(options: StoreOptions): ListedServeCaller[] {
   return readStore(serveCallersPath(options)).callers.map(({ hash: _hash, ...caller }) => ({
     ...caller,

@@ -66,7 +66,14 @@ describe('serve invites', () => {
         callerName: 'Anna',
       })
       expect(validateServeToken({ home, workspacePath, token: 'mim_serve_redeemed_token' }))
-        .toMatchObject({ callerName: 'Anna' })
+        .toMatchObject({
+          callerName: 'Anna',
+          grants: {
+            effects: ['read', 'mutate'],
+            tools: expect.arrayContaining(['fs.read', 'issues.*', 'knowledge.*']),
+            paths: ['.'],
+          },
+        })
       expect(() => redeemServeInvite({ home, workspacePath, invite: invite.invite }))
         .toThrow(/already been used/)
       expect(listServeInvites({ home, workspacePath })[0]).toMatchObject({
@@ -76,6 +83,43 @@ describe('serve invites', () => {
         secret: undefined,
         invite: undefined,
       })
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('honors explicit grants on an invite', () => {
+    const home = mkdtempSync(join(tmpdir(), 'mim-serve-invite-'))
+    const workspacePath = join(home, 'workspace')
+    try {
+      const invite = createServeInvite({
+        home,
+        workspacePath,
+        name: 'Dana',
+        url: 'https://mim.example.com/mcp',
+        workspaceId: 'team-server',
+        workspaceName: 'Team',
+        namespaces: ['issues.*'],
+        secret: 'explicit_grant_secret',
+        token: 'mim_serve_explicit_grant_token',
+        grants: {
+          effects: ['read'],
+          tools: ['issues.list'],
+          paths: ['docs'],
+        },
+      })
+
+      redeemServeInvite({ home, workspacePath, invite: invite.invite })
+
+      expect(validateServeToken({ home, workspacePath, token: 'mim_serve_explicit_grant_token' }))
+        .toMatchObject({
+          callerName: 'Dana',
+          grants: {
+            effects: ['read'],
+            tools: ['issues.list'],
+            paths: ['docs'],
+          },
+        })
     } finally {
       rmSync(home, { recursive: true, force: true })
     }

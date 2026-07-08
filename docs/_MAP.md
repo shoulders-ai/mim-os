@@ -77,7 +77,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
 - **Editor state tool.** `editor.state` (MCP: `editor_state`): open tabs + active document snapshot, pushed by the renderer and cached in main. `src/main/tools/editorState.ts`.
 - **Headless CLI.** `mim` command over the shared tool registry; no Electron. `src/main/cli.ts`, `headless.ts`. Docs: [cli.md](cli.md).
-- **Mim Serve.** Headless shared-workspace host over authenticated MCP HTTP, with token store, single-use invite store, denial ledger, state migration, backup/restore helpers, desktop/headless remote named-tool mounting, invite join, and live remote catalog refresh. `src/main/serve/`, `server/server.ts`, `workspace/sharedWorkspace*.ts`. Docs: [serve.md](serve.md).
+- **Mim Serve.** Headless shared-workspace host over authenticated MCP HTTP, with token store, single-use invite store, invite-aligned namespace grants, denial ledger, state migration, backup/restore helpers, desktop/headless remote named-tool mounting, invite join, and live remote catalog refresh. `src/main/serve/`, `server/server.ts`, `workspace/sharedWorkspace*.ts`. Docs: [serve.md](serve.md).
 - **MCP bridge.** Stdio bridge from external CLI agents to the running desktop plus serve-mode HTTP MCP. `src/main/mcp/`, `src/main/server/server.ts`. Docs: [mcp.md](mcp.md).
 - **Preload bridge.** `window.kernel` IPC gateway. `src/preload/index.ts`.
 
