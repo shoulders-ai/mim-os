@@ -307,3 +307,11 @@ are load-time diagnostics, not silent no-ops.
 ## App iframes must never be detached from the DOM while alive
 
 Re-inserting an `<iframe>` into the DOM resets its browsing context: the app inside reboots from scratch (module graph, WebSocket identify, data load — around a second of blank frame). Vue's `KeepAlive` detaches the subtree on deactivate, so it does NOT preserve iframes. `WorkHost` therefore keeps every visited `PackageFrame` mounted and hides inactive ones with `v-show`; frames are only remounted when the `packages` list identity changes (install/reload/workspace switch), which is what lets `app.reload` deliver fresh app code. Keep any new iframe-hosting surface on the same pattern.
+
+## Package tool result capping is actor-conditional, not universal
+
+`capPackageResult` in `packageRuntime.ts` truncates a tool's result at 24,000 characters, but `executeTool` only applies it when `ctx.actor === 'ai'`. App iframes (`actor: 'package'`), MCP clients, and the CLI (`actor: 'user'`) receive results uncapped, since they consume structured JSON and a silent `{truncated, content}` wrapper reads to them as "no data" rather than an error. Widening the cap back to all actors — e.g. "simplifying" the condition away — will reintroduce apps like Knowledge silently rendering empty states once a workspace's content grows past 24k serialized characters. Note `mim tool` on the CLI intentionally calls through with `actor: 'ai'` (cli.ts), so it stays capped by design — that's not a bug.
+
+## Renderer dev-server port is pinned because localStorage is origin-keyed
+
+`electron.vite.config.mjs` pins the renderer dev server to `port: 5174` with `strictPort: true`. Renderer `localStorage` (recent workspaces, etc.) is scoped to the page origin, and in dev the origin is `http://localhost:<vite-port>`. Without a fixed port, electron-vite falls back to the next free port whenever something else holds 5173, silently landing the app on a fresh empty origin — recent workspaces (and anything else in localStorage) appear to vanish, even though the old origin's data is still on disk in the Electron `Local Storage/leveldb` files. Packaged builds load via `file://` and are unaffected. If this port ever needs to change, expect a one-time "recents reset" for anyone with existing dev-mode localStorage state.

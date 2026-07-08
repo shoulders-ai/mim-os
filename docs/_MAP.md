@@ -227,6 +227,10 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 - [proposals/tools-settings-tab.md](proposals/tools-settings-tab.md) — Settings > Tools plan for unified AI/MCP tool availability policy.
 - [proposals/agents-as-apps.md](proposals/agents-as-apps.md) — **implemented** (phases 0-4; phase 5 deferred). Agents as an app contribution type: `AgentProfile` primitive extracted from the chat runtime, `export const agents` mounting, agent sessions in the native chat surface, starter template and authoring docs.
 - [proposals/user-manual.md](proposals/user-manual.md) — user manual + developer docs for mim-web: positioning, IA, content pipeline, subagent authoring process, design guide.
+- [proposals/mim-serve.md](proposals/mim-serve.md) — `mim serve`: shared workspace host proposal (MCP streamable HTTP, route/auth matrix, issued caller tokens, `remote` actor, declarative approval policy).
+- [proposals/routines.md](proposals/routines.md) — Routines: workspace-owned standing prompts that create runs; headless chat-turn runner, visible tools plus approval grants, scheduler ownership.
+- [proposals/slack-listener.md](proposals/slack-listener.md) — Slack-triggered routines over Socket Mode: listener socket in main, durable event ledger, responder bound as a routine with a `slack` trigger, per-thread sessions, pinned thread reply, explicit Slack transcript retention.
+- [proposals/context-compaction.md](proposals/context-compaction.md) — context compaction as a view over the immutable session log: `buildModelContext`, deterministic pre-pass, LLM summaries, overflow recovery.
 
 ## File Tree
 

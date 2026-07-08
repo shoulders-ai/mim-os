@@ -510,7 +510,9 @@ pkg_c97fd4d0__checkDataset
 The model sees the public name. The app author writes the local id
 `checkDataset`.
 
-Tool results are capped at 24,000 characters before returning to chat.
+Tool results returned to the chat model (actor `ai`) are capped at 24,000
+characters. App UIs, MCP clients, and the CLI receive results uncapped —
+they consume structured data and must not get a truncation wrapper.
 
 ### Named tools
 
