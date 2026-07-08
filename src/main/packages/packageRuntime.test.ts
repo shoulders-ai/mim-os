@@ -140,6 +140,34 @@ describe('app runtime capabilities', () => {
     })
   })
 
+  it('caps oversized tool results for the AI caller but returns them intact to app and user callers', async () => {
+    writePackage('knowledge', `
+      export const tools = {
+        list: {
+          description: 'List entries',
+          inputSchema: { type: 'object', properties: {} },
+          async execute() {
+            return { items: Array.from({ length: 400 }, (_, i) => ({ id: 'entry-' + i, summary: 'x'.repeat(100) })) }
+          }
+        }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('knowledge', true)
+    enablement.ackTrust(packages.get('knowledge')!)
+    const tool = (await runtime.listChatTools()).find(candidate => candidate.packageId === 'knowledge')!
+
+    const forAi = await runtime.executeTool(tool.publicName, {}, { actor: 'ai' }) as Record<string, unknown>
+    expect(forAi.truncated).toBe(true)
+    expect(typeof forAi.content).toBe('string')
+
+    const forApp = await runtime.executeTool(tool.publicName, {}, { actor: 'package', package_id: 'knowledge' }) as { items: unknown[] }
+    expect(forApp.items).toHaveLength(400)
+
+    const forUser = await runtime.executeTool(tool.publicName, {}, { actor: 'user' }) as { items: unknown[] }
+    expect(forUser.items).toHaveLength(400)
+  })
+
   it('validates app tool input against declared schemas before executing handlers', async () => {
     const pkgDir = join(dir, 'packages', 'board')
     mkdirSync(join(pkgDir, 'backend'), { recursive: true })

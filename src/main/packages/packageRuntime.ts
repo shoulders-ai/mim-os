@@ -314,7 +314,9 @@ export function createPackageRuntime(options: PackageRuntimeOptions): PackageRun
         summary: summarizePackageResult(result),
         data: { caller: ctx.actor ?? 'unknown' },
       })
-      return capPackageResult(result)
+      // Cap only model-bound results: app iframes, MCP clients, and the CLI
+      // consume structured results and must receive them intact.
+      return ctx.actor === 'ai' ? capPackageResult(result) : result
     },
 
     createContext(contextOptions) {
