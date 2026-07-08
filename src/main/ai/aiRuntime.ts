@@ -2,6 +2,7 @@ import { createAnthropic } from '@ai-sdk/anthropic'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { Buffer } from 'buffer'
+import { randomUUID } from 'crypto'
 import {
   convertToModelMessages,
   generateObject,
@@ -21,11 +22,14 @@ import { readSlackPolicy } from '@main/integrations/slack/policy.js'
 import { buildProviderOptions, type ModelConfig } from '@main/ai/providerOptions.js'
 import { formatSkillCatalogSection, getSystemPrompt } from '@main/ai/systemPrompt.js'
 import {
-  compactBrowserToolResultsForContext,
+  buildModelContext,
+  selectCompactionCut,
   estimateMessagesTokens,
-} from '@main/ai/messageCompaction.js'
+  type ContextCompactionRecord,
+} from '@main/ai/compaction.js'
+import { appendSessionCompaction } from '@main/sessions.js'
 import type { SkillLoader } from '@main/skills.js'
-import type { ToolRegistry } from '@main/tools/registry.js'
+import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
 import {
   aiToolKeyEnabled,
   readToolsPolicy,
@@ -33,6 +37,8 @@ import {
   type EffectiveToolPolicy,
 } from '@main/tools/toolPolicy.js'
 import { newSpanId, newTraceId } from '@main/trace/trace.js'
+
+export { repairIncompleteToolMessages } from '@main/ai/compaction.js'
 
 export type AiProfile = 'chat' | 'inline' | 'ghost'
 
@@ -86,6 +92,8 @@ export interface StreamRequest {
     contextBefore?: string
     contextAfter?: string
   }
+  routine?: ToolContext['routine']
+  trace?: { traceId: string; spanId: string }
   abortSignal?: AbortSignal
 }
 
@@ -260,6 +268,7 @@ export async function createAiSdkTools({
   sessionId,
   packageTools = [],
   onSkillActivated,
+  routine,
   trace,
 }: {
   tools: ToolRegistry
@@ -267,6 +276,7 @@ export async function createAiSdkTools({
   sessionId?: string
   packageTools?: PackageToolSummary[]
   onSkillActivated?: (skill: ActivatedSkill) => void
+  routine?: ToolContext['routine']
   // Trace context of the chat turn, so every tool call this agent makes
   // nests under the turn span in the trace stream.
   trace?: { traceId: string; spanId: string }
@@ -276,6 +286,7 @@ export async function createAiSdkTools({
   const ctx = {
     actor: 'ai' as const,
     ...(sessionId ? { sessionId } : {}),
+    ...(routine ? { routine } : {}),
     ...(trace ? { traceId: trace.traceId, spanId: trace.spanId } : {}),
   }
   const call = (name: string, params: Record<string, unknown> = {}) => {
@@ -1040,7 +1051,7 @@ export function activateSelectedSkills(
 async function activateSelectedSkillsFromRegistry(
   tools: ToolRegistry,
   names: string[] | undefined,
-  ctx: { sessionId?: string; traceId?: string; spanId?: string } = {},
+  ctx: { sessionId?: string; routine?: ToolContext['routine']; traceId?: string; spanId?: string } = {},
 ): Promise<{ promptSection: string | null; toolNames: string[] }> {
   const requested = [...new Set(
     (names ?? []).map(name => typeof name === 'string' ? name.trim() : '').filter(Boolean),
@@ -1056,6 +1067,7 @@ async function activateSelectedSkillsFromRegistry(
       const result = await tools.call('skill.get', { name }, {
         actor: 'ai',
         ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
+        ...(ctx.routine ? { routine: ctx.routine } : {}),
         ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
         ...(ctx.spanId ? { spanId: ctx.spanId } : {}),
       }) as { skill?: unknown }
@@ -1116,7 +1128,8 @@ export async function streamProfileResponse({
   // tool calls, and the closing persistence all nest under this root span, so
   // one chat send is one run in the Activity feed (not a scatter of orphan
   // traces). Created up front so the listing below can parent to it.
-  const turnTraceId = newTraceId()
+  const parentTrace = request.trace
+  const turnTraceId = parentTrace?.traceId ?? newTraceId()
   const turnSpanId = newSpanId()
   const turnStartedAt = Date.now()
   const turnTrace = { traceId: turnTraceId, spanId: turnSpanId }
@@ -1125,9 +1138,13 @@ export async function streamProfileResponse({
     actor: 'ai',
     traceId: turnTraceId,
     spanId: turnSpanId,
+    ...(parentTrace ? { parentSpanId: parentTrace.spanId } : {}),
     ...(sessionId ? { sessionId } : {}),
     model: modelConfig.model,
-    data: { profile: profile.id },
+    data: {
+      profile: profile.id,
+      ...(request.routine ? { routineId: request.routine.id, routineRunId: request.routine.runId } : {}),
+    },
   })
   const [packageTools, skillCatalog] = profile.useCatalogs
     ? await Promise.all([listPackageTools(tools, sessionId, turnTrace), listSkillCatalog(tools, sessionId, turnTrace)])
@@ -1143,6 +1160,7 @@ export async function streamProfileResponse({
       for (const name of skill.tools) activatedSkillTools.add(name)
       for (const name of skill.unlocks) activatedSkillTools.add(name)
     },
+    routine: request.routine,
     trace: { traceId: turnTraceId, spanId: turnSpanId },
   })
   // Allowlist filtering: when the profile declares a toolAllowlist, narrow the
@@ -1165,6 +1183,7 @@ export async function streamProfileResponse({
   const selectedSkills = profile.useCatalogs
     ? await activateSelectedSkillsFromRegistry(tools, mergedSkills, {
         sessionId,
+        routine: request.routine,
         traceId: turnTraceId,
         spanId: turnSpanId,
       })
@@ -1176,14 +1195,21 @@ export async function streamProfileResponse({
     ? createSkillActiveToolPolicy(Object.keys(aiTools), activatedSkillTools, gatedToolNames)
     : null
   const normalizedMessages = normalizeFileUIParts(request.messages || [])
-  const repaired = repairIncompleteToolMessages(normalizedMessages)
-  const compacted = profile.useCatalogs
-    ? compactBrowserToolResultsForContext(repaired.messages)
-    : { messages: repaired.messages, changed: false }
-  const preparedMessages = compacted.messages
-  if (profile.useCatalogs && profile.persistSession && sessionId && (repaired.changed || compacted.changed)) {
-    await persistRepairedChatSession(tools, sessionId, preparedMessages, turnTrace)
-  }
+  const sessionCompactions = profile.persistSession && sessionId
+    ? await prepareSessionCompactionsBeforeTurn({
+        tools,
+        sessionId,
+        requestMessages: normalizedMessages,
+        modelConfig,
+        trace: turnTrace,
+      })
+    : []
+  const modelContext = buildModelContext({
+    messages: normalizedMessages,
+    compactions: sessionCompactions,
+    modelWindow: modelConfig.contextWindow,
+  })
+  const preparedMessages = modelContext.messages
   const uiMessages = await validateUIMessages({
     messages: preparedMessages,
     tools: aiTools,
@@ -1228,7 +1254,11 @@ export async function streamProfileResponse({
           parentSpanId: turnSpanId,
           ...(sessionId ? { sessionId } : {}),
           model: modelConfig.model,
-          data: { profile: profile.id, ...usage },
+          data: {
+            profile: profile.id,
+            ...usage,
+            ...(request.routine ? { routineId: request.routine.id, routineRunId: request.routine.runId } : {}),
+          },
         })
       }
     },
@@ -1240,7 +1270,7 @@ export async function streamProfileResponse({
   })
 
   return result.toUIMessageStreamResponse({
-    originalMessages: uiMessages,
+    originalMessages: normalizedMessages,
     sendReasoning: profile.sendReasoning,
     onFinish: async ({ messages }) => {
       // Capture the turn's full message array (input + assistant output + tool
@@ -1259,12 +1289,39 @@ export async function streamProfileResponse({
         durationMs: Date.now() - turnStartedAt,
         ...(sessionId ? { sessionId } : {}),
         model: modelConfig.model,
-        data: { profile: profile.id, steps: turnUsageSteps.length },
+        data: {
+          profile: profile.id,
+          steps: turnUsageSteps.length,
+          ...(request.routine ? { routineId: request.routine.id, routineRunId: request.routine.runId } : {}),
+        },
         ...(messagesRef ? { payloadRef: messagesRef } : {}),
       })
       if (!profile.persistSession || !sessionId) return
       const turnUsage = summarizeTurnUsage(turnUsageSteps, estimatedContextTokens)
       await persistChatSession(tools, sessionId, messages, turnUsage.usage, turnUsage.contextTokens, turnTrace)
+      await maybeCompactSessionAfterTurn({
+        tools,
+        sessionId,
+        messages,
+        modelConfig,
+        contextTokens: turnUsage.contextTokens,
+        trigger: 'post_turn',
+        trace: turnTrace,
+      }).catch(error => {
+        tools.trace.append({
+          kind: 'chat.compaction',
+          actor: 'ai',
+          traceId: turnTraceId,
+          parentSpanId: turnSpanId,
+          status: 'error',
+          ...(sessionId ? { sessionId } : {}),
+          model: modelConfig.model,
+          data: {
+            trigger: 'post_turn',
+            error: error instanceof Error ? error.message : String(error),
+          },
+        })
+      })
     },
     onError: (error) => error instanceof Error ? error.message : 'AI request failed',
   })
@@ -1361,50 +1418,6 @@ export function normalizeFileUIParts(messages: UIMessage[]): UIMessage[] {
 
     return changed ? { ...message, parts: nextParts } : message
   })
-}
-
-export function repairIncompleteToolMessages(messages: UIMessage[]): { messages: UIMessage[], changed: boolean } {
-  let changed = false
-  const repaired: UIMessage[] = []
-
-  for (const message of messages) {
-    const parts = (message as { parts?: unknown[] }).parts
-    if (message.role !== 'assistant' || !Array.isArray(parts)) {
-      repaired.push(message)
-      continue
-    }
-
-    const nextParts = parts.filter(part => !isNonTerminalToolPart(part))
-    const substantiveParts = nextParts.filter(isSubstantiveAssistantPart)
-    if (nextParts.length !== parts.length) changed = true
-    if (!substantiveParts.length) {
-      changed = true
-      continue
-    }
-    repaired.push(changed && nextParts !== parts ? { ...message, parts: nextParts as UIMessage['parts'] } : message)
-  }
-
-  return changed ? { messages: repaired, changed: true } : { messages, changed: false }
-}
-
-function isNonTerminalToolPart(part: unknown): boolean {
-  if (!part || typeof part !== 'object') return false
-  const item = part as Record<string, unknown>
-  const type = typeof item.type === 'string' ? item.type : ''
-  if (!type.startsWith('tool-') && type !== 'dynamic-tool') return false
-  return item.state !== 'output-available'
-    && item.state !== 'output-error'
-    && item.state !== 'output-denied'
-}
-
-function isSubstantiveAssistantPart(part: unknown): boolean {
-  if (!part || typeof part !== 'object') return false
-  const item = part as Record<string, unknown>
-  if (item.type === 'step-start') return false
-  if ((item.type === 'text' || item.type === 'reasoning') && typeof item.text === 'string') {
-    return item.text.trim().length > 0
-  }
-  return true
 }
 
 function isTextFileMediaType(mediaType: string): boolean {
@@ -1555,6 +1568,341 @@ async function generateSummary({
   return { summary: result.object?.summary || '' }
 }
 
+const CONTEXT_COMPACTION_RESERVE_TOKENS = 16_384
+const MIN_COMPACTION_SAVED_RATIO = 0.1
+
+interface SessionCompactionState {
+  compactions: ContextCompactionRecord[]
+  messages: UIMessage[]
+  lastInputTokens: number
+  lastContextTokens: number
+  updatedAt?: string
+}
+
+export async function maybeCompactSessionAfterTurn({
+  tools,
+  sessionId,
+  messages,
+  modelConfig,
+  contextTokens,
+  trigger,
+  trace,
+  now = new Date(),
+}: {
+  tools: ToolRegistry
+  sessionId: string
+  messages: UIMessage[]
+  modelConfig: ModelConfig
+  contextTokens: number
+  trigger: 'post_turn' | 'pre_turn' | 'overflow'
+  trace?: { traceId: string; spanId: string }
+  now?: Date
+}): Promise<{ record: ContextCompactionRecord } | null> {
+  if (!shouldCompactForContextWindow(contextTokens, modelConfig.contextWindow)) return null
+
+  const cut = selectCompactionCut({ messages, modelWindow: modelConfig.contextWindow })
+  if (!cut || cut.summarizedMessageCount <= 0) return null
+
+  const workspacePath = tools.getWorkspacePath()
+  if (!workspacePath) return null
+
+  const existingCompactions = await loadSessionCompactions(tools, sessionId, trace)
+  const latest = existingCompactions[existingCompactions.length - 1]
+  if (latest?.modelId === modelConfig.id && typeof latest.savedRatio === 'number' && latest.savedRatio < MIN_COMPACTION_SAVED_RATIO) {
+    return null
+  }
+
+  const summary = await generateCompactionSummary({
+    tools,
+    modelConfig,
+    previousSummary: latest?.summary,
+    messages: cut.summarizedMessages,
+    trace,
+  })
+  if (!summary.trim()) return null
+
+  const createdAt = now.toISOString()
+  const draftRecord: ContextCompactionRecord = {
+    id: `cmp_${createdAt.replace(/\D/g, '').slice(0, 14)}_${randomUUID().slice(0, 8)}`,
+    firstKeptMessageId: cut.firstKeptMessageId,
+    firstKeptMessageIndex: cut.firstKeptMessageIndex,
+    summarizedMessageCount: cut.summarizedMessageCount,
+    summary,
+    tokensBefore: Math.max(0, Math.floor(contextTokens)),
+    tokensAfter: 0,
+    savedRatio: 0,
+    modelId: modelConfig.id,
+    trigger,
+    createdAt,
+  }
+
+  const afterTokens = buildModelContext({
+    messages,
+    compactions: [...existingCompactions, draftRecord],
+    modelWindow: modelConfig.contextWindow,
+  }).estimatedTokens
+  const tokensBefore = contextTokens > 0
+    ? Math.floor(contextTokens)
+    : estimateMessagesTokens(messages)
+  const savedRatio = tokensBefore > 0
+    ? Math.max(0, (tokensBefore - afterTokens) / tokensBefore)
+    : 0
+  if (savedRatio < MIN_COMPACTION_SAVED_RATIO) return null
+
+  const record: ContextCompactionRecord = {
+    ...draftRecord,
+    tokensBefore,
+    tokensAfter: afterTokens,
+    savedRatio,
+  }
+  appendSessionCompaction(workspacePath, sessionId, record)
+
+  tools.trace.append({
+    kind: 'chat.compaction',
+    actor: 'ai',
+    ...(trace ? { traceId: trace.traceId, parentSpanId: trace.spanId } : {}),
+    sessionId,
+    model: modelConfig.model,
+    status: 'ok',
+    data: {
+      trigger,
+      compactionId: record.id,
+      firstKeptMessageId: record.firstKeptMessageId,
+      firstKeptMessageIndex: record.firstKeptMessageIndex,
+      summarizedMessageCount: record.summarizedMessageCount,
+      tokensBefore: record.tokensBefore,
+      tokensAfter: record.tokensAfter,
+      savedRatio: record.savedRatio,
+    },
+  })
+
+  return { record }
+}
+
+async function prepareSessionCompactionsBeforeTurn({
+  tools,
+  sessionId,
+  requestMessages,
+  modelConfig,
+  trace,
+}: {
+  tools: ToolRegistry
+  sessionId: string
+  requestMessages: UIMessage[]
+  modelConfig: ModelConfig
+  trace?: { traceId: string; spanId: string }
+}): Promise<ContextCompactionRecord[]> {
+  const state = await loadSessionCompactionState(tools, sessionId, trace)
+  const contextTokens = Math.max(state.lastInputTokens, state.lastContextTokens)
+  if (
+    !shouldCompactForContextWindow(contextTokens, modelConfig.contextWindow) ||
+    hasFreshCompactionForModel(state, modelConfig.id)
+  ) {
+    return state.compactions
+  }
+
+  try {
+    const result = await maybeCompactSessionAfterTurn({
+      tools,
+      sessionId,
+      messages: state.messages.length ? state.messages : requestMessages,
+      modelConfig,
+      contextTokens,
+      trigger: 'pre_turn',
+      trace,
+    })
+    return result ? [...state.compactions, result.record] : state.compactions
+  } catch (error) {
+    tools.trace.append({
+      kind: 'chat.compaction',
+      actor: 'ai',
+      ...(trace ? { traceId: trace.traceId, parentSpanId: trace.spanId } : {}),
+      sessionId,
+      model: modelConfig.model,
+      status: 'error',
+      data: {
+        trigger: 'pre_turn',
+        error: error instanceof Error ? error.message : String(error),
+      },
+    })
+    return state.compactions
+  }
+}
+
+async function loadSessionCompactions(
+  tools: ToolRegistry,
+  sessionId: string,
+  trace?: { traceId: string; spanId: string },
+): Promise<ContextCompactionRecord[]> {
+  return (await loadSessionCompactionState(tools, sessionId, trace)).compactions
+}
+
+async function loadSessionCompactionState(
+  tools: ToolRegistry,
+  sessionId: string,
+  trace?: { traceId: string; spanId: string },
+): Promise<SessionCompactionState> {
+  try {
+    const session = await tools.call('session.get', { id: sessionId }, {
+      actor: 'system',
+      ...(trace ? { traceId: trace.traceId, spanId: trace.spanId } : {}),
+    }) as {
+      compactions?: ContextCompactionRecord[]
+      messages?: UIMessage[]
+      lastInputTokens?: number
+      lastContextTokens?: number
+      updatedAt?: string
+    }
+    return {
+      compactions: Array.isArray(session.compactions) ? session.compactions : [],
+      messages: Array.isArray(session.messages) ? session.messages : [],
+      lastInputTokens: finiteTokenCount(session.lastInputTokens),
+      lastContextTokens: finiteTokenCount(session.lastContextTokens),
+      ...(typeof session.updatedAt === 'string' ? { updatedAt: session.updatedAt } : {}),
+    }
+  } catch {
+    return {
+      compactions: [],
+      messages: [],
+      lastInputTokens: 0,
+      lastContextTokens: 0,
+    }
+  }
+}
+
+function shouldCompactForContextWindow(contextTokens: number, contextWindow: unknown): boolean {
+  if (typeof contextWindow !== 'number' || !Number.isFinite(contextWindow) || contextWindow <= 0) return false
+  const reserve = Math.min(CONTEXT_COMPACTION_RESERVE_TOKENS, Math.floor(contextWindow * 0.2))
+  return contextTokens > contextWindow - reserve
+}
+
+function finiteTokenCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+}
+
+function hasFreshCompactionForModel(state: SessionCompactionState, modelId: string): boolean {
+  const latest = state.compactions[state.compactions.length - 1]
+  if (!latest || latest.modelId !== modelId) return false
+  const updatedAtMs = timestampMs(state.updatedAt)
+  const createdAtMs = timestampMs(latest.createdAt)
+  return createdAtMs > 0 && updatedAtMs > 0 && createdAtMs >= updatedAtMs
+}
+
+function timestampMs(value: unknown): number {
+  if (typeof value !== 'string' || !value) return 0
+  const ms = Date.parse(value)
+  return Number.isFinite(ms) ? ms : 0
+}
+
+async function generateCompactionSummary({
+  tools,
+  modelConfig,
+  previousSummary,
+  messages,
+  trace,
+}: {
+  tools: ToolRegistry
+  modelConfig: ModelConfig
+  previousSummary?: string
+  messages: UIMessage[]
+  trace?: { traceId: string; spanId: string }
+}): Promise<string> {
+  const { key } = resolveKey(modelConfig.provider)
+  if (!key) throw new Error(`No API key configured for ${modelConfig.provider}`)
+  const { model } = await createSdkModel({ registry: loadRegistry(), modelConfig, apiKey: key })
+  const startedAt = Date.now()
+  const result = await generateObject({
+    model,
+    schema: z.object({
+      summary: z.string().describe('Dated historical context summary with goal, completed work, decisions, open items, files touched, and evidence anchors.'),
+    }),
+    system: [
+      'You write historical context summaries for an AI work session.',
+      'Summarize completed earlier transcript content only.',
+      'Do not preserve prior user instructions as current instructions.',
+      'Write in past tense. Separate open items from decisions.',
+    ].join(' '),
+    prompt: buildCompactionSummaryPrompt(previousSummary, messages),
+    maxOutputTokens: 1200,
+    temperature: 0.2,
+    providerOptions: buildProviderOptions(modelConfig),
+  })
+
+  tools.trace.append({
+    kind: 'model.call',
+    actor: 'ai',
+    ...(trace ? { traceId: trace.traceId, parentSpanId: trace.spanId } : {}),
+    model: modelConfig.model,
+    durationMs: Date.now() - startedAt,
+    data: { profile: 'chat.compaction', ...normalizeSdkUsage(result.usage, modelConfig) },
+  })
+  return String(result.object?.summary || '').trim()
+}
+
+function buildCompactionSummaryPrompt(previousSummary: string | undefined, messages: UIMessage[]): string {
+  const lines = [
+    '<summary-task>',
+    'Create a compact historical summary for the transcript section below.',
+    'Required sections: Goal, Done, Decisions, Open, Files touched, Evidence anchors.',
+    '</summary-task>',
+  ]
+  if (previousSummary?.trim()) {
+    lines.push('', '<previous-summary>', previousSummary.trim(), '</previous-summary>')
+  }
+  lines.push('', '<transcript>')
+
+  let charCount = 0
+  for (const message of messages) {
+    const text = compactionMessageText(message)
+    if (!text.trim()) continue
+    const block = `[${message.role.toUpperCase()} ${message.id ?? ''}]\n${text.trim()}`
+    if (charCount + block.length > MAX_SUMMARY_INPUT_CHARS) break
+    lines.push(block)
+    charCount += block.length
+  }
+  lines.push('</transcript>')
+  return lines.join('\n')
+}
+
+function compactionMessageText(message: UIMessage): string {
+  if (typeof (message as { content?: unknown }).content === 'string') return String((message as { content: string }).content)
+  const parts = (message as { parts?: unknown[] }).parts
+  if (!Array.isArray(parts)) return ''
+
+  return parts.map((part) => {
+    if (!part || typeof part !== 'object') return ''
+    const item = part as Record<string, unknown>
+    if (item.type === 'text' && typeof item.text === 'string') return item.text
+    if (typeof item.type === 'string' && item.type.startsWith('tool-')) {
+      return compactToolPartForSummary(item)
+    }
+    if (item.type === 'data-context' && item.data && typeof item.data === 'object') {
+      const data = item.data as Record<string, unknown>
+      return `[attached context ${typeof data.filename === 'string' ? data.filename : 'attachment'}]`
+    }
+    return ''
+  }).filter(Boolean).join('\n')
+}
+
+function compactToolPartForSummary(part: Record<string, unknown>): string {
+  const input = isRecord(part.input) ? part.input : {}
+  const output = isRecord(part.output) ? part.output : {}
+  const targets = [
+    input.path,
+    input.url,
+    output.path,
+    output.url,
+    output.final_url,
+    output.title,
+    output.exitCode,
+  ].filter(value => value !== undefined && value !== null)
+  return `[${part.type} ${part.state ?? ''}${targets.length ? `: ${targets.map(String).join(', ')}` : ''}]`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
 async function persistChatSession(
   tools: ToolRegistry,
   sessionId: string,
@@ -1574,26 +1922,13 @@ async function persistChatSession(
   } catch {
     usage = requestUsage
   }
-  const compacted = compactBrowserToolResultsForContext(messages)
   await tools.call('session.update', {
     id: sessionId,
-    messages: compacted.messages,
+    messages,
     usage,
     lastContextTokens,
     lastInputTokens: lastContextTokens,
   }, ctx)
-}
-
-async function persistRepairedChatSession(
-  tools: ToolRegistry,
-  sessionId: string,
-  messages: UIMessage[],
-  trace?: { traceId: string; spanId: string },
-) {
-  await tools.call('session.update', { id: sessionId, messages }, {
-    actor: 'system',
-    ...(trace ? { traceId: trace.traceId, spanId: trace.spanId } : {}),
-  })
 }
 
 export function aiToolTimeoutMs(name: string, params: Record<string, unknown> = {}): number {

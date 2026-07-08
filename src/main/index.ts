@@ -39,6 +39,8 @@ import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
 import { registerToolchainTools } from '@main/tools/toolchain.js'
 import { registerCodeTools } from '@main/tools/code.js'
 import { registerSessionTools } from '@main/sessions.js'
+import { registerRoutineTools, runRoutineOnce } from '@main/tools/routines.js'
+import { createRoutineAutomation } from '@main/routines/automation.js'
 import { registerArchiveTools } from '@main/tools/archive.js'
 import { registerAiTools } from '@main/ai/ai.js'
 import { registerPtyTools, spawnPtyProcess, writePty } from '@main/pty.js'
@@ -127,6 +129,8 @@ let telemetryShutdown: (() => Promise<void>) | null = null
 let appUpdateInitialTimer: ReturnType<typeof setTimeout> | null = null
 let appUpdateInterval: ReturnType<typeof setInterval> | null = null
 let historyBaselineTimer: ReturnType<typeof setTimeout> | null = null
+let routineTickerInterval: ReturnType<typeof setInterval> | null = null
+let routineAutomationStop: (() => Promise<void>) | null = null
 
 export const OPEN_DIRECTORY_DIALOG_PROPERTIES = ['openDirectory', 'createDirectory'] as const
 
@@ -390,8 +394,10 @@ async function boot(): Promise<void> {
   let server: Awaited<ReturnType<typeof createServer>> | null = null
   let packages: Awaited<ReturnType<typeof createPackageLoader>> | null = null
   let namedPackageTools: NamedPackageToolSync | null = null
+  let agentMountsRef: ReturnType<typeof createAgentMounts> | null = null
   let packageEnablement: ReturnType<typeof createPackageEnablementStore> | null = null
   let appUpdater: ReturnType<typeof initAutoUpdater> | null = null
+  let routineAutomation: ReturnType<typeof createRoutineAutomation> | null = null
 
   // Git mirrors live in a single per-machine cache shared across workspaces, so
   // a repo is cloned once no matter how many workspaces mount it.
@@ -433,6 +439,11 @@ async function boot(): Promise<void> {
     })),
   )
 
+  function updateRoutineApprovalSession(sessionId: string | undefined, routineId: string | undefined, data: Record<string, unknown>): void {
+    if (!sessionId || !routineId) return
+    void tools.call('session.update', { id: sessionId, ...data }, { actor: 'system' }).catch(() => {})
+  }
+
   const gate = createPermissionGate({
     getApprovalMode: () => readApprovalMode(tools),
     getWorkspacePath: () => tools.getWorkspacePath(),
@@ -455,6 +466,20 @@ async function boot(): Promise<void> {
       const ws = tools.getWorkspacePath()
       if (!ws) throw new Error('No workspace open')
       addBrowserSessionDomain(ws, grant.domain)
+    },
+    onApprovalRequested: (request) => {
+      updateRoutineApprovalSession(request.sessionId, request.routineId, { routineStatus: 'needs-approval' })
+    },
+    onApprovalResolved: (request, decision) => {
+      if (decision.approved) {
+        updateRoutineApprovalSession(request.sessionId, request.routineId, { routineStatus: 'working', routineError: '' })
+      } else {
+        updateRoutineApprovalSession(request.sessionId, request.routineId, {
+          routineStatus: 'error',
+          routineError: 'Approval denied',
+          routineCompletedAt: new Date().toISOString(),
+        })
+      }
     },
     // The gate hard-denies writes to readonly/unknown collections for every
     // actor; this resolver supplies the effective per-collection policy.
@@ -539,6 +564,17 @@ async function boot(): Promise<void> {
     }),
   })
   registerSessionTools(tools)
+  const packageSecretStore = createKeytarSecretStore()
+  registerRoutineTools(tools, {
+    getAgentMounts: () => agentMountsRef,
+    runRoutine: (routine, context) => runRoutineOnce(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+    secrets: packageSecretStore,
+    onChange: async () => {
+      await routineAutomation?.refresh()
+      broadcastToRenderers('routines:changed', {})
+      server?.broadcast('routines:changed', {})
+    },
+  })
   registerAiTools(tools, (channel) => {
     broadcastToRenderers(channel)
     server?.broadcast(channel, {})
@@ -718,7 +754,14 @@ async function boot(): Promise<void> {
   packageEnablement = createPackageEnablementStore({
     getWorkspacePath: () => tools.getWorkspacePath(),
   })
-  const packageSecretStore = createKeytarSecretStore()
+  routineAutomation = createRoutineAutomation({
+    getWorkspacePath: () => tools.getWorkspacePath(),
+    runRoutine: (routine, context) => runRoutineOnce(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+    knownTools: () => new Set(tools.list().map(tool => tool.name)),
+    secrets: packageSecretStore,
+    trace: traceLog,
+  })
+  routineAutomationStop = () => routineAutomation?.stop() ?? Promise.resolve()
   const packageRuntime = createPackageRuntime({
     packages,
     enablement: packageEnablement,
@@ -727,6 +770,7 @@ async function boot(): Promise<void> {
     secrets: packageSecretStore,
   })
   const agentMounts = createAgentMounts({ runtime: packageRuntime, packages, tools })
+  agentMountsRef = agentMounts
   namedPackageTools = createNamedPackageToolSync({ runtime: packageRuntime, tools, packages })
   setAgentContextContributionsProvider(createAgentContextContributionsProvider({ runtime: packageRuntime, packages }))
   setAgentContextLocalPackagesProvider(createLocalPackageStatusProvider({ runtime: packageRuntime, packages, enablement: packageEnablement }))
@@ -857,7 +901,24 @@ async function boot(): Promise<void> {
       return specs
     },
     agentMounts,
+    handleRoutineWebhook: (name, delivery) =>
+      routineAutomation?.handleWebhook(name, delivery) ?? Promise.resolve({
+        status: 404,
+        ok: false,
+        error: 'Routine automation is not available',
+      }),
   })
+  await routineAutomation?.start()
+  await routineAutomation?.tick().catch((err) => {
+    console.error('[routines] initial tick failed', err)
+  })
+  if (routineTickerInterval != null) clearInterval(routineTickerInterval)
+  routineTickerInterval = setInterval(() => {
+    void routineAutomation?.tick().catch((err) => {
+      console.error('[routines] tick failed', err)
+    })
+  }, 60_000)
+  routineTickerInterval.unref?.()
   try {
     writeMcpDiscoveryFile({
       port: server.port,
@@ -899,6 +960,10 @@ async function boot(): Promise<void> {
     await packages!.rescan()
     packageRuntime.invalidate()
     await namedPackageTools!.sync()
+    await routineAutomation?.refresh()
+    await routineAutomation?.tick().catch((err) => {
+      console.error('[routines] workspace tick failed', err)
+    })
     mainWindow?.webContents.send('packages:changed', packages!.list())
     // Close all pop-outs before broadcasting the workspace change — they are
     // workspace-scoped and would show stale content. Each popout's own close
@@ -1348,6 +1413,12 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   clearAppUpdateTimers()
+  if (routineTickerInterval != null) {
+    clearInterval(routineTickerInterval)
+    routineTickerInterval = null
+  }
+  void routineAutomationStop?.()
+  routineAutomationStop = null
   if (historyBaselineTimer != null) {
     clearTimeout(historyBaselineTimer)
     historyBaselineTimer = null

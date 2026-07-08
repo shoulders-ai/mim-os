@@ -8,10 +8,13 @@ import {
   createPermissionGate,
   traceGateDecision,
   type PermissionApprovalRequest,
+  type PermissionDecisionEvent,
   type PermissionGate,
+  type RemoteGrantDecision,
+  type RemoteGrantRequest,
 } from '@main/security/gate.js'
 import { createPackageEnablementStore } from '@main/packages/packageEnablement.js'
-import { createPackageLoader } from '@main/packages/packages.js'
+import { createPackageLoader, type PackageLoader } from '@main/packages/packages.js'
 import { createPackageRuntime } from '@main/packages/packageRuntime.js'
 import { createPackageJobRunner } from '@main/packages/packageJobs.js'
 import { registerPackageRuntimeTools } from '@main/tools/packageRuntime.js'
@@ -50,6 +53,7 @@ import { registerWebTools } from '@main/tools/web.js'
 import { readAccountToken, registerAccountTools } from '@main/tools/account.js'
 import { registerWorkspaceTools } from '@main/tools/workspace.js'
 import { registerSessionTools } from '@main/sessions.js'
+import { registerRoutineTools } from '@main/tools/routines.js'
 import { parseAllowedHttpUrl } from '@main/web/urlPolicy.js'
 import { addBrowserSessionDomain, isBrowserSessionAllowed, readBrowserSessionSettings } from '@main/web/browserSessionSettings.js'
 import { resolveTelemetryConfig } from '@main/telemetry/config.js'
@@ -58,9 +62,13 @@ import { createTelemetry } from '@main/telemetry/telemetry.js'
 import { registerTelemetryTools } from '@main/tools/telemetry.js'
 import type { HttpClient } from '@main/integrations/http.js'
 import { userHomeDir } from '@main/platform.js'
+import type { McpToolSpec } from '@main/server/server.js'
 
 export interface HeadlessKernel {
   tools: ToolRegistry
+  getPackages(): PackageLoader
+  getNamedMcpTools(): McpToolSpec[]
+  getAgentMounts(): ReturnType<typeof createAgentMounts> | null
   openWorkspace(path: string): Promise<void>
   shutdown(): Promise<void>
 }
@@ -68,6 +76,8 @@ export interface HeadlessKernel {
 export interface HeadlessKernelOptions {
   approvals?: 'deny' | 'prompt' | 'allow'
   confirmApproval?: (request: PermissionApprovalRequest) => Promise<boolean>
+  resolveRemoteGrant?: (request: RemoteGrantRequest) => RemoteGrantDecision | Promise<RemoteGrantDecision>
+  onGateDecision?: (event: PermissionDecisionEvent) => void
   telemetry?: {
     enabled?: boolean
     endpoint?: string
@@ -113,7 +123,16 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   let packageEnablement: ReturnType<typeof createPackageEnablementStore> | null = null
   // Per-kernel, not module-scope: tests create several kernels in one process.
   let namedToolsRef: NamedPackageToolSync | null = null
-  const gate = createHeadlessGate(() => tools.getWorkspacePath(), options, traceLog, (name) => namedToolsRef?.getPolicy(name))
+  let agentMountsRef: ReturnType<typeof createAgentMounts> | null = null
+  const gate = createHeadlessGate(
+    () => tools.getWorkspacePath(),
+    options,
+    traceLog,
+    (name) => namedToolsRef?.getPolicy(name),
+    (sessionId, data) => {
+      void tools.call('session.update', { id: sessionId, ...data }, { actor: 'system' }).catch(() => {})
+    },
+  )
   const traceOutcomes = createTraceOutcomeTracker({
     trace: traceLog,
     getWorkspacePath: () => tools?.getWorkspacePath() ?? null,
@@ -135,6 +154,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   registerToolchainTools(tools)
   registerCodeTools(tools)
   registerSessionTools(tools)
+  registerRoutineTools(tools, { getAgentMounts: () => agentMountsRef })
   registerArchiveTools(tools)
   registerAiTools(tools)
   registerSearchTools(tools)
@@ -173,6 +193,22 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
 
   return {
     tools,
+    getPackages() {
+      if (!packages) throw new Error('No workspace open')
+      return packages
+    },
+    getNamedMcpTools() {
+      const specs: McpToolSpec[] = []
+      if (!namedToolsRef) return specs
+      for (const name of namedToolsRef.ownedNames()) {
+        const tool = tools.get(name)
+        if (tool) specs.push({ name: name.replace(/\./g, '_'), mimName: name, description: tool.description })
+      }
+      return specs
+    },
+    getAgentMounts() {
+      return agentMountsRef
+    },
     async openWorkspace(path: string) {
       await tools.call('workspace.open', { path }, { actor: 'system' })
       telemetry.track('workspace_open')
@@ -193,6 +229,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       })
 
       const agentMounts = createAgentMounts({ runtime, packages, tools })
+      agentMountsRef = agentMounts
       registerCoreAppTools(tools, {
         packages,
         enablement,
@@ -232,6 +269,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
     },
     async shutdown() {
       namedToolsRef = null
+      agentMountsRef = null
       packageEnablement = null
       setAgentContextContributionsProvider(null)
       setAgentContextLocalPackagesProvider(null)
@@ -249,6 +287,7 @@ function createHeadlessGate(
   options: HeadlessKernelOptions,
   traceLog: TraceLog,
   getDynamicToolPolicy: (name: string) => ReturnType<NamedPackageToolSync['getPolicy']>,
+  updateRoutineSession: (sessionId: string, data: Record<string, unknown>) => void,
 ): PermissionGate {
   const approvals = options.approvals ?? 'deny'
   let gate!: PermissionGate
@@ -275,7 +314,27 @@ function createHeadlessGate(
       if (!ws) throw new Error('No workspace open')
       addBrowserSessionDomain(ws, grant.domain)
     },
-    recordDecision: (event) => traceGateDecision(traceLog, event),
+    resolveRemoteGrant: options.resolveRemoteGrant,
+    onApprovalRequested: (request) => {
+      if (!request.routineId || !request.sessionId) return
+      updateRoutineSession(request.sessionId, { routineStatus: 'needs-approval' })
+    },
+    onApprovalResolved: (request, decision) => {
+      if (!request.routineId || !request.sessionId) return
+      if (decision.approved) {
+        updateRoutineSession(request.sessionId, { routineStatus: 'working', routineError: '' })
+      } else {
+        updateRoutineSession(request.sessionId, {
+          routineStatus: 'error',
+          routineError: 'Approval denied',
+          routineCompletedAt: new Date().toISOString(),
+        })
+      }
+    },
+    recordDecision: (event) => {
+      traceGateDecision(traceLog, event)
+      options.onGateDecision?.(event)
+    },
     sendApprovalRequest(request) {
       if (approvals === 'deny') return false
       queueMicrotask(async () => {

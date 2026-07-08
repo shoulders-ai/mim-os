@@ -22,11 +22,15 @@ import {
   chatProfile,
   inlineProfile,
   streamProfileResponse,
+  maybeCompactSessionAfterTurn,
   type AgentProfile,
 } from '@main/ai/aiRuntime.js'
 import { generateObject } from 'ai'
 import { loadRegistry } from '@main/ai/ai.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
+import { createToolRegistry } from '@main/tools/registry.js'
+import { createTraceLog } from '@main/trace/trace.js'
+import { registerSessionTools } from '@main/sessions.js'
 
 vi.mock('ai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ai')>()
@@ -158,6 +162,27 @@ describe('central AI runtime tools', () => {
         ctx: { actor: 'ai', sessionId: 's1' },
       },
     ])
+  })
+
+  it('passes routine identity and grants through AI tool calls', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({
+      tools,
+      profile: 'chat',
+      sessionId: 's1',
+      routine: { id: 'support-bot', runId: 'routine_run_1', approvalAllow: ['fs.write'] },
+    })
+
+    await aiTools.fs_write.execute?.({ path: 'notes.md', content: 'hello' }, {})
+
+    expect(calls).toContainEqual(expect.objectContaining({
+      name: 'fs.write',
+      ctx: {
+        actor: 'ai',
+        sessionId: 's1',
+        routine: { id: 'support-bot', runId: 'routine_run_1', approvalAllow: ['fs.write'] },
+      },
+    }))
   })
 
   it('exposes inline comment review tools on the chat profile', async () => {
@@ -1631,7 +1656,7 @@ describe('AgentProfile', () => {
     return { tools, traced }
   }
 
-  function registryWithModels(models: Array<{ id: string; model: string; provider: string }>) {
+  function registryWithModels(models: Array<{ id: string; model: string; provider: string; contextWindow?: number }>) {
     return {
       models,
       defaults: {},
@@ -1727,6 +1752,313 @@ describe('AgentProfile', () => {
 
     await expect(streamProfileResponse({ profile, tools, request: simpleRequest }))
       .rejects.toThrow('instructions assembly failed')
+  })
+
+  it('does not persist repaired context before the provider call', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const calls: Array<{ name: string; params: Record<string, unknown>; ctx?: Record<string, unknown> }> = []
+    const tools = {
+      call: vi.fn(async (name: string, params: Record<string, unknown>, ctx?: Record<string, unknown>) => {
+        calls.push({ name, params, ctx })
+        if (name === 'google.status') return { configured: false, tokenConfigured: false, grantedScopes: [] }
+        if (name === 'slack.status') return { configured: false }
+        if (name === 'skill.list') return { skills: [] }
+        if (name === 'package.tools.list') return { tools: [] }
+        return { ok: true }
+      }),
+      getWorkspacePath: () => null,
+      trace: {
+        append: vi.fn(),
+        writePayload: vi.fn(() => null),
+      },
+      shouldCaptureContent: () => false,
+    } as unknown as ToolRegistry
+    const profile: AgentProfile = {
+      id: 'repair-view-only',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: true,
+      stepCap: 4,
+      sendReasoning: true,
+      buildInstructions: () => 'test instructions',
+    }
+
+    await streamProfileResponse({
+      profile,
+      tools,
+      request: {
+        id: 's1',
+        messages: [
+          { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'read site' }] },
+          {
+            id: 'a1',
+            role: 'assistant',
+            parts: [
+              { type: 'text', text: 'I will read it.' },
+              { type: 'tool-web_read', toolCallId: 'toolu_pending', state: 'input-available', input: { url: 'https://example.com' } },
+            ],
+          },
+        ] as any,
+      },
+    })
+
+    expect(calls.some(call => call.name === 'session.update')).toBe(false)
+  })
+
+  it('uses the repaired model view for prompting but keeps raw original messages for response merging', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+    const { tools } = mockRegistryWithTrace()
+    const originalMessages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'read site' }] },
+      {
+        id: 'a1',
+        role: 'assistant',
+        parts: [
+          { type: 'text', text: 'I will read it.' },
+          { type: 'tool-web_read', toolCallId: 'toolu_pending', state: 'input-available', input: { url: 'https://example.com' } },
+        ],
+      },
+    ] as any
+    const profile: AgentProfile = {
+      id: 'repair-originals',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: false,
+      stepCap: 4,
+      sendReasoning: true,
+      buildInstructions: () => 'test instructions',
+    }
+
+    await streamProfileResponse({
+      profile,
+      tools,
+      request: { id: 's1', messages: originalMessages },
+    })
+
+    const agent = MockAgent.mock.results[MockAgent.mock.results.length - 1].value as {
+      stream: ReturnType<typeof vi.fn>
+    }
+    const streamResult = await agent.stream.mock.results[0].value
+    const responseOptions = streamResult.toUIMessageStreamResponse.mock.calls[0][0]
+    expect(responseOptions.originalMessages).toEqual(originalMessages)
+    expect(agent.stream.mock.calls[0][0].prompt.some((message: { content?: unknown }) =>
+      JSON.stringify(message).includes('toolu_pending'),
+    )).toBe(false)
+  })
+
+  it('applies stored compaction records before prompting', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+    const tools = {
+      call: vi.fn(async (name: string) => {
+        if (name === 'google.status') return { configured: false, tokenConfigured: false, grantedScopes: [] }
+        if (name === 'slack.status') return { configured: false }
+        if (name === 'skill.list') return { skills: [] }
+        if (name === 'package.tools.list') return { tools: [] }
+        if (name === 'session.get') {
+          return {
+            compactions: [{
+              id: 'cmp_1',
+              firstKeptMessageId: 'u2',
+              firstKeptMessageIndex: 2,
+              summary: 'Historical summary: selected the reliable plan.',
+              createdAt: '2026-01-01T00:00:00.000Z',
+            }],
+          }
+        }
+        return { ok: true }
+      }),
+      getWorkspacePath: () => null,
+      trace: {
+        append: vi.fn(),
+        writePayload: vi.fn(() => null),
+      },
+      shouldCaptureContent: () => false,
+    } as unknown as ToolRegistry
+    const profile: AgentProfile = {
+      id: 'compaction-pre-turn',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: true,
+      stepCap: 4,
+      sendReasoning: true,
+      buildInstructions: () => 'test instructions',
+    }
+
+    await streamProfileResponse({
+      profile,
+      tools,
+      request: {
+        id: 's1',
+        messages: [
+          { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'old request' }] },
+          { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old answer' }] },
+          { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'current request' }] },
+        ] as any,
+      },
+    })
+
+    const agent = MockAgent.mock.results[MockAgent.mock.results.length - 1].value as {
+      stream: ReturnType<typeof vi.fn>
+    }
+    const promptJson = JSON.stringify(agent.stream.mock.calls[0][0].prompt)
+    expect(promptJson).toContain('Historical summary: selected the reliable plan.')
+    expect(promptJson).toContain('current request')
+    expect(promptJson).not.toContain('old request')
+  })
+
+  it('appends a compaction record before prompting when previous usage is over the reserve', async () => {
+    mockedLoadRegistry
+      .mockReturnValueOnce(registryWithModels([
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+      ]))
+      .mockReturnValueOnce(registryWithModels([
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+      ]))
+    const mockedGenerateObject = vi.mocked(generateObject)
+    mockedGenerateObject.mockResolvedValueOnce({
+      object: { summary: 'Goal: keep the long session alive.\nDone: old research was summarized.' },
+      usage: { totalTokens: 100, promptTokens: 70, completionTokens: 30 },
+    } as never)
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+    const dir = mkdtempSync(join(tmpdir(), 'mim-compaction-pre-turn-'))
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+    registerSessionTools(tools)
+    tools.register({ name: 'google.status', description: 'test', execute: async () => ({ configured: false, tokenConfigured: false, grantedScopes: [] }) })
+    tools.register({ name: 'slack.status', description: 'test', execute: async () => ({ configured: false }) })
+    tools.register({ name: 'skill.list', description: 'test', execute: async () => ({ skills: [] }) })
+    tools.register({ name: 'package.tools.list', description: 'test', execute: async () => ({ tools: [] }) })
+    const created = await tools.call('session.create', { label: 'Long chat' }, { actor: 'user' }) as { id: string }
+    const messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'start' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old '.repeat(900) }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'middle request' }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'middle '.repeat(900) }] },
+      { id: 'u3', role: 'user', parts: [{ type: 'text', text: 'latest request' }] },
+    ] as any
+    const profile: AgentProfile = {
+      id: 'compaction-pre-turn-create',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: true,
+      stepCap: 4,
+      sendReasoning: true,
+      buildInstructions: () => 'test instructions',
+    }
+
+    try {
+      await tools.call('session.update', {
+        id: created.id,
+        messages,
+        lastInputTokens: 900,
+        lastContextTokens: 900,
+      }, { actor: 'user' })
+
+      await streamProfileResponse({
+        profile,
+        tools,
+        request: { id: created.id, messages },
+      })
+
+      const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
+        messages: typeof messages
+        compactions: Array<{ summary: string; trigger: string }>
+      }
+      expect(got.messages).toEqual(messages)
+      expect(got.compactions).toHaveLength(1)
+      expect(got.compactions[0]).toMatchObject({
+        summary: 'Goal: keep the long session alive.\nDone: old research was summarized.',
+        trigger: 'pre_turn',
+      })
+
+      const agent = MockAgent.mock.results[MockAgent.mock.results.length - 1].value as {
+        stream: ReturnType<typeof vi.fn>
+      }
+      const promptJson = JSON.stringify(agent.stream.mock.calls[0][0].prompt)
+      expect(promptJson).toContain('Goal: keep the long session alive.')
+      expect(promptJson).toContain('latest request')
+      expect(promptJson).not.toContain('middle '.repeat(50))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('appends a compaction record after a high-context turn without rewriting messages', async () => {
+    const mockedGenerateObject = vi.mocked(generateObject)
+    mockedGenerateObject.mockResolvedValueOnce({
+      object: { summary: 'Goal: finish the plan.\nDone: older work was reviewed.' },
+      usage: { totalTokens: 100, promptTokens: 70, completionTokens: 30 },
+    } as never)
+    const dir = mkdtempSync(join(tmpdir(), 'mim-compaction-runtime-'))
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+    registerSessionTools(tools)
+    const created = await tools.call('session.create', { label: 'Long chat' }, { actor: 'user' }) as { id: string }
+    const messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'start' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old '.repeat(900) }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'middle request' }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'middle '.repeat(900) }] },
+      { id: 'u3', role: 'user', parts: [{ type: 'text', text: 'latest request' }] },
+      { id: 'a3', role: 'assistant', parts: [{ type: 'text', text: 'latest answer' }] },
+    ] as any
+    await tools.call('session.update', { id: created.id, messages }, { actor: 'user' })
+
+    try {
+      const result = await maybeCompactSessionAfterTurn({
+        tools,
+        sessionId: created.id,
+        messages,
+        modelConfig: {
+          id: 'test-model',
+          model: 'test-model',
+          provider: 'anthropic',
+          contextWindow: 1000,
+        },
+        contextTokens: 900,
+        trigger: 'post_turn',
+        now: new Date('2026-01-01T00:00:00.000Z'),
+      })
+
+      expect(result?.record).toMatchObject({
+        firstKeptMessageId: 'u3',
+        firstKeptMessageIndex: 4,
+        summarizedMessageCount: 4,
+        summary: 'Goal: finish the plan.\nDone: older work was reviewed.',
+        tokensBefore: 900,
+        modelId: 'test-model',
+        trigger: 'post_turn',
+        createdAt: '2026-01-01T00:00:00.000Z',
+      })
+
+      const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
+        messages: typeof messages
+        compactions: Array<{ id: string; summary: string; savedRatio: number }>
+      }
+      expect(got.messages).toEqual(messages)
+      expect(got.compactions).toHaveLength(1)
+      expect(got.compactions[0].summary).toBe('Goal: finish the plan.\nDone: older work was reviewed.')
+      expect(got.compactions[0].savedRatio).toBeGreaterThan(0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('passes populated skillCatalog and selectedSkillsSection when useCatalogs is true, empty/null when false', async () => {
