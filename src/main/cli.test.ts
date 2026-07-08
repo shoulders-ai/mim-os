@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { findWorkspaceRoot, parseArgs, runCli } from '@main/cli.js'
 import type { PermissionApprovalRequest } from '@main/security/gate.js'
+import { recordServeDeniedRequest } from '@main/serve/denials.js'
 
 describe('mim CLI', () => {
   let dir: string
@@ -24,8 +25,10 @@ describe('mim CLI', () => {
     isTTY?: boolean
     confirmApproval?: (request: PermissionApprovalRequest) => Promise<boolean>
     runMcp?: () => Promise<number>
+    runServe?: (options: { workspacePath: string; host: string; port: number; home?: string }) => Promise<number>
     platform?: NodeJS.Platform
     spawn?: any
+    home?: string
   } = {}) {
     return {
       cwd,
@@ -35,8 +38,10 @@ describe('mim CLI', () => {
       isTTY: options.isTTY,
       confirmApproval: options.confirmApproval,
       runMcp: options.runMcp,
+      runServe: options.runServe,
       platform: options.platform,
       spawn: options.spawn,
+      home: options.home,
     }
   }
 
@@ -202,6 +207,116 @@ describe('mim CLI', () => {
 
     expect(code).toBe(7)
     expect(stderr.join('')).toBe('')
+  })
+
+  it('creates and lists serve tokens for the selected workspace', async () => {
+    await runCli(['init', '--name', 'demo'], io())
+    stdout = []
+
+    const create = await runCli(['serve', 'token', 'create', '--name', 'anna', '--json'], io(dir, undefined, {
+      home: join(dir, 'home'),
+    }))
+    expect(create).toBe(0)
+    const created = JSON.parse(stdout.join('')) as { token: string; record: { id: string; name: string }; snippets: { claude: string } }
+    expect(created.token).toMatch(/^mim_serve_/)
+    expect(created.record).toMatchObject({ name: 'anna' })
+    expect(created.snippets.claude).toContain('claude mcp add')
+
+    stdout = []
+    const list = await runCli(['serve', 'token', 'list', '--json'], io(dir, undefined, {
+      home: join(dir, 'home'),
+    }))
+    expect(list).toBe(0)
+    const listed = JSON.parse(stdout.join('')) as { callers: Array<{ id: string; name: string; hash?: string }> }
+    expect(listed.callers).toEqual([expect.objectContaining({ id: created.record.id, name: 'anna' })])
+    expect(listed.callers[0].hash).toBeUndefined()
+  })
+
+  it('starts serve mode through the injected runner with host and port', async () => {
+    await runCli(['init', '--name', 'demo'], io())
+    let seen: { workspacePath: string; host: string; port: number; home?: string } | null = null
+
+    const code = await runCli(['serve', '--host', '0.0.0.0', '--port', '4780'], io(dir, undefined, {
+      home: join(dir, 'home'),
+      runServe: async (options) => {
+        seen = options
+        return 11
+      },
+    }))
+
+    expect(code).toBe(11)
+    expect(seen).toEqual({
+      workspacePath: dir,
+      host: '0.0.0.0',
+      port: 4780,
+      home: join(dir, 'home'),
+    })
+  })
+
+  it('lists serve denied requests for operator review', async () => {
+    await runCli(['init', '--name', 'demo'], io())
+    const home = join(dir, 'home')
+    recordServeDeniedRequest({
+      home,
+      workspacePath: dir,
+      now: () => new Date('2026-07-08T10:00:00.000Z'),
+      event: {
+        decision: 'denied',
+        tool: 'fs.write',
+        actor: 'remote',
+        principal: 'caller_anna',
+        callerName: 'anna',
+        transport: 'mcp-http',
+        category: 'write',
+        risk: 'medium',
+        mode: 'normal',
+        reason: 'Grant does not include mutate effects',
+      },
+    })
+    stdout = []
+
+    const code = await runCli(['serve', 'denials', 'list', '--json'], io(dir, undefined, { home }))
+
+    expect(code).toBe(0)
+    const parsed = JSON.parse(stdout.join('')) as { deniedRequests: Array<{ tool: string; principal?: string }> }
+    expect(parsed.deniedRequests).toEqual([
+      expect.objectContaining({ tool: 'fs.write', principal: 'caller_anna' }),
+    ])
+  })
+
+  it('migrates selected structured app state into the served workspace', async () => {
+    await runCli(['init', '--name', 'demo'], io())
+    const source = join(dir, 'source-workspace')
+    mkdirSync(join(source, '.mim/packages/board/data/collections/issues'), { recursive: true })
+    writeFileSync(join(source, '.mim/packages/board/data/collections/issues/issue-1.json'), '{"title":"Existing"}')
+    stdout = []
+
+    const code = await runCli(['serve', 'state', 'migrate', '--from', source, '--apps', 'board', '--json'], io())
+
+    expect(code).toBe(0)
+    expect(JSON.parse(stdout.join(''))).toMatchObject({ migrated: ['board'] })
+    expect(readFileSync(join(dir, '.mim/packages/board/data/collections/issues/issue-1.json'), 'utf-8'))
+      .toBe('{"title":"Existing"}')
+  })
+
+  it('creates and restores serve backups from the CLI', async () => {
+    await runCli(['init', '--name', 'demo'], io())
+    writeFileSync(join(dir, '.mim/settings.json'), '{"traceRetentionDays":14}')
+    const backupDir = join(dir, 'backup')
+    stdout = []
+
+    const create = await runCli(['serve', 'backup', 'create', '--output', backupDir, '--json'], io())
+
+    expect(create).toBe(0)
+    expect(JSON.parse(stdout.join(''))).toMatchObject({ copied: expect.arrayContaining(['settings.json']) })
+
+    const restoreTarget = join(dir, 'restored')
+    stdout = []
+    const restore = await runCli(['serve', 'backup', 'restore', '--from', backupDir, '--workspace', restoreTarget, '--json'], io())
+
+    expect(restore).toBe(0)
+    expect(JSON.parse(stdout.join(''))).toMatchObject({ restored: expect.arrayContaining(['settings.json']) })
+    expect(readFileSync(join(restoreTarget, '.mim/settings.json'), 'utf-8')).toBe('{"traceRetentionDays":14}')
   })
 
   it('runs mim go commands through the shell on Windows so .cmd shims resolve', async () => {

@@ -27,6 +27,7 @@ describe('createHeadlessKernel', () => {
       'workspace.open', 'workspace.info', 'workspace.init',
       'settings.get', 'settings.set',
       'session.create', 'session.list',
+      'routine.create', 'routine.list', 'routine.get', 'routine.run', 'routine.pause', 'routine.resume',
       'search', 'search.files', 'search.sessions',
       'trace.query', 'trace.stats',
       'telemetry.track', 'telemetry.status', 'telemetry.setEnabled',
