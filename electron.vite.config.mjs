@@ -45,6 +45,12 @@ export default defineConfig({
     plugins: [mainSourceAliasPlugin(), vue(), tailwindcss()],
     root: resolve(__dirname, 'src/renderer'),
     publicDir: resolve(__dirname, 'public'),
+    // Fixed port: renderer localStorage (e.g. recent workspaces) is keyed to
+    // the dev-server origin, so a drifting port silently resets it.
+    server: {
+      port: 5174,
+      strictPort: true
+    },
     build: {
       rollupOptions: {
         input: {
