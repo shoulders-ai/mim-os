@@ -58,7 +58,12 @@ function pushEditedState() {
   }
 }
 
-function onAllTabsClosed() {
+async function onAllTabsClosed() {
+  try {
+    await window.kernel.pushDirtyTabCount?.({ count: 0, paths: [] })
+  } catch {
+    // Best-effort; if the push fails, still close rather than get stuck.
+  }
   window.close()
 }
 

@@ -154,32 +154,63 @@ describe('PopoutShell', () => {
     expect(adoptTabSpy).toHaveBeenCalledWith(tab)
   })
 
-  it('calls window.close on allTabsClosed emit', async () => {
+  it('pushes zero dirty count and awaits it before calling window.close on allTabsClosed', async () => {
     await mount()
 
-    const editor = container.querySelector('[data-testid="stub-editor"]')
-    expect(editor).toBeTruthy()
+    const callOrder: string[] = []
+    let resolvePush!: () => void
+    kernelMock.pushDirtyTabCount.mockImplementationOnce(() => {
+      callOrder.push('pushDirtyTabCount')
+      return new Promise<void>(r => { resolvePush = r })
+    })
+    const closeSpy = vi.spyOn(window, 'close').mockImplementation(() => {
+      callOrder.push('window.close')
+    })
 
-    // Find the stub component instance and emit allTabsClosed
-    // We trigger it via the kernel event pattern since the stub doesn't expose emit easily
-    // Instead, let's directly call the handler through the component
+    stubEmit.fn!('allTabsClosed')
+    await nextTick()
+
+    // Push was called with the correct zero-state but window.close has NOT fired yet
+    expect(callOrder).toEqual(['pushDirtyTabCount'])
+    expect(kernelMock.pushDirtyTabCount).toHaveBeenCalledWith({ count: 0, paths: [] })
+
+    // Resolve the push — only then should window.close fire
+    resolvePush()
+    await nextTick()
+    await nextTick()
+
+    expect(callOrder).toEqual(['pushDirtyTabCount', 'window.close'])
+    closeSpy.mockRestore()
+  })
+
+  it('calls window.close even if pushDirtyTabCount rejects', async () => {
+    await mount()
+
+    kernelMock.pushDirtyTabCount.mockRejectedValueOnce(new Error('IPC fail'))
     const closeSpy = vi.spyOn(window, 'close').mockImplementation(() => {})
 
-    // Trigger allTabsClosed by finding the emit handler
-    // The PopoutShell listens to @all-tabs-closed on EditorPanel
-    // We need to emit from the stub - let's check if the stub's parent wired it
-    // Since we can't easily trigger Vue emits from outside, test the close function directly
-    // by simulating the same effect
-    const shellVm = app._instance?.proxy as any
-    if (shellVm?.onAllTabsClosed) {
-      shellVm.onAllTabsClosed()
-    } else {
-      // Trigger through DOM event or fallback: call window.close() would be the effect
-      window.close()
-    }
+    stubEmit.fn!('allTabsClosed')
+    await nextTick()
+    await nextTick()
 
     expect(closeSpy).toHaveBeenCalled()
     closeSpy.mockRestore()
+  })
+
+  it('calls window.close when pushDirtyTabCount is not present on kernel', async () => {
+    await mount()
+
+    const original = kernelMock.pushDirtyTabCount
+    kernelMock.pushDirtyTabCount = undefined as any
+    const closeSpy = vi.spyOn(window, 'close').mockImplementation(() => {})
+
+    stubEmit.fn!('allTabsClosed')
+    await nextTick()
+    await nextTick()
+
+    expect(closeSpy).toHaveBeenCalled()
+    closeSpy.mockRestore()
+    kernelMock.pushDirtyTabCount = original
   })
 
   it('updates document.title on activeFileChanged', async () => {
