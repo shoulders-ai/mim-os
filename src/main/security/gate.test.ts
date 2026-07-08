@@ -31,6 +31,7 @@ function makeGate(options: {
   getDynamicToolPolicy?: (toolName: string) => ToolPolicy | undefined
   resolveSavedBrowserSessionGrant?: Parameters<typeof createPermissionGate>[0]['resolveSavedBrowserSessionGrant']
   grantSavedBrowserSessionDomain?: Parameters<typeof createPermissionGate>[0]['grantSavedBrowserSessionDomain']
+  resolveRemoteGrant?: Parameters<typeof createPermissionGate>[0]['resolveRemoteGrant']
 } = {}) {
   const requests = options.requests ?? []
   const decisions = options.decisions ?? []
@@ -46,6 +47,7 @@ function makeGate(options: {
     getDynamicToolPolicy: options.getDynamicToolPolicy,
     resolveSavedBrowserSessionGrant: options.resolveSavedBrowserSessionGrant,
     grantSavedBrowserSessionDomain: options.grantSavedBrowserSessionDomain,
+    resolveRemoteGrant: options.resolveRemoteGrant,
     sendApprovalRequest: (request) => {
       requests.push(request)
       return true
@@ -163,6 +165,108 @@ describe('permission gate decisions', () => {
       actor: 'user',
       tool: 'fs.delete',
       reason: 'direct user action',
+    })
+  })
+
+  it('denies remote callers until serve grants are wired', async () => {
+    const { gate, requests, decisions } = makeGate()
+
+    await expect(
+      gate.check(tool('fs.read'), { path: 'docs/notes.md' }, {
+        actor: 'remote',
+        principal: 'caller-token-1',
+        callerName: 'anna',
+        transport: 'mcp-http',
+      }),
+    ).rejects.toThrow('Remote caller is not authorized')
+
+    expect(requests).toHaveLength(0)
+    expect(decisions.at(-1)).toMatchObject({
+      decision: 'denied',
+      actor: 'remote',
+      tool: 'fs.read',
+      reason: 'Remote caller is not authorized',
+    })
+  })
+
+  it('allows remote callers only through the serve grant resolver', async () => {
+    const resolveRemoteGrant = vi.fn(() => ({ allowed: true, reason: 'serve grant' }))
+    const { gate, requests, decisions } = makeGate({ resolveRemoteGrant })
+
+    await gate.check(tool('fs.read'), { path: 'docs/notes.md' }, {
+      actor: 'remote',
+      principal: 'caller-token-1',
+      callerName: 'anna',
+      transport: 'mcp-http',
+    })
+
+    expect(requests).toHaveLength(0)
+    expect(resolveRemoteGrant).toHaveBeenCalledWith(expect.objectContaining({
+      toolName: 'fs.read',
+      effect: 'read',
+      pathKind: 'workspace',
+      paths: [expect.objectContaining({
+        value: 'docs/notes.md',
+        kind: 'workspace',
+      })],
+      ctx: expect.objectContaining({
+        actor: 'remote',
+        principal: 'caller-token-1',
+      }),
+    }))
+    expect(decisions.at(-1)).toMatchObject({
+      decision: 'allowed',
+      actor: 'remote',
+      tool: 'fs.read',
+      principal: 'caller-token-1',
+      callerName: 'anna',
+      transport: 'mcp-http',
+      reason: 'serve grant',
+    })
+  })
+
+  it('denies remote callers when the serve grant resolver denies', async () => {
+    const { gate, requests, decisions } = makeGate({
+      resolveRemoteGrant: () => ({ allowed: false, reason: 'Grant does not include mutate effects' }),
+    })
+
+    await expect(
+      gate.check(tool('fs.write'), { path: 'docs/notes.md', content: 'x' }, {
+        actor: 'remote',
+        principal: 'caller-token-1',
+        callerName: 'anna',
+        transport: 'mcp-http',
+      }),
+    ).rejects.toThrow('Grant does not include mutate effects')
+
+    expect(requests).toHaveLength(0)
+    expect(decisions.at(-1)).toMatchObject({
+      decision: 'denied',
+      actor: 'remote',
+      tool: 'fs.write',
+      reason: 'Grant does not include mutate effects',
+    })
+  })
+
+  it('keeps user-only operations closed to remote callers before grant resolution', async () => {
+    const resolveRemoteGrant = vi.fn(() => ({ allowed: true, reason: 'serve grant' }))
+    const { gate, decisions } = makeGate({ resolveRemoteGrant })
+
+    await expect(
+      gate.check(tool('agent.launch'), { agentId: 'critic' }, {
+        actor: 'remote',
+        principal: 'caller-token-1',
+        callerName: 'anna',
+        transport: 'mcp-http',
+      }),
+    ).rejects.toThrow('Agent sessions are user-only')
+
+    expect(resolveRemoteGrant).not.toHaveBeenCalled()
+    expect(decisions.at(-1)).toMatchObject({
+      decision: 'denied',
+      actor: 'remote',
+      tool: 'agent.launch',
+      reason: 'Agent sessions are user-only',
     })
   })
 
@@ -709,6 +813,103 @@ describe('permission gate decisions', () => {
     await expect(
       gate.check(tool('fs.delete'), { path: 'old.md' }, { actor: 'ai', sessionId: 's1' }),
     ).rejects.toThrow('No approval surface available')
+  })
+
+  it('auto-allows routine approval grants even when developer mode would otherwise bypass the gate', async () => {
+    const { gate, requests, decisions } = makeGate({ mode: 'developer' })
+
+    await gate.check(
+      tool('fs.write'),
+      { path: 'notes.md', content: 'hello' },
+      {
+        actor: 'ai',
+        sessionId: 's1',
+        routine: { id: 'support-bot', runId: 'routine_run_1', approvalAllow: ['fs.write'] },
+      },
+    )
+
+    expect(requests).toHaveLength(0)
+    expect(decisions.at(-1)).toMatchObject({
+      decision: 'allowed',
+      tool: 'fs.write',
+      actor: 'ai',
+      routineId: 'support-bot',
+      reason: 'routine approval grant',
+    })
+  })
+
+  it('parks routine mutate calls without grants instead of applying developer mode', async () => {
+    const { gate, requests, decisions } = makeGate({ mode: 'developer' })
+
+    const pending = gate.check(
+      tool('fs.write'),
+      { path: 'notes.md', content: 'hello' },
+      {
+        actor: 'ai',
+        sessionId: 's1',
+        routine: { id: 'support-bot', runId: 'routine_run_1', approvalAllow: ['fs.read'] },
+      },
+    )
+    await Promise.resolve()
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      toolName: 'fs.write',
+      sessionId: 's1',
+      routineId: 'support-bot',
+      reason: 'Routine needs approval for this tool',
+    })
+    expect(decisions.find(event => event.decision === 'requested')).toMatchObject({
+      tool: 'fs.write',
+      routineId: 'support-bot',
+      reason: 'Routine needs approval for this tool',
+    })
+
+    gate.respond(requests[0].requestId, { approved: true })
+    await pending
+  })
+
+  it('allows routine baseline reads and search without declarative grants', async () => {
+    const { gate, requests, decisions } = makeGate({ mode: 'developer' })
+    const ctx = {
+      actor: 'ai' as const,
+      sessionId: 's1',
+      routine: { id: 'support-bot', runId: 'routine_run_1', approvalAllow: [] },
+    }
+
+    await gate.check(tool('fs.read'), { path: 'notes.md' }, ctx)
+    await gate.check(tool('search'), { query: 'budget' }, ctx)
+
+    expect(requests).toHaveLength(0)
+    expect(decisions.at(-1)).toMatchObject({
+      decision: 'allowed',
+      routineId: 'support-bot',
+      reason: 'routine baseline',
+    })
+  })
+
+  it('still parks routine granted tools for sensitive paths', async () => {
+    const { gate, requests } = makeGate()
+
+    const pending = gate.check(
+      tool('fs.write'),
+      { path: '.env', content: 'x' },
+      {
+        actor: 'ai',
+        sessionId: 's1',
+        routine: { id: 'support-bot', runId: 'routine_run_1', approvalAllow: ['fs.write'] },
+      },
+    )
+    await Promise.resolve()
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0]).toMatchObject({
+      toolName: 'fs.write',
+      routineId: 'support-bot',
+      pathKind: 'sensitive',
+    })
+    gate.respond(requests[0].requestId, { approved: false })
+    await expect(pending).rejects.toThrow('Permission denied')
   })
 })
 

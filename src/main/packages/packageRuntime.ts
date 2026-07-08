@@ -203,6 +203,7 @@ const noopProgress: RuntimeProgress = {
 export function createPackageRuntime(options: PackageRuntimeOptions): PackageRuntime {
   const cache = new Map<string, Promise<PackageCapabilities>>()
   const toolIndex = new Map<string, { pkg: LoadedPackage; tool: PackageToolDescriptor }>()
+  const packageToolQueues = new Map<string, Promise<void>>()
 
   async function loadCapabilities(packageId: string): Promise<PackageCapabilities> {
     const pkg = options.packages.get(packageId)
@@ -301,7 +302,8 @@ export function createPackageRuntime(options: PackageRuntimeOptions): PackageRun
         inputs: input,
         signal: null,
       })
-      const result = await entry.tool.execute(runtimeCtx, input)
+      const result = await runPackageToolSerialized(packageToolQueues, entry.pkg.manifest.id, () =>
+        entry.tool.execute(runtimeCtx, input))
       options.trace?.append({
         kind: 'package.tool.result',
         actor: 'package',
@@ -328,6 +330,26 @@ export function createPackageRuntime(options: PackageRuntimeOptions): PackageRun
       else cache.clear()
       toolIndex.clear()
     },
+  }
+}
+
+async function runPackageToolSerialized<T>(
+  queues: Map<string, Promise<void>>,
+  packageId: string,
+  task: () => Promise<T> | T,
+): Promise<T> {
+  const previous = queues.get(packageId) ?? Promise.resolve()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const tail = previous.catch(() => undefined).then(() => gate)
+  queues.set(packageId, tail)
+
+  await previous.catch(() => undefined)
+  try {
+    return await task()
+  } finally {
+    release()
+    if (queues.get(packageId) === tail) queues.delete(packageId)
   }
 }
 

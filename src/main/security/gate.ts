@@ -41,8 +41,13 @@ export interface PermissionApprovalRequest {
   requestId: string
   toolName: string
   actor: ToolContext['actor']
+  principal?: string
+  callerName?: string
+  transport?: string
   package_id?: string
   sessionId?: string
+  routineId?: string
+  routineRunId?: string
   category: ToolCategory
   risk: ToolRisk
   mode: ApprovalMode
@@ -68,8 +73,13 @@ export interface PermissionDecisionEvent {
   decision: PermissionDecisionKind
   tool: string
   actor: ToolContext['actor']
+  principal?: string
+  callerName?: string
+  transport?: string
   package_id?: string
   sessionId?: string
+  routineId?: string
+  routineRunId?: string
   // Trace context of the tool call being gated, so the recorded decision
   // parents under the tool span in the unified trace stream.
   traceId?: string
@@ -81,6 +91,31 @@ export interface PermissionDecisionEvent {
   target?: string
   pathKind?: PermissionPathKind
   params?: Record<string, unknown>
+}
+
+export interface RemoteGrantPath {
+  value: string
+  kind?: PermissionPathKind
+  reason?: string
+  absolutePath: string | null
+  resourceCollectionId?: string
+}
+
+export interface RemoteGrantRequest {
+  toolName: string
+  params: Record<string, unknown>
+  ctx: ToolContext
+  policy: ToolPolicy
+  effect: ToolEffect
+  target?: string
+  pathKind?: PermissionPathKind
+  paths: RemoteGrantPath[]
+}
+
+export interface RemoteGrantDecision {
+  allowed: boolean
+  reason: string
+  grantId?: string
 }
 
 export interface PermissionGate {
@@ -109,6 +144,14 @@ export interface PermissionGateOptions {
     grant: SavedBrowserSessionApproval,
     params: Record<string, unknown>,
     ctx: ToolContext,
+  ) => void | Promise<void>
+  resolveRemoteGrant?: (
+    request: RemoteGrantRequest,
+  ) => RemoteGrantDecision | Promise<RemoteGrantDecision>
+  onApprovalRequested?: (request: PermissionApprovalRequest) => void | Promise<void>
+  onApprovalResolved?: (
+    request: PermissionApprovalRequest,
+    decision: PermissionApprovalDecision,
   ) => void | Promise<void>
   sendApprovalRequest: (request: PermissionApprovalRequest) => boolean
   recordDecision?: (event: PermissionDecisionEvent) => void
@@ -253,6 +296,12 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'session.update': { category: 'ui', risk: 'low', targetParam: 'id' },
   'session.reorder': { category: 'ui', risk: 'low' },
   'session.delete': { category: 'ui', risk: 'medium', targetParam: 'id' },
+  'routine.list': { category: 'read', risk: 'low' },
+  'routine.get': { category: 'read', risk: 'low', targetParam: 'name' },
+  'routine.create': { category: 'write', risk: 'medium', targetParam: 'name' },
+  'routine.pause': { category: 'settings', risk: 'medium', targetParam: 'name' },
+  'routine.resume': { category: 'settings', risk: 'medium', targetParam: 'name' },
+  'routine.run': { category: 'general', risk: 'medium', targetParam: 'name' },
   'chat.send': { category: 'ui', risk: 'low' },
   'editor.open': { category: 'ui', risk: 'low', pathParam: 'path' },
   'editor.state': { category: 'read', risk: 'low' },
@@ -379,11 +428,17 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
     const redactedParams = redactPermissionParams(params) as Record<string, unknown>
     const pathInfo = getPathInfo(policy, params, options.getWorkspacePath())
     const target = getTarget(policy, params, pathInfo?.absolutePath ?? undefined)
+    const routineContext = ctx.routine
     const baseEvent = {
       tool: tool.name,
       actor: ctx.actor,
+      principal: ctx.principal,
+      callerName: ctx.callerName,
+      transport: ctx.transport,
       package_id: ctx.package_id,
       sessionId: ctx.sessionId,
+      routineId: routineContext?.id,
+      routineRunId: routineContext?.runId,
       traceId: ctx.traceId,
       parentSpanId: ctx.spanId,
       category: policy.category,
@@ -410,7 +465,12 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       }
     }
 
-    if ((tool.name === 'app.trust' || tool.name === 'registry.trust') && ctx.actor === 'ai') {
+    if (
+      (tool.name === 'app.trust' || tool.name === 'registry.trust') &&
+      ctx.actor !== 'user' &&
+      ctx.actor !== 'system' &&
+      ctx.actor !== 'package'
+    ) {
       const reason = 'Trust acknowledgement is user-only'
       record({ ...baseEvent, decision: 'denied', reason })
       throw new PermissionDeniedError(`Permission denied: ${reason}`)
@@ -420,10 +480,36 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
     // authority; AI already has terminal.run for command execution. Launch
     // and kill stay user-only in v1 (agent-sessions decision 4) — hard-denied
     // before any approval or developer-mode bypass, like app.trust.
-    if ((tool.name === 'agent.launch' || tool.name === 'agent.stop') && ctx.actor === 'ai') {
+    if ((tool.name === 'agent.launch' || tool.name === 'agent.stop') && ctx.actor !== 'user' && ctx.actor !== 'package') {
       const reason = 'Agent sessions are user-only'
       record({ ...baseEvent, decision: 'denied', reason })
       throw new PermissionDeniedError(`Permission denied: ${reason}`)
+    }
+
+    if (ctx.actor === 'remote') {
+      if (!options.resolveRemoteGrant) {
+        const reason = 'Remote caller is not authorized'
+        record({ ...baseEvent, decision: 'denied', reason })
+        throw new PermissionDeniedError(`Permission denied: ${reason}`)
+      }
+      const effect = resolvedToolEffect(tool.name, policy)
+      const resolved = options.resolveRemoteGrant({
+        toolName: tool.name,
+        params,
+        ctx,
+        policy,
+        effect,
+        target,
+        pathKind: pathInfo?.kind,
+        paths: remoteGrantPaths(policy, params, [pathInfo, getSecondaryPathInfo(policy, params, options.getWorkspacePath())]),
+      })
+      const decision = isPromiseLike(resolved) ? await resolved : resolved
+      if (!decision.allowed) {
+        record({ ...baseEvent, decision: 'denied', reason: decision.reason })
+        throw new PermissionDeniedError(`Permission denied: ${decision.reason}`)
+      }
+      record({ ...baseEvent, decision: 'allowed', reason: decision.reason })
+      return
     }
 
     if (ctx.actor === 'user' || ctx.actor === 'system') {
@@ -452,20 +538,93 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       savedBrowserSession = isPromiseLike(resolved) ? (await resolved) ?? null : resolved ?? null
     }
 
+    const allowKey = ctx.sessionId ? `${ctx.sessionId}:${tool.name}` : null
+    const reason = approvalReason(tool.name, policy, mode, pathInfo?.kind, pathInfo?.reason)
+    const pathFloorActive = pathInfo?.kind === 'sensitive' || pathInfo?.kind === 'outside-workspace'
+    const needsSavedBrowserGrant = Boolean(savedBrowserSession && !savedBrowserSession.granted)
+
+    const requestApproval = async (approvalRequestReason: string, opts: { allowSessionRemember: boolean }) => {
+      const request: PermissionApprovalRequest = {
+        requestId: randomUUID(),
+        toolName: tool.name,
+        actor: ctx.actor,
+        principal: ctx.principal,
+        callerName: ctx.callerName,
+        transport: ctx.transport,
+        package_id: ctx.package_id,
+        sessionId: ctx.sessionId,
+        routineId: routineContext?.id,
+        routineRunId: routineContext?.runId,
+        category: policy.category,
+        risk: policy.risk,
+        mode,
+        reason: approvalRequestReason,
+        target,
+        pathKind: pathInfo?.kind,
+        resourceCollectionId: pathInfo?.resourceCollectionId,
+        label: policy.label,
+        params: redactedParams,
+        preview: buildApprovalPreview(tool.name, params),
+        ...(savedBrowserSession ? { savedBrowserSession } : {}),
+      }
+
+      record({ ...baseEvent, decision: 'requested', reason: approvalRequestReason })
+      if (options.onApprovalRequested) await options.onApprovalRequested(request)
+
+      const sent = options.sendApprovalRequest(request)
+      if (!sent) {
+        const deniedReason = 'No approval surface available'
+        await options.onApprovalResolved?.(request, { approved: false })
+        record({ ...baseEvent, decision: 'denied', reason: deniedReason })
+        throw new PermissionDeniedError(`Permission denied: ${deniedReason}`)
+      }
+
+      const decision = await new Promise<PermissionApprovalDecision>((resolveDecision) => {
+        pending.set(request.requestId, resolveDecision)
+        if (ctx.sessionId) pendingSessionIndex.set(request.requestId, ctx.sessionId)
+      })
+      await options.onApprovalResolved?.(request, decision)
+
+      if (!decision.approved) {
+        record({ ...baseEvent, decision: 'denied', reason: 'User denied approval' })
+        throw new PermissionDeniedError(`Permission denied: ${tool.name}`)
+      }
+
+      if (allowKey && opts.allowSessionRemember && decision.alwaysAllow) {
+        sessionToolAllows.add(allowKey)
+      }
+      await grantSavedBrowserSessionIfNeeded(savedBrowserSession, params, ctx, options)
+      record({ ...baseEvent, decision: 'approved', reason: approvalRequestReason })
+    }
+
+    if (ctx.actor === 'ai' && routineContext) {
+      const granted = routineToolGranted(routineContext.approvalAllow ?? [], tool.name)
+      const routineReason = routineApprovalReason({
+        granted,
+        toolName: tool.name,
+        policy,
+        pathInfo,
+        pathFloorActive,
+        needsSavedBrowserGrant,
+        normalReason: approvalReason(tool.name, policy, 'normal', pathInfo?.kind, pathInfo?.reason),
+      })
+      if (!routineReason) {
+        record({ ...baseEvent, decision: 'allowed', reason: granted ? 'routine approval grant' : 'routine baseline' })
+        return
+      }
+      await requestApproval(routineReason, { allowSessionRemember: false })
+      return
+    }
+
     if (mode === 'developer') {
       await grantSavedBrowserSessionIfNeeded(savedBrowserSession, params, ctx, options)
       record({ ...baseEvent, decision: 'bypassed', reason: 'developer mode' })
       return
     }
 
-    const allowKey = ctx.sessionId ? `${ctx.sessionId}:${tool.name}` : null
-    const reason = approvalReason(tool.name, policy, mode, pathInfo?.kind, pathInfo?.reason)
-
     // Session "always allow" may short-circuit ONLY when the path floor does not
     // independently require a prompt. Sensitive and outside-workspace paths always
     // prompt — the floor promise from docs/security.md must never be suppressed.
-    const pathFloorActive = pathInfo?.kind === 'sensitive' || pathInfo?.kind === 'outside-workspace'
-    const needsSavedBrowserGrant = Boolean(savedBrowserSession && !savedBrowserSession.granted)
     if (allowKey && sessionToolAllows.has(allowKey) && !pathFloorActive && !needsSavedBrowserGrant) {
       record({ ...baseEvent, decision: 'allowed', reason: 'allowed for this session' })
       return
@@ -474,50 +633,7 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       record({ ...baseEvent, decision: 'allowed', reason: 'policy allowed' })
       return
     }
-
-    const request: PermissionApprovalRequest = {
-      requestId: randomUUID(),
-      toolName: tool.name,
-      actor: ctx.actor,
-      package_id: ctx.package_id,
-      sessionId: ctx.sessionId,
-      category: policy.category,
-      risk: policy.risk,
-      mode,
-      reason,
-      target,
-      pathKind: pathInfo?.kind,
-      resourceCollectionId: pathInfo?.resourceCollectionId,
-      label: policy.label,
-      params: redactedParams,
-      preview: buildApprovalPreview(tool.name, params),
-      ...(savedBrowserSession ? { savedBrowserSession } : {}),
-    }
-
-    record({ ...baseEvent, decision: 'requested', reason })
-
-    const sent = options.sendApprovalRequest(request)
-    if (!sent) {
-      const deniedReason = 'No approval surface available'
-      record({ ...baseEvent, decision: 'denied', reason: deniedReason })
-      throw new PermissionDeniedError(`Permission denied: ${deniedReason}`)
-    }
-
-    const decision = await new Promise<PermissionApprovalDecision>((resolveDecision) => {
-      pending.set(request.requestId, resolveDecision)
-      if (ctx.sessionId) pendingSessionIndex.set(request.requestId, ctx.sessionId)
-    })
-
-    if (!decision.approved) {
-      record({ ...baseEvent, decision: 'denied', reason: 'User denied approval' })
-      throw new PermissionDeniedError(`Permission denied: ${tool.name}`)
-    }
-
-    if (allowKey && decision.alwaysAllow) {
-      sessionToolAllows.add(allowKey)
-    }
-    await grantSavedBrowserSessionIfNeeded(savedBrowserSession, params, ctx, options)
-    record({ ...baseEvent, decision: 'approved', reason })
+    await requestApproval(reason, { allowSessionRemember: true })
   }
 
   return {
@@ -571,6 +687,9 @@ export function traceGateDecision(trace: TraceLog, event: PermissionDecisionEven
     actor: event.actor,
     tool: event.tool,
     subject: event.target,
+    principal: event.principal,
+    callerName: event.callerName,
+    transport: event.transport,
     sessionId: event.sessionId,
     ...(event.package_id ? { packageId: event.package_id } : {}),
     ...(event.traceId ? { traceId: event.traceId } : {}),
@@ -582,6 +701,8 @@ export function traceGateDecision(trace: TraceLog, event: PermissionDecisionEven
       category: event.category,
       risk: event.risk,
       pathKind: event.pathKind,
+      ...(event.routineId ? { routineId: event.routineId } : {}),
+      ...(event.routineRunId ? { routineRunId: event.routineRunId } : {}),
     },
   })
 }
@@ -639,6 +760,26 @@ function getSecondaryPathInfo(policy: ToolPolicy, params: Record<string, unknown
   const value = params[policy.secondaryPathParam]
   if (typeof value !== 'string') return null
   return classifyPermissionPath(value, workspacePath)
+}
+
+function remoteGrantPaths(
+  policy: ToolPolicy,
+  params: Record<string, unknown>,
+  infos: Array<PermissionPathClassification | null>,
+): RemoteGrantPath[] {
+  const paramsToRead = [policy.pathParam, policy.secondaryPathParam].filter((value): value is string => Boolean(value))
+  return infos.flatMap((info, index) => {
+    const paramName = paramsToRead[index]
+    const value = paramName && typeof params[paramName] === 'string' ? params[paramName] as string : ''
+    if (!info) return []
+    return [{
+      value,
+      kind: info.kind,
+      reason: info.reason,
+      absolutePath: info.absolutePath,
+      resourceCollectionId: info.resourceCollectionId,
+    }]
+  })
 }
 
 function resourceWriteDenial(
@@ -747,6 +888,39 @@ function approvalReason(
   if (effect === 'mutate') return 'This changes your workspace'
   if (effect === 'external') return 'This contacts an outside service'
   return null
+}
+
+function routineToolGranted(grants: string[], toolName: string): boolean {
+  return grants.includes(toolName)
+}
+
+function routineApprovalReason(input: {
+  granted: boolean
+  toolName: string
+  policy: ToolPolicy
+  pathInfo: PermissionPathClassification | null
+  pathFloorActive: boolean
+  needsSavedBrowserGrant: boolean
+  normalReason: string | null
+}): string | null {
+  if (input.granted) {
+    if (input.pathFloorActive || input.needsSavedBrowserGrant) {
+      return input.normalReason ?? 'Routine path needs approval'
+    }
+    if (input.pathInfo?.kind === 'resource' && resolvedToolEffect(input.toolName, input.policy) === 'mutate') {
+      return input.normalReason ?? 'Shared resource write requires approval'
+    }
+    return null
+  }
+
+  if (
+    resolvedToolEffect(input.toolName, input.policy) === 'read' &&
+    !input.pathFloorActive &&
+    !input.needsSavedBrowserGrant
+  ) {
+    return null
+  }
+  return 'Routine needs approval for this tool'
 }
 
 function packagePermissionViolation(

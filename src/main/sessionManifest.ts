@@ -26,11 +26,18 @@ export interface ManifestEntry {
   sortOrder?: number
   taskLabelGenerated?: boolean
   agentId?: string
+  routineId?: string
+  routineRunId?: string
+  routineStatus?: RoutineRunStatus
+  routineError?: string
+  routineFiredAt?: string
+  routineCompletedAt?: string
   createdAt: string
   updatedAt: string
 }
 
 export type Manifest = Record<string, ManifestEntry>
+export type RoutineRunStatus = 'working' | 'needs-approval' | 'done' | 'error' | 'stopped'
 
 const MANIFEST_FILE = '_manifest.json'
 
@@ -146,7 +153,21 @@ export function extractManifestEntry(session: Record<string, unknown>): Manifest
   if (typeof session.sortOrder === 'number') entry.sortOrder = session.sortOrder
   if (session.taskLabelGenerated === true) entry.taskLabelGenerated = true
   if (typeof session.agentId === 'string') entry.agentId = session.agentId
+  if (typeof session.routineId === 'string') entry.routineId = session.routineId
+  if (typeof session.routineRunId === 'string') entry.routineRunId = session.routineRunId
+  if (isRoutineRunStatus(session.routineStatus)) entry.routineStatus = session.routineStatus
+  if (typeof session.routineError === 'string') entry.routineError = session.routineError
+  if (typeof session.routineFiredAt === 'string') entry.routineFiredAt = session.routineFiredAt
+  if (typeof session.routineCompletedAt === 'string') entry.routineCompletedAt = session.routineCompletedAt
   return entry
+}
+
+function isRoutineRunStatus(value: unknown): value is RoutineRunStatus {
+  return value === 'working' ||
+    value === 'needs-approval' ||
+    value === 'done' ||
+    value === 'error' ||
+    value === 'stopped'
 }
 
 /**

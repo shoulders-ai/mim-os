@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createToolRegistry } from '@main/tools/registry.js'
 import { createTraceLog } from '@main/trace/trace.js'
-import { registerSessionTools } from '@main/sessions.js'
+import { appendSessionCompaction, registerSessionTools } from '@main/sessions.js'
 import { mkdtempSync, existsSync, readdirSync, readFileSync, rmSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -43,9 +43,10 @@ describe('Session tools', () => {
 
   it('gets a session with full data', async () => {
     const created = await tools.call('session.create', { label: 'Full' }, ctx) as { id: string }
-    const got = await tools.call('session.get', { id: created.id }, ctx) as { id: string; label: string; messages: unknown[] }
+    const got = await tools.call('session.get', { id: created.id }, ctx) as { id: string; label: string; messages: unknown[]; compactions: unknown[] }
     expect(got.label).toBe('Full')
     expect(got.messages).toEqual([])
+    expect(got.compactions).toEqual([])
   })
 
   it('updates a session', async () => {
@@ -65,6 +66,50 @@ describe('Session tools', () => {
     expect(got.messages).toHaveLength(1)
     expect(got.messages[0].content).toBe('hello')
     expect(got).not.toHaveProperty('pinned')
+  })
+
+  it('ignores compactions passed through generic session.update', async () => {
+    const created = await tools.call('session.create', { label: 'Compaction' }, ctx) as { id: string }
+
+    await tools.call('session.update', {
+      id: created.id,
+      compactions: [{ id: 'bad', summary: 'renderer should not write this' }],
+    }, ctx)
+
+    const got = await tools.call('session.get', { id: created.id }, ctx) as { compactions: unknown[] }
+    expect(got.compactions).toEqual([])
+  })
+
+  it('appends compaction records without changing messages or manifest payload', async () => {
+    const created = await tools.call('session.create', { label: 'Compaction append' }, ctx) as { id: string }
+    const messages = [{ id: 'm1', role: 'user', content: 'keep me' }]
+    await tools.call('session.update', { id: created.id, messages }, ctx)
+
+    appendSessionCompaction(dir, created.id, {
+      id: 'cmp_1',
+      firstKeptMessageId: 'm1',
+      firstKeptMessageIndex: 0,
+      summarizedMessageCount: 0,
+      summary: 'Earlier context summary.',
+      tokensBefore: 1200,
+      tokensAfter: 800,
+      savedRatio: 0.333,
+      modelId: 'test-model',
+      trigger: 'post_turn',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    })
+
+    const got = await tools.call('session.get', { id: created.id }, ctx) as {
+      messages: typeof messages
+      compactions: Array<{ id: string; summary: string }>
+    }
+    expect(got.messages).toEqual(messages)
+    expect(got.compactions).toEqual([
+      expect.objectContaining({ id: 'cmp_1', summary: 'Earlier context summary.' }),
+    ])
+
+    const listed = await tools.call('session.list', {}, ctx) as { sessions: Array<Record<string, unknown>> }
+    expect(listed.sessions[0].compactions).toBeUndefined()
   })
 
   it('reorders sessions without touching updatedAt', async () => {
@@ -105,7 +150,7 @@ describe('Session tools', () => {
     expect(got.messages).toEqual(messages)
   })
 
-  it('compacts old browser tool result payloads when persisted messages exceed the context threshold', async () => {
+  it('preserves browser tool result payloads when persisted messages exceed the context threshold', async () => {
     const created = await tools.call('session.create', { label: 'Browser' }, ctx) as { id: string }
     const messages = [{
       id: 'm1',
@@ -128,8 +173,10 @@ describe('Session tools', () => {
 
     const got = await tools.call('session.get', { id: created.id }, ctx) as { messages: typeof messages }
     const parts = got.messages[0].parts
-    expect(parts[0].output.compacted).toBe(true)
-    expect(parts[1].output.compacted).toBe(true)
+    expect(parts[0].output.compacted).toBeUndefined()
+    expect(parts[1].output.compacted).toBeUndefined()
+    expect(parts[0].output.observation).toContain('browser content')
+    expect(parts[1].output.observation).toContain('browser content')
     expect(parts[2].output.observation).toContain('browser content')
     expect(parts[3].output.observation).toContain('browser content')
   })
@@ -207,6 +254,37 @@ describe('Session tools', () => {
     expect(result.sessions[0].agentId).toBe('package:review-app/referee')
   })
 
+  it('creates a routine session and persists routine metadata to file and manifest', async () => {
+    const firedAt = '2026-01-01T01:00:00.000Z'
+    const session = await tools.call('session.create', {
+      label: 'Routine: support-bot',
+      agentId: 'package:support/responder',
+      routineId: 'support-bot',
+      routineRunId: 'routine_run_1',
+      routineStatus: 'working',
+      routineFiredAt: firedAt,
+    }, ctx) as Record<string, unknown>
+    const id = String(session.id)
+    expect(session.routineId).toBe('support-bot')
+    expect(session.routineRunId).toBe('routine_run_1')
+    expect(session.routineStatus).toBe('working')
+    expect(session.routineFiredAt).toBe(firedAt)
+
+    const raw = JSON.parse(readFileSync(join(dir, '.mim', 'sessions', `${id}.json`), 'utf-8'))
+    expect(raw.routineId).toBe('support-bot')
+    expect(raw.routineRunId).toBe('routine_run_1')
+    expect(raw.routineStatus).toBe('working')
+    expect(raw.routineFiredAt).toBe(firedAt)
+
+    const result = await tools.call('session.list', {}, ctx) as {
+      sessions: Array<{ routineId?: string; routineRunId?: string; routineStatus?: string; routineFiredAt?: string }>
+    }
+    expect(result.sessions[0].routineId).toBe('support-bot')
+    expect(result.sessions[0].routineRunId).toBe('routine_run_1')
+    expect(result.sessions[0].routineStatus).toBe('working')
+    expect(result.sessions[0].routineFiredAt).toBe(firedAt)
+  })
+
   it('session without agentId does not serialize an agentId key', async () => {
     const session = await tools.call('session.create', { label: 'Plain' }, ctx) as { id: string } & Record<string, unknown>
     expect(session.agentId).toBeUndefined()
@@ -228,5 +306,32 @@ describe('Session tools', () => {
     const got = await tools.call('session.get', { id: created.id }, ctx) as { agentId?: string; label: string }
     expect(got.label).toBe('Updated')
     expect(got.agentId).toBe('package:app/agent-a')
+  })
+
+  it('updates routine run status without allowing the standing routine identity to change', async () => {
+    const created = await tools.call('session.create', {
+      label: 'Routine',
+      routineId: 'nightly',
+      routineRunId: 'routine_run_1',
+      routineStatus: 'working',
+    }, ctx) as { id: string }
+    await tools.call('session.update', {
+      id: created.id,
+      routineId: 'other',
+      routineRunId: 'routine_run_2',
+      routineStatus: 'done',
+      routineCompletedAt: '2026-01-01T02:00:00.000Z',
+    }, ctx)
+
+    const got = await tools.call('session.get', { id: created.id }, ctx) as {
+      routineId?: string
+      routineRunId?: string
+      routineStatus?: string
+      routineCompletedAt?: string
+    }
+    expect(got.routineId).toBe('nightly')
+    expect(got.routineRunId).toBe('routine_run_1')
+    expect(got.routineStatus).toBe('done')
+    expect(got.routineCompletedAt).toBe('2026-01-01T02:00:00.000Z')
   })
 })

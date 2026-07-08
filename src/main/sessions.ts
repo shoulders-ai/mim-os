@@ -3,9 +3,9 @@ import { dirname, join } from 'path'
 import type { ToolRegistry } from '@main/tools/registry.js'
 import { indexSession, removeSessionFromIndex } from '@main/search/search.js'
 import { writeAgentContext } from '@main/ai/agentContext.js'
-import { compactBrowserToolResultsForContext } from '@main/ai/messageCompaction.js'
 import { atomicWriteJson } from '@main/atomicJson.js'
 import { loadManifest, upsertManifestEntry, removeManifestEntry, extractManifestEntry } from '@main/sessionManifest.js'
+import type { ContextCompactionRecord } from '@main/ai/compaction.js'
 
 export interface Session {
   id: string
@@ -20,9 +20,18 @@ export interface Session {
   sortOrder?: number
   taskLabelGenerated?: boolean
   agentId?: string
+  routineId?: string
+  routineRunId?: string
+  routineStatus?: RoutineRunStatus
+  routineError?: string
+  routineFiredAt?: string
+  routineCompletedAt?: string
+  compactions: ContextCompactionRecord[]
   createdAt: string
   updatedAt: string
 }
+
+export type RoutineRunStatus = 'working' | 'needs-approval' | 'done' | 'error' | 'stopped'
 
 interface SessionMessage {
   id: string
@@ -48,12 +57,19 @@ function normalizeSession(raw: Session): Session {
     lastContextTokens: typeof raw.lastContextTokens === 'number' ? raw.lastContextTokens : 0,
     lastInputTokens: typeof raw.lastInputTokens === 'number' ? raw.lastInputTokens : 0,
     archived: raw.archived,
+    compactions: normalizeCompactions(raw.compactions),
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
   }
   if (typeof raw.sortOrder === 'number') session.sortOrder = raw.sortOrder
   if (raw.taskLabelGenerated === true) session.taskLabelGenerated = true
   if (typeof raw.agentId === 'string') session.agentId = raw.agentId
+  if (typeof raw.routineId === 'string') session.routineId = raw.routineId
+  if (typeof raw.routineRunId === 'string') session.routineRunId = raw.routineRunId
+  if (isRoutineRunStatus(raw.routineStatus)) session.routineStatus = raw.routineStatus
+  if (typeof raw.routineError === 'string') session.routineError = raw.routineError
+  if (typeof raw.routineFiredAt === 'string') session.routineFiredAt = raw.routineFiredAt
+  if (typeof raw.routineCompletedAt === 'string') session.routineCompletedAt = raw.routineCompletedAt
   return session
 }
 
@@ -74,6 +90,12 @@ export function registerSessionTools(tools: ToolRegistry, options: SessionToolOp
 
       const id = `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
       const agentId = typeof params.agentId === 'string' && params.agentId.length > 0 ? params.agentId : undefined
+      const routineId = typeof params.routineId === 'string' && params.routineId.length > 0 ? params.routineId : undefined
+      const routineRunId = typeof params.routineRunId === 'string' && params.routineRunId.length > 0 ? params.routineRunId : undefined
+      const routineStatus = isRoutineRunStatus(params.routineStatus) ? params.routineStatus : undefined
+      const routineError = typeof params.routineError === 'string' && params.routineError.length > 0 ? params.routineError : undefined
+      const routineFiredAt = typeof params.routineFiredAt === 'string' && params.routineFiredAt.length > 0 ? params.routineFiredAt : undefined
+      const routineCompletedAt = typeof params.routineCompletedAt === 'string' && params.routineCompletedAt.length > 0 ? params.routineCompletedAt : undefined
       const session: Session = {
         id,
         label: (params.label as string) || 'New chat',
@@ -84,10 +106,17 @@ export function registerSessionTools(tools: ToolRegistry, options: SessionToolOp
         lastContextTokens: 0,
         lastInputTokens: 0,
         archived: false,
+        compactions: [],
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       }
       if (agentId) session.agentId = agentId
+      if (routineId) session.routineId = routineId
+      if (routineRunId) session.routineRunId = routineRunId
+      if (routineStatus) session.routineStatus = routineStatus
+      if (routineError) session.routineError = routineError
+      if (routineFiredAt) session.routineFiredAt = routineFiredAt
+      if (routineCompletedAt) session.routineCompletedAt = routineCompletedAt
 
       const dir = join(ws, '.mim', 'sessions')
       mkdirSync(dir, { recursive: true })
@@ -174,15 +203,25 @@ export function registerSessionTools(tools: ToolRegistry, options: SessionToolOp
       if (params.label !== undefined) session.label = params.label as string
       if (params.modelId !== undefined) session.modelId = params.modelId as string
       if (params.controlId !== undefined) session.controlId = params.controlId as string
-      if (params.messages !== undefined) {
-        const compacted = compactBrowserToolResultsForContext(params.messages as SessionMessage[])
-        session.messages = compacted.messages
-      }
+      if (params.messages !== undefined) session.messages = params.messages as SessionMessage[]
       if (params.usage !== undefined) Object.assign(session.usage, params.usage)
       if (params.lastContextTokens !== undefined) session.lastContextTokens = params.lastContextTokens as number
       if (params.lastInputTokens !== undefined) session.lastInputTokens = params.lastInputTokens as number
       if (params.archived !== undefined) session.archived = params.archived as boolean
       if (params.taskLabelGenerated !== undefined) session.taskLabelGenerated = params.taskLabelGenerated as boolean
+      if (isRoutineRunStatus(params.routineStatus)) session.routineStatus = params.routineStatus
+      if (params.routineError !== undefined) {
+        if (typeof params.routineError === 'string' && params.routineError.length > 0) session.routineError = params.routineError
+        else delete session.routineError
+      }
+      if (params.routineFiredAt !== undefined) {
+        if (typeof params.routineFiredAt === 'string' && params.routineFiredAt.length > 0) session.routineFiredAt = params.routineFiredAt
+        else delete session.routineFiredAt
+      }
+      if (params.routineCompletedAt !== undefined) {
+        if (typeof params.routineCompletedAt === 'string' && params.routineCompletedAt.length > 0) session.routineCompletedAt = params.routineCompletedAt
+        else delete session.routineCompletedAt
+      }
       session.updatedAt = new Date().toISOString()
 
       atomicWriteJson(path, session)
@@ -231,4 +270,70 @@ export function registerSessionTools(tools: ToolRegistry, options: SessionToolOp
       return { deleted: id }
     }
   })
+}
+
+export function appendSessionCompaction(
+  workspacePath: string,
+  sessionId: string,
+  record: ContextCompactionRecord,
+): ContextCompactionRecord {
+  const dir = join(workspacePath, '.mim', 'sessions')
+  const path = join(dir, `${sessionId}.json`)
+  if (!existsSync(path)) throw new Error(`Session not found: ${sessionId}`)
+
+  const session = normalizeSession(JSON.parse(readFileSync(path, 'utf-8')) as Session)
+  const normalizedRecord = normalizeCompactionRecord(record)
+  const nextSession: Session = {
+    ...session,
+    compactions: [...session.compactions, normalizedRecord],
+  }
+  atomicWriteJson(path, nextSession)
+  upsertManifestEntry(dir, sessionId, extractManifestEntry(nextSession))
+  return normalizedRecord
+}
+
+function isRoutineRunStatus(value: unknown): value is RoutineRunStatus {
+  return value === 'working' ||
+    value === 'needs-approval' ||
+    value === 'done' ||
+    value === 'error' ||
+    value === 'stopped'
+}
+
+function normalizeCompactions(value: unknown): ContextCompactionRecord[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    try {
+      return [normalizeCompactionRecord(item as ContextCompactionRecord)]
+    } catch {
+      return []
+    }
+  })
+}
+
+function normalizeCompactionRecord(value: ContextCompactionRecord): ContextCompactionRecord {
+  if (!value || typeof value !== 'object') throw new Error('Invalid compaction record')
+  const record = value as Record<string, unknown>
+  const id = typeof record.id === 'string' && record.id.length > 0 ? record.id : ''
+  const summary = typeof record.summary === 'string' && record.summary.trim().length > 0 ? record.summary : ''
+  const createdAt = typeof record.createdAt === 'string' && record.createdAt.length > 0 ? record.createdAt : ''
+  if (!id || !summary || !createdAt) throw new Error('Invalid compaction record')
+
+  return {
+    id,
+    ...(typeof record.firstKeptMessageId === 'string' ? { firstKeptMessageId: record.firstKeptMessageId } : {}),
+    ...(typeof record.firstKeptMessageIndex === 'number' ? { firstKeptMessageIndex: Math.floor(record.firstKeptMessageIndex) } : {}),
+    ...(typeof record.summarizedMessageCount === 'number' ? { summarizedMessageCount: Math.floor(record.summarizedMessageCount) } : {}),
+    summary,
+    ...(typeof record.tokensBefore === 'number' ? { tokensBefore: Math.floor(record.tokensBefore) } : {}),
+    ...(typeof record.tokensAfter === 'number' ? { tokensAfter: Math.floor(record.tokensAfter) } : {}),
+    ...(typeof record.savedRatio === 'number' ? { savedRatio: record.savedRatio } : {}),
+    ...(typeof record.modelId === 'string' ? { modelId: record.modelId } : {}),
+    ...(isCompactionTrigger(record.trigger) ? { trigger: record.trigger } : {}),
+    createdAt,
+  }
+}
+
+function isCompactionTrigger(value: unknown): value is ContextCompactionRecord['trigger'] {
+  return value === 'post_turn' || value === 'pre_turn' || value === 'overflow'
 }

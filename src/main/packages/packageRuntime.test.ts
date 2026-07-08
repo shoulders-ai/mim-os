@@ -140,6 +140,36 @@ describe('app runtime capabilities', () => {
     })
   })
 
+  it('serializes app tool execution per package so data read-modify-write does not lose updates', async () => {
+    writePackage('board', `
+      const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
+      export const tools = {
+        increment: {
+          description: 'Increment counter',
+          inputSchema: { type: 'object', properties: {} },
+          async execute(ctx) {
+            const current = ctx.data.kv.get('counter')?.count ?? 0
+            await sleep(25)
+            ctx.data.kv.set('counter', { count: current + 1 })
+            return { count: current + 1 }
+          }
+        }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('board', true)
+    enablement.ackTrust(packages.get('board')!)
+    const tool = (await runtime.listChatTools()).find(candidate => candidate.packageId === 'board')!
+
+    await Promise.all([
+      runtime.executeTool(tool.publicName, {}, { actor: 'remote', principal: 'anna' }),
+      runtime.executeTool(tool.publicName, {}, { actor: 'remote', principal: 'ben' }),
+    ])
+
+    const ctx = runtime.createContext({ pkg: packages.get('board')! })
+    expect(ctx.data.kv.get('counter')).toEqual({ count: 2 })
+  })
+
   it('caps oversized tool results for the AI caller but returns them intact to app and user callers', async () => {
     writePackage('knowledge', `
       export const tools = {
