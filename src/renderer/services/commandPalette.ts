@@ -110,6 +110,7 @@ export function coreActions(
 export function coreSurfaces(): PaletteItem[] {
   return [
     { id: 'surface:chat', kind: 'surface', label: 'Chat', hint: '' },
+    { id: 'surface:routines', kind: 'surface', label: 'Routines', hint: '' },
     { id: 'surface:files', kind: 'surface', label: 'Files', hint: '' },
     { id: 'surface:terminal', kind: 'surface', label: 'Terminal', hint: '' },
     { id: 'surface:trust', kind: 'surface', label: 'Monitor', hint: '' },

@@ -10,10 +10,12 @@ withDefaults(defineProps<{
   y: number
   canStop?: boolean
   canDelete?: boolean
+  canRename?: boolean
   pingArmed?: boolean
 }>(), {
   canStop: false,
   canDelete: true,
+  canRename: true,
   pingArmed: false,
 })
 
@@ -51,6 +53,7 @@ onUnmounted(() => {
         @click.stop
       >
         <button
+          v-if="canRename"
           data-testid="run-context-rename"
           class="flex w-full items-center gap-2 rounded px-[10px] py-[6px] text-left font-sans text-xs text-ink-2 hover:bg-chrome-high hover:text-ink"
           @click="emit('rename')"

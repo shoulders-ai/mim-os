@@ -78,6 +78,31 @@ describe('runs store', () => {
     ])
   })
 
+  it('maps routine sessions to routine runs with persisted routine status', () => {
+    const sessions = useSessionStore()
+    const runs = useRunsStore()
+    sessions.sessions = [
+      session({
+        id: 's1',
+        label: 'Nightly literature sweep',
+        routineId: 'nightly-lit-sweep',
+        routineRunId: 'routine_run_1',
+        routineStatus: 'needs-approval',
+        messages: [{ id: 'm1', role: 'user', content: 'run' }],
+      }),
+    ]
+
+    expect(runs.allRuns).toEqual([
+      expect.objectContaining({
+        id: 'routine:routine_run_1',
+        kind: 'routine',
+        sourceId: 's1',
+        title: 'Nightly literature sweep',
+        status: 'needs-approval',
+      }),
+    ])
+  })
+
   it('aggregates app jobs without becoming their persistence layer', () => {
     const runs = useRunsStore()
     runs.setPackageRuns([

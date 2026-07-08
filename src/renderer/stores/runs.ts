@@ -15,7 +15,7 @@ export type RunStatus =
   | 'stopped'
   | 'missing'
 
-export type RunKind = 'chat' | 'package-job' | 'workflow' | 'agent-session'
+export type RunKind = 'chat' | 'routine' | 'package-job' | 'agent-session'
 
 export interface NavigatorRun {
   id: string
@@ -233,6 +233,8 @@ export const useRunsStore = defineStore('runs', () => {
 })
 
 function sessionToRun(session: Session): NavigatorRun {
+  if (session.routineId) return routineSessionToRun(session)
+
   const sessionStore = useSessionStore()
   return {
     id: `chat:${session.id}`,
@@ -244,12 +246,33 @@ function sessionToRun(session: Session): NavigatorRun {
   }
 }
 
+function routineSessionToRun(session: Session): NavigatorRun {
+  const sessionStore = useSessionStore()
+  return {
+    id: `routine:${session.routineRunId ?? session.id}`,
+    kind: 'routine',
+    sourceId: session.id,
+    title: session.label,
+    status: mapRoutineStatus(session.routineStatus, sessionStore.sessionStatusKind(session)),
+    updatedAt: session.routineCompletedAt ?? session.updatedAt,
+  }
+}
+
 function mapSessionStatus(status: SessionStatusKind): RunStatus {
   if (status === 'working') return 'working'
   if (status === 'error') return 'error'
   if (status === 'needs-approval') return 'needs-approval'
   if (status === 'ready') return 'ready'
   return 'done'
+}
+
+function mapRoutineStatus(status: Session['routineStatus'], fallback: SessionStatusKind): RunStatus {
+  if (status === 'working') return 'working'
+  if (status === 'needs-approval') return 'needs-approval'
+  if (status === 'done') return 'done'
+  if (status === 'error') return 'error'
+  if (status === 'stopped') return 'stopped'
+  return mapSessionStatus(fallback)
 }
 
 function packageRunToNavigatorRun(run: PackageRunRecord): NavigatorRun {

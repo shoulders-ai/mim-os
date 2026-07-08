@@ -499,6 +499,40 @@ describe('ShellSidebar smoke', () => {
     expect(onSelectPackageRun).toHaveBeenCalledWith('doc-review', 'run-review-1')
   })
 
+  it('routes routine runs through their chat transcript without duplicating them as chat rows', async () => {
+    const onSelectSession = vi.fn()
+    testSessions = [
+      makeSession({
+        id: 'routine-session',
+        label: 'Routine: pulse',
+        routineId: 'pulse',
+        routineRunId: 'routine-run-1',
+        routineStatus: 'working',
+      }),
+    ]
+    useSessionStore().sessions = testSessions
+
+    app = createApp(ShellSidebar, {
+      width: 220,
+      packages: [],
+      activeWorkId: 'work:chat:routine-session',
+      workspaceName: 'Workspace',
+      recentWorkspaces: [],
+      onSelectSession,
+    })
+    app.use(pinia)
+    app.mount(root)
+    await flushUi()
+
+    const row = root.querySelector('[data-run-id="routine:routine-run-1"]') as HTMLButtonElement | null
+    expect(row?.textContent).toContain('Routine: pulse')
+    expect(row?.className).toContain('bg-accent-tint')
+    expect(root.querySelector('[data-session-id="routine-session"]')).toBeNull()
+    row?.click()
+
+    expect(onSelectSession).toHaveBeenCalledWith('routine-session')
+  })
+
   it('opens History and new chats from the Activity header', async () => {
     const onSelectWork = vi.fn()
     app = createApp(ShellSidebar, {

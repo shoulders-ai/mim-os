@@ -44,6 +44,7 @@ export function workTitle(
 export function workSubtitle(work: WorkEntry | null): string {
   if (!work) return ''
   if (work.kind === 'chat') return 'Chat'
+  if (work.kind === 'routines') return 'Routines'
   if (work.kind === 'terminal') return 'Terminal'
   if (work.kind === 'files') return 'Files'
   if (work.kind === 'activity-trust') return 'Monitor'

@@ -2,10 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted, onDeactivated } from 'vue'
 import { Chat } from '@ai-sdk/vue'
 import { DefaultChatTransport } from 'ai'
-import {
-  compactBrowserToolResultsForContext,
-  estimateMessagesTokens,
-} from '@main/ai/messageCompaction.js'
+import { estimateMessagesTokens } from '@main/ai/messageCompaction.js'
 import { useSessionStore } from '../../stores/sessions.js'
 import { useSettingsStore } from '../../stores/settings.js'
 import { useApprovalsStore } from '../../stores/approvals.js'
@@ -86,18 +83,6 @@ function finishMessagesWithElapsed(sessionId, chat) {
   const messagesWithElapsed = withLastAssistantTurnElapsed(chat.messages ?? [], elapsedMs)
   if (messagesWithElapsed !== chat.messages) replaceChatMessages(chat, messagesWithElapsed)
   return messagesWithElapsed
-}
-
-async function compactChatHistoryForContext(sessionId, chat) {
-  const result = compactBrowserToolResultsForContext(chat.messages ?? [])
-  if (!result.changed) return
-  replaceChatMessages(chat, result.messages)
-  await sessionStore.update(sessionId, { messages: result.messages }).catch((err) => {
-    logChatAi('warn', 'context-compact:persist-failed', {
-      sessionId,
-      message: readableError(err),
-    })
-  })
 }
 
 const activeSessionId = computed(() => (
@@ -531,7 +516,6 @@ async function handleSend({ text, attachments, contextChips }) {
   // messages computed (which drives auto-scroll), and completion is handled by
   // the Chat's onFinish/onError callbacks. No polling required.
   try {
-    await compactChatHistoryForContext(sessionId, chat)
     sessionStore.startTurnTimer(sessionId)
     await chat.sendMessage(sendPayload, selectedSkillIds.length ? { body: { skills: selectedSkillIds } } : undefined)
   } catch (err) {

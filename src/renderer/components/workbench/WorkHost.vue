@@ -3,6 +3,7 @@ import { nextTick, ref, watch } from 'vue'
 import ChatView from '../chat/ChatView.vue'
 import TerminalPanel from '../terminal/TerminalPanel.vue'
 import FilesWorkView from '../files/FilesWorkView.vue'
+import RoutinesWorkView from '../routines/RoutinesWorkView.vue'
 import ActivityTrustView from '../activity/ActivityTrustView.vue'
 import PackageFrame from '../packages/PackageFrame.vue'
 import PackageRunView from '../packages/PackageRunView.vue'
@@ -60,6 +61,7 @@ const chatRef = ref<{
 } | null>(null)
 const terminalMounted = ref(false)
 const filesMounted = ref(false)
+const routinesMounted = ref(false)
 const activityTrustMounted = ref(false)
 const archiveMounted = ref(false)
 
@@ -85,6 +87,7 @@ watch(
   async () => {
     if (props.activeHost === 'terminal') terminalMounted.value = true
     if (props.activeHost === 'files') filesMounted.value = true
+    if (props.activeHost === 'routines') routinesMounted.value = true
     if (props.activeHost === 'activity-trust') activityTrustMounted.value = true
     if (props.activeHost === 'archive') archiveMounted.value = true
     const work = props.activeWork
@@ -213,6 +216,12 @@ defineExpose({
     @new-file="emit('newFile')"
     @open-file-dialog="emit('openFileDialog')"
     @path-moved="emit('pathMoved', $event)"
+  />
+  <RoutinesWorkView
+    v-if="routinesMounted"
+    v-show="activeHost === 'routines'"
+    :active="activeHost === 'routines'"
+    @open-session="emit('openSession', $event)"
   />
   <ActivityTrustView
     v-if="activityTrustMounted"

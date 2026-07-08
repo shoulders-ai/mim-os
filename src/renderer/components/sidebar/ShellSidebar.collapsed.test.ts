@@ -194,11 +194,13 @@ describe('ShellSidebar collapsed rail', () => {
 
     const workKeys = [...root.querySelectorAll('[data-work-key]')]
       .map(el => (el as HTMLElement).dataset.workKey)
-    expect(workKeys).toEqual(['chat', 'files', 'terminal', 'trust'])
+    expect(workKeys).toEqual(['chat', 'routines', 'files', 'terminal', 'trust'])
     // Labels are hidden in the rail; titles carry the name for hover.
     expect(root.textContent).not.toContain('Chat')
+    expect(root.textContent).not.toContain('Routines')
     expect(root.textContent).not.toContain('Monitor')
     expect(root.querySelector('[data-work-key="chat"]')?.getAttribute('title')).toBe('Chat')
+    expect(root.querySelector('[data-work-key="routines"]')?.getAttribute('title')).toBe('Routines')
     expect(root.querySelector('[data-work-key="trust"]')?.getAttribute('title')).toBe('Monitor')
   })
 

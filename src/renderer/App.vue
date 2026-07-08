@@ -392,6 +392,7 @@ const workSurfaceActions = createWorkSurfaceActions({
 const openDraftChatWork = workSurfaceActions.openDraftChatWork
 const openAgentChatOrDraft = workSurfaceActions.openAgentChatOrDraft
 const openChatWork = workSurfaceActions.openChatWork
+const openRoutinesWork = workSurfaceActions.openRoutinesWork
 const openTerminalWork = workSurfaceActions.openTerminalWork
 const openFilesWork = workSurfaceActions.openFilesWork
 const openActivityTrustWork = workSurfaceActions.openActivityTrustWork
@@ -751,6 +752,7 @@ async function openPackageDocs(id: string) {
 
 const shellActionDeps = {
   openDraftChatWork,
+  openRoutinesWork,
   openFilesWork,
   openActivityTrustWork,
   openTerminalWork,

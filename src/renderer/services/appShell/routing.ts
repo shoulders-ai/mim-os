@@ -7,6 +7,7 @@ import type { LoadedPackage } from './types.js'
 
 export type ShellAction =
   | { type: 'open-draft-chat'; agentId?: string }
+  | { type: 'open-routines' }
   | { type: 'open-files' }
   | { type: 'open-monitor' }
   | { type: 'open-terminal' }
@@ -27,6 +28,7 @@ export function resolveNavigatorSurfaceAction(
   packages: LoadedPackage[],
 ): ShellAction {
   if (id === '__chat__') return { type: 'open-draft-chat' }
+  if (id === '__routines__') return { type: 'open-routines' }
   if (id === '__files__') return { type: 'open-files' }
   if (id === '__activity_trust__') return { type: 'open-monitor' }
   if (id === '__terminal__') return { type: 'open-terminal' }
@@ -58,6 +60,7 @@ export function resolvePackageOpenAction(
 
 export function resolvePaletteAction(id: string): ShellAction {
   if (id === 'surface:chat') return { type: 'open-draft-chat' }
+  if (id === 'surface:routines') return { type: 'open-routines' }
   if (id === 'surface:files') return { type: 'open-files' }
   if (id === 'surface:trust') return { type: 'open-monitor' }
   if (id === 'surface:terminal') return { type: 'open-terminal' }

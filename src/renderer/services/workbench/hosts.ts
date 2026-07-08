@@ -2,6 +2,7 @@ import type { ArtifactEntry, WorkEntry } from './entries.js'
 
 export type WorkHostKind =
   | 'chat'
+  | 'routines'
   | 'terminal'
   | 'files'
   | 'activity-trust'

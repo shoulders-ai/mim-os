@@ -10,6 +10,7 @@ import {
   IconLayoutSidebarLeftCollapse,
   IconMessage,
   IconPlus,
+  IconRepeat,
   IconSettings,
   IconTerminal2,
 } from '@tabler/icons-vue'
@@ -59,7 +60,7 @@ type ActivityRow =
 // Core platform surfaces: a fixed cluster above the Apps section. Not
 // draggable, no section header — these are fixtures, not installed apps.
 interface SurfaceRow {
-  key: 'chat' | 'files' | 'trust' | 'terminal'
+  key: 'chat' | 'routines' | 'files' | 'trust' | 'terminal'
   label: string
   selectWorkId: string
 }
@@ -146,6 +147,7 @@ const launchablePackageById = computed(() =>
 
 const SURFACE_ICONS: Record<SurfaceRow['key'], typeof IconMessage> = {
   chat: IconMessage,
+  routines: IconRepeat,
   files: IconFolder,
   trust: IconActivity,
   terminal: IconTerminal2,
@@ -156,6 +158,11 @@ const SURFACE_ROWS: SurfaceRow[] = [
     key: 'chat',
     label: 'Chat',
     selectWorkId: '__chat__',
+  },
+  {
+    key: 'routines',
+    label: 'Routines',
+    selectWorkId: '__routines__',
   },
   {
     key: 'files',
@@ -197,14 +204,15 @@ const appRows = computed<AppRow[]>(() => {
 })
 
 const activityRows = computed<ActivityRow[]>(() => {
+  const routineRuns = runsStore.chatRuns.filter(run => run.kind === 'routine')
   const rows: (ActivityRow & { ts: number })[] = [
-    ...sessionStore.visibleSessions.map(session => ({
+    ...sessionStore.visibleSessions.filter(session => !session.routineId).map(session => ({
       key: activityKeyForSession(session.id),
       kind: 'chat' as const,
       session,
       ts: new Date(session.updatedAt).getTime(),
     })),
-    ...[...runsStore.packageJobRuns, ...runsStore.agentSessionRuns].map(run => ({
+    ...[...routineRuns, ...runsStore.packageJobRuns, ...runsStore.agentSessionRuns].map(run => ({
       key: activityKeyForRun(run),
       kind: 'run' as const,
       run,
@@ -297,6 +305,7 @@ function activityRowTitle(row: ActivityRow): string {
 
 function activityRowActive(row: ActivityRow): boolean {
   if (row.kind === 'chat') return props.activeWorkId === `work:chat:${row.session.id}`
+  if (row.run.kind === 'routine') return props.activeWorkId === `work:chat:${row.run.sourceId}`
   if (row.run.kind === 'agent-session') return props.activeWorkId === agentSessionWorkId(row.run)
   return props.activeWorkId === packageRunWorkId(row.run)
 }
@@ -455,7 +464,9 @@ function onSelectionKeydown(event: KeyboardEvent) {
 
 function selectRun(run: NavigatorRun) {
   if (suppressActivityClick.value) return
-  if (run.kind === 'package-job' && run.packageId) {
+  if (run.kind === 'routine') {
+    selectSession(run.sourceId)
+  } else if (run.kind === 'package-job' && run.packageId) {
     emit('selectPackageRun', run.packageId, run.sourceId)
   } else if (run.kind === 'agent-session') {
     emit('selectAgentSession', agentIdForSession(run.sourceId), run.sourceId)
@@ -474,6 +485,7 @@ function appRowActive(row: AppRow): boolean {
 // covers both the draft (`work:chat:new`) and any open session.
 function surfaceActive(row: SurfaceRow): boolean {
   if (row.key === 'chat') return props.activeWorkId.startsWith('work:chat:')
+  if (row.key === 'routines') return props.activeWorkId === 'work:routines'
   if (row.key === 'files') return props.activeWorkId === 'work:files'
   if (row.key === 'terminal') return props.activeWorkId === 'work:terminal'
   return props.activeWorkId === 'work:activity-trust'
@@ -551,6 +563,7 @@ function batchArchive() {
   clearActivitySelection()
   for (const row of rows) {
     if (row.kind === 'chat') emit('archiveSession', row.session.id)
+    else if (row.run.kind === 'routine') emit('archiveSession', row.run.sourceId)
     else if (row.run.kind === 'agent-session') emit('archiveAgentSession', row.run.sourceId)
     else if (row.run.packageId) emit('archivePackageRun', row.run.packageId, row.run.sourceId)
   }
@@ -562,6 +575,7 @@ function batchDelete() {
   clearActivitySelection()
   for (const row of rows) {
     if (row.kind === 'chat') emit('deleteSession', row.session.id)
+    else if (row.run.kind === 'routine') emit('deleteSession', row.run.sourceId)
     else if (row.run.kind === 'agent-session') {
       // Running sessions cannot be deleted (stop first); skip them silently
       // rather than surface a main-process error mid-batch.
@@ -631,6 +645,8 @@ function onRunCtxArchive() {
   closeRunContextMenu()
   if (run?.kind === 'agent-session') {
     emit('archiveAgentSession', run.sourceId)
+  } else if (run?.kind === 'routine') {
+    emit('archiveSession', run.sourceId)
   } else if (run?.kind === 'package-job' && run.packageId) {
     emit('archivePackageRun', run.packageId, run.sourceId)
   }
@@ -641,6 +657,8 @@ function onRunCtxDelete() {
   closeRunContextMenu()
   if (run?.kind === 'agent-session') {
     emit('deleteAgentSession', run.sourceId)
+  } else if (run?.kind === 'routine') {
+    emit('deleteSession', run.sourceId)
   } else if (run?.kind === 'package-job' && run.packageId) {
     emit('deletePackageRun', run.packageId, run.sourceId)
   }
@@ -716,6 +734,7 @@ function confirmArchiveAll() {
   archiveAllDialogOpen.value = false
   for (const row of archivableRows.value) {
     if (row.kind === 'chat') emit('archiveSession', row.session.id)
+    else if (row.run.kind === 'routine') emit('archiveSession', row.run.sourceId)
     else if (row.run.kind === 'agent-session') emit('archiveAgentSession', row.run.sourceId)
     else if (row.run.packageId) emit('archivePackageRun', row.run.packageId, row.run.sourceId)
   }
@@ -846,7 +865,7 @@ onUnmounted(() => {
         :aria-label="row.label"
         @click="emit('selectWork', row.selectWorkId)"
       >
-        <span class="nav-token text-[13px]" :class="surfaceActive(row) ? 'text-accent' : 'text-ink-3'">
+        <span class="nav-token grid h-7 w-7 shrink-0 place-items-center rounded-[7px] text-[13px] leading-none" :class="surfaceActive(row) ? 'text-accent' : 'text-ink-3'">
           <component :is="SURFACE_ICONS[row.key]" :size="16" :stroke="1.8" />
         </span>
         <span
@@ -900,7 +919,7 @@ onUnmounted(() => {
           @click="emit('selectWork', row.selectWorkId)"
         >
           <span
-            class="nav-token text-[13px]"
+            class="nav-token grid h-7 w-7 shrink-0 place-items-center rounded-[7px] text-[13px] leading-none"
             :class="surfaceActive(row)
               ? 'bg-accent-tint text-accent'
               : 'text-ink-3 group-hover/navrow:bg-chrome-mid group-hover/navrow:text-ink'"
@@ -915,9 +934,9 @@ onUnmounted(() => {
            toggle (rail keeps mt-5 above its divider). -->
       <section :class="collapsed ? 'mt-5' : 'mt-[calc(0.75rem-1px)]'">
         <!-- Section marker keeps row positions stable in both states. -->
-        <div class="nav-section-marker" data-testid="section-marker-apps">
+        <div class="flex h-[24px] shrink-0 items-center gap-1" data-testid="section-marker-apps">
           <template v-if="collapsed">
-            <div class="nav-section-divider" data-testid="section-divider-apps" aria-hidden="true" />
+            <div class="h-px w-7 rounded-full bg-rule-light" data-testid="section-divider-apps" aria-hidden="true" />
           </template>
           <template v-else>
             <button
@@ -970,7 +989,7 @@ onUnmounted(() => {
               @click="selectAppRow(row)"
             >
               <span
-                class="nav-token text-[13px]"
+                class="nav-token grid h-7 w-7 shrink-0 place-items-center rounded-[7px] text-[13px] leading-none"
                 :class="collapsed
                   ? (appRowActive(row) ? 'bg-accent-tint text-accent' : 'text-ink-3 group-hover/navrow:bg-chrome-mid group-hover/navrow:text-ink')
                   : (appRowActive(row) ? 'text-accent' : 'text-ink-3')"
@@ -1019,7 +1038,7 @@ onUnmounted(() => {
              marker carries the new-chat affordance in both: header icon when
              expanded, the rail's + token when collapsed (the rail has no room
              for a History token; History stays on the expanded tray). -->
-        <div class="nav-section-marker" data-testid="section-marker-activity">
+        <div class="flex h-[24px] shrink-0 items-center gap-1" data-testid="section-marker-activity">
           <template v-if="collapsed">
             <button
               v-if="!activityCreateHasMenu"
@@ -1265,7 +1284,7 @@ onUnmounted(() => {
         @click="$emit('settings')"
       >
         <span
-          class="nav-token text-ink-3"
+          class="nav-token grid h-7 w-7 shrink-0 place-items-center rounded-[7px] leading-none text-ink-3"
           :class="collapsed ? 'group-hover/navrow:bg-chrome-mid group-hover/navrow:text-ink' : ''"
         >
           <IconSettings :size="16" :stroke="1.8" />
@@ -1296,6 +1315,7 @@ onUnmounted(() => {
       :can-stop="runCtxIsLiveAgent"
       :can-delete="!runCtxIsLiveAgent"
       :ping-armed="runCtxPingArmed"
+      :can-rename="runCtxMenu.run?.kind !== 'routine'"
       @close="closeRunContextMenu"
       @rename="onRunCtxRename"
       @stop="onRunCtxStop"
@@ -1316,7 +1336,14 @@ onUnmounted(() => {
     />
 
     <!-- Undo toast -->
-    <Transition name="toast-fade">
+    <Transition
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="translate-y-2 opacity-0"
+      enter-to-class="translate-y-0 opacity-100"
+      leave-active-class="transition duration-150 ease-in"
+      leave-from-class="translate-y-0 opacity-100"
+      leave-to-class="translate-y-2 opacity-0"
+    >
       <div v-if="sessionStore.undoToast" class="absolute bottom-12 left-2 right-2 flex items-center justify-between px-3 py-2 bg-ink text-surface rounded-[6px] font-sans text-[12px] z-50 shadow-lg">
         <span>{{ sessionStore.undoToast.message }}</span>
         <button v-if="sessionStore.undoToast.snapshot" class="text-accent font-medium text-[12px] hover:opacity-80" @click="onUndo">Undo</button>
@@ -1362,10 +1389,15 @@ onUnmounted(() => {
     <!-- Resize handle (expanded tray only; the rail is fixed width) -->
     <div
       v-if="!collapsed"
-      class="sb-resize absolute top-0 -right-1 w-2 h-full z-10 cursor-col-resize"
-      :class="draggingActive && 'sb-resize-dragging'"
+      class="group/sb-resize absolute top-0 -right-1 z-10 h-full w-2 cursor-col-resize"
       @pointerdown="$emit('resize', $event)"
-    />
+    >
+      <span
+        class="absolute left-[3px] top-0 h-full w-[2px] rounded-[1px] bg-transparent transition-colors duration-150 group-hover/sb-resize:bg-accent"
+        :class="draggingActive ? 'bg-accent' : ''"
+        aria-hidden="true"
+      />
+    </div>
   </aside>
 </template>
 
@@ -1373,62 +1405,5 @@ onUnmounted(() => {
 /* Drag region — vendor-prefixed, cannot be expressed in Tailwind */
 .sb-drag-handle {
   -webkit-app-region: drag;
-}
-
-.nav-token {
-  display: grid;
-  width: 1.75rem;
-  height: 1.75rem;
-  flex-shrink: 0;
-  place-items: center;
-  border-radius: 7px;
-  line-height: 1;
-}
-
-.nav-token :deep(svg) {
-  display: block;
-}
-
-.nav-section-marker {
-  display: flex;
-  height: 24px;
-  flex-shrink: 0;
-  align-items: center;
-  gap: 4px;
-}
-
-.nav-section-divider {
-  width: 1.75rem;
-  height: 1px;
-  border-radius: 999px;
-  background: var(--color-rule-light);
-}
-
-/* Resize handle accent line — uses ::after pseudo-element */
-.sb-resize::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 3px;
-  width: 2px;
-  height: 100%;
-  border-radius: 1px;
-  background: transparent;
-  transition: background 150ms;
-}
-.sb-resize:hover::after,
-.sb-resize-dragging::after {
-  background: var(--color-accent);
-}
-
-/* Toast transition */
-.toast-fade-enter-active,
-.toast-fade-leave-active {
-  transition: opacity 200ms ease, transform 200ms ease;
-}
-.toast-fade-enter-from,
-.toast-fade-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
 }
 </style>

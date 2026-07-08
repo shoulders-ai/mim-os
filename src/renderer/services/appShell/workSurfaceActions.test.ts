@@ -49,6 +49,7 @@ describe('app shell Work surface actions', () => {
 
     await actions.openDraftChatWork()
     await actions.openChatWork('s1')
+    await actions.openRoutinesWork()
     await actions.openTerminalWork()
     await actions.openActivityTrustWork()
 
@@ -64,11 +65,16 @@ describe('app shell Work surface actions', () => {
       sessionId: 's1',
     })
     expect(deps.openWorkEntry).toHaveBeenNthCalledWith(3, {
+      id: 'work:routines',
+      kind: 'routines',
+      title: 'Routines',
+    })
+    expect(deps.openWorkEntry).toHaveBeenNthCalledWith(4, {
       id: 'work:terminal',
       kind: 'terminal',
       title: 'Terminal',
     })
-    expect(deps.openWorkEntry).toHaveBeenNthCalledWith(4, {
+    expect(deps.openWorkEntry).toHaveBeenNthCalledWith(5, {
       id: 'work:activity-trust',
       kind: 'activity-trust',
       title: 'Monitor',

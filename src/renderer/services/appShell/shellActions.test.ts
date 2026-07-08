@@ -8,6 +8,7 @@ import type { ShellAction } from './routing.js'
 function makeDeps(overrides: Partial<ShellActionDeps> = {}) {
   const deps: ShellActionDeps = {
     openDraftChatWork: vi.fn(async () => undefined),
+    openRoutinesWork: vi.fn(async () => undefined),
     openFilesWork: vi.fn(async () => undefined),
     openActivityTrustWork: vi.fn(async () => undefined),
     openTerminalWork: vi.fn(async () => undefined),
@@ -31,6 +32,7 @@ describe('app shell actions', () => {
     const deps = makeDeps()
     const actions: ShellAction[] = [
       { type: 'open-draft-chat' },
+      { type: 'open-routines' },
       { type: 'open-files' },
       { type: 'open-monitor' },
       { type: 'open-terminal' },
@@ -43,6 +45,7 @@ describe('app shell actions', () => {
     }
 
     expect(deps.openDraftChatWork).toHaveBeenCalledOnce()
+    expect(deps.openRoutinesWork).toHaveBeenCalledOnce()
     expect(deps.openFilesWork).toHaveBeenCalledOnce()
     expect(deps.openActivityTrustWork).toHaveBeenCalledOnce()
     expect(deps.openTerminalWork).toHaveBeenCalledOnce()

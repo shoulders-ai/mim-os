@@ -16,6 +16,12 @@ export interface Session {
   modelId: string
   controlId: string
   agentId?: string
+  routineId?: string
+  routineRunId?: string
+  routineStatus?: RoutineRunStatus
+  routineError?: string
+  routineFiredAt?: string
+  routineCompletedAt?: string
   messages: SessionMessage[]
   usage: { inputTokens: number; outputTokens: number; estimatedCost: number }
   lastContextTokens: number
@@ -30,6 +36,7 @@ export interface Session {
 }
 
 export type SessionStatusKind = 'working' | 'error' | 'done' | 'ready' | 'unread' | 'needs-approval'
+export type RoutineRunStatus = 'working' | 'needs-approval' | 'done' | 'error' | 'stopped'
 
 export const useSessionStore = defineStore('sessions', () => {
   const sessions = ref<Session[]>([])
@@ -123,6 +130,9 @@ export const useSessionStore = defineStore('sessions', () => {
     // A conversation you are not looking at can be waiting on an approval; the
     // Navigator surfaces this as the "Approve" tag so the request stays findable.
     if (ext === 'needs-approval') return 'needs-approval'
+    if (session.routineStatus === 'working') return 'working'
+    if (session.routineStatus === 'needs-approval') return 'needs-approval'
+    if (session.routineStatus === 'error') return 'error'
 
     // Check for unread: has messages, status is ready, and updatedAt > lastViewedAt
     if (session.messages?.length > 0 && session.lastViewedAt) {
@@ -131,6 +141,7 @@ export const useSessionStore = defineStore('sessions', () => {
       if (updatedTime > viewedTime) return 'unread'
     }
 
+    if (session.routineStatus === 'done' || session.routineStatus === 'stopped') return 'done'
     if (ext === 'done' || session.messages?.length > 0) return 'done'
     return 'ready'
   }

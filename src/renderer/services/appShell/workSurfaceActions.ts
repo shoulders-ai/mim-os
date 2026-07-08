@@ -5,6 +5,7 @@ import {
   chatWorkEntry,
   filesWorkEntry,
   packageViewWorkEntry,
+  routinesWorkEntry,
   terminalWorkEntry,
   type WorkEntry,
 } from '../workbench/entries.js'
@@ -40,6 +41,10 @@ export function createWorkSurfaceActions(deps: WorkSurfaceActionsDeps) {
 
   async function openChatWork(sessionId: string) {
     await deps.openWorkEntry(sessionWorkEntry(sessionId))
+  }
+
+  async function openRoutinesWork() {
+    return deps.openWorkEntry(routinesWorkEntry())
   }
 
   async function openTerminalWork() {
@@ -103,6 +108,7 @@ export function createWorkSurfaceActions(deps: WorkSurfaceActionsDeps) {
     sessionWorkEntry,
     openDraftChatWork,
     openChatWork,
+    openRoutinesWork,
     openTerminalWork,
     openFilesWork,
     openActivityTrustWork,

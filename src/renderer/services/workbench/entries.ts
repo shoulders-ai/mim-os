@@ -22,6 +22,7 @@ export interface WorkEntryBase {
 export type WorkEntry =
   | (WorkEntryBase & { kind: 'chat'; sessionId: string })
   | (WorkEntryBase & { kind: 'chat-draft'; agentId?: string })
+  | (WorkEntryBase & { kind: 'routines' })
   | (WorkEntryBase & { kind: 'terminal'; terminalGroupId?: string })
   | (WorkEntryBase & { kind: 'files'; query?: string })
   | (WorkEntryBase & { kind: 'activity-trust' })
@@ -97,6 +98,14 @@ export function filesWorkEntry(query = ''): WorkEntry {
     kind: 'files',
     title: 'Files',
     query,
+  }
+}
+
+export function routinesWorkEntry(): WorkEntry {
+  return {
+    id: 'work:routines',
+    kind: 'routines',
+    title: 'Routines',
   }
 }
 
