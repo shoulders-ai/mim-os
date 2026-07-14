@@ -13,9 +13,10 @@ mim serve --host 0.0.0.0 --port 4780
 ```
 
 Invite creation prints a `mim://join/...` deep link plus an equivalent
-`mim-invite-...` paste string. Human desktop users join from that one artifact;
-Mim redeems it once, stores the durable token locally, writes the
-`sharedWorkspace` config, and never shows the durable token in the UI.
+`mim-invite-...` paste string. Human desktop users connect from that one
+artifact; Mim redeems it once, stores the durable token and user-level
+connection locally, and never shows the durable token in the UI. Connecting
+does not edit the currently open folder.
 
 CLI agents and automation still use raw caller tokens. Token creation prints
 ready-to-paste Claude, Codex, Gemini, and `curl` snippets. Tokens are shown
@@ -31,20 +32,25 @@ mim serve token revoke caller_...
 
 ## Desktop And Headless Clients
 
-A local desktop user normally joins from an invite in Settings > Workspace.
-The invite writes the same committed `sharedWorkspace` block that advanced
-users may edit by hand:
+A local desktop user normally connects from an invite in Settings > Workspace.
+After connecting, the user can explicitly link the current folder. New links
+are personal by default and live in `.mim/shared-workspace.json`:
 
-```yaml
-sharedWorkspace:
-  id: team-server
-  name: HTA Model
-  url: https://mim.example.com/mcp
-  namespaces:
-    - issues.*
-    - knowledge.*
-    - references.*
+```json
+{
+  "version": 1,
+  "linkedAt": "2026-07-09T10:00:00.000Z",
+  "sharedWorkspace": {
+    "id": "team-server",
+    "name": "HTA Model",
+    "url": "https://mim.example.com/mcp",
+    "namespaces": ["issues.*", "knowledge.*", "references.*"]
+  }
+}
 ```
+
+Existing `mim.yaml sharedWorkspace` entries are still read as a compatibility
+path, but invite redemption no longer writes them.
 
 The bearer token stays outside the workspace in `~/.mim/keys.env` under a
 deterministic key derived from the id, for example:
@@ -59,16 +65,16 @@ mim shared-workspace token clear team-server
 MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN=tok_...
 ```
 
-On workspace open, the kernel initializes the remote MCP endpoint, warns when
-the server version/capability handshake looks incompatible, and mounts matching
-remote named tools into the local registry. Calls to those mounted tools pass
-through the local gate as a network effect, then execute on the shared
-workspace as the serve-mode `remote` actor. Mounted names are also included in
-the local MCP dynamic catalog and refresh live when the server emits
-`notifications/tools/list_changed`. Settings > Workspace uses plain status:
-local only, connected, invite needed, or an error. It shows the shared
-workspace name, host, and shared tool groups; it never shows bearer token
-values or token storage keys.
+When a folder link exists, the kernel initializes the remote MCP endpoint,
+warns when the server version/capability handshake looks incompatible, and
+mounts matching remote named tools into the local registry. Calls to those
+mounted tools pass through the local gate as a network effect, then execute on
+the shared workspace as the serve-mode `remote` actor. Mounted names are also
+included in the local MCP dynamic catalog and refresh live when the server
+emits `notifications/tools/list_changed`. Settings > Workspace uses plain
+status: local only, connection ready, connected, invite needed, or an error. It
+shows the shared workspace name, host, and shared tool groups; it never shows
+bearer token values or token storage keys.
 
 Server-owned namespaces shadow local app-provided named tools so structured
 state has one writer. Core tools are not shadowed: a `sharedWorkspace`
@@ -164,7 +170,7 @@ event-stream responses.
 - State migration: `src/main/serve/stateMigration.ts`
 - Backup/restore: `src/main/serve/backup.ts`
 - Serve startup: `src/main/serve/start.ts`
-- Desktop/headless shared-workspace client and invite join:
+- Desktop/headless shared-workspace client, invite connection, and folder link:
   `src/main/workspace/sharedWorkspace*.ts`
 - HTTP MCP route and SSE notifications: `src/main/server/server.ts`
 - CLI: `src/main/cli.ts`

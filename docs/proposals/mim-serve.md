@@ -3,15 +3,20 @@
 Status: proposal.
 
 `mim serve` runs a headless Mim on a machine that stays awake - team infra, a
-tailnet node, or a small cloud box - hosting one workspace continuously and
-serving it to desktop Mims, CLI agents, and automations. It is not a separate
-server product. It is the same kernel, the same tool registry, the same
-permission gate, and the same trace stream, booted without Electron and
+tailnet node, or a small cloud box - hosting team services continuously and
+serving them to desktop Mims, CLI agents, and automations. It is not a
+separate server product. It is the same kernel, the same tool registry, the
+same permission gate, and the same trace stream, booted without Electron and
 reachable over a controlled network.
 
-The user-facing noun is **shared workspace**: a workspace hosted by another Mim.
-"Server" stays operator vocabulary for the CLI, process model, and deployment
-docs.
+The user-facing noun should move from **shared workspace** to **team space** or
+**shared space**. "Workspace" already means "the folder I opened on my
+computer"; reusing it for a remote service suggests folder sync and makes the
+product model muddy. "Server" stays operator vocabulary for the CLI, process
+model, and deployment docs. Existing code and config may keep
+`sharedWorkspace` as an internal compatibility term, but the product should
+teach people "connect this folder to a team space", not "turn this folder into
+the server workspace."
 
 ## North Star
 
@@ -31,22 +36,26 @@ server bolted on:
   It is also the exit ramp from Electron: any shell (Electron, Tauri, a
   browser tab) can sit on the same service.
 - **Local-first means the server is yours.** By default it runs on localhost
-  and works offline. A hosted shared workspace is the same process on a
-  machine that stays awake — not a different product.
-- **Compute lives with the workspace.** Files, terminal ptys, code execution,
-  and agent runs happen on the machine that hosts the workspace, never
-  mimicked across machines. Clients render streams; git moves replicas.
+  and works offline. A hosted team space is the same process on a machine that
+  stays awake — not a different product.
+- **Compute lives with the machine that owns the data.** Local files, local
+  terminal ptys, and local code execution stay local. Team-space issues,
+  knowledge, references, routines, traces, and server-hosted agent runs happen
+  on the always-on host. There is no implicit attempt to make every client
+  folder and the server folder identical.
 
 Phases 0-4 below are deliberately incremental and are the committed plan.
 The strategic-direction section sketches the rest of the road so near-term
 decisions don't foreclose it.
 
-## Current Status - 2026-07-08
+## Current Status - 2026-07-09
 
 This proposal is no longer a pure future plan. The repo now contains a large
 part of the serve and shared-workspace plumbing, but the product is not ready
-for ordinary installed-app users. The current gap is user-facing clarity, not
-another server primitive.
+for ordinary installed-app users. The original product-model gap was that
+invite redemption mutated the currently open folder. That gap is now corrected
+at the plumbing level: connect is user-level, link is folder-level, and import
+is still explicit future work.
 
 Phase status:
 
@@ -62,31 +71,47 @@ Phase status:
   first-run hosting docs, private-overlay guidance, reverse-proxy streaming
   guidance, monitoring/rotation expectations, and "what should I send a
   teammate" need a pass.
-- [x] Phase 2 infrastructure is substantially implemented: `mim.yaml`
-  `sharedWorkspace` config, local token storage, desktop/headless remote
-  named-tool mounting, local named-tool shadowing for server-owned namespaces,
-  version/capability warnings, and a read-only workspace status surface exist.
-- [ ] Phase 2 is not product-complete for desktop users: the ordinary join
-  journey now exists, but broader source-of-execution chrome and user testing
-  still need to prove the experience.
-- [ ] Phase 2b invite-led join is substantially implemented: invite
+- [x] Phase 2 connection/link infrastructure is substantially implemented:
+  user-level connection storage under `~/.mim/`, local token storage,
+  personal folder links under `.mim/`, compatibility reads for legacy
+  `mim.yaml sharedWorkspace`, desktop/headless remote named-tool mounting,
+  local named-tool shadowing for server-owned namespaces,
+  version/capability warnings, and a status surface that distinguishes saved
+  connections from linked folders exist.
+- [ ] Phase 2 is not product-complete for desktop users: import/merge flows,
+  broader source chrome, domain-by-domain link choices, stale/revoked
+  connection handling, and the Phase 2.5 acceptance gate still need product
+  hardening before ordinary installed-app users should be guided here.
+- [x] Phase 2b invite connection plumbing is substantially implemented: invite
   mint/list/revoke, single-use `/join` exchange, `mim://`/paste handling,
-  Settings join card, local-only/connected status language, approval-card
-  shared-workspace chip, and live catalog refresh exist. Remaining work is
-  broader scope chrome across chat tool rows and app views, plus final
-  Phase 2.5 acceptance testing.
+  Settings connect card, user-level connection creation, explicit
+  "Link this folder" action, local-only/connection-ready/connected status
+  language, approval-card team-space chip, and live catalog refresh exist.
 - [ ] Phase 3 mim-web identity is not implemented.
 - [ ] Phase 4 unattended server-hosted agent runs are not implemented.
 
 User confusion report:
 
 A user with Mim installed locally can open a folder on their desktop, but the
-shared-workspace story is opaque after that. They cannot tell whether they are
+team-space story is opaque after that. They cannot tell whether they are
 done, whether they need to host something, whether they need an invite, whether
 files are local or remote, or why concepts like `mim serve`, MCP, tokens,
 namespaces, and `mim.yaml` matter. This is a missing phase step. It must be
 handled as product onboarding and role clarity before later phases add more
 capability.
+
+Second confusion report:
+
+A user who already has local Board issues, Knowledge entries, References, and
+ordinary project files may paste a join invite while an arbitrary folder is
+open. If Mim writes a remote connection into that folder and silently routes
+`issues.*`/`knowledge.*` somewhere else, the user cannot predict what happens
+to existing local state. If Mim then suggests sharing or syncing files, the
+blast radius is worse: multiple people with established local folders will
+create duplicates, stale copies, and accidental uploads. The correct product
+stance is: **joining a team space connects Mim to shared services; it does not
+sync, upload, migrate, or take over the current folder unless the user
+explicitly chooses that action after seeing an inventory and consequences.**
 
 ## Principles
 
@@ -95,21 +120,186 @@ capability.
   server-only data model. The server's only special privilege is uptime.
 - **Desktop compatibility is non-negotiable.** Existing desktop boot, local
   WebSocket app runtime, `mim mcp`, `~/.mim/server.json`, `MIM_PORT`, and
-  `MIM_TOKEN` keep their current behavior unless the user explicitly configures
-  a shared workspace.
+  `MIM_TOKEN` keep their current behavior unless the user explicitly connects
+  to a team space or links a folder to one.
 - **Policy replaces presence.** The desktop approval gate assumes a human at
-  the screen. A shared workspace has no screen, so approval becomes a
+  the screen. A team space has no screen, so approval becomes a
   declarative per-caller policy of allowed tools, effects, and path scopes.
   There is no serve-mode "allow everything" switch.
 - **Attribution before capability.** Every remote call carries an issued caller
   identity, and every trace event produced by that call carries the same
   identity. A team cannot share a workspace it cannot audit.
-- **The workspace stays the unit.** One process hosts one workspace: files,
-  `.mim/`, apps, skills, issues, knowledge, traces. A colleague can still read
-  the folder without Mim.
+- **Folders and team spaces are different product objects.** A local workspace
+  is the folder the user opened. A team space is a remote service with its own
+  canonical team state. A connection lets a local Mim use selected team
+  services from selected local folders; it does not convert the folder into a
+  replica, and it does not sync files by default.
+- **Connect, do not sync.** Joining a team space must be safe even when the
+  current local folder is unrelated. No files, issues, knowledge entries,
+  references, sessions, traces, or app state move during join. Moving or
+  merging data is a separate import/share flow with preview and confirmation.
+- **No silent shadowing.** The product may offer a default target such as
+  "Use team Board for this folder", but a local Board and a team Board cannot
+  silently swap under the same UI. Consequential actions need a visible target:
+  local folder or named team space.
 - **MCP is the front door.** The public surface is MCP over streamable HTTP.
   Desktop-only WebSocket routes remain for local app iframes and the local MCP
   stdio bridge; they are not the public remote API in phase one.
+
+## Product Model Reset
+
+This proposal previously blurred three things that must be distinct:
+
+1. **Local folder** — the directory a user opens in desktop Mim. It may already
+   contain local files, local Board issues in `issues/`, local Knowledge
+   entries in `knowledge/`, a local References library under `references/`,
+   app enablement, sessions, traces, and personal workflow assumptions.
+2. **Team space** — an always-on Mim service owned by a team. It has its own
+   canonical team Board, team Knowledge, team References, routines,
+   unattended agent runs, audit traces, caller grants, and backups. It may
+   also have a server-side file workspace, but that file tree is not assumed
+   to be a mirror of any client's open folder.
+3. **Folder link** — an explicit relationship saying "when I work in this
+   local folder, use this team space for these domains." Links can be created,
+   removed, and changed without moving files. A user may link multiple local
+   folders to one team space, link one folder to different spaces for
+   different domains in a future version, or join a team space without linking
+   the current folder at all.
+
+The implementation can still use `mim serve --workspace /srv/team-space` and
+internal `sharedWorkspace` config names. The product must not expose this as
+"your folder became the server workspace." The user story is "you connected to
+the team's shared memory and work queue."
+
+### What Join Means
+
+Accepting a team-space invite does exactly three things:
+
+- Stores a user-level connection record and token outside any project folder.
+- Shows the team space in Mim as an available shared service.
+- Offers to link the currently open folder to that team space for selected
+  domains, with an explicit confirmation.
+
+Join does not:
+
+- Upload or download files.
+- Migrate local issues, knowledge, references, sessions, traces, app data, or
+  app enablement.
+- Edit the local folder's `mim.yaml` unless the user explicitly chooses "use
+  this team space from this folder."
+- Shadow local tools without a visible "Team" target.
+- Make a promise of offline sync or conflict resolution.
+
+If no folder is open, joining still succeeds. The team space appears in a
+Spaces/Home surface, and the next local folder can be linked later. This
+avoids the current accidental coupling to whatever folder happened to be open
+when the user clicked the invite.
+
+### What Happens to Existing Local Issues and Knowledge
+
+Existing local Board and Knowledge records remain local. They are not deleted,
+moved, synced, or hidden by joining. The product must support three explicit
+states:
+
+- **Local only** — this folder's Board/Knowledge/References continue to read
+  and write local files (`issues/`, `knowledge/`, `references/`) exactly as
+  before.
+- **Team linked** — this folder uses a named team space for selected domains.
+  UI labels say "Team Board" or "Team Knowledge"; actions write to the team
+  space.
+- **Mixed during migration** — both local and team data are visible during an
+  import/merge flow, with clear source labels and no ambiguous writes.
+
+Moving existing local state to a team space is an import operation, not a join
+side effect. The import flow must:
+
+- Detect local `issues/`, `knowledge/`, `references/`, and relevant app-data
+  stores.
+- Show counts, sample records, and destination team space before any write.
+- Offer copy-by-default, not destructive move.
+- Preserve ids where possible and show collisions before writing.
+- Deduplicate by stable ids first, then by title/DOI/key heuristics where
+  available.
+- Produce an import report with created, skipped, merged, and conflicted
+  records.
+- Leave the local records intact until the user explicitly archives or removes
+  them.
+
+This import can be implemented with existing tools, but the user-facing flow
+is mandatory. A CLI-only `mim serve state migrate` is an operator tool, not a
+sufficient product answer for people who installed the app.
+
+### What Happens to Files
+
+Files do not sync by default. A local chat may read a local manuscript and
+create a team issue about it, but that is a cross-source action:
+
+```text
+Read local file: ./draft.md
+Create team issue in: HTA Model
+```
+
+The UI must show both sides before or during execution. Uploading a file,
+copying a folder to the server, linking a git remote, or opening a thin remote
+file view are separate actions with separate confirmations.
+
+For the product, there are only three valid file modes:
+
+- **Local files** — normal desktop Mim. Files stay on the user's machine.
+- **Git replica** — an explicit clone/managed-sync relationship, for users who
+  understand or choose repository-backed collaboration. No Dropbox-style sync.
+- **Thin remote files** — future track A. No local clone; file reads/writes go
+  directly to the team-space host with presence and stale-write checks.
+
+There is no mode where Mim tries to sync every client's arbitrary open folder
+to the server.
+
+### Job Stories
+
+- **Solo user:** When I install Mim and open a folder, I want to work locally
+  without being told I have unfinished server setup, so I can ignore team
+  spaces completely.
+- **Teammate joining team memory:** When someone sends me an invite, I want to
+  connect to the team's Board/Knowledge/References without risking my local
+  files or local notes, so I can ask questions and file team issues safely.
+- **Existing local project becoming shared:** When my mature Mim folder has
+  issues and knowledge already, I want a reviewed import to a team space, so
+  the team does not start with an empty board and I do not lose local data.
+- **Researcher with many projects:** When I switch folders, I want Mim to show
+  which team space, if any, this folder is linked to, so I do not write the
+  wrong issue into the wrong team.
+- **Operator:** When I host a team space, I want to invite people, see active
+  callers, review denials, backup state, and rotate/revoke access without
+  editing YAML over SSH for normal operations.
+- **Automation/CI:** When a pipeline or script calls Mim, it should use a
+  named token with narrow grants and no desktop folder assumptions.
+- **Unattended agent:** When an overnight routine runs, it should use team
+  memory and leave traceable outputs in the team space, not in someone's
+  laptop-local folder.
+
+### Product Risks This Reset Must Prevent
+
+- A user joins while the wrong folder is open and accidentally links unrelated
+  work to the team.
+- A local Board appears to go empty because remote tools silently shadowed
+  local tools.
+- Two people each import the same local issues and create duplicate team
+  records.
+- A user assumes files synced because team issues are connected.
+- A remote agent cannot see a local file, but the UI gave the impression that
+  it could.
+- A team host looks like a random folder with three installed app packages
+  instead of a durable team service with backups, audit, identity, routines,
+  and clear data ownership.
+- Revoking a token leaves a stale folder config that looks connected but does
+  nothing useful.
+- A pre-existing hand-authored `mim.yaml sharedWorkspace` block (the legacy
+  compatibility path) silently shadows a domain's local tools with no chip,
+  warning, or link-step confirmation, because the new connect/link UI and its
+  chrome only engage for connections created through the invite flow. A
+  workspace already `configured` via the legacy block never routes through
+  "Link this folder" at all. Phase 2/2.5 needs a migration or detection path
+  for legacy configs, not just chrome for newly-created connections.
 
 ## Context - what exists
 
@@ -156,20 +346,20 @@ Nearly all of the machine already runs without Electron:
 
 Mim's audience is small research organisations: teams of researchers whose
 work is files - protocols, models, manuscripts, extraction tables - and whose
-tooling is increasingly agents. Today each Mim is an island. The workspace
-lives on one laptop; issues and knowledge are shared only as fast as git sync;
-agents die when the lid closes.
+tooling is increasingly agents. Today each Mim is an island. Local folders
+stay on laptops; team memory is copied by hand or by git discipline; agents
+die when the lid closes.
 
-An always-on shared workspace gives the team:
+An always-on team space gives the team:
 
-- **Shared team memory.** Knowledge and issues have one authoritative copy.
+- **Shared team memory.** Team Knowledge and team Issues have one authoritative
+  copy that every connected Mim and automation can call.
   A teammate's CLI agent asks `knowledge_search` and gets the same answer the
   PI's desktop Mim gets.
-- **A single writer for structured state.** Issues and knowledge are
-  file-backed. A shared workspace can turn concurrent writes into a request
-  queue instead of git conflicts between clones, but only after the server
-  serializes app-data writes and desktop replicas route server-owned tool
-  namespaces back to the shared workspace.
+- **A single writer for selected team domains.** Issues, Knowledge, and
+  References become team-space services when a folder is linked to them. Local
+  copies can still exist, but team-domain writes go to one host and one queue
+  after the user chooses that relationship.
 - **Agents that outlive laptops.** Literature monitors, nightly extraction
   checks, and referee passes need a host, not a foreground desktop.
 - **Team audit.** Every remote call - human, desktop Mim, CLI agent, CI job -
@@ -187,8 +377,8 @@ mim serve --workspace /srv/hta-model --host 100.64.0.7 --port 4780
 ```
 
 `mim serve` boots a headless kernel, opens one workspace, then starts the same
-server module in serve mode. One process hosts one workspace; a team with
-three shared workspaces runs three processes. That keeps the trust boundary,
+server module in serve mode. One process hosts one team-space storage root; a
+team with three team spaces runs three processes. That keeps the trust boundary,
 policy file, trace stream, and supervision story simple.
 
 Defaults are conservative:
@@ -408,107 +598,148 @@ Serve mode adds a hard remote-write deny floor for:
 Denied means denied, not "needs approval": no remote caller can install or edit
 code/prompt/control surfaces through `fs.write`, `fs.edit`, import tools, app
 authoring tools, archive extraction, or any named app tool. App and skill
-development against a shared workspace needs a separate operator/development
-flow, not a remote mutation grant.
+development against a team-space storage root needs a separate
+operator/development flow, not a remote mutation grant.
 
-### Sharing a Workspace
+### Creating, Connecting, Linking, and Importing
 
-Moving a workspace to a server is a one-time event, not an ongoing
-relationship. "Share this workspace" has two payloads:
+The previous "share this workspace" model was too coarse. It collapsed four
+different user actions into one dangerous action. The product must keep them
+separate.
 
-1. The file workspace: the workspace is (or becomes) a git repo, the server
-   clones it, and from that moment the server copy is canonical. The laptop
-   copy is demoted from "the workspace" to a replica of it, and `mim.yaml`
-   records the shared-workspace pointer.
-2. Selected structured app state: app data for server-owned namespaces such as
-   Board issues, Knowledge entries, and References libraries is copied to the
-   server at share time. Sessions and traces are not migrated by default:
-   desktop history stays local, while work done on the server produces new
-   sessions and traces on the server.
+1. **Create or host a team space.** An operator chooses or creates the
+   server-side workspace folder that backs the team space. That folder is the
+   service's storage root, not a promise that every teammate has a matching
+   local clone. The operator enables team apps, configures backups, grants,
+   and invitations.
+2. **Connect Mim to a team space.** A human accepts an invite. Mim stores a
+   user-level connection and token. No project folder changes yet.
+3. **Link a local folder to a team space.** The user chooses "Use HTA Model
+   team space from this folder" and selects domains: Board, Knowledge,
+   References, routines, or future remote files. This writes folder-level
+   config only after explicit confirmation.
+4. **Import local state to the team space.** If the local folder already has
+   issues, knowledge, or references, Mim offers an inventory and import/merge
+   flow. Import is copy-by-default and produces a report. It is never implied
+   by connect or link.
 
-Server-owned named tool namespaces — `issues.*`, `knowledge.*`,
-`references.*` — cut over at sharing time: once phase 2 routing is in place,
-desktop sends those calls to the shared workspace, so that state has one
-writable copy and is never a sync problem. Without the structured-state
-migration step, existing users would share a mature workspace and arrive at an
-empty board; that is not acceptable first-run behavior.
+This separation answers the core safety question:
+
+- **Connect** means "I can see/use the team service."
+- **Link** means "in this folder, these domains should target that service."
+- **Import** means "copy selected local records into the service."
+- **Sync/replica** means "coordinate files through git" and is a separate,
+  explicit relationship.
+
+Team-owned named tool namespaces — `issues.*`, `knowledge.*`, `references.*`
+— may become the default target for a linked folder, but only with visible
+source labels and an easy way to inspect local data. A local app may still
+exist for local-only work. The product must never make a mature local Board
+look empty merely because a remote Board was mounted.
+
+The server-side team space can be created in three ways:
+
+- **Empty team space.** Start with no team records. Useful for greenfield
+  projects, CI filing, or a demo.
+- **Imported from a local Mim folder.** The operator or owner previews local
+  issues, knowledge, and references, copies them to the team space, then
+  links that folder to the imported domains.
+- **Git-backed project replica.** The server clones a repo for teams that
+  deliberately want server-side files. This is not automatic and does not
+  make other clients sync every open folder.
 
 ### Canonical State and Backups
 
-Once shared, the server becomes canonical for more than git-tracked files:
-issues, knowledge, references, sessions, traces, token records, grant policy,
-and server secrets live in gitignored `.mim/` or operator-owned `~/.mim/serve/`
-state. Phase one therefore needs a boring backup story.
+Once a domain is linked to a team space, the server becomes canonical for that
+domain's team copy: team issues, team knowledge, team references, routines,
+server-hosted sessions, traces, token records, grant policy, and server secrets
+live in the team-space storage root or operator-owned `~/.mim/serve/` state.
+Local copies are not automatically deleted or synced. Phase one therefore
+needs a boring backup story for the team-space state people deliberately put
+there.
 
-Minimum requirement: `mim serve backup` (or an explicitly documented tar layout)
-captures the workspace `.mim` state needed for structured data plus the
-operator serve state outside the workspace. `mim serve restore` or a documented
-restore procedure must be tested. Files still use git; structured state must
-not be a single disk away from loss.
+Minimum requirement: `mim serve backup` (or an explicitly documented tar
+layout) captures the team-space structured state plus the operator serve state
+outside the storage root. `mim serve restore` or a documented restore
+procedure must be tested. Git-tracked project files still use git when a team
+chooses a git-backed replica; team structured state must not be a single disk
+away from loss.
 
 ### Consumption Models
 
-1. **Live remote source** (phase 1). Callers use the shared workspace's tools
-   directly over MCP. This is the mode for issues, knowledge, references,
-   logbook, search, trace queries, and any caller with no clone.
-2. **Git-sync replica** (phase 2 ships the baseline). Researchers who want
-   fast native editing, offline work, or local toolchains keep a clone.
-   Phase 2 scope is remote named-tool routing over today's managed sync
-   semantics — opt-in, explicit `sync.now`, stop on conflict (see
-   [git.md](../git.md)) — with the shared workspace tending the git remote.
-   The invisible-sync end state (pull on workspace open and window focus,
-   commit and push on idle after saves, one status word — "Synced · just
-   now" — and no git vocabulary anywhere in the UI) is a substantial
-   subsystem and gets its own managed-replica-sync proposal (track E).
-3. **Thin client** (track A). The default for non-technical users: open the
-   shared workspace with zero local files. The editor streams file content
-   over the authenticated API and saves write back; the terminal is a server
-   pty. No clone, no sync, no conflicts — the Google Docs / VS Code Remote
-   mental model.
+1. **Team service source** (phase 1). Callers use the team space's tools
+   directly over MCP. This is the mode for team issues, team knowledge, team
+   references, logbook, trace queries, CI, automation, and anyone with no
+   local folder linked.
+2. **Linked local folder** (phase 2 revised). A desktop Mim has a local folder
+   open and a user-level team-space connection available. The user explicitly
+   links selected domains in that folder to the team space. Local files remain
+   local. Local app data remains local unless imported.
+3. **Git replica** (track E baseline, not automatic join behavior).
+   Researchers who want fast native editing, offline work, or local toolchains
+   may keep a clone and use explicit managed sync. The invisible-sync end
+   state (pull on workspace open and window focus, commit and push on idle
+   after saves, one status word — "Synced · just now" — and no git vocabulary
+   anywhere in the UI) is a substantial subsystem and gets its own
+   managed-replica-sync proposal.
+4. **Thin client** (track A). The default future mode for non-technical users
+   who want to work directly in the team space with zero local files. The
+   editor streams file content over the authenticated API and saves writes
+   back; the terminal is a server pty. No clone, no sync, no conflicts — the
+   Google Docs / VS Code Remote mental model.
 
-These compose. Files flow through git or stream over the API. Shared
-structured state flows through tools.
+These compose only when the user chooses them. Files flow through git or
+stream over the API. Team structured state flows through team tools. Joining a
+team space by itself chooses neither file mode.
 
 The conflict posture — charter for the track E proposal, not phase-2 scope —
-attacks frequency before UX. Structured state only earns the "single writer"
-label after two things exist: phase-one server-side serialization for app-data
-writes, and phase-two routing that shadows local named tools for server-owned
-namespaces. Git auto-merges non-overlapping prose edits silently, and different
-files never conflict at all. Presence — the server knows who has a file open,
-from thin clients directly and from replicas on sync — turns most of the
-residue into a soft "Anna is editing this file" warning before a conflict
-exists. The rare true conflict surfaces as a choice card ("Keep yours / Keep
-Anna's / Compare", with Compare opening the existing diff review UI), backed
-by `.mim/history` so the losing version is one click from recovery. Raw git
-conflict markers in a user's file, or git vocabulary in sync UI copy, are
-bugs. Continuous Dropbox-style bidirectional file sync is explicitly refused;
-git is the only replication mechanism.
+attacks frequency before UX. Team structured state only earns the "single
+writer" label after server-side serialization exists and linked folders route
+team-domain writes to the team target with visible source labels. Git
+auto-merges non-overlapping prose edits silently, and different files never
+conflict at all. Presence — the server knows who has a file open, from thin
+clients directly and from replicas on sync — turns most of the residue into a
+soft "Anna is editing this file" warning before a conflict exists. The rare
+true conflict surfaces as a choice card ("Keep yours / Keep Anna's / Compare",
+with Compare opening the existing diff review UI), backed by `.mim/history` so
+the losing version is one click from recovery. Raw git conflict markers in a
+user's file, or git vocabulary in sync UI copy, are bugs. Continuous
+Dropbox-style bidirectional file sync is explicitly refused; git is the only
+replication mechanism.
 
 Phase one is honestly useful for MCP clients, automation, and read-mostly
-access, but it does not fully enforce single-writer semantics for desktop
-clones. That requires phase two: when a workspace declares server-owned tool
-namespaces, desktop Mim shadows or disables matching local named tools and
-routes those calls to the shared workspace. A local app may still exist for UI,
-but the canonical `issues.*`, `knowledge.*`, and `references.*` tools must
-come from the configured remote unless the user explicitly enters a development
-mode.
+access, but it does not solve desktop product semantics. That requires the
+revised phase two: user-level team-space connections, explicit folder links,
+import/merge, and visible source selection. A local app may still exist for
+local work; a team app may exist for team work. The user must never have to
+infer which one a tool name currently means.
 
 ### Desktop Mim as a Client
 
-The desktop main process grows an MCP HTTP client that mounts configured
-remote tools into the local registry under a source-qualified identity.
-Configuration lives in `mim.yaml`; credentials live outside the workspace in
-`~/.mim/keys.env` or a serve-token store.
+The desktop main process grows an MCP HTTP client that can connect to team
+spaces and mount remote tools under a source-qualified identity. The
+connection record is user-level and lives outside project folders. Credentials
+live outside every workspace in `~/.mim/keys.env` or a serve-token store.
+
+Folder-level configuration is a link, not the connection itself. A local
+folder records "use team space X for domains Y" only after the user chooses
+that relationship. Hand-edited `mim.yaml` may remain a compatibility path, but
+the primary product path must not require or silently write folder config at
+invite redemption time.
 
 The local gate still applies before anything leaves the machine. A remote
 tool call is an external effect locally, then a `remote` actor call on the
-shared workspace. The UI should show where a tool executes, but it should not
-turn into an admin console. One Settings > Workspace section is enough.
+team space. The UI should show where a tool executes, but it should not turn
+into an admin console. One Spaces/Workspace settings surface is enough if it
+answers four questions plainly: Am I local only? Which team spaces am I
+connected to? Is this folder linked to one? Which domains target local versus
+team?
 
 Tool-execution chrome is a hard phase-two requirement: once desktop chat can
 mount remote tools, every consequential action must make clear which workspace
-will be read or mutated. The server also reports its Mim version and shared
-workspace API/capability version during connection setup. Desktop warns on
+will be read or mutated. In cross-source actions, show both sides: local file
+source and team-space destination. The server also reports its Mim version and
+team-space API/capability version during connection setup. Desktop warns on
 unsupported or meaningfully skewed versions before mounting remote tools.
 
 ### Secrets on a Headless Server
@@ -568,7 +799,7 @@ behavior.
 Outcome: Electron behavior is unchanged, and a headless test can boot the
 server in serve mode with all non-public routes denied.
 
-### Phase 1 - authenticated shared workspace
+### Phase 1 - authenticated team space
 
 The minimal useful increment: an authenticated MCP source on a tailnet or
 behind a reverse proxy.
@@ -595,8 +826,8 @@ behind a reverse proxy.
 - Per-namespace or per-app-data-store write serialization for server-owned
   structured state so concurrent `issues.*`/`knowledge.*`/`references.*` calls
   cannot lose updates.
-- Share-time structured-state migration for server-owned app namespaces.
-- Backup and restore path for workspace `.mim` structured state plus
+- Operator/state migration tools for existing server-owned app namespaces.
+- Backup and restore path for team-space structured state plus
   operator-owned serve state.
 - Denied-request ledger with actionable denial messages and enough metadata
   for an operator to turn a denial into a grant.
@@ -606,158 +837,160 @@ behind a reverse proxy.
 - Trace attribution by caller principal/name for every call and gate decision.
 
 Outcome: Claude Code, Codex, Gemini CLI, CI, and `curl` can read/search and
-write explicitly granted shared state, with every action attributed and
+write explicitly granted team state, with every action attributed and
 policy-checked.
 
-### Phase 2 - desktop Mim as a client
+### Phase 2 - team-space connection model
 
-- Shared-workspace configuration in `mim.yaml`; token outside the workspace.
-- Remote tool mounting in the desktop registry with source-qualified identity.
-- Server-owned namespaces route to the shared workspace and shadow local named
-  tools to preserve single-writer semantics.
-- Use today's managed sync semantics to tend the git remote: explicit
-  `sync.now`, conservative git operations, and stop-on-conflict. Invisible
-  background replica sync is track E, not phase 2.
-- Minimal UI in Settings > Workspace, clear tool-execution chrome, and a
-  server version/capability handshake with desktop warnings on unsupported or
-  meaningfully skewed versions.
-- Evaluate one conservative retry path for explicit sync
-  (pull/rebase/push when the local worktree is clean) before surfacing a
-  conflict; still stop rather than inventing silent conflict resolution.
+Do not ship remote desktop mounting as "write `sharedWorkspace` into the
+currently open folder." Phase 2's first deliverable is the product-safe
+connection model.
 
-Outcome: a teammate can ask local chat to file an issue, and the issue exists
-in the shared workspace immediately.
+- Add a user-level team-space connection store outside workspaces. It contains
+  display name, host, capability version, connection id, and token reference.
+  It does not live in a random project folder.
+- Add a folder-level link model: this folder may use connection X for domains
+  Y. The link is explicit, reversible, and inspectable. Compatibility with
+  `mim.yaml sharedWorkspace` can remain, but the UI flow must distinguish
+  connection from folder link.
+- Remote tools mount with source-qualified identity, but are not silently
+  substituted for local tools. The registry can expose both local and team
+  targets to the UI/agent planner, or expose a selected default only after the
+  folder link says that domain targets the team space.
+- Tool-execution chrome is a hard requirement: chat tool rows, approval cards,
+  app work views, and status chips must show Local vs Team target before or
+  during consequential actions.
+- Cross-source actions must show both source and destination, e.g. "read local
+  `draft.md`; create team issue in HTA Model."
+- Server version/capability handshake warns before mounting tools when the
+  client/server contract is unsupported or meaningfully skewed.
+- Today's explicit managed sync remains separate. No file sync is started by
+  joining or linking a team space.
 
-### Phase 2b - join by invite, scope by chrome
+Outcome: a desktop Mim can be connected to team services without changing any
+local folder until the user explicitly links that folder.
 
-Phase 2 makes remote mounting work; it does not make it legible. Today a
-teammate joins by hand-editing a `sharedWorkspace` block into `mim.yaml` and
-hand-placing a bearer token into `~/.mim/keys.env`, and Settings > Workspace
-only reports the resulting state. That is the confusion report in product
-form. This phase is the design that fixes it, built on two ideas: **joining is
-one artifact** (the invite carries everything, like a Slack invite link or a
-Tailscale login) and **scope is one visual rule** (local is unmarked, remote
-is marked). It changes no permission semantics — it is a writer and a renderer
-for the contracts phases 1-2 already ship.
+### Phase 2b - invite-led connection
 
-**The invite is the entire join surface.**
+Phase 2b remains the human onboarding path, but its semantics change: the
+invite creates a connection, not a folder mutation.
+
+**The invite is the entire connection surface.**
 
 - `mim serve invite create --name anna [--expires 7d]` mints a single-use
   invite in two equivalent forms: a paste string (`mim-invite-…`) and a
-  `mim://join/…` deep link. Both encode the server URL, workspace id and
+  `mim://join/…` deep link. Both encode the server URL, team-space id and
   display name, caller name, and a one-time redemption secret. `mim serve
   invite list/revoke` mirror the token commands; invite secrets are
-  hash-stored beside `callers.json` like everything else.
-- Redemption is an exchange, not a handoff. The client presents the invite
-  once at a redemption endpoint and receives the durable bearer token, which
-  lands directly in `~/.mim/keys.env` under the existing
-  `MIM_SHARED_WORKSPACE_<ID>_TOKEN` key. The durable token never transits
-  Slack, is never rendered in any UI, and the invite dies on first use or
-  expiry — a link sitting in chat scrollback is worthless after the teammate
-  clicks it. The redemption route is the one endpoint reachable without a
-  bearer token: it accepts only invite exchange, is rate-limited, compares
-  hashes in constant time, and joins the phase-one route matrix and its tests.
-- The operator's job collapses to sending one Slack message containing one
-  link. Phase 1's client snippets remain the answer for CLI agents and
-  automation; the invite is the answer for humans with Mim installed.
+  hash-stored beside `callers.json`.
+- Redemption is an exchange. The client presents the invite once at a
+  redemption endpoint and receives the durable bearer token, which lands
+  directly in user-level token storage. The durable token never transits
+  Slack, is never rendered in UI, and the invite dies on first use or expiry.
+- The operator sends one link. CLI agents and automation still use phase-one
+  token snippets.
 
-**Join by paste, not by config.**
+**Join is not link.**
 
-- The desktop app registers the `mim://` protocol. Clicking an invite opens
-  Mim on a single confirmation card: workspace display name, host, caller
-  name, and the data model in one plain line — "Files stay on this machine.
-  Issues and Knowledge come from *hta-model*." One primary action: Join. The
-  same card opens by pasting the invite string into Settings > Workspace, for
-  clients that strip links.
-- Join writes the `sharedWorkspace` block through the existing `mim.yaml`
-  contract and the token through the existing keys.env store. The user sees
-  neither file. Hand-edited configs keep working unchanged — the invite is a
-  writer of the same contract, not a second mechanism.
-- Joining takes effect live: remote tools mount without an app restart, and
-  the mounted catalog refreshes on `tools/list_changed` (this closes the
-  phase-2 live-refresh gap).
-- Failure states are specific, and each carries its one next action: invite
-  already used or expired (request a new invite from the person who sent it),
-  host unreachable (retry), version skew (the phase-2 handshake warning).
+- Clicking or pasting an invite opens a confirmation card with one plain
+  sentence: "This connects Mim to HTA Model. It will not upload, download, or
+  change files in the folder you currently have open."
+- Primary action: Connect. Secondary action, shown only after connection
+  succeeds and only if a folder is open: Link this folder...
+- The link step lists domains available from the team space: Board,
+  Knowledge, References, routines, future remote files. The user chooses which
+  domains, if any, this folder should use.
+- If local records exist in a chosen domain, the link step does not hide them.
+  It offers: keep local only, use team empty/current state, or import local
+  records to team space first.
+- Joining takes effect live for the connection list and catalog cache, but
+  domain tools become defaults for a folder only after the folder link exists.
+- Failure states are specific and actionable: invite already used/expired
+  (request a new invite), host unreachable (retry), version skew (update
+  client/server), grant denied (ask operator for the named grant).
 
-**Scope chrome: local is unmarked, remote is marked.**
+**Scope chrome: local is unmarked only when there is no ambiguity.**
 
-- One rule, applied everywhere, never inverted: any surface that reads or
-  writes the shared workspace carries its chip — display name plus a status
-  dot. Chat tool-call rows and approval prompts for remote-routed calls,
-  Board/Knowledge views backed by remote namespaces, and the workspace title
-  all carry it; purely local surfaces never do. A solo user's Mim contains no
-  shared-workspace chrome at all — absence is the answer to "am I done?".
-- Connection status is one word on the chip — Connected, Offline, Denied,
-  Invite needed — each with one next action. Denied names the missing grant,
-  fed by the phase-1 denied-request ledger, so a denial reads "ask your
-  operator to grant `issues.create`", not "permission denied".
-- No instruction text in chrome. The interface shape answers the question;
-  sentences live on the join card and in docs.
-
-**Roles split by entry artifact, not by menu.**
-
-- Solo user: opening a folder is the whole journey. Nothing invites them to
-  host or join; the Settings row reads as an optional join point, not an
-  incomplete setup.
-- Teammate: enters through an invite link and never meets MCP, bearer
-  headers, YAML, or namespaces.
-- Operator: enters through hosting docs and `mim serve`. The app never
-  proposes hosting as a next step for ordinary users.
+- A solo local folder with no team links stays visually quiet.
+- Once a folder is linked, every team-backed surface carries the team-space
+  chip. Local surfaces remain local-labeled when a same-domain team surface is
+  also available.
+- Board/Knowledge/References views need target selectors or separate source
+  labels when both local and team records exist. A remote target cannot make a
+  local board look empty.
 
 Acceptance:
 
-- Invite-to-connected in under one minute, without the user encountering the
-  words MCP, bearer, token, YAML, or namespace.
-- Invites are single-use, expiring, revocable, and hash-stored; the durable
-  token is never displayed anywhere.
-- Server-side revocation flips the desktop chip to "Invite needed" with a
-  working re-join path (a fresh invite), not a dead config.
-- Every remote-routed tool call shows the shared-workspace chip before and
-  during execution, including in approval prompts.
-- Joining mounts remote tools without restart; catalogs update live on
-  `tools/list_changed`.
-- The redemption endpoint passes route-matrix tests: it is the only
-  tokenless route, exchanges each invite at most once, and rate-limits.
+- Invite-to-connected in under one minute, without the user encountering MCP,
+  bearer, token, YAML, or namespace vocabulary.
+- Connection succeeds even when no folder is open.
+- Connection does not modify the current folder until the user explicitly
+  links it.
+- Linking a folder shows available domains and detects existing local
+  issues/knowledge/references before setting a team default.
+- Every remote-routed tool call shows the team-space chip before and during
+  execution, including approval prompts.
+- Catalogs update live on `tools/list_changed`.
+- The redemption endpoint remains the only tokenless route, exchanges each
+  invite at most once, and rate-limits.
 
-Outcome: the operator pastes one link into Slack; the teammate clicks it,
-reads one card, clicks Join, and asks a question against team memory — and
-from then on can always see, at a glance, which workspace any action touches.
+Outcome: the operator sends one link; the teammate connects to team memory
+without risking local state, then deliberately chooses whether the current
+folder should use that team space.
+
+### Phase 2c - local state inventory and import
+
+This phase is required before telling existing users to move real projects
+onto a team space.
+
+- Inventory local issues, knowledge entries, references, and relevant app-data
+  stores for the open folder.
+- Show counts, representative records, local paths, and destination team space.
+- Provide copy-only import first. Destructive move/archive is a later explicit
+  cleanup action.
+- Detect collisions by id/path/key, then likely duplicates by title/DOI where
+  possible. The user chooses skip, keep both, or merge for conflicts.
+- Import through the same team tools remote callers use, so grants,
+  serialization, trace attribution, and validation are exercised.
+- Produce a durable import report stored locally and in the team trace.
+- After import, offer to link the folder domains to the team copies. Do not
+  assume import means link, and do not assume link means import.
+
+Outcome: a mature local Mim project can become a team-backed project without
+an empty-board surprise, silent duplication, or local data loss.
 
 ### Phase 2.5 - installed-app onboarding and role clarity
 
-This phase is a product acceptance gate inserted because Phase 2's technical
-mounting model does not answer the installed user's basic question: "I opened a
-folder in Mim; what now?" Phase 2b above is the design intended to pass this
-gate; the gate is graded against the requirements below regardless of
-mechanism.
+This phase is a product acceptance gate inserted because technical mounting
+does not answer the installed user's basic question: "I opened a folder in
+Mim; what now?" No later phase may rely on protocol vocabulary as the way to
+discover the model.
 
 Requirements:
 
-- The local-only path is first-class. A solo user should understand that
-  opening a folder is enough, and shared workspace setup is optional.
-- The join path is invite-led. A teammate should be able to start from a
-  shared-workspace invite and end in a connected state without learning MCP,
-  bearer headers, environment files, YAML, or namespace routing.
-- The host path is clearly separate. Running `mim serve`, issuing tokens,
+- The local-only path is first-class. Opening a folder is enough; team setup
+  is optional.
+- The join path is invite-led and creates a team-space connection, not an
+  implicit folder sync or folder mutation.
+- The link path is explicit. A user can connect to a team space and decide
+  later which local folders use it.
+- The import path is explicit. Existing local issues, knowledge entries, and
+  references remain local until copied or merged through a reviewed flow.
+- The host path is clearly separate. Running `mim serve`, app installation,
   backups, revocation, and deployment are operator responsibilities, not the
   default next step for everyone who installed Mim.
-- The app and docs explain the data model in plain language: files can remain
-  local, while selected team tools such as issues or knowledge may use the
-  shared workspace when configured.
-- Status language is concrete: local only, connected to a named shared
-  workspace, missing invite/token, remote unavailable, or permission denied
-  with a clear next action.
-- The user can see when a tool action will affect the local workspace versus
-  the shared workspace before or during the action.
+- Status language is concrete: local only, connected to a named team space,
+  folder linked to a named team space, import available, remote unavailable,
+  or permission denied with a clear next action.
+- The user can see when a tool action affects local state, team state, or both.
 - First-run and sharing copy give opinionated defaults by role: solo user,
-  teammate joining a workspace, operator hosting a workspace, and automation or
-  CLI caller.
+  teammate joining, existing-project owner importing, operator hosting, and
+  automation/CLI caller.
 
 Outcome: a person who installed Mim and opened a folder can tell within one
-minute whether they are finished, should paste an invite, or should hand the
-hosting instructions to an operator. No later phase may rely on users learning
-the protocol vocabulary as the way to discover this.
+minute whether they are done, should paste an invite, should link this folder,
+should import existing local state, or should hand hosting instructions to an
+operator.
 
 ### Phase 3 - mim-web issued identity
 
@@ -765,7 +998,7 @@ the protocol vocabulary as the way to discover this.
   revoke, validate.
 - Server validates tokens against mim-web with an operator-configured offline
   grace cache.
-- The same principal can entitle private apps and name shared-workspace calls.
+- The same principal can entitle private apps and name team-space calls.
   This is also the identity substrate for a future managed hosted offering, so
   token validation and principal ids must not assume local-only administration.
 
@@ -790,17 +1023,30 @@ revocation that does not require redeploying the server.
 - Depend on [context-compaction.md](context-compaction.md) so long unattended
   runs survive context growth.
 
-Outcome: a nightly referee or literature monitor runs on the shared workspace,
+Outcome: a nightly referee or literature monitor runs on the team space,
 files comments/issues, and leaves a normal session and trace.
 
 ## Product Requirements
 
 - **Installed-app clarity.** The default desktop experience is local-first:
-  install Mim, open a folder, and work. Shared workspace concepts appear only
-  when the user chooses to join or host one.
-- **Time to first value.** Token creation prints exact client setup snippets.
-  The operator should be able to send one message; the teammate pastes one
-  command/config block and asks a question against team memory.
+  install Mim, open a folder, and work. Team-space concepts appear only when
+  the user chooses to join or host one.
+- **No accidental folder binding.** Accepting an invite creates a user-level
+  team-space connection. It does not edit the current folder, link domains, or
+  sync files.
+- **Explicit domain linking.** A local folder can use team Board, Knowledge,
+  References, routines, or future remote files only after the user chooses
+  those domains for that folder.
+- **Local data stays local until imported.** Existing `issues/`, `knowledge/`,
+  `references/`, app data, sessions, and traces are untouched by connection
+  and linking. Import/merge is a reviewed copy operation with a report.
+- **No silent source swap.** If local and team versions of a domain are both
+  possible, the UI shows the target. A local Board cannot disappear because a
+  team Board mounted.
+- **Time to first value.** Human invites are one link; automation tokens print
+  exact client setup snippets. The operator should be able to send one message
+  and get a teammate connected to team memory without exposing protocol
+  details.
 - **Opinionated consumption defaults.** Non-technical users should be steered
   toward thin clients when available; technical users toward git-sync replicas;
   agents, CI, and automation toward MCP. Users should not have to understand
@@ -811,7 +1057,7 @@ files comments/issues, and leaves a normal session and trace.
 - **Remote run visibility.** Server-hosted agent sessions must be discoverable
   from the normal desktop History surface by phase four.
 - **Demo story.** The flagship demo is a routine or Slack-triggered overnight
-  referee/literature agent that runs on the shared workspace, files comments or
+  referee/literature agent that runs on the team space, files comments or
   issues, posts a Slack summary, and leaves an attributed session/trace.
 - **Presence pays early.** Full thin-client presence is track A/E, but even
   early "active callers" and "last touched by" status in `mim serve status` or
@@ -825,7 +1071,7 @@ paint the road shut. Each needs its own proposal before implementation.
 
 ### Track A — thin-client workspace editing
 
-The default consumption mode for non-technical users: open a shared workspace
+The default consumption mode for non-technical users: open a team space
 with zero local files. An authenticated file read/write API for the editor
 (the `/workspace-files` routes grow caller auth instead of staying disabled
 in serve mode), per-file presence with soft-lock warnings, autosave writing
@@ -837,7 +1083,7 @@ caching of recently opened files so reads survive a flaky connection.
 
 ### Track B — remote terminal and agent sessions
 
-node-pty is plain Node, not Electron. A shared workspace can host ptys and
+node-pty is plain Node, not Electron. A team space can host ptys and
 CLI agent sessions (Claude Code, Codex, Gemini CLI) server-side; shells
 render the byte stream over the wire, exactly like SSH. This is "agents
 outlive laptops" for interactive work. It supersedes the deferral below once
@@ -858,7 +1104,7 @@ proposal; it is noted here because phase 4 and tracks A-B create the demand.
 
 Requires the north-star renderer migration (renderer speaks only the server
 API) plus tracks A-C; at that point serving the Vue shell as a web app
-against a shared workspace becomes a packaging decision, not an architecture
+against a team space becomes a packaging decision, not an architecture
 change.
 
 ### Track E — managed replica sync
@@ -906,9 +1152,12 @@ conflict) is the phase-2 baseline it replaces.
   body caps ship in phase one. Per-token AI spend ceilings can follow once
   phase four exposes agent runs. Phase four still ships per-caller cost
   attribution immediately.
-- **Canonical state needs backups.** Shared workspace structured state and
-  operator serve state are part of the service boundary; phase one must have a
-  tested backup/restore story before teams depend on it.
+- **Canonical state needs backups.** Team-space structured state and operator
+  serve state are part of the service boundary; phase one must have a tested
+  backup/restore story before teams depend on it.
+- **No implicit data movement.** Connecting to a team space is not consent to
+  upload local files or local app state. Import, upload, git replica, and thin
+  remote file editing are separate flows with explicit target/source labels.
 - **Blast radius is the Unix account.** The server should run as a dedicated
   account whose home holds only `~/.mim` server state and the workspace.
   Granting `shell.run` or `code.run` grants exactly that account's authority.
@@ -949,11 +1198,22 @@ Phase one is not complete until these are automated:
   effect, target, and suggested grant/action text.
 - Concurrent writes to the same server-owned app-data namespace are serialized
   and cannot lose updates.
-- Sharing an existing workspace migrates selected server-owned app data
-  (issues/knowledge/references) while leaving sessions/traces local unless the
-  user explicitly chooses otherwise.
-- Backup and restore round-trip a shared workspace's structured `.mim` state
-  plus operator serve state into a fresh server instance.
+- Invite redemption creates a user-level team-space connection and stores the
+  token outside workspaces; it does not edit the currently open folder's
+  `mim.yaml` or any project file.
+- Joining with no folder open succeeds and leaves a usable team-space
+  connection for later folder linking.
+- Linking a folder to a team space is a separate action with explicit selected
+  domains.
+- If a folder contains local `issues/`, `knowledge/`, or `references/`, the
+  link flow detects them and offers local-only, team target, or import before
+  any domain default changes.
+- Importing existing local state to a team space copies selected
+  issues/knowledge/references with collision reporting while leaving sessions,
+  traces, and the local source records untouched unless the user explicitly
+  chooses cleanup.
+- Backup and restore round-trip a team space's structured state plus operator
+  serve state into a fresh server instance.
 - MCP clients receive `tools/list_changed` when app reload, integration status,
   or policy changes alter the catalog.
 - Phase-four model usage and cost events include the initiating caller
@@ -997,8 +1257,27 @@ Deferred, not refused (see Strategic Direction):
 - Invisible background replica sync (track E). Phase 2 uses today's explicit
   managed sync.
 
+## Decisions Landed
+
+- **Connection store.** User-level team-space connections live under
+  `~/.mim/shared-workspaces.json`. Bearer tokens remain in `~/.mim/keys.env`.
+  Joining a team space never writes to the currently open folder.
+- **Folder link file.** Folder links are personal by default and live under
+  `.mim/shared-workspace.json`, which is already covered by the workspace's
+  gitignored `.mim/` boundary. Existing `mim.yaml sharedWorkspace` entries are
+  still read as a compatibility path, but new invite joins do not write them.
+
 ## Open Questions
 
+- **Product noun.** Use "team space", "shared space", or another term? The
+  important constraint is that user-facing copy must not imply that the
+  current local folder is synced or converted by joining.
+- **Local plus team UI.** Should Board/Knowledge show one target selector, two
+  separate views, or a combined source-labeled view during migration? The
+  answer should be tested with users who already have local issues/KG entries.
+- **Import collision policy.** Which conflicts are auto-skippable, which are
+  auto-mergeable, and which need human review? Issues can key by id/title;
+  Knowledge by id/title/type; References by citation key, DOI, and title.
 - **MCP event push beyond catalog changes.** `tools/list_changed` is required
   in phase one. Is polling `issues.list`/`trace.query` enough for all other
   phase-one updates, or do remote clients need additional notifications?
