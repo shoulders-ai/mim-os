@@ -11,7 +11,7 @@ The app ships three integrated surfaces:
 
 - **Chat** — streaming AI agent with tool use, approval gate, model/effort picker, cost tracking.
 - **Document pane** — unified text/PDF/file-card tabs; text uses CodeMirror 6 with formatting, live preview, comments, citations, export, and ghost suggestions.
-- **Terminal** — multi-tab shell (xterm.js + node-pty); detected CLI coding agents (Claude Code, Codex, Gemini CLI) launch as first-class agent sessions with status, persisted scrollback, and history.
+- **Terminal** — multi-tab shell (xterm.js + node-pty); detected CLI coding agents (Claude Code, Codex, Gemini CLI, Pi) launch as first-class agent sessions with status, persisted scrollback, and history.
 
 Apps extend the shell with custom UI mounted in sandboxed iframes, backed by a WebSocket SDK that gives them access to the full tool registry.
 
@@ -49,7 +49,7 @@ node bin/mim.mjs status --workspace .
 
 ## Release Builds
 
-Release packaging is driven by `.github/workflows/release.yml` on `v*` tags or manual workflow dispatch. The matrix builds macOS arm64/x64, Windows x64, and Linux x64. macOS, Windows, and Linux AppImage builds support app auto-update through GitHub Releases metadata generated during packaging. Linux deb and tar.gz artifacts remain manual download formats; the tar.gz is the fuse-free portable option when AppImage support is missing.
+Release packaging is driven by `.github/workflows/release.yml` on `v*` tags or manual workflow dispatch. The matrix builds macOS arm64/x64, Windows x64, and Linux x64/arm64. macOS, Windows, and Linux AppImage builds support app auto-update through GitHub Releases metadata generated during packaging. Linux deb and tar.gz artifacts remain manual download formats; the tar.gz is the fuse-free portable option when AppImage support is missing.
 
 ## AI Key Setup
 

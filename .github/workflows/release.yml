@@ -39,6 +39,10 @@ jobs:
             platform: linux
             build_args: '--x64'
             label: Linux
+          - os: ubuntu-24.04-arm
+            platform: linux
+            build_args: '--arm64'
+            label: Linux ARM64
           - os: windows-latest
             platform: win
             build_args: '--x64'
@@ -60,7 +64,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Install Linux dependencies
-        if: matrix.os == 'ubuntu-22.04'
+        if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libsecret-1-dev libglib2.0-dev rpm
@@ -125,6 +129,7 @@ jobs:
         run: |
           TAG="${{ github.ref_name }}"
           REPO="${{ github.repository }}"
+          # latest*.yml includes latest-linux-arm64.yml for Linux ARM64 AppImage updates.
           for f in dist-installers/*.dmg dist-installers/*.zip dist-installers/*.exe dist-installers/*.AppImage dist-installers/*.deb dist-installers/*.tar.gz dist-installers/*.blockmap dist-installers/latest*.yml; do
             [ -f "$f" ] && gh release upload "$TAG" "$f" --repo "$REPO" --clobber || true
           done

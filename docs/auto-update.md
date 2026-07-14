@@ -9,8 +9,8 @@ checks in `src/main/packages/updateCheck.ts`.
 |---|---|---|
 | macOS arm64/x64 | dmg + zip | yes |
 | Windows x64 | nsis | yes |
-| Linux x64 | AppImage | yes |
-| Linux x64 | deb, tar.gz | no; manual download |
+| Linux x64/arm64 | AppImage | yes |
+| Linux x64/arm64 | deb, tar.gz | no; manual download |
 
 macOS needs the zip artifact for Squirrel.Mac updates; the dmg remains the
 first-install artifact. Linux update checks only run when `APPIMAGE` is present.
@@ -24,6 +24,7 @@ first-install artifact. Linux update checks only run when `APPIMAGE` is present.
 - `latest-mac.yml`
 - `latest.yml`
 - `latest-linux.yml`
+- `latest-linux-arm64.yml`
 - blockmaps
 
 The release workflow still controls uploads manually. It runs electron-builder
@@ -33,6 +34,11 @@ with `--publish never`, then uploads installers, zip files, blockmaps, and
 macOS arm64 and x64 are built in one macOS job so electron-builder writes one
 arch-aware `latest-mac.yml` containing both zip files. Separate mac jobs would
 clobber `latest-mac.yml`.
+
+Linux x64 and arm64 are built in separate native Linux jobs so native modules
+are rebuilt for the target architecture. Electron Builder writes x64 AppImage
+updates to `latest-linux.yml` and arm64 AppImage updates to
+`latest-linux-arm64.yml`.
 
 `deb.publish: null` keeps deb artifacts out of updater metadata.
 
@@ -76,6 +82,14 @@ notarized builds.
 npm run test
 npm run build
 CSC_IDENTITY_AUTO_DISCOVERY=false npm run dist:mac -- --publish never
+npm run dist:linux -- --x64 --publish never
+```
+
+Run the Linux arm64 packaging smoke on GitHub's `ubuntu-24.04-arm` runner or
+another ARM64 Linux host:
+
+```bash
+npm run dist:linux -- --arm64 --publish never
 ```
 
 After the mac packaging smoke:

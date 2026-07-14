@@ -85,9 +85,9 @@ export default {
     icon: 'resources/icon.png',
     category: 'Development',
     target: [
-      { target: 'AppImage', arch: ['x64'] },
-      { target: 'deb', arch: ['x64'] },
-      { target: 'tar.gz', arch: ['x64'] },
+      { target: 'AppImage', arch: ['x64', 'arm64'] },
+      { target: 'deb', arch: ['x64', 'arm64'] },
+      { target: 'tar.gz', arch: ['x64', 'arm64'] },
     ],
     executableArgs: ['--class=mim'],
   },
