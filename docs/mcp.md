@@ -128,6 +128,9 @@ enabled in Settings > Tools:
 | `slack_bot_status` | `slack.bot.status` |
 | `slack_bot_connect` | `slack.bot.connect` |
 | `slack_bot_disconnect` | `slack.bot.disconnect` |
+| `slack_bot_setup` | `slack.bot.setup` |
+| `slack_bot_check` | `slack.bot.check` |
+| `slack_listener_status` | `slack.listener.status` |
 | `google_status` | `google.status` |
 | `google_set_oauth_client` | `google.setOAuthClient` |
 | `google_connect` | `google.connect` |
@@ -151,7 +154,12 @@ user-controlled through Settings > Tools.
 The live browser tools use the desktop Electron runtime. `browser_open` creates
 or reuses the MCP session's live browser context, and `browser_act` observes,
 clicks, types, scrolls, waits, extracts, shows, hides, or closes that same
-session.
+session. Local desktop MCP clients may open public websites and loopback
+development servers on `localhost`, `*.localhost`, `127.0.0.0/8`, or `::1`.
+Public-page sessions cannot reach loopback subresources, and remote serve-mode
+MCP has no Electron live-browser runtime. The **Use live browser** row in
+Settings > Tools is enabled by default and controls whether both tools appear in
+the MCP catalog.
 
 ### Conditional Integration Data Tools
 
@@ -201,18 +209,21 @@ exposed dynamically alongside the core set — the server queries the active nam
 tool registrations at request time. Named tools without an `inputSchema` are
 silently excluded from the MCP catalog.
 
-When a workspace declares `sharedWorkspace` in `mim.yaml`, desktop and headless
-Mim mount the configured remote named-tool namespaces into the local registry.
-Mounted remote tools use the same underscore MCP naming convention and appear in
-the dynamic MCP catalog. They shadow local app-provided named tools for the
-configured server-owned namespaces, but do not replace local core tools. The
-mount listens to the shared workspace's `/mcp/events` stream and refreshes when
-it receives `notifications/tools/list_changed`.
+When a workspace has an explicit `.mim/shared-workspace.json` folder link,
+desktop and headless Mim mount the configured remote named-tool namespaces into
+the local registry. Existing `mim.yaml sharedWorkspace` declarations are still
+read as a compatibility path. Mounted remote tools use the same underscore MCP
+naming convention and appear in the dynamic MCP catalog. They shadow local
+app-provided named tools for the configured server-owned namespaces, but do not
+replace local core tools. The mount listens to the shared workspace's
+`/mcp/events` stream and refreshes when it receives
+`notifications/tools/list_changed`.
 
 ## Client Config
 
-Settings > Apps shows a **Connect** button next to each installed CLI agent.
-Clicking it runs the agent's native `mcp add` command behind the scenes:
+Settings > Apps shows a **Connect** button next to each installed CLI agent
+that supports Mim's MCP bridge. Clicking it runs the agent's native `mcp add`
+command behind the scenes:
 
 | Agent | Command |
 |---|---|
@@ -220,8 +231,15 @@ Clicking it runs the agent's native `mcp add` command behind the scenes:
 | Codex | `codex mcp add mim -- mim mcp` |
 | Gemini CLI | `gemini mcp add mim mim mcp` |
 
+Pi sessions are supported, but Pi has no built-in MCP client. Its Settings row
+therefore reports **Mim tools unavailable** and does not offer connection controls.
+
 This is a one-time setup — the config persists across sessions. The
 **Disconnect** option is in the agent's Customise section.
+
+After connection, ask the CLI agent to use Mim's `browser_open` MCP tool when a
+local preview is needed. This is separate from ChatGPT's built-in Browser surface,
+which is not attached to CLI sessions.
 
 Manual setup is also possible. The equivalent JSON config (for agents that
 accept it):

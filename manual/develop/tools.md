@@ -38,6 +38,7 @@ approval.
 | `app.disable` | Remove an app from the current user sidebar/capability set. Never touches data folders, install dirs, or workspace shari | **mutate** | ask |
 | `app.trust` | Acknowledge trust for a vendored workspace app on this machine. User-only. | **mutate** | ask |
 | `app.remove` | Remove an app from workspace sharing by deleting the committed mim.yaml pin. Keeps install dirs, data folders, and perso | **mutate** | ask |
+| `app.agents.list` | List mounted agent profiles from enabled apps. | **mutate** | ask |
 
 ## archive
 
@@ -194,6 +195,21 @@ approval.
 | `references.resolveBibliography` | Resolve the active bibliography for a markdown document using the quiet priority order shared by editor and export. | **mutate** | ask |
 | `references.setBibliographyPath` | Set the active workspace bibliography path after validating it is a workspace or mounted-resource .bib file. | **mutate** | ask |
 
+## routine
+
+| tool | description | effect | approval |
+|---|---|---|---|
+| `routine.list` | List workspace routines and validation diagnostics | read | auto |
+| `routine.get` | Get a workspace routine definition | read | auto |
+| `routine.create` | Create a disabled workspace routine file | **mutate** | ask |
+| `routine.pause` | Pause a routine on this machine | **mutate** | ask |
+| `routine.resume` | Enable a routine on this machine after acknowledging its current authority | **mutate** | ask |
+| `routine.run` | Run a workspace routine once as a normal chat turn and wait for completion | **mutate** | ask |
+| `routine.start` | Start a workspace routine once and return its chat session immediately | **mutate** | ask |
+| `routine.webhook.secret.status` | Check whether a webhook-triggered routine has its local signing secret configured | **mutate** | ask |
+| `routine.webhook.secret.set` | Store a webhook-triggered routine signing secret in the OS keychain for this machine | **mutate** | ask |
+| `routine.webhook.secret.delete` | Remove a webhook-triggered routine signing secret from the OS keychain on this machine | **mutate** | ask |
+
 ## search
 
 | tool | description | effect | approval |
@@ -273,6 +289,12 @@ approval.
 | `slack.send` | Post a Slack message to a channel. | external | ask |
 | `slack.connect` | Store a Slack token and verify it. Accepts a file path to a token file (plain text or JSON with token field), or an inli | **mutate** | ask |
 | `slack.disconnect` | Remove a Slack token from the OS keychain. | **mutate** | ask |
+| `slack.bot.status` | Check whether Slack bot and Socket Mode credentials are configured for an account. | read | auto |
+| `slack.bot.connect` | Store Slack bot and app-level Socket Mode tokens and verify both. Accepts a JSON file with bot_token and app_token, or i | **mutate** | ask |
+| `slack.bot.disconnect` | Remove Slack bot and app-level Socket Mode tokens from the OS keychain. | **mutate** | ask |
+| `slack.bot.setup` | Set up a workspace Slack bot in one step: optionally store bot credentials, create/update the Slack routine, and enable  | **mutate** | ask |
+| `slack.bot.check` | Return one workspace Slack bot readiness checklist: routine binding, local enablement, credentials, and live listener av | read | auto |
+| `slack.listener.status` | Check the local Slack Socket Mode listener runtime. | read | auto |
 | `slack.replies` | Read threaded Slack replies for a message. | external | ask |
 
 ## sync
@@ -322,7 +344,7 @@ approval.
 | `web.browser.removeDomain` | Remove a website access domain grant. | **mutate** | ask |
 | `web.browser.open` | Open a visible browser window to set up website access. | external | ask |
 | `web.browser.clearProfile` | Clear cookies, storage, and cache used for website access. | **mutate** | ask |
-| `web.live.open` | Open a Markanywhere-style live browser session and return a bounded page observation with compact actionable refs. | external | ask |
+| `web.live.open` | Open a Markanywhere-style live browser session for public websites or localhost development servers and return a bounded | external | ask |
 | `web.live.act` | Run one Markanywhere-style live browser action: observe, click, type, scroll, wait, extract, show, hide, or close. | external | ask |
 | `web.search` | Search the web via Exa and return results with title, URL, and snippet. Requires EXA_API_KEY. | external | ask |
 
@@ -335,4 +357,8 @@ approval.
 | `workspace.open` | Open a folder as a workspace. Creates .mim/ if needed. | **mutate** | ask |
 | `workspace.orient` | Regenerate the runtime agent context file (.mim/agent-context.md) for the current workspace and return it. | read | auto |
 | `workspace.info` | Get info about the current workspace | read | auto |
+| `workspace.sharedWorkspace.status` | Report saved shared workspace connections and the explicit link for the open folder without exposing bearer tokens. | **mutate** | ask |
+| `workspace.sharedWorkspace.inspectInvite` | Inspect a shared workspace invite for confirmation without redeeming it. | **mutate** | ask |
+| `workspace.sharedWorkspace.join` | Redeem a shared workspace invite and save a user-level connection without exposing the token. | **mutate** | ask |
+| `workspace.sharedWorkspace.link` | Explicitly link the open folder to a saved shared workspace connection. | **mutate** | ask |
 | `workspace.defaultAgentsMd` | Return the default AGENTS.md template content. | **mutate** | ask |

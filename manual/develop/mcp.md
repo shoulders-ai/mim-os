@@ -67,6 +67,11 @@ Present in the MCP catalog when enabled in Settings > Tools:
 | `settings_get` | `settings.get` |
 | `settings_set` | `settings.set` |
 
+`browser_open` uses Mim's desktop Electron browser and accepts public sites plus
+loopback development servers on `localhost`, `*.localhost`, `127.0.0.0/8`, and
+`::1`. Follow-up `browser_act` calls operate the same MCP session. This is Mim's
+browser tool, not ChatGPT's built-in Browser surface.
+
 Connection management tools (`slack_connect`, `slack_disconnect`, `google_connect`, `google_disconnect`, `google_set_oauth_client`, `slack_status`, `google_status`) are also part of the curated surface so CLI agents can set up integrations. `settings_set` cannot write `tools`, `tools.enabled`, or `tools.disabled`.
 
 ## Conditional integration tools
@@ -83,13 +88,15 @@ Named tools from enabled apps are exposed alongside the core set. The server que
 
 ## Client setup
 
-Settings > Apps shows a Connect button next to each installed CLI agent. It runs the agent's native `mcp add` command:
+Settings > Apps shows a Connect button next to each installed CLI agent that supports Mim's MCP bridge. It runs the agent's native `mcp add` command:
 
 | Agent | Command |
 |---|---|
 | Claude Code | `claude mcp add mim -- mim mcp` |
 | Codex | `codex mcp add mim -- mim mcp` |
 | Gemini CLI | `gemini mcp add mim mim mcp` |
+
+Pi sessions are supported, but Pi has no built-in MCP client. Its Settings row reports **Mim tools unavailable** and has no connection controls.
 
 This is one-time setup. The equivalent JSON config for agents that accept it:
 
