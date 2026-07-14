@@ -5,6 +5,8 @@ import { registerWorkspaceTools } from '@main/tools/workspace.js'
 import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { upsertSharedWorkspaceConnection } from '@main/workspace/sharedWorkspaceConnections.js'
+import { readSharedWorkspaceConfig } from '@main/workspace/sharedWorkspaceLinks.js'
 import { writeSharedWorkspaceToken } from '@main/workspace/sharedWorkspaceTokens.js'
 
 describe('Workspace tools', () => {
@@ -184,13 +186,96 @@ describe('Workspace contract tools (status / init / info)', () => {
 
       expect(result).toEqual({
         configured: true,
+        linked: true,
+        linkSource: 'mim-yaml',
         id: 'team-server',
         url: 'https://mim.example.com/mcp',
         namespaces: ['issues.*'],
         tokenConfigured: true,
         tokenKey: 'MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN',
+        connections: [],
       })
       expect(JSON.stringify(result)).not.toContain('tok_secret')
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME
+      else process.env.HOME = oldHome
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('workspace.sharedWorkspace.status reports user connections separately from folder links', async () => {
+    const oldHome = process.env.HOME
+    const home = mkdtempSync(join(tmpdir(), 'mim-ws-home-'))
+    process.env.HOME = home
+    try {
+      upsertSharedWorkspaceConnection({
+        id: 'team-server',
+        name: 'HTA Model',
+        url: 'https://mim.example.com/mcp',
+        namespaces: ['issues.*', 'knowledge.*'],
+      }, {
+        home,
+        callerName: 'Anna',
+        now: () => new Date('2026-07-09T10:00:00.000Z'),
+      })
+      writeSharedWorkspaceToken('team-server', 'tok_secret', { home })
+
+      const result = await tools.call('workspace.sharedWorkspace.status', {}, ctx)
+
+      expect(result).toEqual({
+        configured: false,
+        linked: false,
+        connections: [{
+          id: 'team-server',
+          name: 'HTA Model',
+          url: 'https://mim.example.com/mcp',
+          namespaces: ['issues.*', 'knowledge.*'],
+          callerName: 'Anna',
+          connectedAt: '2026-07-09T10:00:00.000Z',
+          tokenConfigured: true,
+          linked: false,
+        }],
+      })
+      expect(JSON.stringify(result)).not.toContain('tok_secret')
+    } finally {
+      if (oldHome === undefined) delete process.env.HOME
+      else process.env.HOME = oldHome
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('workspace.sharedWorkspace.link explicitly links the open folder without editing mim.yaml', async () => {
+    const oldHome = process.env.HOME
+    const home = mkdtempSync(join(tmpdir(), 'mim-ws-home-'))
+    process.env.HOME = home
+    try {
+      upsertSharedWorkspaceConnection({
+        id: 'team-server',
+        name: 'HTA Model',
+        url: 'https://mim.example.com/mcp',
+        namespaces: ['issues.*', 'knowledge.*'],
+      }, { home })
+      writeSharedWorkspaceToken('team-server', 'tok_secret', { home })
+
+      const result = await tools.call('workspace.sharedWorkspace.link', { id: 'team-server' }, ctx)
+
+      expect(result).toEqual({
+        linked: true,
+        sharedWorkspace: {
+          id: 'team-server',
+          name: 'HTA Model',
+          url: 'https://mim.example.com/mcp',
+          namespaces: ['issues.*', 'knowledge.*'],
+        },
+      })
+      expect(readSharedWorkspaceConfig(dir)).toEqual({
+        id: 'team-server',
+        name: 'HTA Model',
+        url: 'https://mim.example.com/mcp',
+        namespaces: ['issues.*', 'knowledge.*'],
+      })
+      expect(existsSync(join(dir, '.mim', 'shared-workspace.json'))).toBe(true)
+      expect(existsSync(join(dir, 'mim.yaml'))).toBe(false)
     } finally {
       if (oldHome === undefined) delete process.env.HOME
       else process.env.HOME = oldHome

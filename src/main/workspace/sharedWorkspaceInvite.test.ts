@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createServeInvite } from '@main/serve/invites.js'
@@ -7,11 +7,12 @@ import {
   inspectSharedWorkspaceInvite,
   joinSharedWorkspaceFromInvite,
 } from './sharedWorkspaceInvite.js'
+import { listSharedWorkspaceConnections } from './sharedWorkspaceConnections.js'
 import { readSharedWorkspaceToken } from './sharedWorkspaceTokens.js'
 import { parseMimYaml } from './workspaceContract.js'
 
 describe('shared workspace invite join', () => {
-  it('inspects an invite without network access and joins by writing config plus local token storage', async () => {
+  it('inspects an invite without network access and joins by storing a user connection plus local token', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mim-shared-join-'))
     const home = join(root, 'home')
     const workspacePath = join(root, 'workspace')
@@ -82,16 +83,20 @@ describe('shared workspace invite join', () => {
       })
       expect(JSON.stringify(joined)).not.toContain('mim_serve_durable_token')
       expect(readSharedWorkspaceToken('team-server', { home })).toBe('mim_serve_durable_token')
-
-      const config = parseMimYaml(readFileSync(join(workspacePath, 'mim.yaml'), 'utf-8'))
-      expect(config.name).toBe('local-notes')
-      expect(config.apps).toEqual({ board: true })
-      expect(config.sharedWorkspace).toEqual({
+      expect(listSharedWorkspaceConnections({ home })).toEqual([{
         id: 'team-server',
         name: 'HTA Model',
         url: 'https://mim.example.com/mcp',
         namespaces: ['issues.*', 'knowledge.*'],
-      })
+        callerName: 'Anna',
+        connectedAt: expect.any(String),
+      }])
+
+      const config = parseMimYaml(readFileSync(join(workspacePath, 'mim.yaml'), 'utf-8'))
+      expect(config.name).toBe('local-notes')
+      expect(config.apps).toEqual({ board: true })
+      expect(config.sharedWorkspace).toBeUndefined()
+      expect(existsSync(join(workspacePath, '.mim', 'shared-workspace.json'))).toBe(false)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

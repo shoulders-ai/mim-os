@@ -182,7 +182,7 @@ disabled. A committed `mim.yaml` app pin never activates app code by itself.
 - Headless registry: `src/main/headless.ts`
 - MCP stdio bridge: `src/main/mcp/stdio.ts`
 - Shared workspace client token helpers: `src/main/workspace/sharedWorkspaceTokens.ts`
-- Shared workspace invite join: `src/main/workspace/sharedWorkspaceInvite.ts`
+- Shared workspace invite connection and folder link: `src/main/workspace/sharedWorkspace*.ts`
 - Serve helpers: `src/main/serve/`
 - Binary wrapper: `bin/mim.mjs`
 - Build output: `out/main/cli.js`

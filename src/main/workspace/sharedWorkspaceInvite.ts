@@ -1,14 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
-import { basename, join } from 'path'
 import {
   decodeInvitePayload,
   inspectServeInvite,
 } from '@main/serve/invites.js'
-import {
-  parseMimYaml,
-  serializeMimYaml,
-  type MimSharedWorkspaceConfig,
-} from './workspaceContract.js'
+import type { MimSharedWorkspaceConfig } from './workspaceContract.js'
+import { upsertSharedWorkspaceConnection } from './sharedWorkspaceConnections.js'
+import { normalizeSharedWorkspaceConfig } from './sharedWorkspaceLinks.js'
 import { writeSharedWorkspaceToken } from './sharedWorkspaceTokens.js'
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
@@ -25,7 +21,7 @@ export interface SharedWorkspaceInvitePreview {
 }
 
 export interface JoinSharedWorkspaceFromInviteOptions {
-  workspacePath: string
+  workspacePath?: string
   invite: string
   home?: string
   fetchUrl?: FetchLike
@@ -80,7 +76,7 @@ export async function joinSharedWorkspaceFromInvite(
   const callerName = typeof parsed.callerName === 'string' ? parsed.callerName : payload.callerName
 
   writeSharedWorkspaceToken(sharedWorkspace.id, parsed.token, { home: options.home })
-  writeSharedWorkspaceConfig(options.workspacePath, sharedWorkspace)
+  upsertSharedWorkspaceConnection(sharedWorkspace, { home: options.home, callerName })
 
   return {
     joined: true,
@@ -100,29 +96,7 @@ function joinEndpointForMcpUrl(url: string): string {
 }
 
 function normalizeSharedWorkspace(raw: unknown): MimSharedWorkspaceConfig {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('Shared workspace invite response is missing workspace config')
-  }
-  const source = raw as Record<string, unknown>
-  const candidate: MimSharedWorkspaceConfig = {
-    id: typeof source.id === 'string' ? source.id : '',
-    url: typeof source.url === 'string' ? source.url : '',
-    namespaces: Array.isArray(source.namespaces)
-      ? source.namespaces.filter((item): item is string => typeof item === 'string')
-      : [],
-    ...(typeof source.name === 'string' ? { name: source.name } : {}),
-  }
-  const reparsed = parseMimYaml(serializeMimYaml({ name: 'x', sharedWorkspace: candidate })).sharedWorkspace
-  if (!reparsed) throw new Error('Shared workspace invite response has invalid workspace config')
-  return reparsed
-}
-
-function writeSharedWorkspaceConfig(workspacePath: string, sharedWorkspace: MimSharedWorkspaceConfig): void {
-  mkdirSync(workspacePath, { recursive: true })
-  const path = join(workspacePath, 'mim.yaml')
-  const config = existsSync(path)
-    ? parseMimYaml(readFileSync(path, 'utf-8'))
-    : { name: basename(workspacePath) }
-  config.sharedWorkspace = sharedWorkspace
-  writeFileSync(path, serializeMimYaml(config))
+  const normalized = normalizeSharedWorkspaceConfig(raw)
+  if (!normalized) throw new Error('Shared workspace invite response has invalid workspace config')
+  return normalized
 }

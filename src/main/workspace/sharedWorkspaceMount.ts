@@ -1,12 +1,13 @@
-import { existsSync, readFileSync } from 'fs'
-import { join } from 'path'
 import type { ToolDef, ToolRegistry } from '@main/tools/registry.js'
 import { readSharedWorkspaceToken } from './sharedWorkspaceTokens.js'
-import { parseMimYaml, type MimSharedWorkspaceConfig } from './workspaceContract.js'
+import type { MimSharedWorkspaceConfig } from './workspaceContract.js'
+import { readSharedWorkspaceConfig } from './sharedWorkspaceLinks.js'
 import {
   createSharedWorkspaceToolMount,
   type SharedWorkspaceToolMount,
 } from './sharedWorkspaceRemote.js'
+
+export { readSharedWorkspaceConfig } from './sharedWorkspaceLinks.js'
 
 export interface SharedWorkspaceMountLoaderOptions {
   workspacePath: string
@@ -16,16 +17,6 @@ export interface SharedWorkspaceMountLoaderOptions {
   canShadowTool?: (name: string, existing: ToolDef) => boolean
   watchCatalog?: boolean
   onWarning?: (message: string) => void
-}
-
-export function readSharedWorkspaceConfig(workspacePath: string): MimSharedWorkspaceConfig | null {
-  const path = join(workspacePath, 'mim.yaml')
-  if (!existsSync(path)) return null
-  try {
-    return parseMimYaml(readFileSync(path, 'utf-8')).sharedWorkspace ?? null
-  } catch {
-    return null
-  }
 }
 
 export async function openSharedWorkspaceToolMount(
