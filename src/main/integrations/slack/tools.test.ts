@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createTraceLog } from '@main/trace/trace.js'
@@ -55,6 +55,9 @@ describe('Slack tools', () => {
       'slack.bot.status',
       'slack.bot.connect',
       'slack.bot.disconnect',
+      'slack.bot.setup',
+      'slack.bot.check',
+      'slack.listener.status',
       'slack.replies',
     ]) {
       expect(tools.get(name)?.inputSchema, name).toBeDefined()
@@ -323,6 +326,174 @@ describe('Slack tools', () => {
     expect(secrets.dump()).toEqual({
       [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]: 'xoxp-user',
     })
+  })
+
+  it('bot setup creates and enables a Slack routine under the bot account by default', async () => {
+    const secrets = createMemorySecretStore()
+    const listener = {
+      refresh: vi.fn(async () => {}),
+      status: vi.fn(() => ({
+        implemented: true as const,
+        running: true,
+        live: true,
+        accounts: [{
+          account: 'bot',
+          configured: true,
+          connected: true,
+          state: 'open' as const,
+          botUserId: 'U1',
+          teamId: 'T1',
+        }],
+      })),
+    }
+    registerSlackTools(tools, {
+      secrets,
+      listener,
+      http: {
+        async request(input) {
+          if (String(input.url).includes('apps.connections.open')) {
+            return {
+              ok: true,
+              status: 200,
+              async json() { return { ok: true, url: 'wss://socket.slack.test/secret' } },
+              async text() { return '{"ok":true,"url":"wss://socket.slack.test/secret"}' },
+            }
+          }
+          return {
+            ok: true,
+            status: 200,
+            async json() { return { ok: true, team: 'Shoulders', user: 'mim2', user_id: 'U1', bot_id: 'B1', team_id: 'T1' } },
+            async text() { return '{"ok":true,"team":"Shoulders","user":"mim2","user_id":"U1","bot_id":"B1","team_id":"T1"}' },
+          }
+        },
+      },
+    })
+    const tokenFile = join(dir, 'slack-bot.json')
+    writeFileSync(tokenFile, JSON.stringify({
+      bot_token: 'xoxb-bot',
+      app_token: 'xapp-socket',
+    }))
+
+    const result = await tools.call('slack.bot.setup', {
+      file: tokenFile,
+      channel: 'C1',
+      body: 'Answer questions using this workspace.',
+    }, ctx) as Record<string, unknown>
+
+    expect(result.account).toBe('bot')
+    expect(result.configured).toBe(true)
+    expect(result.live).toBe(true)
+    expect(result.ready).toBe(true)
+    expect(JSON.stringify(result)).not.toContain('wss://')
+    expect(result.routine).toMatchObject({
+      id: 'channel-bot',
+      path: 'routines/channel-bot.md',
+      enabled: true,
+      needsEnablement: false,
+      channel: 'C1',
+      mode: 'mention',
+    })
+    expect(result.listener).toMatchObject({ implemented: true, running: true, connected: true, status: 'open' })
+    expect(listener.refresh).toHaveBeenCalledOnce()
+    expect(readFileSync(join(dir, 'routines', 'channel-bot.md'), 'utf-8')).toContain('account: bot')
+    const state = JSON.parse(readFileSync(join(dir, '.mim', 'routines', 'state.json'), 'utf-8'))
+    expect(state.routines['channel-bot']).toMatchObject({ enabled: true, paused: false })
+    expect(secrets.dump()).toMatchObject({
+      [`${MIM_KEYCHAIN_SERVICE}:${slackBotSecretAccount('bot')}`]: 'xoxb-bot',
+      [`${MIM_KEYCHAIN_SERVICE}:${slackAppSecretAccount('bot')}`]: 'xapp-socket',
+    })
+  })
+
+  it('bot setup updates an existing routine instead of making the user edit YAML', async () => {
+    mkdirSync(join(dir, 'routines'), { recursive: true })
+    writeFileSync(join(dir, 'routines', 'channel-bot.md'), [
+      '---',
+      'name: channel-bot',
+      'trigger:',
+      '  slack:',
+      '    account: default',
+      '    channels:',
+      '      - { id: COLD, mode: mention }',
+      'tools: [fs.read]',
+      'approval:',
+      '  allow: [fs.read]',
+      '---',
+      '',
+      'Old prompt.',
+    ].join('\n'))
+    registerSlackTools(tools, { secrets: createMemorySecretStore(), http: fakeHttp({ ok: true }) })
+
+    const result = await tools.call('slack.bot.setup', {
+      account: 'bot',
+      channel: 'CNEW',
+      mode: 'always',
+      body: 'New prompt.',
+      tools: ['fs.read', 'search.files'],
+    }, ctx) as Record<string, unknown>
+
+    const text = readFileSync(join(dir, 'routines', 'channel-bot.md'), 'utf-8')
+    expect(text).toContain('account: bot')
+    expect(text).toContain('id: CNEW')
+    expect(text).toContain('mode: always')
+    expect(text).toContain('New prompt.')
+    expect(result.routine).toMatchObject({
+      id: 'channel-bot',
+      enabled: true,
+      needsEnablement: false,
+      channel: 'CNEW',
+      mode: 'always',
+    })
+    expect(result.credentials).toMatchObject({ configured: false, botTokenConfigured: false, appTokenConfigured: false })
+  })
+
+  it('bot check returns one readiness checklist instead of exposing runtime files', async () => {
+    mkdirSync(join(dir, 'routines'), { recursive: true })
+    writeFileSync(join(dir, 'routines', 'channel-bot.md'), [
+      '---',
+      'name: channel-bot',
+      'trigger:',
+      '  slack:',
+      '    account: bot',
+      '    channels:',
+      '      - { id: C1, mode: mention }',
+      'tools: [fs.read]',
+      'approval:',
+      '  allow: [fs.read]',
+      '---',
+      '',
+      'Answer questions.',
+    ].join('\n'))
+    registerSlackTools(tools, { secrets: createMemorySecretStore(), http: fakeHttp({ ok: true }) })
+
+    const result = await tools.call('slack.bot.check', {}, ctx) as Record<string, unknown>
+
+    expect(result).toMatchObject({
+      account: 'bot',
+      channel: 'C1',
+      configured: false,
+      live: false,
+      ready: false,
+      routine: {
+        exists: true,
+        id: 'channel-bot',
+        enabled: false,
+        needsEnablement: true,
+      },
+      credentials: {
+        configured: false,
+        botTokenConfigured: false,
+        appTokenConfigured: false,
+      },
+      listener: {
+        implemented: false,
+        running: false,
+        connected: false,
+      },
+    })
+    expect(result.nextActions).toEqual([
+      'Run slack_bot_setup to connect credentials and enable the workspace routine.',
+      'Open the Mim desktop app to run the local Slack listener.',
+    ])
   })
 
   it('replies reads threaded messages', async () => {

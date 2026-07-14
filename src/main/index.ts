@@ -39,8 +39,9 @@ import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
 import { registerToolchainTools } from '@main/tools/toolchain.js'
 import { registerCodeTools } from '@main/tools/code.js'
 import { registerSessionTools } from '@main/sessions.js'
-import { registerRoutineTools, runRoutineOnce } from '@main/tools/routines.js'
+import { createRoutineChatSession, registerRoutineTools, runRoutineOnce } from '@main/tools/routines.js'
 import { createRoutineAutomation } from '@main/routines/automation.js'
+import { loadRoutineCatalog } from '@main/routines/routines.js'
 import { registerArchiveTools } from '@main/tools/archive.js'
 import { registerAiTools } from '@main/ai/ai.js'
 import { registerPtyTools, spawnPtyProcess, writePty } from '@main/pty.js'
@@ -80,6 +81,8 @@ import {
 import { parseAllowedHttpUrl } from '@main/web/urlPolicy.js'
 import { registerAccountTools, readAccountToken, setAccountDev } from '@main/tools/account.js'
 import { registerSlackTools } from '@main/integrations/slack/tools.js'
+import { SlackIntegration } from '@main/integrations/slack/client.js'
+import { createSlackSocketModeListener } from '@main/integrations/slack/listener.js'
 import { registerGoogleTools } from '@main/integrations/google/tools.js'
 import { SLACK_MCP_TOOL_SPECS, GOOGLE_MCP_TOOL_SPECS } from '@main/server/server.js'
 import { registerTelemetryTools } from '@main/tools/telemetry.js'
@@ -377,6 +380,33 @@ function extnameLower(path: string): string {
   return extname(path).toLowerCase().replace(/^\./, '')
 }
 
+async function latestAssistantReply(tools: ToolRegistry, sessionId: string): Promise<string | null> {
+  const session = await tools.call('session.get', { id: sessionId }, { actor: 'system' }) as { messages?: unknown[] }
+  const messages = Array.isArray(session.messages) ? session.messages : []
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (!isRecord(message) || message.role !== 'assistant') continue
+    const text = assistantMessageText(message)
+    if (text) return text
+  }
+  return null
+}
+
+function assistantMessageText(message: Record<string, unknown>): string | null {
+  const parts = Array.isArray(message.parts) ? message.parts : []
+  const partText = parts
+    .map(part => isRecord(part) && part.type === 'text' && typeof part.text === 'string' ? part.text : '')
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+  if (partText) return partText
+  return typeof message.content === 'string' && message.content.trim() ? message.content.trim() : null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
 async function boot(): Promise<void> {
   let tools!: ToolRegistry
   const appVersion = app.getVersion()
@@ -416,6 +446,7 @@ async function boot(): Promise<void> {
   let packageEnablement: ReturnType<typeof createPackageEnablementStore> | null = null
   let appUpdater: ReturnType<typeof initAutoUpdater> | null = null
   let routineAutomation: ReturnType<typeof createRoutineAutomation> | null = null
+  let slackListener: ReturnType<typeof createSlackSocketModeListener> | null = null
 
   // Git mirrors live in a single per-machine cache shared across workspaces, so
   // a repo is cloned once no matter how many workspaces mount it.
@@ -605,12 +636,26 @@ async function boot(): Promise<void> {
   })
   registerSessionTools(tools)
   const packageSecretStore = createKeytarSecretStore()
+  slackListener = createSlackSocketModeListener({
+    getWorkspacePath: () => tools.getWorkspacePath(),
+    getRoutines: () => {
+      const ws = tools.getWorkspacePath()
+      if (!ws) return []
+      return loadRoutineCatalog(ws, { knownTools: new Set(tools.list().map(tool => tool.name)) }).routines
+    },
+    runRoutine: (routine, context) => runRoutineOnce(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+    getSessionReplyText: (sessionId) => latestAssistantReply(tools, sessionId),
+    slack: new SlackIntegration({ secrets: packageSecretStore }),
+    trace: traceLog,
+  })
   registerRoutineTools(tools, {
     getAgentMounts: () => agentMountsRef,
     runRoutine: (routine, context) => runRoutineOnce(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+    startRoutine: (routine, context) => createRoutineChatSession(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
     secrets: packageSecretStore,
     onChange: async () => {
       await routineAutomation?.refresh()
+      await slackListener?.refresh()
       broadcastToRenderers('routines:changed', {})
       server?.broadcast('routines:changed', {})
     },
@@ -654,7 +699,7 @@ async function boot(): Promise<void> {
       getWorkspacePath: () => tools.getWorkspacePath(),
     }),
   })
-  const slackMcp = registerSlackTools(tools)
+  const slackMcp = registerSlackTools(tools, { secrets: packageSecretStore, listener: slackListener })
   const googleMcp = registerGoogleTools(tools, {
     openExternal: (url) => shell.openExternal(url),
   })
@@ -801,7 +846,10 @@ async function boot(): Promise<void> {
     secrets: packageSecretStore,
     trace: traceLog,
   })
-  routineAutomationStop = () => routineAutomation?.stop() ?? Promise.resolve()
+  routineAutomationStop = async () => {
+    await routineAutomation?.stop()
+    await slackListener?.stop()
+  }
   const packageRuntime = createPackageRuntime({
     packages,
     enablement: packageEnablement,
@@ -958,6 +1006,9 @@ async function boot(): Promise<void> {
       }),
   })
   await routineAutomation?.start()
+  await slackListener?.refresh().catch((err) => {
+    console.error('[slack] listener refresh failed', err)
+  })
   await routineAutomation?.tick().catch((err) => {
     console.error('[routines] initial tick failed', err)
   })
@@ -1020,6 +1071,9 @@ async function boot(): Promise<void> {
     await routineAutomation?.refresh()
     await routineAutomation?.tick().catch((err) => {
       console.error('[routines] workspace tick failed', err)
+    })
+    await slackListener?.refresh().catch((err) => {
+      console.error('[slack] workspace listener refresh failed', err)
     })
     mainWindow?.webContents.send('packages:changed', packages!.list())
     // Close all pop-outs before broadcasting the workspace change — they are
@@ -1172,7 +1226,7 @@ async function boot(): Promise<void> {
       actor: 'user',
       sessionId: typeof options.sessionId === 'string' ? options.sessionId : undefined,
     })
-    if (tool === 'workspace.sharedWorkspace.join') {
+    if (tool === 'workspace.sharedWorkspace.link') {
       await remountSharedWorkspaceTools()
       const path = tools.getWorkspacePath()
       broadcastToRenderers('workspace:changed', path)

@@ -1,10 +1,11 @@
 # Slack Listener
 
-Status: proposal with foundations in place. Routine `slack` trigger validation,
-duplicate binding diagnostics, bot/app-token credential tools, a metadata-only
-event ledger, and socket-free dispatch helpers are implemented. Live Socket
-Mode lifecycle, threaded sessions, and replies remain proposal work.
-[mim-serve.md](mim-serve.md) remains the future always-on host.
+Status: desktop runtime implemented for the core loop. Routine `slack` trigger
+validation, duplicate binding diagnostics, bot/app-token credential tools, a
+metadata-only event ledger, one-shot setup/check tools, Socket Mode lifecycle,
+event dispatch, and bot thread replies are implemented. Durable per-thread
+sessions, debounce/replay, parked approvals, and [mim-serve.md](mim-serve.md)
+as an always-on host remain proposal work.
 
 Mim hosts a Slack-triggered routine: a Socket Mode listener in the main
 process watches configured channels and answers by running a mounted agent,
@@ -28,10 +29,9 @@ models. What is genuinely new here is the conversational shape: a Slack
 thread is a continuing conversation, so fires map to a persistent
 per-thread session rather than one-shot runs.
 
-Readiness gate: Phase 0/1 can land as internal foundations, but the feature is
-not product-ready until routines provide the runner, routine-scoped grants,
-parking, and per-machine enablement ack. Shipping "connect a bot token and let
-agents post as it" before that would muddy Mim's model.
+Readiness gate: the user-facing path is `slack.bot.setup`/`slack.bot.check`,
+not routine-file editing or hidden runtime-state inspection. The desktop app
+must be open for Socket Mode delivery; `mim serve` is the future always-on host.
 
 ## Why Socket Mode, not the personal token
 
@@ -70,11 +70,11 @@ out, so no public endpoint, no tunnel, no reverse proxy.
   #general" cannot retarget the send. Broader Slack sends are an explicit
   allowlist entry a user must opt into, and earn the load-time warning
   diagnostic.
-- **Threads are sessions.** Each Slack thread maps to one chat session
-  carrying the agent's identity — visible in Activity, replayable in
-  History, fully traced. Follow-up messages in the thread continue the same
-  session, so the bot has conversation memory. The operator surface is Mim
-  itself, not a dashboard.
+- **Threads should become sessions.** The implemented desktop loop creates a
+  routine session per Slack event and replies in the originating thread. The
+  north star is one durable chat session per Slack thread, carrying the agent's
+  identity, visible in Activity, replayable in History, and reusable for
+  follow-up memory. The operator surface is Mim itself, not a dashboard.
 - **Slack text has an explicit retention boundary.** Slack thread content is
   persisted only where the feature needs it: the per-thread session transcript
   under `.mim/sessions/`. Trace payload blobs, tool result blobs, event
@@ -159,51 +159,46 @@ The body already exists in the session transcript as the assistant response.
 New code in `src/main/integrations/slack/` beside the existing client;
 the routine runner and gate mechanics come from routines phases 1 and 3.
 
-- **Socket lifecycle** (`listener.ts`): current code implements the
-  socket-free decision helpers: enabled-routine binding extraction,
-  configured-channel matching, mention matching against the bot user id,
-  bot/self-message exclusion, duplicate suppression, and conversion of a
-  matching Slack message into a routine fire. The deferred socket host uses
-  `apps.connections.open` with the app token → wss URL → the existing `ws`
-  dependency (no `@slack/bolt`, no Slack SDK), `hello`/`disconnect` frame
-  handling, refresh-before-expiry reconnect, jittered backoff, and envelope
-  ack within 3s.
+- **Socket lifecycle** (`listener.ts`): implemented with the existing `ws`
+  dependency, not `@slack/bolt` or a Slack SDK. The listener opens Socket Mode
+  URLs with `apps.connections.open`, keeps one socket per enabled Slack routine
+  account, handles `hello` and `disconnect` frames, reconnects with bounded
+  backoff, extracts enabled-routine bindings, matches mention/always modes,
+  ignores bot/self messages, records metadata in the ledger, acknowledges
+  event envelopes after local metadata persistence, dispatches matching events
+  into the routine runner, and posts the final assistant text back to the
+  Slack thread.
 - **Durable event ledger** (`eventLedger.ts`): implemented as a bounded
   metadata ledger under `.mim/slack/event-ledger.json`, keyed by Slack
   `event_id` (`team_id`, `channel`, `ts`, `thread_ts`, event type, routine id,
   received time, status). It detects duplicates, lists `received`/`queued`
   replay candidates, prunes old records, and sanitizes loaded records so raw
-  message text cannot be carried forward. The deferred socket host must write
-  to this ledger before acking an envelope; if persistence fails, do not ack so
-  Slack can redeliver.
+  message text cannot be carried forward. The socket host records metadata
+  before acknowledging an event envelope so Slack can redeliver if local
+  persistence fails.
 - **Per-thread debounce and queueing** (`threadQueue.ts`): rapid message bursts
   become one routine fire. Overlapping fires on one thread queue behind the
   active turn because a conversation is ordered; fires on different threads
   run concurrently up to the routine runner's limits. Queue records contain
   event ids and message metadata only; text is read from the in-memory event
   while live and re-fetched from Slack during restart replay.
-- **Conversational fires** (`responder.ts`): a fire resolves or creates
-  the thread's session (session record carries
-  `routineId` and `slackThread: { account, team_id, channel, thread_ts }`,
-  extending the same metadata path as `agentId`), fetches bounded thread
-  context via `conversations.replies` on first touch, appends new messages as
-  a fenced untrusted user turn, runs the routine through the standard runner,
-  and posts the final text via the pinned reply helper. Turn failures post a
-  short error notice to the thread and mark the run errored; errors never take
-  down the listener.
-- **Pinned reply helper** (`threadReply.ts`): internal runner-owned Slack send
-  using the bot token. It accepts only `{ account, channel, thread_ts, text }`
-  where channel/thread come from the fire, not the model. It is not exposed as
-  a general AI/MCP tool. If implemented as a registry tool for trace/gate
-  consistency, the gate marks it system/routine-only and the AI tool map never
-  includes it.
+- **Routine fires and replies** (`listener.ts` + routine runner): a fire creates
+  a normal routine session, passes Slack channel/thread/user metadata as trigger
+  payload, runs through the standard routine runner and gate, extracts the
+  final assistant text from the session transcript, and posts it via the
+  internal bot-token thread reply helper. Turn failures post a short error
+  notice to the thread and mark the ledger record errored; errors do not take
+  down the listener. Durable per-thread session reuse remains deferred.
+- **Pinned reply helper** (`client.ts`): internal runner-owned Slack send using
+  the bot token. It accepts only `{ account, channel, thread_ts, text }` where
+  channel/thread come from the fire, not the model. It is not exposed as a
+  general AI/MCP tool.
 - **Lifecycle**: the listener starts when the active workspace has at
   least one enabled `slack`-triggered routine and stops on workspace
   switch/close. One listener connection per app instance per account.
   Kernel tool `slack.listener.status` reports socket state, connected-as
-  identity, bound channels, and last-event age; `workspace.orient`'s
-  health block includes it (the routines heartbeat lesson: "socket dead"
-  must be distinguishable from "bot alive but failing every turn").
+  identity, and last-event age; `slack.bot.check` folds this into the
+  user-facing readiness checklist.
 
 ## Phases
 
@@ -211,9 +206,11 @@ the routine runner and gate mechanics come from routines phases 1 and 3.
 
 Implemented: token-kind-aware storage, bot auth, Socket Mode URL verification,
 internal bot thread reply helper, `slack.bot.status`, `slack.bot.connect`,
-`slack.bot.disconnect`, `slack_bot_connect`, `slack_bot_disconnect`, gate
-policy, and trace secret handling. The live listener does not consume these
-credentials yet.
+`slack.bot.disconnect`, `slack.bot.setup`, `slack.bot.check`,
+`slack_bot_connect`, `slack_bot_disconnect`, `slack_bot_setup`,
+`slack_bot_check`, `slack.listener.status`, gate policy, and trace secret
+handling. The desktop listener consumes these credentials when at least one
+enabled Slack-triggered routine references the account.
 
 - `SlackIntegration` (`client.ts`) gains token-kind-aware storage
   (`slack:{account}` existing personal/user token,
@@ -271,15 +268,14 @@ credentials yet.
 
 ### Phase 1 — Listener core
 
-Partially implemented. No responder yet.
+Implemented for the desktop single-turn loop.
 
-- Implemented: `listener.ts` pure helpers for enabled-routine binding,
+- Implemented: `listener.ts` helpers for enabled-routine binding,
   mention/always-mode routing, bot/self-message exclusion, dedup before fire,
-  and metadata-only queueing into an injected routine fire callback. No live
-  Slack in the test suite.
-- Deferred: socket state machine (idle → connecting → open → reconnecting),
-  envelope ack, reconnect/backoff, per-thread debounce, restart replay fetch,
-  `slack.listener.status`, and orient health.
+  metadata-only ledger writes, Socket Mode connection lifecycle, envelope ack,
+  reconnect/backoff, injected routine fire callback, and bot thread replies.
+- Deferred: per-thread debounce, restart replay fetch, durable per-thread
+  session reuse, parked approvals, and orient health.
 - `eventLedger.ts`: implemented durable metadata persistence, duplicate event
   suppression, replayable status listing, bounded pruning, and no message text
   persisted.

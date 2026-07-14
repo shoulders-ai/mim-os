@@ -1,10 +1,13 @@
+import { EventEmitter } from 'events'
 import { describe, expect, it, vi } from 'vitest'
 import type { RoutineDefinition } from '@main/routines/routines.js'
 import { createMemorySlackEventLedger } from './eventLedger.js'
 import {
+  createSlackSocketModeListener,
   createSlackRoutineDispatcher,
   messageMentionsBot,
   slackRoutineBindings,
+  type SlackWebSocketLike,
 } from './listener.js'
 
 function routine(id: string, channel: string, mode: 'mention' | 'always' = 'mention'): RoutineDefinition {
@@ -86,7 +89,7 @@ describe('Slack routine listener foundations', () => {
       },
     }))
     expect(ledger.get('Ev1')).toMatchObject({
-      status: 'queued',
+      status: 'dispatched',
       routineId: 'support-bot',
       channel: 'C1',
     })
@@ -117,6 +120,45 @@ describe('Slack routine listener foundations', () => {
 
     expect(duplicate.status).toBe('duplicate')
     expect(onFire).toHaveBeenCalledTimes(1)
+  })
+
+  it('dedupes app_mention and message events for the same Slack message', async () => {
+    const onFire = vi.fn(async () => {})
+    const ledger = createMemorySlackEventLedger()
+    const dispatcher = createSlackRoutineDispatcher({
+      ledger,
+      botUserId: 'U_BOT',
+      getRoutines: () => [routine('support-bot', 'C1')],
+      onFire,
+    })
+
+    await expect(dispatcher.handleMessage({
+      eventId: 'EvMessage',
+      account: 'default',
+      teamId: 'T1',
+      type: 'message',
+      channel: 'C1',
+      ts: '100.1',
+      user: 'U_USER',
+      text: '<@U_BOT> help',
+    })).resolves.toMatchObject({ status: 'queued', routineId: 'support-bot' })
+
+    await expect(dispatcher.handleMessage({
+      eventId: 'EvMention',
+      account: 'default',
+      teamId: 'T1',
+      type: 'app_mention',
+      channel: 'C1',
+      ts: '100.1',
+      user: 'U_USER',
+      text: '<@U_BOT> help',
+    })).resolves.toMatchObject({ status: 'ignored', reason: 'duplicate-message' })
+
+    expect(onFire).toHaveBeenCalledTimes(1)
+    expect(ledger.get('EvMention')).toMatchObject({
+      status: 'ignored',
+      reason: 'duplicate-message',
+    })
   })
 
   it('ignores bot messages and mention-mode messages without a mention', async () => {
@@ -173,5 +215,170 @@ describe('Slack routine listener foundations', () => {
       user: 'U_USER',
       text: 'help',
     })).resolves.toMatchObject({ status: 'queued', routineId: 'support-bot' })
+  })
+})
+
+class FakeSocket extends EventEmitter implements SlackWebSocketLike {
+  sent: string[] = []
+  closed = false
+
+  send(data: string): void {
+    this.sent.push(data)
+  }
+
+  close(): void {
+    this.closed = true
+    this.emit('close', 1000, Buffer.from('closed'))
+  }
+}
+
+async function flush(): Promise<void> {
+  await new Promise(resolve => setImmediate(resolve))
+  await new Promise(resolve => setImmediate(resolve))
+}
+
+describe('Slack Socket Mode listener', () => {
+  it('acks events, runs the matching routine, and posts the assistant reply in the Slack thread', async () => {
+    const socket = new FakeSocket()
+    const ledger = createMemorySlackEventLedger()
+    const slack = {
+      hasBotTokens: vi.fn(async () => ({ configured: true, botTokenConfigured: true, appTokenConfigured: true })),
+      botAuthTest: vi.fn(async () => ({ user_id: 'U_BOT', team_id: 'T1' })),
+      connectionsOpen: vi.fn(async () => 'wss://slack.example/socket'),
+      botPostThreadReply: vi.fn(async () => ({ ok: true })),
+    }
+    const runRoutine = vi.fn(async () => ({ sessionId: 's1', routineRunId: 'rr1', status: 'done' as const }))
+    const listener = createSlackSocketModeListener({
+      getWorkspacePath: () => '/workspace',
+      getRoutines: () => [routine('support-bot', 'C1')],
+      createLedger: () => ledger,
+      slack,
+      runRoutine,
+      getSessionReplyText: vi.fn(async () => 'Here is the answer.'),
+      socketFactory: vi.fn(() => socket),
+    })
+
+    await listener.refresh()
+    socket.emit('open')
+    socket.emit('message', JSON.stringify({
+      envelope_id: 'En1',
+      type: 'events_api',
+      payload: {
+        event_id: 'Ev1',
+        team_id: 'T1',
+        event: {
+          type: 'app_mention',
+          channel: 'C1',
+          ts: '100.1',
+          user: 'U_USER',
+          text: '<@U_BOT> help',
+        },
+      },
+    }))
+    await flush()
+
+    expect(socket.sent).toContain(JSON.stringify({ envelope_id: 'En1' }))
+    expect(runRoutine).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'support-bot' }),
+      {
+        trigger: 'slack',
+        payload: {
+          slack: expect.objectContaining({
+            account: 'default',
+            teamId: 'T1',
+            channel: 'C1',
+            ts: '100.1',
+            threadTs: '100.1',
+            user: 'U_USER',
+          }),
+          text: '<@U_BOT> help',
+        },
+      },
+    )
+    expect(slack.botPostThreadReply).toHaveBeenCalledWith({
+      account: 'default',
+      channel: 'C1',
+      threadTs: '100.1',
+      text: 'Here is the answer.',
+    })
+    expect(ledger.get('Ev1')).toMatchObject({ status: 'dispatched', routineId: 'support-bot' })
+    expect(listener.status().accounts).toEqual([
+      expect.objectContaining({ account: 'default', state: 'open', connected: true, botUserId: 'U_BOT' }),
+    ])
+  })
+
+  it('reports missing credentials without opening a socket', async () => {
+    const socketFactory = vi.fn(() => new FakeSocket())
+    const listener = createSlackSocketModeListener({
+      getWorkspacePath: () => '/workspace',
+      getRoutines: () => [routine('support-bot', 'C1')],
+      createLedger: () => createMemorySlackEventLedger(),
+      slack: {
+        hasBotTokens: vi.fn(async () => ({ configured: false, botTokenConfigured: false, appTokenConfigured: false })),
+        botAuthTest: vi.fn(),
+        connectionsOpen: vi.fn(),
+        botPostThreadReply: vi.fn(),
+      },
+      runRoutine: vi.fn(),
+      getSessionReplyText: vi.fn(),
+      socketFactory,
+    })
+
+    await listener.refresh()
+
+    expect(socketFactory).not.toHaveBeenCalled()
+    expect(listener.status()).toMatchObject({
+      implemented: true,
+      running: false,
+      live: false,
+      accounts: [
+        {
+          account: 'default',
+          state: 'not_configured',
+          configured: false,
+          connected: false,
+        },
+      ],
+    })
+  })
+
+  it('marks a dispatched event as error and replies in thread when the routine run fails', async () => {
+    const socket = new FakeSocket()
+    const ledger = createMemorySlackEventLedger()
+    const listener = createSlackSocketModeListener({
+      getWorkspacePath: () => '/workspace',
+      getRoutines: () => [routine('support-bot', 'C1')],
+      createLedger: () => ledger,
+      slack: {
+        hasBotTokens: vi.fn(async () => ({ configured: true, botTokenConfigured: true, appTokenConfigured: true })),
+        botAuthTest: vi.fn(async () => ({ user_id: 'U_BOT', team_id: 'T1' })),
+        connectionsOpen: vi.fn(async () => 'wss://slack.example/socket'),
+        botPostThreadReply: vi.fn(async () => ({ ok: true })),
+      },
+      runRoutine: vi.fn(async () => { throw new Error('model unavailable') }),
+      getSessionReplyText: vi.fn(),
+      socketFactory: vi.fn(() => socket),
+    })
+
+    await listener.refresh()
+    socket.emit('open')
+    socket.emit('message', JSON.stringify({
+      envelope_id: 'En1',
+      type: 'events_api',
+      payload: {
+        event_id: 'Ev1',
+        team_id: 'T1',
+        event: {
+          type: 'app_mention',
+          channel: 'C1',
+          ts: '100.1',
+          user: 'U_USER',
+          text: '<@U_BOT> help',
+        },
+      },
+    }))
+    await flush()
+
+    expect(ledger.get('Ev1')).toMatchObject({ status: 'error', reason: 'model unavailable' })
   })
 })

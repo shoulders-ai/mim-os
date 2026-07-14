@@ -48,10 +48,11 @@ defaults:
 Source:
 
 - Client: `src/main/integrations/slack/client.ts`
+- Listener: `src/main/integrations/slack/listener.ts`
 - Tools: `src/main/integrations/slack/tools.ts`
 - AI tools: `src/main/integrations/slack/aiTools.ts`
 - Policy: `src/main/integrations/slack/policy.ts`
-- Tests: `src/main/integrations/slack/client.test.ts`, `src/main/integrations/slack/tools.test.ts`, `src/main/integrations/slack/aiTools.test.ts`, `src/main/integrations/slack/policy.test.ts`
+- Tests: `src/main/integrations/slack/client.test.ts`, `src/main/integrations/slack/listener.test.ts`, `src/main/integrations/slack/tools.test.ts`, `src/main/integrations/slack/aiTools.test.ts`, `src/main/integrations/slack/policy.test.ts`
 - Settings UI: `src/renderer/components/settings/ConnectionsSettingsPanel.vue`
 
 Tools:
@@ -59,6 +60,7 @@ Tools:
 - `slack.setToken`, `slack.deleteToken`, `slack.status`
 - `slack.connect` (accepts `file` for file-based token ingestion), `slack.disconnect`
 - `slack.bot.status`, `slack.bot.connect`, `slack.bot.disconnect`
+- `slack.bot.setup`, `slack.bot.check`, `slack.listener.status`
 - `slack.channels`, `slack.users`, `slack.dms`
 - `slack.history`, `slack.search`, `slack.replies`
 - `slack.send`
@@ -67,8 +69,19 @@ Tools:
 `slack.bot.connect` is the Slack-triggered routine setup path. It stores both
 the bot token and app-level Socket Mode token, verifies the bot with
 `auth.test`, verifies Socket Mode with `apps.connections.open`, and never
-returns the websocket URL. The live Socket Mode listener and thread reply loop
-are still listener-runtime work; credential setup is implemented.
+returns the websocket URL. The desktop runtime owns the live Socket Mode
+listener: it opens one websocket per enabled Slack routine account, acknowledges
+event envelopes after metadata is recorded locally, dispatches matching Slack
+messages into the routine runner, and posts the assistant's final response back
+to the Slack thread as the bot.
+
+For user-facing bot setup, prefer `slack.bot.setup`. It accepts the channel,
+optional credential file/token fields, optional account, mode, and prompt body;
+then creates or updates the Slack routine, enables it locally, verifies
+credentials when provided, and returns a readiness checklist. `slack.bot.check`
+is the diagnostic surface for agents and Settings: it reports routine binding,
+local enablement, credentials, and live listener state without inspecting
+workspace runtime files.
 
 ### Tool Policy
 
@@ -102,7 +115,8 @@ Settings > Tools policy before calls reach the registry.
 ### MCP Exposure
 
 `slack.status`, `slack.connect`, `slack.disconnect`, `slack.bot.status`,
-`slack.bot.connect`, and `slack.bot.disconnect` are present unless disabled in
+`slack.bot.connect`, `slack.bot.disconnect`, `slack.bot.setup`,
+`slack.bot.check`, and `slack.listener.status` are present unless disabled in
 Settings > Tools. Data tools (`slack.channels`, `slack.users`,
 `slack.dms`, `slack.history`, `slack.replies`, `slack.search`, `slack.send`)
 appear conditionally when a token is configured and the corresponding tool row
@@ -166,6 +180,8 @@ always-present tools in the chat profile:
 - `slack_disconnect()` — remove the Slack user/personal token
 - `slack_bot_connect(file?)` — store and verify Slack bot and Socket Mode tokens from file
 - `slack_bot_disconnect()` — remove Slack bot listener tokens
+- `slack_bot_setup(channel, file?, body?)` — create/update and enable the workspace Slack bot routine, optionally storing/verifying credentials
+- `slack_bot_check()` — return the workspace Slack bot readiness checklist, including live listener state
 - `connections_configure(integration, ...)` — update Settings > Tools capability rows
 
 File-based credential ingestion reads secrets server-side in the main process —
@@ -243,8 +259,8 @@ approval card's caution styling. All Slack/Google integration tools are
 
 - Integration reads (search, history, channels, replies, events, Gmail/Drive/Docs/Sheets reads) are `external` → approval in Normal and Strict.
 - Outbound send/create/write tools (`gmail.send`, `calendar.create`, `sheets.write`, `sheets.append`, kernel `slack.send`) are `external` and additionally `high` risk, so the card adds a caution treatment.
-- Secret setup and OAuth exchange tools mutate stored credentials; `google.exchangeCode` is `external`. `slack.connect`, `slack.disconnect`, `slack.bot.connect`, `slack.bot.disconnect`, `google.connect`, and `google.disconnect` are `secrets`/`high`.
-- Status checks (`slack.status`, `google.status`) are treated as reads and do not prompt.
+- Secret setup and OAuth exchange tools mutate stored credentials; `google.exchangeCode` is `external`. `slack.connect`, `slack.disconnect`, `slack.bot.connect`, `slack.bot.disconnect`, `slack.bot.setup`, `google.connect`, and `google.disconnect` are `secrets`/`high`.
+- Status checks (`slack.status`, `slack.listener.status`, `google.status`) are treated as reads and do not prompt.
 - Packages cannot call personal Slack or Google integration tools in runtime v1.
 
 The event log recursively redacts tokens, keys, secrets, subjects, snippets, message bodies, text, and content-like fields before summaries are persisted.

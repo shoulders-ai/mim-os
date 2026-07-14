@@ -230,13 +230,14 @@ describe('ToolRegistry', () => {
       'google.connect',
       'google.exchangeCode',
       'slack.bot.connect',
+      'slack.bot.setup',
     ]) {
       tools.register({ name, description: 'Secret', execute: async () => ({ value: 'sk-secret' }) })
       await tools.call(name, {}, { actor: 'user' })
     }
 
     const results = readTraceLines(dir).filter(l => l.kind === 'tool.result')
-    expect(results).toHaveLength(9)
+    expect(results).toHaveLength(10)
     for (const result of results) expect(result.payloadRef).toBeUndefined()
   })
 
