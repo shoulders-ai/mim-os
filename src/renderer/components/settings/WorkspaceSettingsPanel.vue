@@ -7,12 +7,23 @@ import SettingRow from './SettingRow.vue'
 
 interface SharedWorkspaceStatus {
   configured: boolean
+  linked?: boolean
   id?: string
   name?: string
   url?: string
   namespaces?: string[]
   tokenConfigured?: boolean
   tokenKey?: string
+  connections?: SharedWorkspaceConnection[]
+}
+
+interface SharedWorkspaceConnection {
+  id: string
+  name?: string
+  url: string
+  namespaces: string[]
+  tokenConfigured: boolean
+  linked: boolean
 }
 
 interface SharedWorkspaceInvitePreview {
@@ -30,16 +41,30 @@ const invitePreview = ref<SharedWorkspaceInvitePreview | null>(null)
 const inviteError = ref('')
 const joinMessage = ref('')
 const joining = ref(false)
+const linking = ref(false)
+
+const primaryConnection = computed(() => {
+  const connections = sharedWorkspace.value?.connections ?? []
+  return connections.find(connection => connection.linked) ?? connections[0] ?? null
+})
 
 const sharedWorkspaceLabel = computed(() => {
   if (!sharedWorkspace.value) return 'Loading'
-  if (!sharedWorkspace.value.configured) return 'Local only'
+  if (!sharedWorkspace.value.configured) {
+    if (!primaryConnection.value) return 'Local only'
+    return primaryConnection.value.tokenConfigured ? 'Connection ready' : 'Reconnect needed'
+  }
   return sharedWorkspace.value.tokenConfigured ? 'Connected' : 'Invite needed'
 })
 
 const sharedWorkspaceDesc = computed(() => {
   if (!sharedWorkspace.value) return ''
-  if (!sharedWorkspace.value.configured) return 'Opening a folder is enough. Join only when someone sends an invite'
+  if (!sharedWorkspace.value.configured) {
+    if (!primaryConnection.value) return 'Opening a folder is enough. Connect only when someone sends an invite'
+    return primaryConnection.value.tokenConfigured
+      ? `Link this folder to use ${primaryConnectionName.value}`
+      : `Ask for a fresh invite to reconnect ${primaryConnectionName.value}`
+  }
   return sharedWorkspace.value.tokenConfigured
     ? `${sharedWorkspaceName.value} provides ${namespaceLabel(sharedWorkspace.value.namespaces ?? [])}`
     : 'Ask for a fresh invite to reconnect this workspace'
@@ -51,21 +76,29 @@ const sharedWorkspaceName = computed(() =>
 
 const sharedWorkspaceHost = computed(() => {
   const url = sharedWorkspace.value?.url
-  if (!url) return ''
-  try {
-    return new URL(url).host
-  } catch {
-    return url
-  }
+  return urlHost(url)
 })
 
+const primaryConnectionName = computed(() =>
+  primaryConnection.value?.name || primaryConnection.value?.id || 'shared workspace',
+)
+const primaryConnectionHost = computed(() => urlHost(primaryConnection.value?.url))
 const canReviewInvite = computed(() => inviteText.value.trim().length > 0 && !joining.value)
 const canJoinInvite = computed(() => inviteText.value.trim().length > 0 && !joining.value)
-const showJoin = computed(() => sharedWorkspace.value?.configured !== true || sharedWorkspace.value?.tokenConfigured !== true)
+const showLink = computed(() =>
+  sharedWorkspace.value?.configured !== true &&
+  primaryConnection.value?.tokenConfigured === true,
+)
+const canLink = computed(() => showLink.value && !linking.value)
+const showJoin = computed(() => {
+  if (!sharedWorkspace.value) return false
+  if (sharedWorkspace.value.configured) return sharedWorkspace.value.tokenConfigured !== true
+  return !showLink.value
+})
 
 const previewSentence = computed(() => {
   if (!invitePreview.value) return ''
-  return `Files stay on this machine. ${namespaceLabel(invitePreview.value.namespaces)} come from ${invitePreview.value.workspaceName}.`
+  return `Files stay on this machine. ${namespaceLabel(invitePreview.value.namespaces)} come from ${invitePreview.value.workspaceName}; folders link separately.`
 })
 
 onMounted(() => {
@@ -146,12 +179,33 @@ async function joinInvite() {
   }
 }
 
+async function linkSharedWorkspace() {
+  sharedWorkspaceError.value = ''
+  joinMessage.value = ''
+  const connection = primaryConnection.value
+  if (!connection) return
+  linking.value = true
+  try {
+    const result = await window.kernel.call('workspace.sharedWorkspace.link', { id: connection.id }) as Record<string, unknown>
+    joinMessage.value = `Linked this folder to ${joinedWorkspaceName(result)}`
+    await loadSharedWorkspace()
+  } catch (err) {
+    sharedWorkspaceError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    linking.value = false
+  }
+}
+
 function normalizeSharedWorkspaceStatus(raw: unknown): SharedWorkspaceStatus {
   if (!raw || typeof raw !== 'object') return { configured: false }
   const source = raw as Record<string, unknown>
-  if (source.configured !== true) return { configured: false }
+  const connections = Array.isArray(source.connections)
+    ? source.connections.map(normalizeSharedWorkspaceConnection).filter((item): item is SharedWorkspaceConnection => item !== null)
+    : []
+  if (source.configured !== true) return { configured: false, linked: false, connections }
   return {
     configured: true,
+    linked: source.linked === true,
     id: typeof source.id === 'string' ? source.id : '',
     name: typeof source.name === 'string' ? source.name : '',
     url: typeof source.url === 'string' ? source.url : '',
@@ -160,6 +214,25 @@ function normalizeSharedWorkspaceStatus(raw: unknown): SharedWorkspaceStatus {
       : [],
     tokenConfigured: source.tokenConfigured === true,
     tokenKey: typeof source.tokenKey === 'string' ? source.tokenKey : '',
+    connections,
+  }
+}
+
+function normalizeSharedWorkspaceConnection(raw: unknown): SharedWorkspaceConnection | null {
+  if (!raw || typeof raw !== 'object') return null
+  const source = raw as Record<string, unknown>
+  const id = typeof source.id === 'string' ? source.id : ''
+  const url = typeof source.url === 'string' ? source.url : ''
+  if (!id || !url) return null
+  return {
+    id,
+    name: typeof source.name === 'string' ? source.name : '',
+    url,
+    namespaces: Array.isArray(source.namespaces)
+      ? source.namespaces.filter((item): item is string => typeof item === 'string')
+      : [],
+    tokenConfigured: source.tokenConfigured === true,
+    linked: source.linked === true,
   }
 }
 
@@ -174,6 +247,15 @@ function normalizeInvitePreview(raw: unknown): SharedWorkspaceInvitePreview {
     namespaces: Array.isArray(source.namespaces)
       ? source.namespaces.filter((item): item is string => typeof item === 'string')
       : [],
+  }
+}
+
+function urlHost(url: string | undefined): string {
+  if (!url) return ''
+  try {
+    return new URL(url).host
+  } catch {
+    return url
   }
 }
 
@@ -207,7 +289,9 @@ function joinedWorkspaceName(result: Record<string, unknown>): string {
             ? sharedWorkspace.tokenConfigured
               ? 'bg-ok/10 text-ok'
               : 'bg-warn/10 text-warn'
-            : 'bg-chrome-mid text-ink-3'"
+            : primaryConnection
+              ? 'bg-accent-soft text-accent'
+              : 'bg-chrome-mid text-ink-3'"
         >
           {{ sharedWorkspaceLabel }}
         </span>
@@ -225,9 +309,30 @@ function joinedWorkspaceName(result: Record<string, unknown>): string {
         <span class="min-w-0 truncate font-sans text-ink-2">{{ namespaceLabel(sharedWorkspace.namespaces ?? []) }}</span>
       </div>
 
+      <div
+        v-if="showLink && primaryConnection"
+        class="grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-2 border-b border-rule-light py-3 text-[11px] last:border-b-0"
+      >
+        <span class="text-ink-3">Connection</span>
+        <span class="min-w-0 truncate font-sans text-ink-2">{{ primaryConnectionName }}</span>
+        <span class="text-ink-3">Host</span>
+        <span class="min-w-0 truncate font-mono text-ink-2">{{ primaryConnectionHost }}</span>
+        <span class="text-ink-3">Shared tools</span>
+        <span class="min-w-0 truncate font-sans text-ink-2">{{ namespaceLabel(primaryConnection.namespaces ?? []) }}</span>
+        <span />
+        <button
+          type="button"
+          class="inline-flex h-7 w-fit items-center rounded-[6px] bg-ink px-3 font-sans text-[11px] font-[650] text-surface hover:bg-accent hover:text-accent-ink disabled:bg-chrome-mid disabled:text-ink-4"
+          :disabled="!canLink"
+          @click="linkSharedWorkspace"
+        >
+          {{ linking ? 'Linking' : 'Link this folder' }}
+        </button>
+      </div>
+
       <div v-if="showJoin" class="border-b border-rule-light py-3 last:border-b-0">
         <label class="mb-1.5 block font-sans text-[11px] font-[620] text-ink-2" for="shared-workspace-invite">
-          Join shared workspace
+          Connect shared workspace
         </label>
         <textarea
           id="shared-workspace-invite"
@@ -251,7 +356,7 @@ function joinedWorkspaceName(result: Record<string, unknown>): string {
             :disabled="!canJoinInvite"
             @click="joinInvite"
           >
-            {{ joining ? 'Joining' : 'Join' }}
+            {{ joining ? 'Connecting' : 'Connect' }}
           </button>
         </div>
 

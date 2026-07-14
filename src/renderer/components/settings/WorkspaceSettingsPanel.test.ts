@@ -35,8 +35,10 @@ describe('WorkspaceSettingsPanel', () => {
           name: 'HTA Model',
           url: 'https://mim.example.com/mcp',
           namespaces: ['issues.*', 'knowledge.*'],
+          linked: true,
           tokenConfigured: true,
           tokenKey: 'MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN',
+          connections: [],
         }
       }
       if (tool === 'resources.collections') return { collections: [] }
@@ -82,9 +84,38 @@ describe('WorkspaceSettingsPanel', () => {
     expect(on).toHaveBeenCalledWith('workspace:changed', expect.any(Function))
   })
 
-  it('lets a local user review and join from a shared workspace invite', async () => {
+  it('lets a local user connect from an invite and explicitly link the current folder', async () => {
+    let connected = false
+    let linked = false
     call = vi.fn(async (tool: string, params?: Record<string, unknown>) => {
-      if (tool === 'workspace.sharedWorkspace.status') return { configured: false }
+      if (tool === 'workspace.sharedWorkspace.status') {
+        if (linked) {
+          return {
+            configured: true,
+            linked: true,
+            id: 'team-server',
+            name: 'HTA Model',
+            url: 'https://mim.example.com/mcp',
+            namespaces: ['issues.*', 'knowledge.*'],
+            tokenConfigured: true,
+            connections: [],
+          }
+        }
+        return {
+          configured: false,
+          linked: false,
+          connections: connected
+            ? [{
+                id: 'team-server',
+                name: 'HTA Model',
+                url: 'https://mim.example.com/mcp',
+                namespaces: ['issues.*', 'knowledge.*'],
+                tokenConfigured: true,
+                linked: false,
+              }]
+            : [],
+        }
+      }
       if (tool === 'workspace.sharedWorkspace.inspectInvite') {
         expect(params).toEqual({ invite: 'mim-invite-demo' })
         return {
@@ -97,10 +128,24 @@ describe('WorkspaceSettingsPanel', () => {
       }
       if (tool === 'workspace.sharedWorkspace.join') {
         expect(params).toEqual({ invite: 'mim-invite-demo' })
+        connected = true
         return {
           joined: true,
           callerName: 'Anna',
           tokenStored: true,
+          sharedWorkspace: {
+            id: 'team-server',
+            name: 'HTA Model',
+            url: 'https://mim.example.com/mcp',
+            namespaces: ['issues.*', 'knowledge.*'],
+          },
+        }
+      }
+      if (tool === 'workspace.sharedWorkspace.link') {
+        expect(params).toEqual({ id: 'team-server' })
+        linked = true
+        return {
+          linked: true,
           sharedWorkspace: {
             id: 'team-server',
             name: 'HTA Model',
@@ -129,11 +174,18 @@ describe('WorkspaceSettingsPanel', () => {
 
     button(root, 'Review invite')!.click()
     await flushUi()
-    expect(root.textContent).toContain('Files stay on this machine. Issues and Knowledge come from HTA Model.')
+    expect(root.textContent).toContain('Files stay on this machine. Issues and Knowledge come from HTA Model; folders link separately.')
 
-    button(root, 'Join')!.click()
+    button(root, 'Connect')!.click()
     await flushUi()
     expect(call).toHaveBeenCalledWith('workspace.sharedWorkspace.join', { invite: 'mim-invite-demo' })
+    expect(root.textContent).toContain('Connection ready')
+    expect(root.textContent).toContain('Link this folder')
+
+    button(root, 'Link this folder')!.click()
+    await flushUi()
+    expect(call).toHaveBeenCalledWith('workspace.sharedWorkspace.link', { id: 'team-server' })
+    expect(root.textContent).toContain('Connected')
     expect(root.textContent).not.toContain('mim_serve')
   })
 })
