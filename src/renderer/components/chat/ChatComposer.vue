@@ -536,7 +536,7 @@ defineExpose({
 
             <!-- Bottom row: left (attach) + right (streaming indicator, usage, model, send/stop) -->
             <div
-                class="flex items-center justify-between mt-1.5 pt-1.5 min-w-0"
+                class="flex items-center justify-between pt-1.5 min-w-0"
             >
                 <!-- Left: attach button -->
                 <div class="flex items-center gap-2 shrink-0">

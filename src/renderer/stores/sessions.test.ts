@@ -283,6 +283,37 @@ describe('renderer session store', () => {
     expect(result?.id).toBe(created.id)
   })
 
+  it('refresh() re-fetches and merges session usage even after hydration without changing selection', async () => {
+    let getCount = 0
+    const call = stubKernel((tool, params) => {
+      if (tool === 'session.get') {
+        getCount += 1
+        return makeSession({
+          id: String(params?.id),
+          messages: [{ id: 'm1', role: 'assistant', content: 'done' }],
+          usage: getCount === 1
+            ? { inputTokens: 0, outputTokens: 0, estimatedCost: 0 }
+            : { inputTokens: 289000, outputTokens: 4200, estimatedCost: 1.53 },
+          lastContextTokens: getCount === 1 ? 0 : 101000,
+        })
+      }
+      throw new Error(`Unexpected tool: ${tool}`)
+    })
+    const store = useSessionStore()
+    store.sessions = [makeSession({ id: 's1', messages: [] })]
+    store.activeSessionId = 'other-session'
+
+    await store.ensureMessages('s1')
+    const refreshed = await store.refresh('s1')
+
+    expect(call).toHaveBeenCalledTimes(2)
+    expect(call).toHaveBeenLastCalledWith('session.get', { id: 's1' })
+    expect(refreshed?.usage.estimatedCost).toBe(1.53)
+    expect(store.sessions[0].usage.estimatedCost).toBe(1.53)
+    expect(store.sessions[0].lastContextTokens).toBe(101000)
+    expect(store.activeSessionId).toBe('other-session')
+  })
+
   it('update() and rename() persist through session.update', async () => {
     const call = stubKernel()
     const store = useSessionStore()
@@ -298,11 +329,20 @@ describe('renderer session store', () => {
 
   it('update() merges full backend session metadata when returned', async () => {
     const persistedMessages: SessionMessage[] = [{ id: 'm1', role: 'assistant', content: 'done' }]
+    const compactions = [{
+      id: 'cmp_1',
+      firstKeptMessageId: 'm1',
+      firstKeptMessageIndex: 0,
+      summary: 'Earlier work was summarized.',
+      trigger: 'post_turn' as const,
+      createdAt: '2026-01-05T00:00:00.000Z',
+    }]
     const call = stubKernel((tool, params) => {
       if (tool === 'session.update') {
         return makeSession({
           id: String(params?.id),
           messages: persistedMessages,
+          compactions,
           usage: { inputTokens: 289000, outputTokens: 4200, estimatedCost: 1.53 },
           lastContextTokens: 101000,
           updatedAt: '2026-01-05T00:00:00.000Z',
@@ -324,6 +364,7 @@ describe('renderer session store', () => {
     expect(store.sessions[0].messages).toEqual(persistedMessages)
     expect(store.sessions[0].usage.estimatedCost).toBe(1.53)
     expect(store.sessions[0].lastContextTokens).toBe(101000)
+    expect(store.sessions[0].compactions).toEqual(compactions)
     expect(store.sessions[0].updatedAt).toBe('2026-01-05T00:00:00.000Z')
   })
 

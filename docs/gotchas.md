@@ -12,6 +12,40 @@ When defining tools with the Vercel AI SDK `tool()` function, always use `inputS
 
 Build the `Chat` only after its session's history is loaded: `getOrCreateChat` awaits `sessionStore.ensureMessages(id)` before `new Chat({ messages })`, so an engine is never born empty for a session that has persisted messages (the old "chat is empty until you send a message" bug). `session.list` strips messages, so the store tracks hydrated ids to fetch each session's history exactly once.
 
+The main AI runtime persists final usage and context metadata before the chat
+stream closes. The renderer must therefore await the `Chat` turn and then call
+`sessionStore.refresh(id)` to merge that persisted metadata into Pinia. Do not
+use `ensureMessages(id)` for this: its hydration cache intentionally skips
+already-loaded sessions, which leaves cost and context stale after a turn.
+`ChatView.vue` centralizes this ordering in `runTurnAndRefreshSession` for sends,
+retries, queued routine turns, and start-fresh seed turns. Refresh failure is
+logged but must not replace the model turn's own result.
+
+## Token cost is a provider-aware estimate, not a token-total multiplier
+
+`normalizeSdkUsage()` prices the usage categories reported by the AI SDK
+separately: uncached input, cache reads, cache writes, and output. An explicit
+zero in `resources/ai-models.json` is a real zero; do not replace it with the
+base input rate. Models with provider billing tiers also carry
+`longContextThresholdTokens`, `longContextInputMultiplier`, and
+`longContextOutputMultiplier`, which apply to the whole model call after its
+reported input crosses the threshold.
+
+Anthropic requests currently use `cacheControl: { type: 'ephemeral' }` without
+a TTL, so their catalog cache-write rate is the five-minute rate. If the app
+starts requesting one-hour caches, the usage path and catalog must distinguish
+that more expensive write tier. Claude Fable 5 also reports tokens for a
+pre-output refusal even though Anthropic does not bill them; the estimator uses
+the SDK's `content-filter` finish reason plus zero output to preserve the usage
+counts while recording zero cost. Mid-stream refusals remain billable.
+
+Catalog contract tests in `src/main/ai/ai.test.ts` pin published context windows,
+Fable pricing, and long-context tiers. Estimator tests in
+`src/main/ai/aiRuntime.test.ts` cover category pricing, explicit zero rates,
+long-context multipliers, and Fable refusals. The displayed amount remains an
+estimate: account discounts, taxes, provider credits, and provider-side add-on
+fees outside reported model-token usage are not included.
+
 ## Trace grouping: thread the turn traceId, or you get orphan Activity runs
 
 The Activity feed groups one run per `traceId` (`feedRuns` in `ActivityTrustView.vue`). Any `tools.call` made on behalf of a chat turn that does **not** carry the turn's `{ traceId, spanId }` in its `ToolContext` starts a fresh trace and therefore shows up as its own feed row. This is what made a single chat send look like 20+ unrelated activities: the pre-flight `skill.list`/`package.tools.list` and the closing `session.update` persistence ran with no trace context. The `chat.turn` root span is now created up front (`streamProfileResponse`) and threaded into all per-turn helpers, including context-compaction summary checks, overflow retry, and compaction record writes. When adding any new per-turn helper call, pass the turn trace.
@@ -79,6 +113,17 @@ allowlist enforced in `src/main/server/server.ts` before `tools.call()`, and
 keep `__meta.tools` MCP-only and identified-only. The stdio bridge may mirror
 the map for DX, but it must not be the only restriction.
 
+## Live-browser localhost access follows the initial target
+
+Loopback is allowed only for `web.live.open`, and only when the URL passed to
+`browser_open` is itself `localhost`, `*.localhost`, `127.0.0.0/8`, or `::1`.
+Carry that decision into the session request blocker for HTTP(S) and WebSocket
+requests so Vite-style HMR works. Never enable loopback globally: a browser
+session opened on a public page must remain unable to probe local services, and
+private LAN, link-local, cloud-metadata, and unique-local addresses stay blocked.
+`web.read`, Website Access setup, and headless/serve web tools keep the default
+public-only policy.
+
 ## Package launch tokens must outlive their mint window once identified
 
 Package iframe URLs are long-lived: the work pane keeps `PackageFrame` under `KeepAlive` with a cached launch URL, and browsers reload an iframe from its existing `src` every time it is reattached to the DOM. So navigating away from a package view and back replays the **original** launch token — possibly minutes later. Launch tokens (`src/main/server/server.ts`) therefore expire only while unused: the 60s `expiresAt` window applies to tokens that never identified, and the first successful `identify` clears it so the same URL keeps re-identifying for iframe remounts and SDK reconnects. Do not reintroduce a hard token expiry; it resurfaces as intermittent package UI startup failures after >60s away. Relatedly, `sdk/mim.js` must reject `ready` when identify fails — swallowing the failure makes every later call fail with the unidentified-connection error instead of the real cause.
@@ -95,6 +140,23 @@ Teleported/floating overlays start life before runtime positioning has fully set
 
 Do not use `file://` URLs for editor preview images. The BrowserWindow keeps Electron's default web security enabled. Local Markdown images are rendered through `fs.readImageDataUrl`, which resolves paths inside the current workspace and returns image data URLs for the renderer. The same constraint drives the PDF Artifact viewer: `PdfArtifact.vue` loads PDFs from the kernel server's GET-only `/workspace-files/<path>` route (`src/main/server/server.ts`), never from `file://`.
 
+## CodeMirror plugin replacements stay within one line
+
+CodeMirror decoration functions supplied by a `ViewPlugin` run after viewport
+geometry is chosen, so their replace ranges must never cross a line break.
+`codemirror/livePreview.js` enforces this for token-hiding replacements with
+`pushSingleLineReplacement`. Markdown images and tables may span lines and must
+stay in `StateField` decoration sets instead. Moving either widget back into the
+viewport plugin causes `Decorations that replace line breaks may not be specified
+via plugins` and can leave the newly selected tab showing the previous document's
+DOM.
+
+The editor's shared-view tab switching also requires `@codemirror/view` 6.43.6
+or newer. Earlier 6.43 releases contain tile-tree corruption bugs triggered by
+decoration-heavy document updates. Preserve the real-view multiline-image and
+decorated-state-swap regressions in `codemirror/livePreview.test.ts` when changing
+preview decorations or tab state.
+
 ## Inline comments need the CM6 protection bypass
 
 Markdown comments are real inline tags on disk, but hidden in the editor with CodeMirror replace decorations and atomic ranges. Normal typing must not touch those hidden spans, so `codemirror/comments.js` uses `EditorState.changeFilter` to reject edits that intersect tag markup. Any programmatic operation that intentionally creates, removes, or rewrites comment tags must dispatch with `annotations: commentMutation.of(true)`; otherwise CodeMirror will block the transaction or make whole-document replacements appear to do nothing.
@@ -108,6 +170,16 @@ Comment tools in main refuse to mutate a file that is open and dirty in the edit
 Do not document secret-bearing `mim tool` examples with tokens directly in the command line. Use `mim tool <name> --stdin` so JSON can come from a trusted local prompt or pipe without putting tokens in shell history.
 
 Generic `mim tool` dispatch must stay on the `ai` actor and pass through the headless permission gate. Non-interactive approval-required calls are denied, TTY calls prompt, and `--yes` is the only intentional auto-approval path for trusted local automation.
+
+## Routine state is not the routine registry
+
+Routine definitions live in `routines/*.md` and are reported by `routine.list`
+via `loadRoutineCatalog()`. `.mim/routines/state.json` stores only
+machine-local enablement, authority acknowledgements, scheduler heartbeat, and
+last-run metadata. An empty `routines` object in that state file does not mean
+routine files failed to load; it means no routine has been enabled or recorded
+local run state yet. For Slack bot readiness, use `slack_bot_check` instead of
+inferring status from hidden runtime files.
 
 ## Search index failures are non-fatal
 

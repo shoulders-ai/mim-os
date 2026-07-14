@@ -14,6 +14,7 @@ import { isPlaceholderTaskLabel, provisionalTaskLabel, requestTaskLabel, shouldR
 import { getCurrentDocument, getCurrentDocumentSummary, subscribeCurrentDocument } from '../../services/currentDocument.js'
 import { documentContextAttachment, modelSupportsVision, projectFileContextAttachment } from './composerLogic.js'
 import ChatMessage from './ChatMessage.vue'
+import ChatCompactionDivider from './ChatCompactionDivider.vue'
 import InlineApproval from './InlineApproval.vue'
 import ChatComposer from './ChatComposer.vue'
 import ChatComposerFooter from './ChatComposerFooter.vue'
@@ -22,6 +23,8 @@ import { useChatEngines } from './useChatEngines.js'
 import { withLastAssistantTurnElapsed } from './assistantTurn.js'
 import { requestSummary, lastUserMessageText, buildSeedMessage } from '../../services/ai/summary.js'
 import { aiApiBase, aiFetch } from '../../services/ai/aiApi.js'
+import { compactionDividerForMessages } from './compactionDivider.js'
+import { queuedRoutineSeedMessage } from './queuedRoutineRun.js'
 
 const sessionStore = useSessionStore()
 const settingsStore = useSettingsStore()
@@ -71,6 +74,23 @@ function logChatAi(level, message, details = undefined) {
   const logger = level === 'error' ? console.error : level === 'warn' ? console.warn : console.info
   if (details !== undefined) logger('[chat-ai]', message, details)
   else logger('[chat-ai]', message)
+}
+
+async function runTurnAndRefreshSession(sessionId, run) {
+  try {
+    return await run()
+  } finally {
+    try {
+      await sessionStore.refresh(sessionId)
+    } catch (err) {
+      // A metadata refresh failure must not replace the model turn's own
+      // success/error result.
+      logChatAi('warn', 'session:refresh-failed', {
+        sessionId,
+        message: readableError(err),
+      })
+    }
+  }
 }
 
 function replaceChatMessages(chat, messages) {
@@ -190,6 +210,54 @@ const costLabel = computed(() => {
 })
 
 const showUsageIndicators = computed(() => messages.value.length > 0)
+const compactionDivider = computed(() =>
+  compactionDividerForMessages(messages.value, session.value?.compactions)
+)
+
+const queuedRoutineRunSessionIds = new Set()
+
+async function maybeStartQueuedRoutineRun() {
+  const s = session.value
+  const seedMessage = queuedRoutineSeedMessage(s, messages.value)
+  if (!s || !seedMessage) return
+  if (queuedRoutineRunSessionIds.has(s.id) || isStreaming.value) return
+  if (!concreteModel.value) return
+
+  queuedRoutineRunSessionIds.add(s.id)
+  try {
+    const chat = await getOrCreateChat(s.id)
+    if (activeSessionId.value !== s.id) {
+      queuedRoutineRunSessionIds.delete(s.id)
+      return
+    }
+    sessionStore.setSessionStatus(s.id, 'working')
+    sessionStore.startTurnTimer(s.id)
+    await runTurnAndRefreshSession(s.id, () => chat.regenerate({ messageId: seedMessage.id }))
+  } catch (err) {
+    const message = readableError(err)
+    sessionStore.clearTurnTimer(s.id)
+    sessionStore.setSessionStatus(s.id, 'error')
+    await sessionStore.update(s.id, {
+      routineStatus: 'error',
+      routineError: message,
+      routineCompletedAt: new Date().toISOString(),
+    }).catch(() => {})
+    if (activeSessionId.value === s.id) error.value = message
+    else {
+      sessionStore.setSessionError(s.id, message)
+      toastStore.push({ kind: 'error', message: `${s.label || 'Routine'}: ${message}` })
+    }
+  }
+}
+
+watch([
+  () => activeSessionId.value,
+  () => session.value?.routineStatus,
+  () => concreteModel.value?.id,
+  messages,
+], () => {
+  void maybeStartQueuedRoutineRun()
+}, { deep: true, immediate: true })
 
 const control = computed(() =>
   controlForModel(concreteModel.value, session.value?.controlId)
@@ -517,7 +585,9 @@ async function handleSend({ text, attachments, contextChips }) {
   // the Chat's onFinish/onError callbacks. No polling required.
   try {
     sessionStore.startTurnTimer(sessionId)
-    await chat.sendMessage(sendPayload, selectedSkillIds.length ? { body: { skills: selectedSkillIds } } : undefined)
+    await runTurnAndRefreshSession(sessionId, () =>
+      chat.sendMessage(sendPayload, selectedSkillIds.length ? { body: { skills: selectedSkillIds } } : undefined)
+    )
   } catch (err) {
     sessionStore.clearTurnTimer(sessionId)
     logChatAi('error', 'send:failed', {
@@ -745,7 +815,7 @@ async function handleStartFresh() {
       }
       sessionStore.setSessionStatus(newSession.id, 'working')
       sessionStore.startTurnTimer(newSession.id)
-      await chat.sendMessage(payload)
+      await runTurnAndRefreshSession(newSession.id, () => chat.sendMessage(payload))
     }
 
     if (!summary && fallback) {
@@ -781,16 +851,15 @@ function onApprovalModeChange(mode) {
 
 async function handleRetry() {
   const chat = activeChat.value
-  if (!chat) return
+  const sessionId = activeSessionId.value
+  if (!chat || !sessionId) return
   try {
-    if (session.value) {
-      sessionStore.setSessionStatus(session.value.id, 'working')
-      sessionStore.startTurnTimer(session.value.id)
-    }
+    sessionStore.setSessionStatus(sessionId, 'working')
+    sessionStore.startTurnTimer(sessionId)
     // Reactive: streaming flows through chat.messages; completion via onFinish.
-    await chat.regenerate()
+    await runTurnAndRefreshSession(sessionId, () => chat.regenerate())
   } catch (err) {
-    if (session.value) sessionStore.clearTurnTimer(session.value.id)
+    sessionStore.clearTurnTimer(sessionId)
     error.value = err?.message || 'Retry failed'
   }
 }
@@ -1087,6 +1156,10 @@ onUnmounted(() => {
         <!-- Messages -->
         <div class="max-w-[720px] w-full mx-auto flex flex-col gap-5">
           <template v-for="(msg, idx) in messages" :key="msg.id">
+            <ChatCompactionDivider
+              v-if="compactionDivider && compactionDivider.messageIndex === idx"
+              :record="compactionDivider.record"
+            />
             <ChatMessage
               :message="msg"
               :is-last-assistant="msg.role === 'assistant' && isLastAssistantIndex(idx)"
@@ -1176,6 +1249,7 @@ onUnmounted(() => {
       :document-name="currentDocumentSummary?.name || ''"
       @send="handleSend"
       @stop="handleStop"
+      @start-fresh="handleStartFresh"
       @update:model-id="onModelChange"
       @update:control-id="onControlChange"
     />

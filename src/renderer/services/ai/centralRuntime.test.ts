@@ -37,8 +37,26 @@ describe('renderer AI integration boundary', () => {
 
     expect(text).toContain('onFinish: async ({ isError, isAbort, finishReason })')
     expect(text).toContain('if (isError)')
-    expect(text).toContain('await chat.sendMessage(sendPayload,')
+    expect(text).toContain('chat.sendMessage(sendPayload,')
     expect(text).toContain('[chat-ai]')
+  })
+
+  it('refreshes persisted session metadata after each awaited chat turn', () => {
+    const text = source('src/renderer/components/chat/ChatView.vue')
+
+    expect(text).toContain('async function runTurnAndRefreshSession')
+    expect(text).toContain('await sessionStore.refresh(sessionId)')
+    expect(text.match(/await runTurnAndRefreshSession\(/g)).toHaveLength(4)
+  })
+
+  it('starts queued routine sessions through the normal chat engine', () => {
+    const text = source('src/renderer/components/chat/ChatView.vue')
+
+    expect(text).toContain("import { queuedRoutineSeedMessage } from './queuedRoutineRun.js'")
+    expect(text).toContain('function maybeStartQueuedRoutineRun')
+    expect(text).toContain('queuedRoutineSeedMessage(s, messages.value)')
+    expect(text).toContain('chat.regenerate({ messageId: seedMessage.id')
+    expect(text).toContain('maybeStartQueuedRoutineRun()')
   })
 
   it('persists composer drafts when chat view leaves the screen', () => {

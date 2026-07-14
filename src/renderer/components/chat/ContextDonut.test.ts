@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick } from 'vue'
 import ContextDonut from './ContextDonut.vue'
 
@@ -11,8 +11,11 @@ async function flushUi() {
   await nextTick()
 }
 
-function mountDonut(props = {}) {
-  const app = createApp(ContextDonut, props)
+function mountDonut(props = {}, listeners = {}) {
+  const app = createApp(ContextDonut, {
+    ...props,
+    ...listeners,
+  })
   const root = document.createElement('div')
   document.body.appendChild(root)
   app.mount(root)
@@ -68,7 +71,8 @@ describe('ContextDonut', () => {
     await flushUi()
 
     const fill = mounted.root.querySelectorAll('circle')[1]
-    expect(fill.getAttribute('stroke')).toBe('var(--color-rem)')
+    expect(fill.getAttribute('stroke')).toBe('currentColor')
+    expect(fill.classList.contains('text-rem')).toBe(true)
   })
 
   it('shows Start fresh button when usage >= 85%', async () => {
@@ -77,6 +81,21 @@ describe('ContextDonut', () => {
     const button = mounted.root.querySelector('button')
     expect(button).toBeTruthy()
     expect(button?.textContent).toContain('Start fresh')
+    expect(button?.closest('[aria-hidden="true"]')).toBeNull()
+  })
+
+  it('emits start-fresh when the Start fresh button is clicked', async () => {
+    const onStartFresh = vi.fn()
+    mounted = mountDonut(
+      { percent: 0.87, size: 16, tokenCount: 174000, contextWindow: 200000 },
+      { onStartFresh },
+    )
+    await flushUi()
+
+    mounted.root.querySelector<HTMLButtonElement>('button')?.click()
+    await flushUi()
+
+    expect(onStartFresh).toHaveBeenCalledTimes(1)
   })
 
   it('does not show Start fresh button below 85%', async () => {

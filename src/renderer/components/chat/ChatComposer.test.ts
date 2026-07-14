@@ -124,4 +124,25 @@ describe('ChatComposer', () => {
     expect(root.textContent).toContain('Comments: plan.md (1)')
     expect(onSend).not.toHaveBeenCalled()
   })
+
+  it('emits start-fresh from the context donut action', async () => {
+    const onSend = vi.fn()
+    const onStartFresh = vi.fn()
+    mountComposer(onSend, {
+      contextPercent: 0.9,
+      contextTokens: 180000,
+      contextWindow: 200000,
+      showUsageIndicators: true,
+      onStartFresh,
+    })
+    await flushUi()
+
+    const button = [...root.querySelectorAll<HTMLButtonElement>('button')]
+      .find(item => item.textContent?.includes('Start fresh'))
+    button?.click()
+    await flushUi()
+
+    expect(onStartFresh).toHaveBeenCalledTimes(1)
+    expect(onSend).not.toHaveBeenCalled()
+  })
 })

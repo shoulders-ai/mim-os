@@ -10,6 +10,20 @@ export interface SessionMessage {
   createdAt?: string
 }
 
+export interface SessionCompactionRecord {
+  id: string
+  firstKeptMessageId?: string
+  firstKeptMessageIndex?: number
+  summarizedMessageCount?: number
+  summary: string
+  tokensBefore?: number
+  tokensAfter?: number
+  savedRatio?: number
+  modelId?: string
+  trigger?: 'post_turn' | 'pre_turn' | 'overflow'
+  createdAt: string
+}
+
 export interface Session {
   id: string
   label: string
@@ -22,6 +36,7 @@ export interface Session {
   routineError?: string
   routineFiredAt?: string
   routineCompletedAt?: string
+  compactions?: SessionCompactionRecord[]
   messages: SessionMessage[]
   usage: { inputTokens: number; outputTokens: number; estimatedCost: number }
   lastContextTokens: number
@@ -289,6 +304,18 @@ export const useSessionStore = defineStore('sessions', () => {
     }
   }
 
+  // Re-fetch current session metadata even when its messages are already
+  // hydrated. The main AI runtime persists usage independently of the renderer,
+  // so completed turns need this explicit merge to surface fresh cost/context.
+  async function refresh(id: string): Promise<Session | null> {
+    const full = await window.kernel.call('session.get', { id }) as Session
+    const idx = sessions.value.findIndex(s => s.id === id)
+    if (idx >= 0) sessions.value[idx] = { ...sessions.value[idx], ...full }
+    else if (full?.id) sessions.value.unshift(full)
+    hydratedIds.add(id)
+    return sessions.value.find(s => s.id === id) ?? null
+  }
+
   async function select(id: string) {
     activeSessionId.value = id
     // Mark as viewed
@@ -424,6 +451,7 @@ export const useSessionStore = defineStore('sessions', () => {
     create,
     select,
     ensureMessages,
+    refresh,
     update,
     rename,
     archive,

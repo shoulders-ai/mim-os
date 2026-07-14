@@ -1,6 +1,6 @@
 # Context Compaction
 
-Status: Phase 1-4 implemented; Phase 5 planned.
+Status: Phase 1-5 implemented.
 
 Long agentic sessions must not die of context exhaustion, and keeping the
 model alive must not destroy the transcript. Compaction is therefore **a view
@@ -10,8 +10,9 @@ compaction record tells the runtime how to rebuild model input from that
 record.
 
 The feature should be boring in normal use: users still see the full chat,
-agents get a smaller historical context when needed, and no new "memory"
-surface appears unless a transcript divider is useful later.
+agents get a smaller historical context when needed, and the only visible
+surface is a small transcript divider that marks where model-visible history
+now starts.
 
 ## Principles
 
@@ -29,11 +30,12 @@ surface appears unless a transcript divider is useful later.
   model-visible UI messages. Every `AgentProfile` - built-in chat, inline,
   app-mounted agents ([agents-as-apps.md](agents-as-apps.md)) - goes through
   it.
-- **Real tokens, not guesses.** Thresholds use the provider-reported usage the
-  runtime already persists (`lastInputTokens` / `lastContextTokens` in
-  `src/main/sessions.ts`). Character estimates are only a fallback for turns
-  without provider usage and are treated as untrusted immediately after a
-  compaction.
+- **Real tokens first, estimates as a guardrail.** Thresholds prefer the
+  provider-reported usage the runtime already persists (`lastInputTokens` /
+  `lastContextTokens` in `src/main/sessions.ts`). Before provider calls, Mim
+  also estimates the freshly built prompt, including instructions and tool
+  definitions, so oversized resumed turns are compacted before the provider can
+  reject them.
 - **Deterministic before generative.** A no-LLM pre-pass handles routine bloat
   every turn. The LLM summary is a threshold backstop for genuinely long
   sessions.
@@ -61,16 +63,21 @@ The deterministic pass currently handles:
 - exact duplicate large tool outputs beyond the first occurrence.
 
 The threshold backstop writes append-only compaction records when real
-provider usage approaches the selected model's context window. Post-turn
-checks run after session persistence; pre-turn checks catch resumed sessions,
-model switches, and missed post-turn attempts. If Anthropic, OpenAI, or Google
-rejects a turn with a recognized context-length error, Mim appends one
+provider usage or the freshly built prompt estimate approaches the selected
+model's context window. Post-turn checks run after session persistence;
+pre-turn checks catch resumed sessions, model switches, missed post-turn
+attempts, and prompt growth that was not reflected in prior provider usage. If
+Anthropic, OpenAI, or Google rejects a turn with a recognized context-length
+error, Mim appends one
 `overflow` compaction record, rebuilds the model prompt from the summary plus
 tail, and retries once. Non-context provider errors and second context-length
 failures surface normally. The model receives the latest historical summary
 plus the kept tail, while the session transcript remains unchanged.
 
-The remaining planned work is the optional transcript divider UI.
+The renderer shows a compact divider at the latest compaction record's
+`firstKeptMessageId`, with `firstKeptMessageIndex` as a fallback. The divider
+does not hide earlier transcript messages. It can expand to show the
+historical summary text.
 
 ## Motivation
 
@@ -302,8 +309,9 @@ work.
 1. **Post-turn** - main path. After successful turn persistence, check the
    real input-token pressure and append a compaction record if needed.
 2. **Pre-turn** - before provider calls, re-read session compaction metadata
-   and last token usage. This covers model switches, resumed routines, and a
-   missed post-turn compaction.
+   and last token usage, then check the freshly built prompt estimate. This
+   covers model switches, resumed routines, missed post-turn compaction, and
+   prompt growth from tool definitions or newly attached context.
 3. **Overflow recovery** - when the provider rejects with a recognized
    context-length error, do not persist the failed response. Compact with
    trigger `overflow`, rebuild context, and retry exactly once. A second
@@ -317,10 +325,10 @@ tests. Add details to `docs/gotchas.md` only when the patterns prove quirky.
 No renderer UI is required for Phase 1-4. The transcript remains the full
 history.
 
-Phase 5 can add a divider card at `firstKeptMessageId`, driven by compaction
+The renderer shows a divider at `firstKeptMessageId`, driven by compaction
 records: "Context compacted - earlier messages summarized for the model." It
-is expandable to the summary text. The card does not hide earlier messages and
-does not describe itself as memory. It marks where model input now begins.
+is expandable to the summary text. The divider does not hide earlier messages
+and does not describe itself as memory. It marks where model input now begins.
 
 Interaction follows [design-system.md](../design-system.md): hover background
 as affordance, no pointer cursor, terse copy, Tailwind utilities only.
@@ -382,7 +390,8 @@ before building model context. Compaction summary calls trace as
 Implemented coverage includes session normalization/storage, generic
 `session.update` ignoring renderer-supplied compactions, append-only record
 writes that leave `messages[]` untouched, stored-record model views, post-turn
-record creation, and pre-turn catch-up before provider prompting.
+record creation, previous-usage pre-turn catch-up, and fresh-prompt preflight
+before provider prompting.
 
 ### Phase 4: Overflow Recovery - Implemented
 
@@ -397,16 +406,16 @@ error and asserts:
 - no failed assistant/error message is persisted before retry;
 - a second context-length failure surfaces normally.
 
-### Phase 5: Renderer Divider Card
+### Phase 5: Renderer Divider - Implemented
 
-Add the transcript divider card driven by `session.compactions`.
+Add the transcript divider driven by `session.compactions`.
 
-Tests cover:
+Implemented coverage includes:
 
 - divider placement at `firstKeptMessageId` / index fallback;
 - expandable summary text;
 - full transcript remains visible;
-- no native pointer cursor on the card controls.
+- session-store merging of backend compaction metadata after turn persistence.
 
 ## Backward Compatibility And Migration
 
@@ -444,5 +453,3 @@ Tests cover:
   real large `web_read`, `fs_read`, and command-output transcripts.
 - Exact post-turn compaction timeout. Add an abortable timeout only if
   compaction latency proves able to block normal persistence for too long.
-- Divider copy and density in Phase 5. Validate against the design system when
-  the renderer work starts.

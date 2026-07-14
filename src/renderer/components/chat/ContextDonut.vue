@@ -19,10 +19,10 @@ const circumference = computed(() => 2 * Math.PI * radius.value)
 const clampedPercent = computed(() => Math.max(0, Math.min(1, props.percent)))
 const dashOffset = computed(() => circumference.value * (1 - clampedPercent.value))
 
-const strokeColor = computed(() => {
-  if (clampedPercent.value > 0.85) return 'var(--color-rem)'
-  if (clampedPercent.value > 0.6) return 'var(--color-accent)'
-  return 'var(--color-ink-4)'
+const strokeClass = computed(() => {
+  if (clampedPercent.value > 0.85) return 'text-rem'
+  if (clampedPercent.value > 0.6) return 'text-accent'
+  return 'text-ink-4'
 })
 
 const tooltip = computed(() => {
@@ -48,7 +48,6 @@ function formatTokens(value) {
   <span
     class="group relative inline-flex items-center justify-center flex-shrink-0"
     :aria-label="tooltip"
-    :style="{ width: size + 'px', height: size + 'px' }"
   >
     <svg :width="size" :height="size" :viewBox="`0 0 ${size} ${size}`" aria-hidden="true">
       <circle
@@ -63,26 +62,27 @@ function formatTokens(value) {
       <circle
         v-if="clampedPercent > 0"
         class="-rotate-90 origin-center"
+        :class="strokeClass"
         :cx="center"
         :cy="center"
         :r="radius"
         fill="none"
         stroke-width="2"
         stroke-linecap="round"
-        :stroke="strokeColor"
+        stroke="currentColor"
         :stroke-dasharray="circumference"
         :stroke-dashoffset="dashOffset"
       />
     </svg>
     <span
-      class="absolute bottom-[calc(100%+7px)] left-1/2 z-30 flex flex-col gap-px px-2 py-[5px] rounded-[5px] bg-ink text-surface font-mono text-[10px] leading-[1.35] whitespace-nowrap opacity-0 -translate-x-1/2 translate-y-0.5 transition-[opacity,transform] duration-[120ms] ease-out group-hover:opacity-100 group-hover:translate-y-0"
+      class="absolute bottom-[calc(100%+7px)] left-1/2 z-30 flex flex-col gap-px px-2 py-[5px] rounded-[5px] bg-ink text-surface font-mono text-[10px] leading-[1.35] whitespace-nowrap opacity-0 -translate-x-1/2 translate-y-0.5 transition-[opacity,transform] duration-[120ms] ease-out group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0"
       :class="showStartFresh ? 'pointer-events-auto' : 'pointer-events-none'"
-      aria-hidden="true"
     >
       <span v-for="line in tooltipLines" :key="line">{{ line }}</span>
       <button
         v-if="showStartFresh"
         class="mt-1 rounded-[3px] bg-surface/20 px-1.5 py-0.5 text-[10px] font-medium text-surface hover:bg-surface/30"
+        title="Start a fresh chat from summary"
         @click.stop="emit('start-fresh')"
       >Start fresh from summary</button>
     </span>
