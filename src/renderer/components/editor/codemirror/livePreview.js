@@ -197,6 +197,16 @@ export function resolveImagePath(src, filePath) {
   return resolved.join('/')
 }
 
+// Decorations supplied by a ViewPlugin are computed after CodeMirror decides
+// its viewport. They may hide text within one line, but CodeMirror forbids
+// them from replacing line breaks because that would invalidate the viewport
+// geometry. Potentially multiline replacements belong in a StateField.
+function pushSingleLineReplacement(decorations, state, from, to, spec = {}) {
+  if (to > state.doc.lineAt(from).to) return false
+  decorations.push(Decoration.replace(spec).range(from, to))
+  return true
+}
+
 export function buildDecorations(view, isEnabled, getFilePath) {
   if (!isEnabled()) return Decoration.none
 
@@ -256,8 +266,8 @@ export function buildDecorations(view, isEnabled, getFilePath) {
           },
         })
         if (marks.length >= 2) {
-          decos.push(Decoration.replace({}).range(marks[0].from, marks[0].to))
-          decos.push(Decoration.replace({}).range(marks[marks.length - 1].from, marks[marks.length - 1].to))
+          pushSingleLineReplacement(decos, state, marks[0].from, marks[0].to)
+          pushSingleLineReplacement(decos, state, marks[marks.length - 1].from, marks[marks.length - 1].to)
           decos.push(Decoration.mark({ class: 'cm-lp-bold' }).range(marks[0].to, marks[marks.length - 1].from))
         }
         return false
@@ -275,8 +285,8 @@ export function buildDecorations(view, isEnabled, getFilePath) {
           },
         })
         if (marks.length >= 2) {
-          decos.push(Decoration.replace({}).range(marks[0].from, marks[0].to))
-          decos.push(Decoration.replace({}).range(marks[marks.length - 1].from, marks[marks.length - 1].to))
+          pushSingleLineReplacement(decos, state, marks[0].from, marks[0].to)
+          pushSingleLineReplacement(decos, state, marks[marks.length - 1].from, marks[marks.length - 1].to)
           decos.push(Decoration.mark({ class: 'cm-lp-italic' }).range(marks[0].to, marks[marks.length - 1].from))
         }
         return false
@@ -294,8 +304,8 @@ export function buildDecorations(view, isEnabled, getFilePath) {
           },
         })
         if (marks.length >= 2) {
-          decos.push(Decoration.replace({}).range(marks[0].from, marks[0].to))
-          decos.push(Decoration.replace({}).range(marks[marks.length - 1].from, marks[marks.length - 1].to))
+          pushSingleLineReplacement(decos, state, marks[0].from, marks[0].to)
+          pushSingleLineReplacement(decos, state, marks[marks.length - 1].from, marks[marks.length - 1].to)
           decos.push(Decoration.mark({ class: 'cm-lp-strike' }).range(marks[0].to, marks[marks.length - 1].from))
         }
         return false
@@ -313,8 +323,8 @@ export function buildDecorations(view, isEnabled, getFilePath) {
           },
         })
         if (marks.length >= 2) {
-          decos.push(Decoration.replace({}).range(marks[0].from, marks[0].to))
-          decos.push(Decoration.replace({}).range(marks[marks.length - 1].from, marks[marks.length - 1].to))
+          pushSingleLineReplacement(decos, state, marks[0].from, marks[0].to)
+          pushSingleLineReplacement(decos, state, marks[marks.length - 1].from, marks[marks.length - 1].to)
           decos.push(Decoration.mark({ class: 'cm-lp-inline-code' }).range(marks[0].to, marks[marks.length - 1].from))
         }
         return false
@@ -332,32 +342,18 @@ export function buildDecorations(view, isEnabled, getFilePath) {
           },
         })
         if (linkMarks.length >= 1) {
-          decos.push(Decoration.replace({}).range(linkMarks[0].from, linkMarks[0].to))
+          pushSingleLineReplacement(decos, state, linkMarks[0].from, linkMarks[0].to)
         }
         if (linkMarks.length >= 2) {
-          decos.push(Decoration.replace({}).range(linkMarks[1].from, nTo))
+          pushSingleLineReplacement(decos, state, linkMarks[1].from, nTo)
           decos.push(Decoration.mark({ class: 'cm-lp-link' }).range(linkMarks[0].to, linkMarks[1].from))
         }
         return false
       }
 
-      if (name === 'Image' && !onCursorLine) {
-        let imgUrl = null
-        syntaxTree(state).iterate({
-          from: nFrom, to: nTo,
-          enter(child) {
-            if (child.from < nFrom || child.to > nTo) return
-            if (child.type.name === 'URL') {
-              imgUrl = state.sliceDoc(child.from, child.to)
-            }
-          },
-        })
-        if (imgUrl && getFilePath) {
-          const imagePath = resolveImagePath(imgUrl, getFilePath())
-          decos.push(Decoration.replace({ widget: new ImageWidget(imgUrl, imagePath) }).range(nFrom, nTo))
-        }
-        return false
-      }
+      // Images may span lines in valid Markdown. Their replacements are
+      // provided by imageField below, where cross-line ranges are legal.
+      if (name === 'Image') return false
 
       if (name.startsWith('ATXHeading') && !onCursorLine) {
         syntaxTree(state).iterate({
@@ -365,7 +361,7 @@ export function buildDecorations(view, isEnabled, getFilePath) {
           enter(child) {
             if (child.type.name === 'HeaderMark') {
               const hideEnd = Math.min(child.to + 1, nTo)
-              decos.push(Decoration.replace({}).range(child.from, hideEnd))
+              pushSingleLineReplacement(decos, state, child.from, hideEnd)
             }
           },
         })
@@ -377,7 +373,7 @@ export function buildDecorations(view, isEnabled, getFilePath) {
           enter(child) {
             if (child.type.name === 'QuoteMark') {
               const hideEnd = Math.min(child.to + 1, nTo)
-              decos.push(Decoration.replace({}).range(child.from, hideEnd))
+              pushSingleLineReplacement(decos, state, child.from, hideEnd)
             }
           },
         })
@@ -390,7 +386,7 @@ export function buildDecorations(view, isEnabled, getFilePath) {
       }
 
       if (name === 'HorizontalRule' && !onCursorLine) {
-        decos.push(Decoration.replace({ widget: new HrWidget() }).range(nFrom, nTo))
+        pushSingleLineReplacement(decos, state, nFrom, nTo, { widget: new HrWidget() })
         return false
       }
 
@@ -405,6 +401,54 @@ export function buildDecorations(view, isEnabled, getFilePath) {
   // quote-mark and its line-class decoration at the same line start — stayed
   // in push order and RangeSetBuilder rejected them ("Ranges must be added
   // sorted by `from` position and `startSide`").
+  return RangeSet.of(decos, true)
+}
+
+function buildImageDecorations(state, isEnabled, getFilePath) {
+  if (!isEnabled() || !getFilePath) return Decoration.none
+
+  const cursorLines = new Set()
+  for (const range of state.selection.ranges) {
+    const headLine = state.doc.lineAt(range.head).number
+    const anchorLine = state.doc.lineAt(range.anchor).number
+    for (let line = Math.min(headLine, anchorLine); line <= Math.max(headLine, anchorLine); line++) {
+      cursorLines.add(line)
+    }
+  }
+
+  const decos = []
+  syntaxTree(state).iterate({
+    enter(node) {
+      const name = node.type.name
+      if (name === 'FencedCode' || name === 'CodeBlock') return false
+      if (name !== 'Image') return
+
+      const startLine = state.doc.lineAt(node.from).number
+      const endLine = state.doc.lineAt(node.to > node.from ? node.to - 1 : node.to).number
+      for (let line = startLine; line <= endLine; line++) {
+        if (cursorLines.has(line)) return false
+      }
+
+      let imgUrl = null
+      syntaxTree(state).iterate({
+        from: node.from,
+        to: node.to,
+        enter(child) {
+          if (child.from < node.from || child.to > node.to) return
+          if (child.type.name === 'URL') imgUrl = state.sliceDoc(child.from, child.to)
+        },
+      })
+      if (imgUrl) {
+        const imagePath = resolveImagePath(imgUrl, getFilePath())
+        decos.push(
+          Decoration.replace({ widget: new ImageWidget(imgUrl, imagePath) })
+            .range(node.from, node.to),
+        )
+      }
+      return false
+    },
+  })
+
   return RangeSet.of(decos, true)
 }
 
@@ -615,6 +659,32 @@ export function livePreviewExtension(isEnabled, getFilePath) {
     { decorations: (v) => v.decorations },
   )
 
+  let imageEnabled = isEnabled()
+  let imageFilePath = getFilePath?.() ?? ''
+  const imageField = StateField.define({
+    create(state) {
+      imageEnabled = isEnabled()
+      imageFilePath = getFilePath?.() ?? ''
+      return buildImageDecorations(state, isEnabled, getFilePath)
+    },
+    update(value, tr) {
+      const nowEnabled = isEnabled()
+      const nowFilePath = getFilePath?.() ?? ''
+      if (
+        nowEnabled !== imageEnabled ||
+        nowFilePath !== imageFilePath ||
+        tr.docChanged ||
+        tr.selection
+      ) {
+        imageEnabled = nowEnabled
+        imageFilePath = nowFilePath
+        return buildImageDecorations(tr.state, isEnabled, getFilePath)
+      }
+      return value
+    },
+    provide: field => EditorView.decorations.from(field),
+  })
+
   let tableEnabled = isEnabled()
   const tableField = StateField.define({
     create(state) {
@@ -651,5 +721,5 @@ export function livePreviewExtension(isEnabled, getFilePath) {
     },
   }))
 
-  return [plugin, tableField, tableNav, tableMouse, livePreviewTheme]
+  return [plugin, imageField, tableField, tableNav, tableMouse, livePreviewTheme]
 }

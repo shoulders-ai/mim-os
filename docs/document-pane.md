@@ -108,6 +108,21 @@ Markdown-specific chrome must stay gated on the active tab being text and
 markdown. PDF/table/card tabs should not leak into autosave, comments, export,
 current-document context, or text dirty state.
 
+### Live Preview Decorations
+
+Live preview splits decorations by the geometry they can affect. Viewport-based
+`ViewPlugin` decorations may hide or style Markdown tokens only within a single
+line. Images and tables can replace ranges containing line breaks, so their
+widgets come from `StateField` decoration sets, which CodeMirror can account for
+before calculating the viewport. The image field also rebuilds when the active
+file path changes so relative image paths stay correct across tab switches and
+renames.
+
+`livePreview.test.ts` exercises multiline images and real `EditorView.setState()`
+swaps between image-rich and table-rich Markdown. Keep those tests backed by the
+real CodeMirror view; a mocked tab-state test cannot detect content-DOM or tile
+tree corruption.
+
 ## External Changes and Deletion
 
 `useEditorFileSync.ts` owns disk/buffer reconciliation. Two facts are tracked

@@ -55,18 +55,22 @@ function getDecos(doc: string, cursorPos = 0) {
 
 function makeLivePreviewView(doc: string, cursorPos = 0) {
   const parent = document.createElement('div')
-  const state = EditorState.create({
-    doc,
-    selection: { anchor: cursorPos },
-    extensions: [
-      markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
-      livePreviewExtension(() => true, () => '/test/file.md'),
-    ],
-  })
+  const state = makeLivePreviewState(doc, cursorPos)
   const view = new EditorView({ state, parent })
   ensureSyntaxTree(view.state, view.state.doc.length, 1000)
   view.dispatch({ selection: { anchor: cursorPos } })
   return view
+}
+
+function makeLivePreviewState(doc: string, cursorPos = 0, filePath = '/test/file.md') {
+  return EditorState.create({
+    doc,
+    selection: { anchor: cursorPos },
+    extensions: [
+      markdown({ base: markdownLanguage, extensions: [Strikethrough] }),
+      livePreviewExtension(() => true, () => filePath),
+    ],
+  })
 }
 
 describe('livePreview', () => {
@@ -95,6 +99,44 @@ describe('livePreview', () => {
       const dom = new ImageWidget('https://example.com/pixel.png', 'https://example.com/pixel.png').toDOM()
       const img = dom.querySelector('img')!
       expect(img.src).toBe('https://example.com/pixel.png')
+    })
+
+    it('renders a multiline image without a plugin decoration crossing a line break', () => {
+      const doc = '![alt\ntext](https://example.com/pixel.png)\n\nother'
+      let view: EditorView | null = null
+
+      expect(() => {
+        view = makeLivePreviewView(doc, doc.indexOf('other'))
+      }).not.toThrow()
+      expect(view!.dom.querySelector('.cm-lp-image-wrap img')?.getAttribute('src'))
+        .toBe('https://example.com/pixel.png')
+
+      view!.destroy()
+    })
+
+    it('redraws the target document when swapping decorated editor states', () => {
+      const readme = '![one](https://example.com/one.png)\n![two](https://example.com/two.png)\n\nREADME body'
+      const map = 'Map intro\n\n| Doc | Purpose |\n| --- | --- |\n| README | Overview |\n\nMap body'
+      const parent = document.createElement('div')
+      const readmeState = makeLivePreviewState(readme, readme.indexOf('README body'), '/README.md')
+      const mapState = makeLivePreviewState(map, map.indexOf('Map body'), '/docs/_MAP.md')
+      const view = new EditorView({ state: readmeState, parent })
+
+      view.setState(mapState)
+      view.dispatch({ selection: { anchor: map.indexOf('Map body') } })
+      expect(view.state.doc.toString()).toBe(map)
+      expect(view.dom.querySelector('.cm-lp-table-wrap')).toBeTruthy()
+      expect(view.dom.textContent).toContain('Map body')
+      expect(view.dom.textContent).not.toContain('README body')
+
+      view.setState(readmeState)
+      view.dispatch({ selection: { anchor: readme.indexOf('README body') } })
+      expect(view.state.doc.toString()).toBe(readme)
+      expect(view.dom.querySelectorAll('.cm-lp-image-wrap')).toHaveLength(2)
+      expect(view.dom.textContent).toContain('README body')
+      expect(view.dom.textContent).not.toContain('Map body')
+
+      view.destroy()
     })
   })
 
