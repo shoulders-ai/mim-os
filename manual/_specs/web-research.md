@@ -10,7 +10,8 @@ and how you control it.
 - The live browser: for pages that need interaction, the agent opens a real browser
   session (`web.live.open`, `web.live.act`) and acts step by step. Describe at user
   level: what you see, what the agent sees (bounded observations — one plain
-  sentence).
+  sentence). Include localhost preview support for desktop chat and connected CLI
+  agents, plus the public-page-to-localhost isolation boundary.
 - Control: website access is permissioned (verify the exact user-facing control in
   Settings > Connections / website access and how approval prompts appear for web
   actions).

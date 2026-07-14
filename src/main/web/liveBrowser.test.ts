@@ -141,6 +141,59 @@ describe('live browser Electron boundary', () => {
     expect(mockWindow.focus).toHaveBeenCalled()
   })
 
+  it('opens loopback development URLs while keeping private networks blocked', async () => {
+    const driver = createElectronLiveBrowserDriver()
+
+    await driver.open(
+      { url: 'http://localhost:4567/', visible: true },
+      { actor: 'user', sessionId: 'local-preview' },
+    )
+
+    expect(mockPageWebContents.loadURL).toHaveBeenCalledWith(
+      'http://localhost:4567/',
+      expect.objectContaining({ userAgent: expect.any(String) }),
+    )
+
+    const listener = onBeforeRequest.mock.calls.find((call) => typeof call[1] === 'function')?.[1]
+    expect(listener).toBeTypeOf('function')
+
+    const localhostCallback = vi.fn()
+    listener({ url: 'http://127.0.0.1:4567/@vite/client', resourceType: 'script' }, localhostCallback)
+    expect(localhostCallback).toHaveBeenCalledWith({ cancel: false })
+
+    const hmrCallback = vi.fn()
+    listener({ url: 'ws://localhost:4567/?token=dev', resourceType: 'webSocket' }, hmrCallback)
+    expect(hmrCallback).toHaveBeenCalledWith({ cancel: false })
+
+    const privateCallback = vi.fn()
+    listener({ url: 'http://192.168.1.20/admin', resourceType: 'xhr' }, privateCallback)
+    expect(privateCallback).toHaveBeenCalledWith({ cancel: true })
+
+    const metadataCallback = vi.fn()
+    listener({ url: 'http://169.254.169.254/latest/meta-data/', resourceType: 'xhr' }, metadataCallback)
+    expect(metadataCallback).toHaveBeenCalledWith({ cancel: true })
+  })
+
+  it('does not let a public page reach loopback subresources', async () => {
+    const driver = createElectronLiveBrowserDriver()
+
+    await driver.open(
+      { url: 'https://example.com/' },
+      { actor: 'user', sessionId: 'public-page' },
+    )
+
+    const listener = onBeforeRequest.mock.calls.find((call) => typeof call[1] === 'function')?.[1]
+    expect(listener).toBeTypeOf('function')
+
+    const callback = vi.fn()
+    listener({ url: 'http://localhost:4567/private', resourceType: 'xhr' }, callback)
+    expect(callback).toHaveBeenCalledWith({ cancel: true })
+
+    const webSocketCallback = vi.fn()
+    listener({ url: 'ws://127.0.0.1:4567/private', resourceType: 'webSocket' }, webSocketCallback)
+    expect(webSocketCallback).toHaveBeenCalledWith({ cancel: true })
+  })
+
   it('can show and hide an existing live browser session', async () => {
     const driver = createElectronLiveBrowserDriver()
     const ctx = { actor: 'ai' as const, sessionId: 'show-hide' }
@@ -273,7 +326,7 @@ describe('live browser Electron boundary', () => {
       .resolves.toMatch(/^rejected:Live browser timed out/)
     expect(mockWindow.destroy).toHaveBeenCalled()
     expect(onBeforeRequest).toHaveBeenLastCalledWith(
-      { urls: ['http://*/*', 'https://*/*'] },
+      { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
       null,
     )
   })

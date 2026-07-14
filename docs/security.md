@@ -221,7 +221,12 @@ clears the approval store queue so inline cards disappear immediately.
 - **Web URL SSRF block**: `parseAllowedHttpUrl` accepts only `http`/`https` and
   rejects private, loopback, link-local, unique-local, unspecified, and cloud
   metadata addresses by default. Tests/local development must opt in with the
-  explicit `allowPrivateAddresses` escape hatch.
+  explicit `allowPrivateAddresses` escape hatch. The desktop live browser uses
+  the narrower `allowLoopbackAddresses` option only for a session whose initial
+  URL is itself loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, or `::1`).
+  Its HTTP(S) and WebSocket request blocker carries that per-session decision:
+  public pages cannot pivot into localhost, and all non-loopback private ranges
+  remain denied. Headless/serve runtimes never receive the Electron driver.
 
 ## Known limits
 

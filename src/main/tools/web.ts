@@ -112,9 +112,9 @@ export function registerWebTools(tools: ToolRegistry, deps: WebToolsDeps = {}): 
 
   tools.register({
     name: 'web.live.open',
-    description: 'Open a Markanywhere-style live browser session and return a bounded page observation with compact actionable refs.',
+    description: 'Open a Markanywhere-style live browser session for public websites or localhost development servers and return a bounded page observation with compact actionable refs.',
     inputSchema: objectSchema({
-      url: { type: 'string', description: 'The URL to open (http/https only)' },
+      url: { type: 'string', description: 'The public or loopback URL to open (http/https only; localhost, *.localhost, 127.0.0.0/8, and ::1 are supported)' },
       stateful: { type: 'boolean', description: 'Use approved Website Access profile for granted domains (default false)' },
       visible: { type: 'boolean', description: 'Show the AI-controlled browser window so the user can watch or interact (default false)' },
       timeout_ms: { type: 'number', description: 'Navigation/capture timeout in milliseconds (default 30000)' },

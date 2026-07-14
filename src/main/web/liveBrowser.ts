@@ -5,7 +5,7 @@ import { chunkMarkdownByStructure } from '@main/html/markdown.js'
 import { isBrowserSessionAllowed, readBrowserSessionSettings } from '@main/web/browserSessionSettings.js'
 import { BROWSER_SESSION_PARTITION } from '@main/web/browserSession.js'
 import { CAPTURE_MARKANYWHERE_PAGE_SCRIPT, type MarkanywhereActionRef, type MarkanywherePageCapture } from '@main/web/liveBrowserCapture.js'
-import { parseAllowedHttpUrl, USER_AGENT } from '@main/web/urlPolicy.js'
+import { isLoopbackUrl, parseAllowedHttpUrl, USER_AGENT } from '@main/web/urlPolicy.js'
 
 export interface LiveBrowserOpenParams {
   url: string
@@ -164,12 +164,13 @@ export function createElectronLiveBrowserDriver(options: LiveBrowserDriverOption
 
   return {
     async open(params, ctx) {
-      const parsed = parseAllowedHttpUrl(params.url)
+      const parsed = parseAllowedHttpUrl(params.url, { allowLoopbackAddresses: true })
       await closeSession(ctx)
 
       const stateful = params.stateful === true
       const workspacePath = options.getWorkspacePath?.() ?? null
       const allowedDomains = stateful ? approvedWebsiteAccessDomains(parsed.href, workspacePath) : undefined
+      const allowLoopbackAddresses = isLoopbackUrl(parsed)
       const visible = params.visible === true
       const partition = stateful ? BROWSER_SESSION_PARTITION : `mim-live-browser-${randomUUID()}`
       const browser = createLiveBrowserWindow(partition, visible)
@@ -179,7 +180,7 @@ export function createElectronLiveBrowserDriver(options: LiveBrowserDriverOption
         if (!blockedWebsiteAccessRequest || blocked.resourceType === 'mainFrame') {
           blockedWebsiteAccessRequest = blocked
         }
-      })
+      }, { allowLoopbackAddresses })
       const session: LiveBrowserSession = {
         win,
         contents,
@@ -681,11 +682,12 @@ function installLiveBrowserRequestBlocker(
   contents: WebContents,
   allowedDomains?: string[],
   onWebsiteAccessBlocked?: (blocked: BlockedWebsiteAccessRequest) => void,
+  urlPolicy: { allowLoopbackAddresses?: boolean } = {},
 ): () => void {
-  const filter = { urls: ['http://*/*', 'https://*/*'] }
+  const filter = { urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }
   contents.session.webRequest.onBeforeRequest(filter, (details, callback) => {
     try {
-      const parsed = parseAllowedHttpUrl(details.url)
+      const parsed = parseAllowedBrowserRequestUrl(details.url, urlPolicy)
       if (allowedDomains?.length && !isBrowserSessionAllowed(parsed.href, allowedDomains).allowed) {
         onWebsiteAccessBlocked?.({
           url: parsed.href,
@@ -703,6 +705,20 @@ function installLiveBrowserRequestBlocker(
   return () => {
     contents.session.webRequest.onBeforeRequest(filter, null)
   }
+}
+
+function parseAllowedBrowserRequestUrl(
+  rawUrl: string,
+  urlPolicy: { allowLoopbackAddresses?: boolean },
+): URL {
+  const parsed = new URL(rawUrl)
+  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+    return parseAllowedHttpUrl(rawUrl, urlPolicy)
+  }
+  const policyUrl = new URL(parsed.href)
+  policyUrl.protocol = parsed.protocol === 'ws:' ? 'http:' : 'https:'
+  parseAllowedHttpUrl(policyUrl.href, urlPolicy)
+  return parsed
 }
 
 interface BlockedWebsiteAccessRequest {

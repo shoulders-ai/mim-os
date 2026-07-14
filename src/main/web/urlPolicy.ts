@@ -1,9 +1,8 @@
 export const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36'
 
-const BLOCKED_HOSTS = new Set(['localhost', '0.0.0.0', '[::1]'])
-
 export interface UrlPolicyOptions {
   allowPrivateAddresses?: boolean
+  allowLoopbackAddresses?: boolean
 }
 
 export class BlockedUrlError extends Error {
@@ -23,7 +22,8 @@ export function parseAllowedHttpUrl(rawUrl: string, options: UrlPolicyOptions = 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`Only http/https URLs are supported, got ${parsed.protocol}`)
   }
-  if (!options.allowPrivateAddresses && isBlockedUrl(parsed)) {
+  const loopbackAllowed = options.allowLoopbackAddresses === true && isLoopbackUrl(parsed)
+  if (!options.allowPrivateAddresses && !loopbackAllowed && isBlockedUrl(parsed)) {
     throw new BlockedUrlError(rawUrl)
   }
   return parsed
@@ -48,19 +48,32 @@ function parseIpv4MappedHex(host: string): [number, number, number, number] | nu
   return [(hi >> 8) & 0xff, hi & 0xff, (lo >> 8) & 0xff, lo & 0xff]
 }
 
-function isBlockedUrl(url: URL): boolean {
-  if (BLOCKED_HOSTS.has(url.hostname)) return true
+function parseIpv4(host: string): [number, number, number, number] | null {
+  const parts = host.split('.')
+  if (parts.length !== 4 || parts.some(part => !/^\d{1,3}$/.test(part))) return null
+  const nums = parts.map(Number)
+  if (nums.some(num => num > 255)) return null
+  return nums as [number, number, number, number]
+}
+
+export function isLoopbackUrl(url: URL): boolean {
   const host = url.hostname.replace(/^\[/, '').replace(/\]$/, '').toLowerCase()
+  if (host === 'localhost' || host.endsWith('.localhost')) return true
   if (host === '::1') return true
+  const mapped = parseIpv4MappedHex(host)
+  if (mapped?.[0] === 127) return true
+  return parseIpv4(host)?.[0] === 127
+}
+
+function isBlockedUrl(url: URL): boolean {
+  if (isLoopbackUrl(url)) return true
+  const host = url.hostname.replace(/^\[/, '').replace(/\]$/, '').toLowerCase()
   if (host === '::') return true
   const mapped = parseIpv4MappedHex(host)
   if (mapped && isPrivateIpv4(...mapped)) return true
   if (isPrivateIpv6(host)) return true
-  const parts = host.split('.')
-  if (parts.length === 4) {
-    const nums = parts.map(p => parseInt(p, 10))
-    if (nums.every(n => !isNaN(n)) && isPrivateIpv4(nums[0], nums[1], nums[2], nums[3])) return true
-  }
+  const ipv4 = parseIpv4(host)
+  if (ipv4 && isPrivateIpv4(...ipv4)) return true
   return false
 }
 

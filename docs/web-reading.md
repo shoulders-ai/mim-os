@@ -5,7 +5,8 @@ Mim exposes two model-facing web access modes:
 - `web_read`, backed by `web.read`, is the simple stateless reader for ordinary
   pages, docs, articles, PDFs, and search-result follow-up.
 - `browser_open` and `browser_act`, backed by `web.live.open` and
-  `web.live.act`, are the Markanywhere-port live browser for interactive pages.
+  `web.live.act`, are the Markanywhere-port live browser for interactive pages
+  and local development servers.
 
 Chat and MCP share this public naming: `web_read`, `web_search`,
 `browser_open`, and `browser_act`.
@@ -38,6 +39,12 @@ session for debugging or user-assisted auth/CAPTCHA/MFA/legal-consent handoff.
 session. `browser_open` and `browser_act({ action: "observe" })` do not return a
 separate `markdown` field; the observation already contains the readable page
 text with the page header and chunk continuation hint when needed.
+
+The desktop live browser accepts public URLs plus explicit loopback development
+targets: `localhost`, `*.localhost`, `127.0.0.0/8`, and `::1`. This support is
+available through Mim chat and through the local `mim mcp` bridge, so CLI agents
+can inspect a development server with `browser_open` and continue in the same
+session with `browser_act`. Other private-network addresses remain blocked.
 
 ## Routing
 
@@ -89,10 +96,17 @@ The current settings key is `browserSession`.
 
 ## Security
 
-Fetch and Chromium-rendered reads share the same URL policy. Initial URLs and
+Fetch and Chromium-rendered reads share the default URL policy. Initial URLs and
 redirect targets must be public `http` or `https` URLs. Hidden Chromium sessions
 also install a request blocker so subresource requests to private, loopback,
 link-local, or otherwise disallowed targets are cancelled.
+
+The desktop live browser has one narrow exception: when `browser_open` itself
+targets a supported loopback host, that session may load loopback HTTP(S) and
+WebSocket resources for the local app. A session opened on a public page cannot
+reach loopback resources, and loopback sessions still cannot reach private LAN,
+link-local, cloud-metadata, or unique-local addresses. Headless/serve mode has no
+Electron live-browser driver, so the exception is not available to remote MCP.
 
 Website Access reads add a second request boundary: sign-in, consent, and
 cookies may only be used on domains covered by the approved domain patterns for
