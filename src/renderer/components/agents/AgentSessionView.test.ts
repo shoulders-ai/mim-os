@@ -141,17 +141,20 @@ describe('AgentSessionView', () => {
     expect(root.textContent).toContain('Gemini CLI')
   })
 
-  it('stops a running session without confirmation', async () => {
+  it('archives a running session from the header', async () => {
+    const archive = vi.fn()
     useRunsStore().setAgentSessions([makeSession()])
-    mountView()
+    mountView({}, { onArchiveAgentSession: archive })
     await flushUi()
 
-    const stop = buttonByText('Stop')
-    expect(stop).not.toBeNull()
-    stop?.click()
+    expect(buttonByText('Stop')).toBeNull()
+    const archiveButton = buttonByText('Archive')
+    expect(archiveButton).not.toBeNull()
+    archiveButton?.click()
     await flushUi()
 
-    expect(call).toHaveBeenCalledWith('agent.stop', { sessionId: 's1' })
+    expect(archive).toHaveBeenCalledWith('s1')
+    expect(call).not.toHaveBeenCalledWith('agent.stop', expect.anything())
   })
 
   it('surfaces the needs-input runtime state and the title hint', async () => {
@@ -207,7 +210,7 @@ describe('AgentSessionView', () => {
     expect(buttonByText('Stop')).toBeNull()
   })
 
-  it('explains an interrupted session in plain language', async () => {
+  it('explains an interrupted session as a stopped restart casualty', async () => {
     useRunsStore().setAgentSessions([makeSession({
       status: 'interrupted',
       endedAt: '2026-06-12T10:05:00.000Z',
@@ -217,7 +220,28 @@ describe('AgentSessionView', () => {
     mountView()
     await flushUi()
 
-    expect(root.textContent).toContain('Interrupted — Mim was closed while this session ran')
+    expect(root.textContent).toContain('Stopped because Mim was closed while this session ran')
+  })
+
+  it('offers archive next to resume for a stopped session', async () => {
+    const archive = vi.fn()
+    useRunsStore().setAgentSessions([makeSession({
+      status: 'stopped',
+      endedAt: '2026-06-12T10:05:00.000Z',
+      ptyId: undefined,
+      runtimeStatus: undefined,
+    })])
+    mountView({}, { onArchiveAgentSession: archive })
+    await flushUi()
+
+    expect(buttonByText('Resume')).not.toBeNull()
+    const archiveButton = buttonByText('Archive')
+    expect(archiveButton).not.toBeNull()
+    archiveButton?.click()
+    await flushUi()
+
+    expect(archive).toHaveBeenCalledWith('s1')
+    expect(call).not.toHaveBeenCalledWith('agent.stop', expect.anything())
   })
 
   it('resumes the session in place and applies the updated record to the store', async () => {

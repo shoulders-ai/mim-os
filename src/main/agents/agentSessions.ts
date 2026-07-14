@@ -13,7 +13,15 @@ import { basename, dirname, join } from 'path'
 import { randomUUID } from 'crypto'
 import { atomicWriteJson } from '@main/atomicJson.js'
 import { createAgentStatusTracker, isSpinnerPrefix, type AgentRuntimeStatus, type AgentStatusTracker } from '@main/agents/agentStatus.js'
-import { AGENT_CATALOG, resumeArgs as catalogResumeArgs, cliSessionsDir, extractCodexSessionId } from '@main/agents/agentCatalog.js'
+import {
+  AGENT_CATALOG,
+  assertAgentExtraArgs,
+  assertDetectedAgentAvailable,
+  launchArgs as catalogLaunchArgs,
+  resumeArgs as catalogResumeArgs,
+  cliSessionsDir,
+  extractCodexSessionId,
+} from '@main/agents/agentCatalog.js'
 import type { DetectedAgent } from '@main/agents/agentCatalog.js'
 import type { PtyHandle, PtySpawnOptions } from '@main/pty.js'
 
@@ -57,7 +65,7 @@ export function cleanTitleHint(hint: string | undefined): string {
   return text.trim()
 }
 
-const AGENT_NAMES_LC = new Set(['claude code', 'codex', 'gemini cli'])
+const AGENT_NAMES_LC = new Set(['claude code', 'codex', 'gemini cli', 'pi'])
 
 export function isTrivialTitle(cleaned: string, cwd?: string): boolean {
   if (!cleaned || cleaned.length < 3) return true
@@ -160,6 +168,7 @@ export interface AgentSessionRecord {
   archived?: boolean
   titleHint?: string // last OSC 0/1/2 title seen; persisted on change
   cliSessionId?: string // agent CLI's own session ID, detected after spawn
+  userArgs?: string[] // launch-time custom flags retained when the CLI needs them for exact resume
 }
 
 // Record plus live runtime state, merged for the renderer: ptyId lets it
@@ -192,7 +201,7 @@ export interface AgentSessionsOptions {
 }
 
 export interface AgentSessions {
-  launch(agent: DetectedAgent): { record: AgentSessionRuntime; ptyId: number }
+  launch(agent: DetectedAgent, userArgs?: string[]): { record: AgentSessionRuntime; ptyId: number }
   resume(sessionId: string, agent: DetectedAgent): { record: AgentSessionRuntime; ptyId: number }
   stop(sessionId: string): AgentSessionRuntime
   list(options?: { includeArchived?: boolean; archived?: boolean }): AgentSessionRuntime[]
@@ -472,19 +481,23 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     return { dir, ids }
   }
 
-  function launch(agent: DetectedAgent): { record: AgentSessionRuntime; ptyId: number } {
-    if (!agent.installed || !agent.binPath) throw new Error(`Agent not installed: ${agent.id}`)
+  function launch(agent: DetectedAgent, userArgs: string[] = []): { record: AgentSessionRuntime; ptyId: number } {
+    assertDetectedAgentAvailable(agent)
+    assertAgentExtraArgs(agent.id, userArgs)
     const cwd = requireWorkspace()
     const sessionId = generateId()
+    const args = catalogLaunchArgs(agent.id, sessionId, [...agent.args, ...userArgs])
     const mcpToken = options.createMcpToken(sessionId)
     const record: AgentSessionRecord = {
       sessionId,
       agentId: agent.id,
       title: defaultTitle(agent.name),
-      command: [agent.binPath, ...agent.args].join(' '),
+      command: [agent.binPath, ...args].join(' '),
       cwd,
       status: 'running',
       startedAt: now().toISOString(),
+      cliSessionId: agent.id === 'pi' ? sessionId : undefined,
+      userArgs: userArgs.length > 0 ? [...userArgs] : undefined,
     }
     const snapshot = snapshotCliSessions(agent.id, cwd)
     const tracker = createAgentStatusTracker({ idleThresholdMs })
@@ -505,7 +518,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     try {
       live.handle = options.spawnPty({
         file: agent.binPath,
-        args: agent.args,
+        args,
         cwd,
         env: {
           MIM_PORT: String(options.getMcpServerPort()),
@@ -527,11 +540,12 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
   }
 
   function resume(sessionId: string, agent: DetectedAgent): { record: AgentSessionRuntime; ptyId: number } {
-    if (!agent.installed || !agent.binPath) throw new Error(`Agent not installed: ${agent.id}`)
+    assertDetectedAgentAvailable(agent)
     const record = requireRecord(sessionId)
     if (record.status === 'running') throw new Error(`Agent session is already running: ${sessionId}`)
 
-    const rArgs = catalogResumeArgs(record.agentId, record.cliSessionId, record.cwd)
+    const retainedArgs = record.agentId === 'pi' ? [...agent.args, ...(record.userArgs ?? [])] : []
+    const rArgs = catalogResumeArgs(record.agentId, record.cliSessionId, record.cwd, retainedArgs)
     const mcpToken = options.createMcpToken(sessionId)
 
     record.status = 'running'
@@ -673,7 +687,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     for (const record of records) {
       if (record.status !== 'running') continue
       if (active.has(record.sessionId)) continue
-      record.status = 'interrupted'
+      record.status = 'stopped'
       record.endedAt = now().toISOString()
       persist(record)
     }

@@ -4,11 +4,15 @@ title: agents
 order: 8
 sources:
   - docs/agent-sessions.md
+  - docs/routines.md
   - docs/skills.md
   - docs/mcp.md
   - src/main/ai/systemPrompt.ts
   - src/renderer/components/chat/ChatComposer.vue
+  - src/renderer/components/chat/ChatCompactionDivider.vue
   - src/renderer/components/chat/ModelPicker.vue
+  - src/renderer/components/routines/RoutinesWorkView.vue
+  - src/renderer/stores/routines.ts
   - src/renderer/stores/pings.ts
   - resources/ai-models.json
 verified: bf1358ebd68b1348a9fd85c6576c5b71e5f11880
@@ -16,7 +20,7 @@ verified: bf1358ebd68b1348a9fd85c6576c5b71e5f11880
 
 # agents
 
-Mim has a built-in agent that can read and edit your files, run code, search the web, and work across every surface in the workspace. CLI agents -- Claude Code, Codex, and Gemini CLI -- run as first-class sessions alongside it.
+Mim has a built-in agent that can read and edit your files, run code, search the web, and work across every surface in the workspace. CLI agents -- Claude Code, Codex, Gemini CLI, and Pi -- run as first-class sessions alongside it.
 
 ## The built-in agent
 
@@ -34,6 +38,8 @@ The control next to it adjusts the model's reasoning depth and shows the selecte
 
 The context donut beside the pickers tracks how much of the model's context window the current chat has consumed. Hover to see the percentage and token count. The tooltip also shows the estimated cost for the chat so far, formatted as a dollar amount.
 
+When a long chat is compacted, a `Context compacted` divider marks where the model-visible history now starts. Expanding it shows the summary sent to the model while the full transcript stays visible.
+
 Type `@` in the composer to mention a skill, a workspace file, or an app tool by name. Matching items appear in a dropdown; selecting one adds a context chip above the text field. The + menu at the bottom left of the composer offers the same items plus file attachment and the current document. Context chips are sent with that one message and do not persist into later turns.
 
 ## Instructions
@@ -50,19 +56,29 @@ Skills come from four sources, in increasing precedence: built-in skills that sh
 
 Manage your skill library in Settings > Skills. You can toggle skills on or off, add a source, import a skill from a folder, or create a new personal skill from a template. Building your own skills is covered in [skills](/develop/skills).
 
+## Routines
+
+A routine is a standing prompt saved in your workspace. Open Routines in the Navigator to create one, choose a model, and choose when it runs: manually, daily, weekly, on a simple interval, after file changes, or from an external request.
+
+Click Run to start a routine by hand. Mim opens the routine's chat transcript and runs it through the same agent surface as an ordinary chat, so assistant messages, tool calls, tool results, and approval cards appear as the run progresses. Routine runs also appear in Activity as routine rows.
+
+Resume enables a routine on this machine for its automatic trigger. Pause disables that local trigger without deleting the routine file. The routine definition lives under `routines/` in the workspace; local enablement and run state live under `.mim/routines/`.
+
+Routines carry their own tool and approval grants. A routine can proceed unattended only for the tools its definition grants; other consequential actions ask in that routine's chat transcript.
+
 ## CLI agents
 
-Claude Code, Codex, and Gemini CLI are detected automatically when their binaries are installed on your machine. Detection checks the login shell's PATH, so binaries installed via Homebrew, npm, or similar tools are found without extra configuration.
+Claude Code, Codex, Gemini CLI, and Pi are detected automatically when their binaries are installed on your machine. Detection checks the login shell's PATH, so binaries installed via Homebrew, npm, or similar tools are found without extra configuration. Pi 0.76.0 or newer is required; Settings shows the detected version and explains when an installed copy is too old or cannot be verified.
 
 Detection alone does not surface a launcher. You enable each agent under the Coding agents heading in Settings > Apps. Enabling one adds a launcher row to the Navigator's Apps section; each click starts a new agent session.
 
-An agent session is a first-class run. It gets its own Activity row with a live status indicator -- working, needs input, idle, done, stopped, or error -- and a title that updates automatically once the agent begins a task. Scrollback is captured in the main process and persists across restarts: even if you quit and reopen Mim, the session's output is still there. When an ended session is reopened, you can resume it -- Mim passes the agent's native resume flag so it picks up where it left off. Sessions also appear in History alongside chats and app runs, and can be renamed, archived, or deleted.
+An agent session is a first-class run. It gets its own Activity row with a live status indicator -- working, needs input, idle, done, stopped, or error -- and a title that updates automatically once the agent begins a task. Scrollback is captured in the main process and persists across restarts: even if you quit and reopen Mim, the session's output is still there. When an ended session is reopened, you can resume it -- Mim passes the agent's native resume identity so it picks up where it left off. Pi uses the same Mim session id at launch and resume, making that identity deterministic. Sessions also appear in History alongside chats and app runs, and can be renamed, archived, or deleted.
 
-The Customise disclosure in each agent's row lets you set CLI flags per workspace -- for example, passing a specific model flag or enabling the agent's own auto-approval mode. These flags are appended to the launch command every time you start a session.
+The Customise disclosure in each agent's row lets you set CLI flags per workspace -- for example, passing a specific model flag or enabling the agent's own auto-approval mode. These flags are appended to the launch command every time you start a session. Mim manages Pi's session-control flags, so use Customise for options such as `--model`, not `--session-id`, resume, continue, or fork flags.
 
 ## The MCP bridge
 
-CLI agents can reach Mim itself over a local MCP connection. Mim-specific tools -- reading files, the editor, comments, file history, search, skills, web, and connected integrations -- become available to the CLI agent, under the same approval rules. File writing, shell commands, and git remain the CLI agent's own capabilities. A Connect button in the agent's row in Settings > Apps registers the MCP server with the agent's native configuration in one click. Disconnect is in the agent's Customise section.
+Claude Code, Codex, and Gemini CLI can reach Mim itself over a local MCP connection. Mim-specific tools -- reading files, the editor, comments, file history, search, skills, web, and connected integrations -- become available to the CLI agent, under the same approval rules. File writing, shell commands, and git remain the CLI agent's own capabilities. A Connect button in the agent's row in Settings > Apps registers the MCP server with the agent's native configuration in one click. Disconnect is in the agent's Customise section. Pi runs as a full CLI session, but cannot call Mim tools yet, so its row has no Connect control.
 
 ::: under-the-hood
 The system prompt is assembled from `AGENTS.md` (or a default template) with template variables resolved at each turn: the tool catalog, the skill catalog, the workspace tree, the project log tail, and a volatile workspace-context digest. The full resolution logic is in `src/main/ai/systemPrompt.ts`.

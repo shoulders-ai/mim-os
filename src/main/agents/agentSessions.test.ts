@@ -36,6 +36,19 @@ const gemini: DetectedAgent = {
   installed: true,
   binPath: '/opt/homebrew/bin/gemini',
 }
+
+const pi: DetectedAgent = {
+  id: 'pi',
+  name: 'Pi',
+  bin: 'pi',
+  args: [],
+  minimumVersion: '0.76.0',
+  mimToolConnection: 'none',
+  installed: true,
+  binPath: '/opt/homebrew/bin/pi',
+  version: '0.80.6',
+  compatible: true,
+}
 import type { PtyHandle, PtySpawnOptions } from '@main/pty.js'
 
 const claude: DetectedAgent = {
@@ -188,6 +201,26 @@ describe('agent sessions', () => {
     expect(sessions.activeSessionCount()).toBe(1)
   })
 
+  it('launches Pi with the Mim session id and persists flags needed for exact resume', () => {
+    const { sessions, ptys } = makeHarness({ generateId: () => 'mim-pi-session' })
+
+    const { record } = sessions.launch(pi, ['--model', 'openai/gpt-5'])
+
+    expect(ptys[0].opts.args).toEqual([
+      '--session-id',
+      'mim-pi-session',
+      '--model',
+      'openai/gpt-5',
+    ])
+    expect(record.cliSessionId).toBe('mim-pi-session')
+    expect(record.userArgs).toEqual(['--model', 'openai/gpt-5'])
+    expect(record.command).toBe('/opt/homebrew/bin/pi --session-id mim-pi-session --model openai/gpt-5')
+
+    const onDisk = JSON.parse(readFileSync(join(sessionsDir(), 'mim-pi-session.json'), 'utf-8'))
+    expect(onDisk.cliSessionId).toBe('mim-pi-session')
+    expect(onDisk.userArgs).toEqual(['--model', 'openai/gpt-5'])
+  })
+
   it('counters duplicate default titles', () => {
     const { sessions } = makeHarness()
     expect(sessions.launch(claude).record.title).toBe('Claude Code')
@@ -295,7 +328,7 @@ describe('agent sessions', () => {
     expect(() => sessions.stop('nope')).toThrow('Agent session not found: nope')
   })
 
-  it('reconcileStaleSessions marks persisted running records as interrupted', () => {
+  it('reconcileStaleSessions marks persisted running records as stopped', () => {
     const staleId = randomUUID()
     atomicWriteJson(join(sessionsDir(), `${staleId}.json`), {
       sessionId: staleId,
@@ -311,7 +344,7 @@ describe('agent sessions', () => {
 
     sessions.reconcileStaleSessions()
 
-    expect(sessions.get(staleId)!.status).toBe('interrupted')
+    expect(sessions.get(staleId)!.status).toBe('stopped')
     expect(sessions.get(staleId)!.endedAt).toBeTruthy()
     // Live sessions are untouched
     expect(sessions.get(live.record.sessionId)!.status).toBe('running')
@@ -620,6 +653,22 @@ describe('agent sessions', () => {
   })
 
   describe('resume', () => {
+    it('resumes Pi with the same exact id and original custom flags', () => {
+      const { sessions, ptys } = makeHarness({ generateId: () => 'mim-pi-session' })
+      const { record: original } = sessions.launch(pi, ['--model', 'openai/gpt-5'])
+      ptys[0].exit(0)
+
+      const { record: resumed } = sessions.resume(original.sessionId, pi)
+
+      expect(ptys[1].opts.args).toEqual([
+        '--session-id',
+        'mim-pi-session',
+        '--model',
+        'openai/gpt-5',
+      ])
+      expect(resumed.command).toBe('/opt/homebrew/bin/pi --session-id mim-pi-session --model openai/gpt-5')
+    })
+
     it('spawns Claude Code with --resume <cliSessionId> when detected', () => {
       vi.stubEnv('HOME', dir)
       const projectDir = cliSessionsDir('claude-code', dir)!

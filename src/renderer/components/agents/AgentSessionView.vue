@@ -3,7 +3,7 @@
 // live TerminalSurface while the pty runs, scrollback replay with an
 // end-state banner once it ends. Session data comes from the runs store;
 // only identity arrives via props.
-import { IconAlertTriangle, IconPlayerPlay, IconPlayerStop } from '@tabler/icons-vue'
+import { IconAlertTriangle, IconArchive, IconPlayerPlay } from '@tabler/icons-vue'
 import { computed, ref, watch } from 'vue'
 import TerminalSurface from '../terminal/TerminalSurface.vue'
 import type { TerminalKeybindingProfile } from '../terminal/terminalKeybindings.js'
@@ -17,6 +17,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   openAgentSession: [agentId: string, sessionId: string]
+  archiveAgentSession: [sessionId: string]
 }>()
 
 const runsStore = useRunsStore()
@@ -31,13 +32,17 @@ const agentName = computed(() =>
 )
 const keybindingProfile = computed<TerminalKeybindingProfile>(() => {
   const agentId = effectiveAgentId.value
-  if (agentId === 'claude-code' || agentId === 'gemini-cli' || agentId === 'codex') {
+  if (agentId === 'claude-code' || agentId === 'gemini-cli' || agentId === 'codex' || agentId === 'pi') {
     return agentId
   }
   return 'terminal'
 })
 const running = computed(() => session.value?.status === 'running')
 const ended = computed(() => !!session.value && session.value.status !== 'running')
+const endedArchivable = computed(() => {
+  const current = session.value
+  return current?.status === 'stopped' || current?.status === 'interrupted'
+})
 
 const statusLabel = computed(() => {
   const current = session.value
@@ -51,7 +56,7 @@ const statusLabel = computed(() => {
   if (current.status === 'done') return 'Done'
   if (current.status === 'error') return 'Failed'
   if (current.status === 'stopped') return 'Stopped'
-  return 'Interrupted'
+  return 'Stopped'
 })
 
 const statusClass = computed(() => {
@@ -62,6 +67,7 @@ const statusClass = computed(() => {
   if (current.status === 'running') return 'border-accent/25 text-accent bg-accent-tint'
   if (current.status === 'done') return 'border-add/25 text-add bg-add/8'
   if (current.status === 'stopped') return 'border-rule text-ink-3 bg-chrome-mid'
+  if (current.status === 'interrupted') return 'border-rule text-ink-3 bg-chrome-mid'
   return 'border-rem/25 text-rem bg-rem/8'
 })
 
@@ -74,12 +80,12 @@ const bannerText = computed(() => {
     return current.exitCode != null ? `Failed (exit ${current.exitCode})` : 'Failed'
   }
   if (current.status === 'stopped') return 'Stopped'
-  return 'Interrupted — Mim was closed while this session ran'
+  return 'Stopped because Mim was closed while this session ran'
 })
 
 const bannerClass = computed(() => {
   const status = session.value?.status
-  if (status === 'error' || status === 'interrupted') return 'border-rem/20 bg-rem/8 text-rem'
+  if (status === 'error') return 'border-rem/20 bg-rem/8 text-rem'
   return 'border-rule-light bg-chrome-high text-ink-2'
 })
 
@@ -116,20 +122,13 @@ function isMissingSessionError(message: string, sessionId: string): boolean {
 }
 
 /* ── Actions ── */
-const actionBusy = ref<'stop' | 'resume' | null>(null)
+const actionBusy = ref<'resume' | null>(null)
 const actionError = ref<string | null>(null)
 
-async function stopSession() {
-  if (!running.value || actionBusy.value) return
-  actionBusy.value = 'stop'
+function archiveSession() {
+  if (!session.value || actionBusy.value) return
   actionError.value = null
-  try {
-    await window.kernel.call('agent.stop', { sessionId: props.sessionId })
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    actionBusy.value = null
-  }
+  emit('archiveAgentSession', props.sessionId)
 }
 
 async function resumeSession() {
@@ -177,12 +176,11 @@ watch(running, (isRunning) => {
       <button
         v-if="running"
         class="flex h-6 shrink-0 items-center gap-1 rounded-[5px] border border-rule-light px-2 font-sans text-[11px] font-medium text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-50"
-        :disabled="actionBusy === 'stop'"
-        title="Stop session"
-        @click="stopSession"
+        title="Stop and archive session"
+        @click="archiveSession"
       >
-        <IconPlayerStop :size="12" :stroke-width="2" />
-        Stop
+        <IconArchive :size="12" :stroke-width="2" />
+        Archive
       </button>
     </header>
 
@@ -228,6 +226,16 @@ watch(running, (isRunning) => {
         >
           <IconPlayerPlay :size="12" :stroke-width="2.2" />
           Resume
+        </button>
+        <button
+          v-if="endedArchivable"
+          class="flex h-6 shrink-0 items-center gap-1.5 rounded-[5px] border border-rule-light bg-surface px-2 font-sans text-[11px] font-semibold text-ink-2 hover:bg-chrome-mid hover:text-ink disabled:opacity-50"
+          :disabled="actionBusy === 'resume'"
+          title="Archive session"
+          @click="archiveSession"
+        >
+          <IconArchive :size="12" :stroke-width="2" />
+          Archive
         </button>
       </div>
       <div class="relative mt-1 min-h-0 flex-1 overflow-hidden bg-surface">
