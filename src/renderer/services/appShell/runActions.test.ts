@@ -164,7 +164,7 @@ describe('app shell run actions', () => {
         throw new Error(`unexpected ${tool}`)
       }),
     })
-    agentSessions.push(makeAgentSession())
+    agentSessions.push(makeAgentSession({ status: 'done' }))
     setActiveWork({
       id: 'work:agent-session:sess-1',
       kind: 'agent-session',
@@ -180,6 +180,25 @@ describe('app shell run actions', () => {
     expect(deps.removeWorkHistoryEntry).toHaveBeenCalledWith('work:agent-session:sess-1')
     expect(deps.openNextActivity).toHaveBeenCalledWith('work:agent-session:sess-1')
     expect(deps.incrementArchiveRefresh).toHaveBeenCalledOnce()
+  })
+
+  it('stops running agent sessions before archiving them', async () => {
+    const archived = makeAgentSession({ archived: true, status: 'stopped' })
+    const { deps, agentSessions } = makeDeps({
+      callKernel: vi.fn(async tool => {
+        if (tool === 'agent.stop') return { session: makeAgentSession({ status: 'stopped' }) }
+        if (tool === 'agent.sessions.archive') return { session: archived }
+        throw new Error(`unexpected ${tool}`)
+      }),
+    })
+    agentSessions.push(makeAgentSession({ status: 'running' }))
+    const actions = createRunActions(deps)
+
+    await actions.archiveAgentSession('sess-1')
+
+    expect(deps.callKernel).toHaveBeenNthCalledWith(1, 'agent.stop', { sessionId: 'sess-1' })
+    expect(deps.callKernel).toHaveBeenNthCalledWith(2, 'agent.sessions.archive', { sessionId: 'sess-1' })
+    expect(deps.applyAgentSessionEvent).toHaveBeenCalledWith({ type: 'session.changed', session: archived })
   })
 
   it('deletes active agent sessions, prunes Work history, navigates to next activity, and refreshes archive state', async () => {

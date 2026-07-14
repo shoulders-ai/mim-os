@@ -310,8 +310,8 @@ describe('runs store agent sessions', () => {
       agentSession({ sessionId: 'done', status: 'done' }),
       agentSession({ sessionId: 'error', status: 'error' }),
       agentSession({ sessionId: 'stopped', status: 'stopped' }),
-      // Interrupted sessions (app quit mid-run) surface as errors, mirroring
-      // app jobs boot reconciliation marking interrupted runs failed.
+      // Older interrupted records (app quit mid-run) surface as stopped, not
+      // errors: Mim closing is not an agent failure.
       agentSession({ sessionId: 'interrupted', status: 'interrupted' }),
     ])
 
@@ -323,7 +323,7 @@ describe('runs store agent sessions', () => {
       ['done', 'done'],
       ['error', 'error'],
       ['stopped', 'stopped'],
-      ['interrupted', 'error'],
+      ['interrupted', 'stopped'],
     ])
   })
 

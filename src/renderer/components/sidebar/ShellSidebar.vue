@@ -272,7 +272,7 @@ function agentIdForSession(sessionId: string): string {
 
 // Live pty states — the only states where Stop applies and Delete does not.
 // 'done' (RunStatus) is excluded because it's shared with record-level done
-// (process exited); the brief runtime-done window (< 5s) still shows Stop
+// (process exited); the brief runtime-done window (< 5s) still shows Archive
 // in the AgentSessionView header.
 function agentRunIsLive(run: NavigatorRun): boolean {
   return run.kind === 'agent-session' && (run.status === 'working' || run.status === 'needs-input' || run.status === 'idle')

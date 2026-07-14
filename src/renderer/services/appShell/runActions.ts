@@ -127,9 +127,13 @@ export function createRunActions(deps: RunActionsDeps) {
 
   async function archiveAgentSession(sessionId: string) {
     try {
-      const agentId = deps.agentSessions().find(item => item.sessionId === sessionId)?.agentId ?? ''
+      const existing = deps.agentSessions().find(item => item.sessionId === sessionId)
+      const agentId = existing?.agentId ?? ''
       const entryId = agentSessionWorkEntry(agentId, sessionId, '').id
       const wasActiveWork = deps.activeWork()?.kind === 'agent-session' && deps.activeWork()?.sessionId === sessionId
+      if (existing?.status === 'running') {
+        await deps.callKernel('agent.stop', { sessionId })
+      }
       const result = await deps.callKernel('agent.sessions.archive', { sessionId }) as { session?: AgentSessionRuntime }
       if (result.session) deps.applyAgentSessionEvent({ type: 'session.changed', session: result.session })
       else deps.removeAgentSession(sessionId)

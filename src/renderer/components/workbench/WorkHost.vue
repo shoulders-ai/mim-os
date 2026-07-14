@@ -52,6 +52,7 @@ const emit = defineEmits<{
   reviewApproval: [approval: ApprovalRequest]
   openSettings: []
   openAgentSession: [agentId: string, sessionId: string]
+  archiveAgentSession: [sessionId: string]
 }>()
 
 const terminalRef = ref<InstanceType<typeof TerminalPanel> | null>(null)
@@ -265,6 +266,7 @@ defineExpose({
       :agent-id="activeWork.agentId"
       :session-id="activeWork.sessionId"
       @open-agent-session="(agentId, sessionId) => emit('openAgentSession', agentId, sessionId)"
+      @archive-agent-session="sessionId => emit('archiveAgentSession', sessionId)"
     />
   </KeepAlive>
 </template>

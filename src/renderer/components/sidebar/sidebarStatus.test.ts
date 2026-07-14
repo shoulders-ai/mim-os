@@ -46,7 +46,7 @@ describe('runStatusTag', () => {
 
 // Agent sessions map onto the shared run vocabulary (runs store:
 // running→working/needs-input/done/idle, done→done, stopped→stopped,
-// error/interrupted→error). Pin every status they can produce so the
+// interrupted→stopped, error→error). Pin every status they can produce so the
 // shared mapping cannot silently lose one.
 describe('agent session status vocabulary', () => {
   const agentStatuses = ['working', 'needs-input', 'idle', 'done', 'error', 'stopped'] as const

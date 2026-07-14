@@ -1292,6 +1292,7 @@ onBeforeUnmount(() => {
             @archive-session="archiveSession"
             @open-package-run="openPackageRunWork"
             @open-agent-session="openAgentSessionWork"
+            @archive-agent-session="archiveAgentSession"
             @review-approval="reviewApprovalChange"
             @open-settings="openSettings('ai')"
           />

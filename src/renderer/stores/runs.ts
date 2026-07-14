@@ -323,8 +323,7 @@ function mapAgentSessionStatus(session: AgentSessionRuntime): RunStatus {
   }
   if (session.status === 'done') return 'done'
   if (session.status === 'stopped') return 'stopped'
-  // 'error' and 'interrupted' both surface as errors — mirrors packageJobs
-  // boot reconciliation marking interrupted runs failed.
+  if (session.status === 'interrupted') return 'stopped'
   return 'error'
 }
 
