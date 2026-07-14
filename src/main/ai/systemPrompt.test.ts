@@ -104,6 +104,8 @@ describe('getSystemPrompt', () => {
     expect(out).toContain('google_connect')
     expect(out).toContain('slack_connect')
     expect(out).toContain('slack_bot_connect')
+    expect(out).toContain('slack_bot_setup')
+    expect(out).toContain('slack_bot_check')
     expect(out).toContain('connections_configure')
     expect(out).toContain('keychain')
     expect(out).toContain('file')

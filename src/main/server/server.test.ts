@@ -575,7 +575,7 @@ describe('app server', () => {
       expect.objectContaining({
         name: 'browser_open',
         mimName: 'web.live.open',
-        description: 'Open a live browser session for interactive websites',
+        description: 'Open Mim\'s live browser for interactive websites or localhost development servers',
       }),
       expect.objectContaining({
         name: 'browser_act',
@@ -739,7 +739,7 @@ describe('app server', () => {
     expect(identify).toEqual({ id: 'identify-2', error: 'Invalid MCP token' })
   })
 
-  it('routes MCP tool calls as AI with the MCP session id and enforces the server allowlist', async () => {
+  it('routes MCP tool calls as the local user with the MCP session id and enforces the server allowlist', async () => {
     const call = vi.fn(async (_name: string) => ({ ok: true }))
     server = await createServer(makeTools(call, null, makeMcpToolDefs()), makePackages([addPackage()]))
     const socket = await openSocket(server.port)
@@ -758,7 +758,7 @@ describe('app server', () => {
     const browser = await sendJson(socket, {
       id: 'browser-1',
       method: 'web.live.open',
-      params: { url: 'https://example.com', visible: true },
+      params: { url: 'http://localhost:4567', visible: true },
     })
     const denied = await sendJson(socket, {
       id: 'write-1',
@@ -774,7 +774,7 @@ describe('app server', () => {
       actor: 'user',
       sessionId: 'agent-session-2',
     })
-    expect(call).toHaveBeenNthCalledWith(2, 'web.live.open', { url: 'https://example.com', visible: true }, {
+    expect(call).toHaveBeenNthCalledWith(2, 'web.live.open', { url: 'http://localhost:4567', visible: true }, {
       actor: 'user',
       sessionId: 'agent-session-2',
     })

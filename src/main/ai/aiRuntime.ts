@@ -28,6 +28,7 @@ import {
   type ContextCompactionRecord,
 } from '@main/ai/compaction.js'
 import { appendSessionCompaction } from '@main/sessions.js'
+import { loadRoutineCatalog, type RoutineDefinition } from '@main/routines/routines.js'
 import type { SkillLoader } from '@main/skills.js'
 import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
 import {
@@ -244,6 +245,10 @@ const packageCreateInputSchema = z.object({
 export function createAiRuntime({ tools, agentMounts }: AiRuntimeOptions) {
   return {
     streamChatResponse: async (request: StreamRequest) => {
+      const routineRequest = await resolveActiveRoutineChatRequest(tools, request, agentMounts)
+      if (routineRequest) {
+        return streamProfileResponse({ profile: routineRequest.profile, tools, request: routineRequest.request })
+      }
       let profile: AgentProfile = chatProfile
       if (request.agentId) {
         if (!agentMounts) throw new Error('Agent chat is not available')
@@ -260,6 +265,80 @@ export function createAiRuntime({ tools, agentMounts }: AiRuntimeOptions) {
     generateSummary: (request: SummaryRequest) =>
       generateSummary({ tools, request }),
   }
+}
+
+async function resolveActiveRoutineChatRequest(
+  tools: ToolRegistry,
+  request: StreamRequest,
+  agentMounts: AiRuntimeOptions['agentMounts'],
+): Promise<{ profile: AgentProfile; request: StreamRequest } | null> {
+  if (!request.id) return null
+  const session = await tools.call('session.get', { id: request.id }, { actor: 'system' }).catch(() => null) as {
+    routineId?: string
+    routineRunId?: string
+    routineStatus?: string
+    messages?: UIMessage[]
+  } | null
+  if (!session?.routineId || !session.routineRunId) return null
+  if (session.routineStatus !== 'working' && session.routineStatus !== 'needs-approval') return null
+
+  const workspacePath = tools.getWorkspacePath()
+  if (!workspacePath) throw new Error('No workspace open')
+  const catalog = loadRoutineCatalog(workspacePath, {
+    knownTools: new Set(tools.list().map(toolDef => toolDef.name)),
+  })
+  const routine = catalog.routines.find(item => item.id === session.routineId || item.name === session.routineId)
+  if (!routine) {
+    const diagnostic = catalog.diagnostics.find(item => item.routineId === session.routineId)
+    throw new Error(diagnostic?.message ?? `Routine not found: ${session.routineId}`)
+  }
+
+  const profile = await resolveRoutineProfileForChat(routine, agentMounts)
+  const messages = Array.isArray(session.messages) && session.messages.length
+    ? session.messages
+    : request.messages
+  return {
+    profile,
+    request: {
+      ...request,
+      messages,
+      modelId: routine.model ?? profile.defaultModelId,
+      agentId: routine.agent,
+      routine: {
+        id: routine.id,
+        runId: session.routineRunId,
+        approvalAllow: routine.approvalAllow,
+      },
+    },
+  }
+}
+
+async function resolveRoutineProfileForChat(
+  routine: RoutineDefinition,
+  agentMounts: AiRuntimeOptions['agentMounts'],
+): Promise<AgentProfile> {
+  const base = routine.agent
+    ? await requireAgentMountsForRoutine(agentMounts).resolveProfile(routine.agent)
+    : chatProfile
+  return {
+    ...base,
+    id: `routine:${routine.id}`,
+    defaultModelId: routine.model ?? base.defaultModelId,
+    stepCap: routine.steps ?? base.stepCap,
+    toolAllowlist: routineToolAllowlist(base.toolAllowlist, routine.tools),
+  }
+}
+
+function requireAgentMountsForRoutine(agentMounts: AiRuntimeOptions['agentMounts']) {
+  if (!agentMounts) throw new Error('Routine agent support is not available')
+  return agentMounts
+}
+
+function routineToolAllowlist(baseAllowlist: string[] | undefined, routineTools: string[]): string[] | undefined {
+  if (!routineTools.length) return baseAllowlist ? [...baseAllowlist] : undefined
+  if (!baseAllowlist) return [...routineTools]
+  const base = new Set(baseAllowlist)
+  return routineTools.filter(toolName => base.has(toolName))
 }
 
 export async function createAiSdkTools({
@@ -352,7 +431,7 @@ export async function createAiSdkTools({
 
   const liveBrowserTools = {
     browser_open: tool({
-      description: 'Open a Markanywhere-style live browser session for interactive websites. Returns one bounded observation field plus compact short actionable refs.',
+      description: 'Open Mim\'s Markanywhere-style live browser for interactive websites or localhost development servers. Returns one bounded observation field plus compact short actionable refs.',
       inputSchema: z.object({
         url: z.string().url(),
         stateful: z.boolean().optional().describe('Use approved Website Access profile for granted domains'),
@@ -801,10 +880,11 @@ export async function createAiSdkTools({
         const routineSlackAccountsPromise = call('routine.list', {})
           .then(routineSlackAccounts)
           .catch(() => [])
-        const [google, slack, slackBot, routineSlackAccountLabels] = await Promise.all([
+        const [google, slack, slackBot, slackBotCheck, routineSlackAccountLabels] = await Promise.all([
           call('google.status', {}).catch(() => null),
           call('slack.status', {}).catch(() => null),
           call('slack.bot.status', {}).catch(() => null),
+          call('slack.bot.check', {}).catch(() => null),
           routineSlackAccountsPromise,
         ])
         const slackBots = await Promise.all(
@@ -816,6 +896,7 @@ export async function createAiSdkTools({
           google,
           slack,
           slackBot,
+          slackBotCheck,
           ...(slackBots.length ? { slackBots: slackBots.filter(Boolean) } : {}),
         }
       },
@@ -885,6 +966,34 @@ export async function createAiSdkTools({
       description: 'Remove Slack bot and Socket Mode tokens from the OS keychain.',
       inputSchema: z.object({ account: z.string().optional() }),
       execute: async (params) => call('slack.bot.disconnect', dropEmpty(params)),
+    }),
+
+    slack_bot_setup: tool({
+      description: 'Set up a Slack bot for this workspace in one step: optionally store bot/app tokens, create or update the channel routine, and enable it locally. Returns a readiness checklist.',
+      inputSchema: z.object({
+        file: z.string().optional(),
+        bot_token: z.string().optional(),
+        app_token: z.string().optional(),
+        account: z.string().optional(),
+        channel: z.string(),
+        mode: z.enum(['mention', 'always']).optional(),
+        name: z.string().optional(),
+        description: z.string().optional(),
+        body: z.string().optional(),
+        tools: z.array(z.string()).optional(),
+        approvalAllow: z.array(z.string()).optional(),
+      }),
+      execute: async (params) => call('slack.bot.setup', dropEmpty(params)),
+    }),
+
+    slack_bot_check: tool({
+      description: 'Check the workspace Slack bot readiness in one result: routine binding, local enablement, credentials, and live listener availability.',
+      inputSchema: z.object({
+        account: z.string().optional(),
+        channel: z.string().optional(),
+        name: z.string().optional(),
+      }),
+      execute: async (params) => call('slack.bot.check', dropEmpty(params)),
     }),
 
     connections_configure: tool({
@@ -1267,6 +1376,40 @@ export async function streamProfileResponse({
     request,
     trace: turnTrace,
   })
+  if (profile.persistSession && sessionId) {
+    const promptTokens = estimatePreparedPromptTokens(preparedPrompt, instructions, aiTools)
+    if (shouldCompactForContextWindow(promptTokens, modelConfig.contextWindow)) {
+      try {
+        const compaction = await maybeCompactSessionAfterTurn({
+          tools,
+          sessionId,
+          messages: normalizedMessages,
+          modelConfig,
+          contextTokens: promptTokens,
+          trigger: 'pre_turn',
+          trace: turnTrace,
+        })
+        if (compaction) {
+          sessionCompactions = [...sessionCompactions, compaction.record]
+          preparedPrompt = await preparePrompt(sessionCompactions)
+        }
+      } catch (error) {
+        tools.trace.append({
+          kind: 'chat.compaction',
+          actor: 'ai',
+          traceId: turnTraceId,
+          parentSpanId: turnSpanId,
+          status: 'error',
+          sessionId,
+          model: modelConfig.model,
+          data: {
+            trigger: 'pre_turn',
+            error: error instanceof Error ? error.message : String(error),
+          },
+        })
+      }
+    }
+  }
 
   const agent = new ToolLoopAgent({
     model,
@@ -1282,7 +1425,7 @@ export async function streamProfileResponse({
     providerOptions: buildProviderOptions(modelConfig, request.controlId),
     onStepFinish(event) {
       if (event.usage) {
-        const usage = normalizeSdkUsage(event.usage, modelConfig)
+        const usage = normalizeSdkUsage(event.usage, modelConfig, { finishReason: event.finishReason })
         turnUsageSteps.push(usage)
         tools.trace.append({
           kind: 'model.call',
@@ -1313,6 +1456,9 @@ export async function streamProfileResponse({
       !sessionId ||
       !isContextLengthError(error, modelConfig.provider)
     ) {
+      if (request.routine && sessionId) {
+        await markRoutineSessionError(tools, sessionId, error instanceof Error ? error.message : String(error), turnTrace)
+      }
       throw error
     }
 
@@ -1341,7 +1487,12 @@ export async function streamProfileResponse({
       })
       return null
     })
-    if (!compaction) throw error
+    if (!compaction) {
+      if (request.routine && sessionId) {
+        await markRoutineSessionError(tools, sessionId, error instanceof Error ? error.message : String(error), turnTrace)
+      }
+      throw error
+    }
 
     sessionCompactions = [...sessionCompactions, compaction.record]
     preparedPrompt = await preparePrompt(sessionCompactions)
@@ -1381,6 +1532,7 @@ export async function streamProfileResponse({
       if (!profile.persistSession || !sessionId) return
       const turnUsage = summarizeTurnUsage(turnUsageSteps, preparedPrompt.estimatedContextTokens)
       await persistChatSession(tools, sessionId, messages, turnUsage.usage, turnUsage.contextTokens, turnTrace)
+      if (request.routine) await markRoutineSessionDone(tools, sessionId, turnTrace)
       await maybeCompactSessionAfterTurn({
         tools,
         sessionId,
@@ -1405,7 +1557,11 @@ export async function streamProfileResponse({
         })
       })
     },
-    onError: (error) => error instanceof Error ? error.message : 'AI request failed',
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : 'AI request failed'
+      if (request.routine && sessionId) void markRoutineSessionError(tools, sessionId, message, turnTrace)
+      return message
+    },
   })
 }
 
@@ -1552,7 +1708,7 @@ async function generateGhostSuggestions({
     providerOptions: buildProviderOptions(modelConfig),
   })
 
-  traceModelCall(tools, 'ghost', modelConfig, result.usage, Date.now() - startedAt)
+  traceModelCall(tools, 'ghost', modelConfig, result.usage, Date.now() - startedAt, result.finishReason)
   const suggestions = cleanSuggestions(result.object?.suggestions)
   return { suggestions: suggestions.length ? suggestions : cleanSuggestions(request.fallback || []) }
 }
@@ -1588,7 +1744,7 @@ async function generateTaskLabel({
     providerOptions: buildProviderOptions(modelConfig),
   })
 
-  traceModelCall(tools, 'task-label', modelConfig, result.usage, Date.now() - startedAt)
+  traceModelCall(tools, 'task-label', modelConfig, result.usage, Date.now() - startedAt, result.finishReason)
   return { label: cleanTaskLabel(result.object?.label) }
 }
 
@@ -1646,7 +1802,7 @@ async function generateSummary({
     providerOptions: buildProviderOptions(modelConfig),
   })
 
-  traceModelCall(tools, 'summary', modelConfig, result.usage, Date.now() - startedAt)
+  traceModelCall(tools, 'summary', modelConfig, result.usage, Date.now() - startedAt, result.finishReason)
   return { summary: result.object?.summary || '' }
 }
 
@@ -1659,6 +1815,29 @@ interface SessionCompactionState {
   lastInputTokens: number
   lastContextTokens: number
   updatedAt?: string
+}
+
+function estimatePreparedPromptTokens(
+  preparedPrompt: { modelMessages: unknown[], estimatedContextTokens: number },
+  instructions: string,
+  aiTools: Record<string, unknown>,
+): number {
+  const toolDefinitions = Object.entries(aiTools).map(([name, value]) => {
+    const item = isRecord(value) ? value : {}
+    return {
+      name,
+      description: typeof item.description === 'string' ? item.description : undefined,
+      inputSchema: item.inputSchema ?? item.parameters,
+    }
+  })
+  return Math.max(
+    preparedPrompt.estimatedContextTokens,
+    estimateMessagesTokens({
+      instructions,
+      messages: preparedPrompt.modelMessages,
+      tools: toolDefinitions,
+    }),
+  )
 }
 
 export async function maybeCompactSessionAfterTurn({
@@ -2021,6 +2200,39 @@ async function persistChatSession(
     lastContextTokens,
     lastInputTokens: lastContextTokens,
   }, ctx)
+}
+
+async function markRoutineSessionDone(
+  tools: ToolRegistry,
+  sessionId: string,
+  trace?: { traceId: string; spanId: string },
+) {
+  await tools.call('session.update', {
+    id: sessionId,
+    routineStatus: 'done',
+    routineCompletedAt: new Date().toISOString(),
+    routineError: '',
+  }, {
+    actor: 'system',
+    ...(trace ? { traceId: trace.traceId, spanId: trace.spanId } : {}),
+  }).catch(() => {})
+}
+
+async function markRoutineSessionError(
+  tools: ToolRegistry,
+  sessionId: string,
+  message: string,
+  trace?: { traceId: string; spanId: string },
+) {
+  await tools.call('session.update', {
+    id: sessionId,
+    routineStatus: 'error',
+    routineError: message,
+    routineCompletedAt: new Date().toISOString(),
+  }, {
+    actor: 'system',
+    ...(trace ? { traceId: trace.traceId, spanId: trace.spanId } : {}),
+  }).catch(() => {})
 }
 
 export function aiToolTimeoutMs(name: string, params: Record<string, unknown> = {}): number {
@@ -2472,27 +2684,45 @@ function traceModelCall(
   modelConfig: ModelConfig,
   usage: unknown,
   durationMs: number,
+  finishReason?: string,
 ): void {
   tools.trace.append({
     kind: 'model.call',
     actor: 'ai',
     model: modelConfig.model,
     durationMs,
-    data: { profile, ...normalizeSdkUsage(usage, modelConfig) },
+    data: { profile, ...normalizeSdkUsage(usage, modelConfig, { finishReason }) },
   })
 }
 
-export function normalizeSdkUsage(usage: unknown, modelConfig: ModelConfig): UsageSummary {
+export function normalizeSdkUsage(
+  usage: unknown,
+  modelConfig: ModelConfig,
+  billing: { finishReason?: string } = {},
+): UsageSummary {
   const record = (usage || {}) as Record<string, unknown>
   const input = normalizeInputTokens(record)
   const output = normalizeOutputTokens(record)
   const totalTokens = numberOrZero(record.totalTokens) || input.total + output.total
   const pricing = modelConfig.pricing || {}
-  const estimatedCost =
-    (input.noCache / 1_000_000) * inputPrice(modelConfig) +
-    (input.cacheRead / 1_000_000) * cacheReadPrice(modelConfig) +
-    (input.cacheWrite / 1_000_000) * cacheWritePrice(modelConfig) +
-    (output.total / 1_000_000) * numberOrZero(pricing.outputPerMillion)
+  const longContextThreshold = numberOrZero(pricing.longContextThresholdTokens)
+  const longContext = longContextThreshold > 0 && input.total > longContextThreshold
+  const inputMultiplier = longContext
+    ? positiveNumberOrOne(pricing.longContextInputMultiplier)
+    : 1
+  const outputMultiplier = longContext
+    ? positiveNumberOrOne(pricing.longContextOutputMultiplier)
+    : 1
+  const isUnbilledPreOutputFableRefusal =
+    modelConfig.model === 'claude-fable-5' &&
+    billing.finishReason === 'content-filter' &&
+    output.total === 0
+  const estimatedCost = isUnbilledPreOutputFableRefusal
+    ? 0
+    : (input.noCache / 1_000_000) * inputPrice(modelConfig) * inputMultiplier +
+      (input.cacheRead / 1_000_000) * cacheReadPrice(modelConfig) * inputMultiplier +
+      (input.cacheWrite / 1_000_000) * cacheWritePrice(modelConfig) * inputMultiplier +
+      (output.total / 1_000_000) * numberOrZero(pricing.outputPerMillion) * outputMultiplier
 
   return {
     inputTokens: input.total,
@@ -2589,17 +2819,29 @@ function inputPrice(modelConfig: ModelConfig) {
 }
 
 function cacheReadPrice(modelConfig: ModelConfig) {
-  const explicit = numberOrZero(modelConfig.pricing?.cacheReadInputPerMillion)
-  if (explicit > 0) return explicit
+  const explicit = explicitPrice(modelConfig, 'cacheReadInputPerMillion')
+  if (explicit !== null) return explicit
   if (modelConfig.provider === 'anthropic') return inputPrice(modelConfig) * 0.1
   return inputPrice(modelConfig)
 }
 
 function cacheWritePrice(modelConfig: ModelConfig) {
-  const explicit = numberOrZero(modelConfig.pricing?.cacheWriteInputPerMillion)
-  if (explicit > 0) return explicit
+  const explicit = explicitPrice(modelConfig, 'cacheWriteInputPerMillion')
+  if (explicit !== null) return explicit
   if (modelConfig.provider === 'anthropic') return inputPrice(modelConfig) * 1.25
   return inputPrice(modelConfig)
+}
+
+function explicitPrice(modelConfig: ModelConfig, key: string): number | null {
+  const pricing = modelConfig.pricing
+  if (!pricing || !Object.prototype.hasOwnProperty.call(pricing, key)) return null
+  const value = Number(pricing[key])
+  return Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function positiveNumberOrOne(value: unknown) {
+  const number = numberOrZero(value)
+  return number > 0 ? number : 1
 }
 
 function numberOrZero(value: unknown) {

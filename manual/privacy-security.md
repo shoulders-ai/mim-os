@@ -4,6 +4,7 @@ title: privacy & security
 order: 12
 sources:
   - docs/security.md
+  - docs/routines.md
   - docs/telemetry.md
   - docs/observability.md
   - docs/integrations.md
@@ -48,7 +49,7 @@ Eight categories of data can leave your machine. Most require your action or a k
 
 The approval gate stands between the agent and any consequential action. When the agent calls a tool that would change your workspace or contact an outside service, Mim shows an inline approval card before the action runs. File edits include a diff so you can see exactly what will change.
 
-Three approval modes, set under Approval mode in Settings > AI & Models:
+For ordinary chats, three approval modes are available under Approval mode in Settings > AI & Models:
 
 ::: rows
 - Strict -- ask before every action, including reads.
@@ -58,9 +59,11 @@ Three approval modes, set under Approval mode in Settings > AI & Models:
 
 Normal is the default.
 
-Sensitive paths -- SSH keys, cloud-provider configs, shell dotfiles and history, credential files, `.env` files, and locations like `.ssh`, `.gnupg`, and `.aws` -- always prompt in Strict and Normal, even when you have granted a standing allow for the same tool. Only Allow all turns this off.
+Sensitive paths -- SSH keys, cloud-provider configs, shell dotfiles and history, credential files, `.env` files, and locations like `.ssh`, `.gnupg`, and `.aws` -- always prompt in Strict and Normal, even when you have granted a standing allow for the same tool. For ordinary chats, Allow all turns this off.
 
 Each approval card offers an always-allow checkbox. Checking it grants that tool for the rest of the current chat. Stopping the chat clears all standing grants.
+
+Routines use their own approval grants. A routine can run unattended only for tools granted by its routine definition; other consequential actions ask in that routine's chat transcript. An always-allow choice in an ordinary chat does not expand a routine's grants.
 
 ## Where secrets live
 
@@ -79,7 +82,7 @@ Traces are yours, on your machine. Default retention is 90 days. Set `traceReten
 Mim keeps file history for every file the agent or an app changes. You can restore any previous version without touching your git repository. See [history & recovery](history-recovery).
 
 ::: under-the-hood
-The permission gate runs before every tool execution in the registry. A tool's effect -- `read`, `mutate`, or `external` -- determines whether a prompt appears; risk only sets the approval card's caution styling. Path classification (`workspace`, `sensitive`, `outside-workspace`) is enforced as a floor above session allows. The `user` and `system` actors always pass; `ai` is the only actor that receives interactive prompts; `package` actors are checked against declared permissions and denied for system tools and personal integrations. Allow all mode bypasses all checks, including the path floor.
+The permission gate runs before every tool execution in the registry. A tool's effect -- `read`, `mutate`, or `external` -- determines whether a prompt appears; risk only sets the approval card's caution styling. Path classification (`workspace`, `sensitive`, `outside-workspace`) is enforced as a floor above session allows. The `ai` actor is the only actor that receives interactive prompts; `package` actors are checked against declared permissions and denied for system tools and personal integrations. For ordinary AI calls, Allow all bypasses the interactive prompt. Routine context is checked before that bypass, and read-only resource collections hard-deny writes for every actor.
 
 More in [permission gate](/develop/security).
 :::

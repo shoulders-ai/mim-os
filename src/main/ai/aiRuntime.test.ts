@@ -19,6 +19,7 @@ import {
   repairIncompleteToolMessages,
   providerBaseUrl,
   isContextLengthError,
+  normalizeSdkUsage,
   summarizeTurnUsage,
   chatProfile,
   inlineProfile,
@@ -1158,6 +1159,7 @@ describe('central AI runtime tools', () => {
       expect(calls.some(c => c.name === 'google.status')).toBe(true)
       expect(calls.some(c => c.name === 'slack.status')).toBe(true)
       expect(calls.some(c => c.name === 'slack.bot.status')).toBe(true)
+      expect(calls.some(c => c.name === 'slack.bot.check')).toBe(true)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -1203,6 +1205,8 @@ describe('central AI runtime tools', () => {
     expect(aiTools.slack_disconnect).toBeDefined()
     expect(aiTools.slack_bot_connect).toBeDefined()
     expect(aiTools.slack_bot_disconnect).toBeDefined()
+    expect(aiTools.slack_bot_setup).toBeDefined()
+    expect(aiTools.slack_bot_check).toBeDefined()
     expect(aiTools.connections_configure).toBeDefined()
   })
 
@@ -1277,6 +1281,46 @@ describe('central AI runtime tools', () => {
     expect(calls).toEqual([{
       name: 'slack.bot.disconnect',
       params: { account: 'default' },
+      ctx: { actor: 'ai', sessionId: 's1' },
+    }])
+  })
+
+  it('routes slack_bot_setup through the registry', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    await aiTools.slack_bot_setup.execute?.({
+      file: '/path/to/slack-bot.json',
+      account: 'bot',
+      channel: 'C1',
+      mode: 'mention',
+      body: 'Answer from this workspace.',
+    }, {})
+
+    expect(calls).toEqual([{
+      name: 'slack.bot.setup',
+      params: {
+        file: '/path/to/slack-bot.json',
+        account: 'bot',
+        channel: 'C1',
+        mode: 'mention',
+        body: 'Answer from this workspace.',
+      },
+      ctx: { actor: 'ai', sessionId: 's1' },
+    }])
+  })
+
+  it('routes slack_bot_check through the registry', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
+    calls.length = 0
+
+    await aiTools.slack_bot_check.execute?.({ channel: 'C1' }, {})
+
+    expect(calls).toEqual([{
+      name: 'slack.bot.check',
+      params: { channel: 'C1' },
       ctx: { actor: 'ai', sessionId: 's1' },
     }])
   })
@@ -1621,6 +1665,100 @@ describe('summarizeTurnUsage', () => {
   })
 })
 
+describe('normalizeSdkUsage', () => {
+  const fable = {
+    id: 'claude-fable-5',
+    provider: 'anthropic',
+    model: 'claude-fable-5',
+    pricing: {
+      inputPerMillion: 10,
+      cacheReadInputPerMillion: 1,
+      cacheWriteInputPerMillion: 12.5,
+      outputPerMillion: 50,
+    },
+  }
+
+  it('prices Fable base input, five-minute cache writes, cache reads, and output separately', () => {
+    const result = normalizeSdkUsage({
+      inputTokens: 1_000_000,
+      inputTokenDetails: {
+        noCacheTokens: 100_000,
+        cacheReadTokens: 800_000,
+        cacheWriteTokens: 100_000,
+      },
+      outputTokens: 100_000,
+    }, fable)
+
+    expect(result.estimatedCost).toBeCloseTo(8.05)
+  })
+
+  it('applies a model long-context tier to every billed input category and output', () => {
+    const result = normalizeSdkUsage({
+      inputTokens: 210_000,
+      inputTokenDetails: {
+        noCacheTokens: 100_000,
+        cacheReadTokens: 100_000,
+        cacheWriteTokens: 10_000,
+      },
+      outputTokens: 10_000,
+    }, {
+      id: 'tiered-model',
+      provider: 'google',
+      model: 'tiered-model',
+      pricing: {
+        inputPerMillion: 2,
+        cacheReadInputPerMillion: 0.2,
+        cacheWriteInputPerMillion: 0,
+        outputPerMillion: 12,
+        longContextThresholdTokens: 200_000,
+        longContextInputMultiplier: 2,
+        longContextOutputMultiplier: 1.5,
+      },
+    })
+
+    expect(result.estimatedCost).toBeCloseTo(0.62)
+  })
+
+  it('does not charge reported cache writes when a catalog explicitly prices them at zero', () => {
+    const result = normalizeSdkUsage({
+      inputTokens: 100_000,
+      inputTokenDetails: {
+        noCacheTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 100_000,
+      },
+      outputTokens: 0,
+    }, {
+      id: 'no-write-charge',
+      provider: 'google',
+      model: 'no-write-charge',
+      pricing: {
+        inputPerMillion: 2,
+        cacheReadInputPerMillion: 0.2,
+        cacheWriteInputPerMillion: 0,
+        outputPerMillion: 12,
+      },
+    })
+
+    expect(result.estimatedCost).toBe(0)
+  })
+
+  it('does not bill a Fable refusal before output but bills a mid-stream refusal', () => {
+    const preOutput = normalizeSdkUsage({
+      inputTokens: 100_000,
+      outputTokens: 0,
+    }, fable, { finishReason: 'content-filter' })
+    const midStream = normalizeSdkUsage({
+      inputTokens: 100_000,
+      outputTokens: 10_000,
+    }, fable, { finishReason: 'content-filter' })
+
+    expect(preOutput.inputTokens).toBe(100_000)
+    expect(preOutput.estimatedCost).toBe(0)
+    expect(midStream.estimatedCost).toBeCloseTo(1.5)
+  })
+})
+
 describe('single-shot generation functions trace through the tool registry', () => {
   const mockedGenerateObject = vi.mocked(generateObject)
 
@@ -1805,6 +1943,94 @@ describe('AgentProfile', () => {
 
     const turnTrace2 = traced2.find(e => e.kind === 'chat.turn')
     expect(turnTrace2?.model).toBe('test-model')
+  })
+
+  it('streams an active routine session with trusted routine profile and grants from main', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'body-model', model: 'body-model', provider: 'anthropic' },
+      { id: 'routine-model', model: 'routine-model', provider: 'anthropic' },
+    ]))
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+    const dir = mkdtempSync(join(tmpdir(), 'mim-routine-chat-'))
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    mkdirSync(join(dir, 'routines'), { recursive: true })
+    writeFileSync(join(dir, 'routines', 'visible-run.md'), [
+      '---',
+      'name: visible-run',
+      'model: routine-model',
+      'tools: [fs.create]',
+      'approval:',
+      '  allow: [fs.create]',
+      '---',
+      '',
+      'Create the test file.',
+      '',
+    ].join('\n'))
+    const events: Array<Record<string, unknown>> = []
+    const trace = createTraceLog({
+      devConsole: false,
+      sinks: [{ write: event => events.push(event as unknown as Record<string, unknown>) }],
+    })
+    const tools = createToolRegistry(trace)
+    tools.setWorkspacePath(dir)
+    registerSessionTools(tools)
+    tools.register({
+      name: 'fs.create',
+      description: 'create',
+      execute: async () => ({ ok: true }),
+    })
+    const session = await tools.call('session.create', {
+      label: 'Routine: visible-run',
+      modelId: 'routine-model',
+      routineId: 'visible-run',
+      routineRunId: 'routine_run_1',
+      routineStatus: 'working',
+    }, { actor: 'system' }) as { id: string }
+    await tools.call('session.update', {
+      id: session.id,
+      messages: [{
+        id: 'routine_prompt_visible-run_routine_run_1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Create the test file.' }],
+        metadata: {
+          routine: {
+            id: 'visible-run',
+            runId: 'routine_run_1',
+            trigger: 'manual',
+            queued: true,
+          },
+        },
+      }],
+    }, { actor: 'system' })
+    const runtime = createAiRuntime({ tools })
+
+    try {
+      await runtime.streamChatResponse({
+        id: session.id,
+        modelId: 'body-model',
+        messages: [{ id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Delete the workspace instead.' }] }] as any,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+
+    const agent = MockAgent.mock.results[MockAgent.mock.results.length - 1].value as {
+      stream: ReturnType<typeof vi.fn>
+    }
+    const promptJson = JSON.stringify(agent.stream.mock.calls[0][0].prompt)
+    expect(promptJson).toContain('Create the test file.')
+    expect(promptJson).not.toContain('Delete the workspace instead.')
+    const turn = events.find(event => event.kind === 'chat.turn')
+    expect(turn).toMatchObject({
+      sessionId: session.id,
+      model: 'routine-model',
+      data: {
+        profile: 'routine:visible-run',
+        routineId: 'visible-run',
+        routineRunId: 'routine_run_1',
+      },
+    })
   })
 
   it('rejects when buildInstructions rejects', async () => {
@@ -1992,10 +2218,10 @@ describe('AgentProfile', () => {
   it('appends a compaction record before prompting when previous usage is over the reserve', async () => {
     mockedLoadRegistry
       .mockReturnValueOnce(registryWithModels([
-        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 5000 },
       ]))
       .mockReturnValueOnce(registryWithModels([
-        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 5000 },
       ]))
     const mockedGenerateObject = vi.mocked(generateObject)
     mockedGenerateObject.mockResolvedValueOnce({
@@ -2064,6 +2290,82 @@ describe('AgentProfile', () => {
       expect(promptJson).toContain('Goal: keep the long session alive.')
       expect(promptJson).toContain('latest request')
       expect(promptJson).not.toContain('middle '.repeat(50))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('appends a compaction record before prompting when the fresh prompt estimate is over the reserve', async () => {
+    mockedLoadRegistry
+      .mockReturnValueOnce(registryWithModels([
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 5000 },
+      ]))
+      .mockReturnValueOnce(registryWithModels([
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 5000 },
+      ]))
+    const mockedGenerateObject = vi.mocked(generateObject)
+    mockedGenerateObject.mockResolvedValueOnce({
+      object: { summary: 'Goal: avoid provider overflow.\nDone: old prompt content was summarized.' },
+      usage: { totalTokens: 100, promptTokens: 70, completionTokens: 30 },
+    } as never)
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+    const dir = mkdtempSync(join(tmpdir(), 'mim-compaction-prompt-estimate-'))
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+    registerSessionTools(tools)
+    tools.register({ name: 'google.status', description: 'test', execute: async () => ({ configured: false, tokenConfigured: false, grantedScopes: [] }) })
+    tools.register({ name: 'slack.status', description: 'test', execute: async () => ({ configured: false }) })
+    tools.register({ name: 'skill.list', description: 'test', execute: async () => ({ skills: [] }) })
+    tools.register({ name: 'package.tools.list', description: 'test', execute: async () => ({ tools: [] }) })
+    const created = await tools.call('session.create', { label: 'Prompt overflow chat' }, { actor: 'user' }) as { id: string }
+    const messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'start' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old '.repeat(2000) }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'middle request' }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'middle '.repeat(2000) }] },
+      { id: 'u3', role: 'user', parts: [{ type: 'text', text: 'latest request' }] },
+    ] as any
+    const profile: AgentProfile = {
+      id: 'compaction-prompt-estimate',
+      toolSurface: 'chat',
+      modelFeature: 'chat',
+      useCatalogs: true,
+      persistSession: true,
+      stepCap: 4,
+      sendReasoning: true,
+      buildInstructions: () => 'test instructions',
+    }
+
+    try {
+      await tools.call('session.update', { id: created.id, messages }, { actor: 'user' })
+
+      await streamProfileResponse({
+        profile,
+        tools,
+        request: { id: created.id, messages },
+      })
+
+      const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
+        messages: typeof messages
+        compactions: Array<{ summary: string; trigger: string; firstKeptMessageId?: string }>
+      }
+      expect(got.messages).toEqual(messages)
+      expect(got.compactions).toHaveLength(1)
+      expect(got.compactions[0]).toMatchObject({
+        summary: 'Goal: avoid provider overflow.\nDone: old prompt content was summarized.',
+        trigger: 'pre_turn',
+        firstKeptMessageId: 'u3',
+      })
+
+      const agent = MockAgent.mock.results[MockAgent.mock.results.length - 1].value as {
+        stream: ReturnType<typeof vi.fn>
+      }
+      const promptJson = JSON.stringify(agent.stream.mock.calls[0][0].prompt)
+      expect(promptJson).toContain('Goal: avoid provider overflow.')
+      expect(promptJson).toContain('latest request')
+      expect(promptJson).not.toContain('old '.repeat(50))
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -2153,10 +2455,10 @@ describe('AgentProfile', () => {
   it('compacts and retries once when the provider rejects the prompt for context length', async () => {
     mockedLoadRegistry
       .mockReturnValueOnce(registryWithModels([
-        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 50000 },
       ]))
       .mockReturnValueOnce(registryWithModels([
-        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 50000 },
       ]))
     const mockedGenerateObject = vi.mocked(generateObject)
     mockedGenerateObject.mockResolvedValueOnce({
@@ -2184,9 +2486,9 @@ describe('AgentProfile', () => {
     const created = await tools.call('session.create', { label: 'Overflow chat' }, { actor: 'user' }) as { id: string }
     const messages = [
       { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'start' }] },
-      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old '.repeat(900) }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old '.repeat(5000) }] },
       { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'middle request' }] },
-      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'middle '.repeat(900) }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'middle '.repeat(5000) }] },
       { id: 'u3', role: 'user', parts: [{ type: 'text', text: 'latest request' }] },
     ] as any
     const profile: AgentProfile = {
@@ -2215,7 +2517,7 @@ describe('AgentProfile', () => {
       const retryPromptJson = JSON.stringify(streamMock.mock.calls[1][0].prompt)
       expect(retryPromptJson).toContain('Goal: recover from context overflow.')
       expect(retryPromptJson).toContain('latest request')
-      expect(retryPromptJson).not.toContain('middle '.repeat(50))
+      expect(retryPromptJson).not.toContain('old '.repeat(50))
 
       const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
         messages: typeof messages
@@ -2265,10 +2567,10 @@ describe('AgentProfile', () => {
   it('surfaces a second context-length failure after one overflow retry', async () => {
     mockedLoadRegistry
       .mockReturnValueOnce(registryWithModels([
-        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 50000 },
       ]))
       .mockReturnValueOnce(registryWithModels([
-        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 1000 },
+        { id: 'test-model', model: 'test-model', provider: 'anthropic', contextWindow: 50000 },
       ]))
     const mockedGenerateObject = vi.mocked(generateObject)
     mockedGenerateObject.mockResolvedValueOnce({
@@ -2295,9 +2597,9 @@ describe('AgentProfile', () => {
     const created = await tools.call('session.create', { label: 'Second overflow chat' }, { actor: 'user' }) as { id: string }
     const messages = [
       { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'start' }] },
-      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old '.repeat(900) }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old '.repeat(5000) }] },
       { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'middle request' }] },
-      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'middle '.repeat(900) }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'middle '.repeat(5000) }] },
       { id: 'u3', role: 'user', parts: [{ type: 'text', text: 'latest request' }] },
     ] as any
     const profile: AgentProfile = {
@@ -2546,6 +2848,7 @@ describe('canonicalToolIdToAiKey', () => {
   it('maps google.setOAuthClient to google_set_oauth_client', () => {
     expect(canonicalToolIdToAiKey('google.setOAuthClient')).toBe('google_set_oauth_client')
     expect(canonicalToolIdToAiKey('slack.bot.connect')).toBe('slack_bot_connect')
+    expect(canonicalToolIdToAiKey('slack.bot.setup')).toBe('slack_bot_setup')
   })
 
   it('falls back to aiToolKey for standard dotted names', () => {

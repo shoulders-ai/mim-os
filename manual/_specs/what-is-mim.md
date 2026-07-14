@@ -12,8 +12,8 @@ assumes it.
   Artifact pane shows durable things (documents, PDFs, images). Use a `::: rows` block.
 - The three core surfaces in one paragraph each: Chat (an agent with tools that asks
   before consequential actions), the editor, the terminal.
-- Extension in one paragraph: apps and skills exist; point to [apps](apps) and
-  [agents](agents). Do not explain them here.
+- Extension in one paragraph: apps, skills, and routines exist; point to
+  [apps](apps) and [agents](agents). Do not explain them here.
 - Where things live, briefly: the workspace folder; nothing hidden in a cloud.
 - Trapdoor: the runtime in one paragraph (Electron; a single tool registry that every
   actor — you, the agent, apps — calls through; permission gate + trace). Link /develop.
@@ -27,6 +27,7 @@ blocks.
 ## Sources
 
 - README.md
+- docs/routines.md
 - docs/workbench-navigation.md
 - src/renderer/components/sidebar/ShellSidebar.vue (verify surface names as shipped)
 

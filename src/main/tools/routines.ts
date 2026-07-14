@@ -236,6 +236,49 @@ export async function runRoutineOnce(
   return started.completion
 }
 
+export async function createRoutineChatSession(
+  tools: ToolRegistry,
+  routine: RoutineDefinition,
+  context: RoutineRunContext,
+  options: Pick<RegisterRoutineToolsOptions, 'getAgentMounts'> = {},
+): Promise<RoutineRunResult> {
+  const routineRunId = `routine_run_${Date.now()}_${randomUUID().slice(0, 8)}`
+  const firedAt = new Date().toISOString()
+  const profile = await resolveRoutineProfile(routine, options.getAgentMounts?.())
+  const session = await tools.call('session.create', {
+    label: `Routine: ${routine.name}`,
+    modelId: routine.model ?? profile.defaultModelId ?? '',
+    agentId: routine.agent,
+    routineId: routine.id,
+    routineRunId,
+    routineStatus: 'working',
+    routineFiredAt: firedAt,
+  }, { actor: 'system' }) as { id: string }
+  const traceId = newTraceId()
+  const spanId = newSpanId()
+
+  tools.trace.append({
+    kind: 'routine.fired',
+    actor: 'ai',
+    traceId,
+    spanId,
+    sessionId: session.id,
+    data: {
+      routineId: routine.id,
+      routineRunId,
+      trigger: context.trigger,
+      queued: true,
+    },
+  })
+
+  await tools.call('session.update', {
+    id: session.id,
+    messages: [routineQueuedPromptMessageForContext(routine, context, routineRunId)],
+  }, { actor: 'system' })
+
+  return { sessionId: session.id, routineRunId, status: 'working' }
+}
+
 export async function startRoutineRun(
   tools: ToolRegistry,
   routine: RoutineDefinition,
@@ -437,6 +480,27 @@ function routinePromptMessageForContext(routine: RoutineDefinition, context: Rou
     id: `routine_prompt_${routine.id}`,
     role: 'user',
     parts: [{ type: 'text', text: `${routine.body}${triggerContext}` }],
+  } as UIMessage
+}
+
+function routineQueuedPromptMessageForContext(
+  routine: RoutineDefinition,
+  context: RoutineRunContext,
+  routineRunId: string,
+): UIMessage {
+  const message = routinePromptMessageForContext(routine, context) as UIMessage & { metadata?: Record<string, unknown> }
+  return {
+    ...message,
+    id: `routine_prompt_${routine.id}_${routineRunId}`,
+    metadata: {
+      ...(message.metadata ?? {}),
+      routine: {
+        id: routine.id,
+        runId: routineRunId,
+        trigger: context.trigger,
+        queued: true,
+      },
+    },
   } as UIMessage
 }
 

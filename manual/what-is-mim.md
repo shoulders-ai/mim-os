@@ -4,6 +4,7 @@ title: what is mim
 order: 1
 sources:
   - README.md
+  - docs/routines.md
   - docs/workbench-navigation.md
   - src/renderer/components/sidebar/ShellSidebar.vue
 verified: bf1358ebd68b1348a9fd85c6576c5b71e5f11880
@@ -18,7 +19,7 @@ Mim is a desktop application for AI-native research work. It brings together an 
 Mim is one window divided into three panes.
 
 ::: rows
-- Navigator — the left column. It shows what work exists, where it is, and what state it is in. A fixed cluster at the top gives direct access to Chat, Files, Terminal, and Monitor. Below that, an Apps section lists installed app launchers and detected CLI agents, and an Activity section lists your chats and agent sessions. Settings lives at the bottom.
+- Navigator — the left column. It shows what work exists, where it is, and what state it is in. A fixed cluster at the top gives direct access to Chat, Routines, Files, Terminal, and Monitor. Below that, an Apps section lists installed app launchers and detected CLI agents, and an Activity section lists your chats, routine runs, and agent sessions. Settings lives at the bottom.
 - Work — the center pane. This is where you act: chat transcripts, terminals, file browsers, search, app views, and configuration all appear here.
 - Artifact — the right pane. It holds durable things you are working on or reviewing: documents, PDFs, images, diffs, and reports.
 :::
@@ -33,11 +34,11 @@ Chat is a conversation with Mim's agent. The agent has access to a registry of t
 
 The editor is the document surface in the artifact pane. It opens text files, PDFs, and file cards as tabs in one tab strip. Text documents support formatting, live preview, comments, citations, export, and ghost suggestions from the agent. PDF and file-card tabs are read-only views. Closing the last tab collapses Artifact to a thin rail; opening a new document restores it.
 
-The terminal is a multi-tab shell in the work pane. You run commands, scripts, and build tools here as you would in any terminal. When Mim detects a CLI agent on your machine — Claude Code, Codex, or Gemini CLI — it can launch that agent as a first-class agent session with its own status, persisted scrollback, and history. These sessions appear alongside your chats in the Activity list.
+The terminal is a multi-tab shell in the work pane. You run commands, scripts, and build tools here as you would in any terminal. When Mim detects a CLI agent on your machine — Claude Code, Codex, Gemini CLI, or Pi — it can launch that agent as a first-class agent session with its own status, persisted scrollback, and history. These sessions appear alongside your chats in the Activity list.
 
-## Apps and skills
+## Apps, skills, and routines
 
-Mim is extensible. Apps add capabilities — custom UI, new tools, specialized workflows — and run in sandboxed iframes, calling the same tool registry scoped by each app's declared permissions. Skills are written workflows the agent loads on demand to handle recurring tasks. Both are covered in [apps](apps) and [agents](agents).
+Mim is extensible. Apps add capabilities — custom UI, new tools, specialized workflows — and run in sandboxed iframes, calling the same tool registry scoped by each app's declared permissions. Skills are written workflows the agent loads on demand to handle recurring tasks. Routines are standing prompts you can run manually or let Mim trigger from schedules, file changes, or external requests. Apps are covered in [apps](apps); skills and routines are covered in [agents](agents).
 
 ## Where things live
 

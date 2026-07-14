@@ -201,11 +201,18 @@ routine's `tools` as a visibility filter on the AI tool map. The separate
 context; it is not an `AgentProfile.toolAllowlist`, because visible and
 pre-approved are different product concepts.
 
-The rendered body becomes the user message, and the runner calls
-`streamProfileResponse` and drains the stream. `persistSession` stays true:
-the run **is** a chat session. UI starts return the chat session immediately and
-continue the stream in the background, while scheduler/headless runs can still
-wait for completion. Session storage grows explicit routine metadata:
+The rendered body becomes the user message. Desktop UI starts create a queued
+chat session with that user message already visible; the renderer then consumes
+the ordinary `/api/ai/chat` stream, so assistant text, tool calls, tool results,
+and approvals are live transcript state rather than hidden main-process work.
+The server recognizes active routine sessions and attaches the queued prompt plus
+model/agent/tools and approval grants from trusted session and routine metadata
+before streaming.
+
+Scheduler/headless runs still call `streamProfileResponse` and drain the stream
+inside the main process because no renderer owns those runs. `persistSession`
+stays true: the run **is** a chat session. Session storage grows explicit
+routine metadata:
 
 - `routineId` — the standing definition that fired.
 - `routineRunId` — this firing's run id.

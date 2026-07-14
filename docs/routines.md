@@ -54,6 +54,10 @@ execution can trust its authority.
 Manual starts and runs are allowed for disabled routines so authors can test a
 routine before enabling it.
 
+`.mim/routines/state.json` is not the definition registry. It may have an empty
+`routines` object while valid routine files exist. Use `routine.list` to inspect
+definitions and `slack.bot.check` for Slack bot readiness.
+
 ## Tools
 
 The main-process routine tools are:
@@ -69,12 +73,18 @@ The main-process routine tools are:
 - `routine.webhook.secret.set`
 - `routine.webhook.secret.delete`
 
-`routine.start` creates a session with `routineId`, `routineRunId`,
-`routineStatus`, and `routineFiredAt`, returns that session immediately, then
-continues the run in the background. Completion or error metadata is persisted
-on the session when the stream finishes. `routine.run` uses the same runner but
-waits for completion, which is useful for schedulers and headless callers. The
-renderer maps these sessions to `routine` runs in the Navigator.
+On desktop, `routine.start` creates a queued chat session with `routineId`,
+`routineRunId`, `routineStatus`, `routineFiredAt`, and the routine prompt as the
+visible first user message. The renderer opens that session and starts the
+normal chat stream, so assistant text, tool calls, tool results, and approval
+cards all render in the transcript as they happen. The server resolves the
+queued prompt plus routine model/agent/tools/approval grants from the trusted
+session and routine file before streaming; the renderer never supplies routine
+authority.
+
+`routine.run` uses the same routine profile and waits for completion in the
+main process, which is useful for schedulers and headless callers. The renderer
+maps routine sessions to `routine` runs in the Navigator.
 
 Webhook secret tools take a routine name. They resolve the routine's
 `trigger.webhook.secret` name and store/remove only the local OS keychain value;
@@ -135,7 +145,9 @@ signed local webhooks, webhook secret tools, run state persistence, and trace
 events for fires/skips/completions/errors.
 
 Slack trigger validation, duplicate binding diagnostics, bot/app-token
-credential tools, a dispatcher, and a metadata-only event ledger exist as
-foundations. Slack Socket Mode lifecycle wiring, bot replies, chained routines,
-scheduler ownership across multiple hosts, durable parked approvals, and
-`mim serve` ownership are still outside the current runtime.
+credential tools, one-shot setup/check tools that create/update and enable the
+workspace routine, Socket Mode lifecycle wiring, a metadata-only event ledger,
+event-to-routine dispatch, and bot thread replies are implemented in the
+desktop runtime. Durable per-thread session continuation, debounce/replay,
+chained routines, scheduler ownership across multiple hosts, durable parked
+approvals, and `mim serve` ownership are still outside the current runtime.

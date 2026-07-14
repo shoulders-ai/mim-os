@@ -18,7 +18,9 @@ final voice pass on this chapter.
   - nothing else. Say that sentence only if the sources support it.
 - What asks first: the approval gate. Consequential tool calls (writes, external
   calls) ask before running; approval modes and standing grants (verify names and
-  semantics in gate source/security.md at user level).
+  semantics in gate source/security.md at user level). Call out that routines use
+  their own approval grants and ordinary chat always-allow choices do not expand
+  those grants.
 - Where secrets live: API keys in `~/.mim/keys.env`; integration tokens in the OS
   keychain; `config.yaml` never holds secrets.
 - What is recorded: every tool call by every actor lands in the trace — who, what,
@@ -36,6 +38,7 @@ severity — no TODO left in this chapter at publish time.
 ## Sources
 
 - docs/security.md
+- docs/routines.md
 - docs/telemetry.md
 - docs/observability.md
 - docs/integrations.md (token storage)
