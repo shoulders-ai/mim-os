@@ -33,7 +33,10 @@ export function groupModelsByProvider(models) {
  * Format a context window number as a human-readable string.
  */
 export function formatContextWindow(tokens) {
-  if (tokens >= 1_000_000) return `${tokens / 1_000_000}M`
+  if (tokens >= 1_000_000) {
+    const millions = Number((tokens / 1_000_000).toFixed(2))
+    return `${millions}M`
+  }
   if (tokens >= 1_000) return `${tokens / 1_000}K`
   return String(tokens)
 }
@@ -70,8 +73,9 @@ export function generateModelsMarkdown(catalog) {
     '',
     '# models',
     '',
-    'Models available in Mim, grouped by provider. Pricing is per million tokens',
-    '(input/output).',
+    'Models available in Mim, grouped by provider. The table shows standard input/output rates',
+    'per million tokens. Cost estimates also use the cache and long-context pricing fields in',
+    '`resources/ai-models.json` when the provider reports those usage categories.',
     '',
   ]
 

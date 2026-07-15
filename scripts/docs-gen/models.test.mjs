@@ -12,6 +12,8 @@ describe('models', () => {
   describe('formatContextWindow', () => {
     it('formats millions', () => {
       expect(formatContextWindow(1_000_000)).toBe('1M')
+      expect(formatContextWindow(1_048_576)).toBe('1.05M')
+      expect(formatContextWindow(1_050_000)).toBe('1.05M')
     })
     it('formats thousands', () => {
       expect(formatContextWindow(200_000)).toBe('200K')
@@ -100,6 +102,8 @@ describe('models', () => {
 
     it('includes model table with all columns', () => {
       const md = generateModelsMarkdown(minimalCatalog)
+      expect(md).toContain('standard input/output rates')
+      expect(md).toContain('cache and long-context pricing')
       expect(md).toContain('| model | context | pricing (in/out) | capabilities | control |')
       expect(md).toContain('Claude Sonnet 5')
       expect(md).toContain('1M')

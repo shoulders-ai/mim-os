@@ -36,9 +36,9 @@ The model picker shows a provider icon and a short name -- Sonnet 5, 3.5 Flash, 
 
 The control next to it adjusts the model's reasoning depth and shows the selected level. Available levels range from None or Minimal at the low end to Max at the high end, varying by model. Higher levels produce more thorough reasoning at greater cost.
 
-The context donut beside the pickers tracks how much of the model's context window the current chat has consumed. Hover to see the percentage and token count. The tooltip also shows the estimated cost for the chat so far, formatted as a dollar amount.
+The context donut beside the pickers tracks how much of the model's context window the current chat has consumed. Hover to see the percentage and token count. The tooltip also shows the estimated cost for the chat so far, formatted as a dollar amount. When Mim is using a compacted model view, the tooltip shows the compacted token count while the full transcript remains visible.
 
-When a long chat is compacted, a `Context compacted` divider marks where the model-visible history now starts. Expanding it shows the summary sent to the model while the full transcript stays visible.
+When a long chat is compacted, a `Context compacted` divider marks where the model-visible history now starts. The divider says whether compaction happened before the reply, after the last reply for future turns, or as a retry after the model rejected the prompt. Expanding it shows the summary sent to the model while the full transcript stays visible. During a high-context send, a temporary status row may appear while Mim checks or summarizes context before the response starts.
 
 Type `@` in the composer to mention a skill, a workspace file, or an app tool by name. Matching items appear in a dropdown; selecting one adds a context chip above the text field. The + menu at the bottom left of the composer offers the same items plus file attachment and the current document. Context chips are sent with that one message and do not persist into later turns.
 
@@ -62,7 +62,9 @@ A routine is a standing prompt saved in your workspace. Open Routines in the Nav
 
 Click Run to start a routine by hand. Mim opens the routine's chat transcript and runs it through the same agent surface as an ordinary chat, so assistant messages, tool calls, tool results, and approval cards appear as the run progresses. Routine runs also appear in Activity as routine rows.
 
-Resume enables a routine on this machine for its automatic trigger. Pause disables that local trigger without deleting the routine file. The routine definition lives under `routines/` in the workspace; local enablement and run state live under `.mim/routines/`.
+Automatic routines have one switch. Turning it on first shows what will run, which agent and model it uses, and what it may do without asking; Enable automatic runs confirms that authority on this machine. Turn the switch off to stop future automatic runs without deleting the routine. Manual routines simply show Run.
+
+Use a routine's action menu to edit all of its settings, open the Markdown definition, revisit its last run, duplicate it, or move it to the OS Trash. Edits to its schedule, model, agent, tools, approvals, run limit, or missed-run behavior require a fresh review; changing only its description or instructions does not. The definition lives under `routines/` in the workspace, while machine-local activation and run state live under `.mim/routines/`.
 
 Routines carry their own tool and approval grants. A routine can proceed unattended only for the tools its definition grants; other consequential actions ask in that routine's chat transcript.
 
@@ -78,7 +80,7 @@ The Customise disclosure in each agent's row lets you set CLI flags per workspac
 
 ## The MCP bridge
 
-Claude Code, Codex, and Gemini CLI can reach Mim itself over a local MCP connection. Mim-specific tools -- reading files, the editor, comments, file history, search, skills, web, and connected integrations -- become available to the CLI agent, under the same approval rules. File writing, shell commands, and git remain the CLI agent's own capabilities. A Connect button in the agent's row in Settings > Apps registers the MCP server with the agent's native configuration in one click. Disconnect is in the agent's Customise section. Pi runs as a full CLI session, but cannot call Mim tools yet, so its row has no Connect control.
+All four CLI agents can reach Mim itself. Claude Code, Codex, and Gemini CLI use a local MCP connection; a Connect button in Settings > Apps registers it with the agent's native configuration, and Disconnect lives in Customise. Pi needs no setup: Mim loads a built-in extension whenever it launches or resumes Pi, so its row says **Mim tools built in** and has no connection controls. Mim-specific tools -- reading files, the editor, comments, file history, search, skills, web, and connected integrations -- become available under the same tool policy and approval rules. File writing, shell commands, and git remain the CLI agent's own capabilities. If Pi's connection is interrupted, the Pi command `/mim-reconnect` retries it without restarting the session.
 
 ::: under-the-hood
 The system prompt is assembled from `AGENTS.md` (or a default template) with template variables resolved at each turn: the tool catalog, the skill catalog, the workspace tree, the project log tail, and a volatile workspace-context digest. The full resolution logic is in `src/main/ai/systemPrompt.ts`.

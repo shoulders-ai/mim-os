@@ -23,6 +23,15 @@ Mim Desktop
     Tool registry
 ```
 
+Pi 0.76+ uses a direct adapter instead of stdio MCP:
+
+```text
+Pi
+    bundled Mim extension (WebSocket JSON-RPC)
+Mim Desktop
+    Tool registry
+```
+
 On desktop start, Mim writes `~/.mim/server.json` with a port and bearer token. The file is written atomically with owner-only permissions. On quit, Mim deletes it best-effort.
 
 Agent sessions launched from Settings > Apps receive per-session `MIM_PORT` and `MIM_TOKEN` environment variables. Running `mim mcp` outside Mim falls back to `~/.mim/server.json`. Per-agent tokens are revoked when the live session exits.
@@ -96,7 +105,11 @@ Settings > Apps shows a Connect button next to each installed CLI agent that sup
 | Codex | `codex mcp add mim -- mim mcp` |
 | Gemini CLI | `gemini mcp add mim mim mcp` |
 
-Pi sessions are supported, but Pi has no built-in MCP client. Its Settings row reports **Mim tools unavailable** and has no connection controls.
+Pi has no connection controls. Mim automatically passes its bundled extension
+on launch and resume, and Settings reports **Mim tools built in**. The extension
+uses the session's `MIM_PORT` and `MIM_TOKEN`, registers the enabled catalog
+directly with Pi, and identifies calls as `pi`. It is not an MCP server. A
+connection failure does not stop Pi; `/mim-reconnect` retries the adapter.
 
 This is one-time setup. The equivalent JSON config for agents that accept it:
 

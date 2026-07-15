@@ -6,8 +6,9 @@ generated: true
 
 # models
 
-Models available in Mim, grouped by provider. Pricing is per million tokens
-(input/output).
+Models available in Mim, grouped by provider. The table shows standard input/output rates
+per million tokens. Cost estimates also use the cache and long-context pricing fields in
+`resources/ai-models.json` when the provider reports those usage categories.
 
 ## providers
 
@@ -42,15 +43,15 @@ Models available in Mim, grouped by provider. Pricing is per million tokens
 
 | model | context | pricing (in/out) | capabilities | control |
 |---|---|---|---|---|
-| Gemini 3.1 Pro | 1M | $2/$12 | text, json, streaming, reasoning, tools, promptCaching, vision | thinking (high) |
-| Gemini 3.5 Flash | 1M | $1.5/$9 | text, json, streaming, reasoning, tools, promptCaching, vision | thinking (medium) |
-| Gemini 3.1 Flash-Lite | 1M | $0.25/$1.5 | text, json, streaming, reasoning, tools, promptCaching, vision | thinking (minimal) |
+| Gemini 3.1 Pro | 1.05M | $2/$12 | text, json, streaming, reasoning, tools, promptCaching, vision | thinking (high) |
+| Gemini 3.5 Flash | 1.05M | $1.5/$9 | text, json, streaming, reasoning, tools, promptCaching, vision | thinking (medium) |
+| Gemini 3.1 Flash-Lite | 1.05M | $0.25/$1.5 | text, json, streaming, reasoning, tools, promptCaching, vision | thinking (minimal) |
 
 ## openai
 
 | model | context | pricing (in/out) | capabilities | control |
 |---|---|---|---|---|
-| GPT-5.5 | 1M | $5/$30 | text, json, streaming, reasoning, tools, promptCaching, vision | effort (medium) |
-| GPT-5.4 | 1M | $2.5/$15 | text, json, streaming, reasoning, tools, promptCaching, vision | effort (medium) |
+| GPT-5.5 | 1.05M | $5/$30 | text, json, streaming, reasoning, tools, promptCaching, vision | effort (medium) |
+| GPT-5.4 | 1.05M | $2.5/$15 | text, json, streaming, reasoning, tools, promptCaching, vision | effort (medium) |
 | GPT-5.4 mini | 400K | $0.75/$4.5 | text, json, streaming, reasoning, tools, promptCaching, vision | effort (low) |
 | GPT-5.4 nano | 200K | $0.2/$1.25 | text, json, streaming, reasoning, tools, promptCaching | effort (none) |

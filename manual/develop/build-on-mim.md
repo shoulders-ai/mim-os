@@ -20,9 +20,9 @@ An app is an installable capability bundle: backend jobs, AI tools, data storage
 
 A skill is a markdown instruction folder (`SKILL.md` plus optional resources) that the agent loads on demand. Skills gate tools: tools listed in `unlocks` stay hidden from chat until the skill activates. Workspace skills, personal skills, added sources, and app-bundled skills each have their own precedence layer. See [skills](skills) for the format, discovery rules, and progressive tool gating.
 
-## Tools over MCP
+## Tools for CLI agents
 
-Mim exposes its tool registry to external CLI agents (Claude Code, Codex, Gemini CLI) through a local MCP stdio bridge. The bridge connects to the running desktop over WebSocket, so CLI agents share the same workspace, approval gate, and trace log. The exposed surface includes file tools, web tools, editor state, integration data tools, and named app tools. See [MCP bridge](mcp) for the tool surface and client setup. The generated [tool catalog](/develop/tools) lists every registered tool with its effect classification.
+Mim exposes its tool registry to Claude Code, Codex, and Gemini CLI through a local MCP stdio bridge. Pi gets the same curated catalog through a first-party extension that Mim loads automatically for its sessions. Both paths connect to the running desktop over an authenticated WebSocket, so CLI agents share the same workspace, approval gate, and trace log. The exposed surface includes file tools, web tools, editor state, integration data tools, and named app tools. See [MCP bridge](mcp) for the tool surface and connection architecture. The generated [tool catalog](/develop/tools) lists every registered tool with its effect classification.
 
 ## Headless CLI
 

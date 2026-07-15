@@ -71,11 +71,13 @@ API keys are stored in `~/.mim/keys.env`, a file written with permissions restri
 
 ## What is recorded
 
-Every tool call by every actor -- you, the agent, apps -- is recorded in the trace stream under `.mim/traces/`. Each entry captures who made the call, what tool ran, when, and the outcome. The trace digest redacts keys, tokens, and content fields. Full tool results and model exchanges are kept as separate payload files, on your machine, with secret-bearing tools excluded; set `traceCaptureContent` to `false` in `.mim/settings.json` to turn content capture off.
+By default, every tool call by every actor -- you, the agent, apps -- is recorded in the local trace stream under `.mim/traces/`. Each compact audit entry captures who made the call, what tool ran, when, and the outcome. The audit digest redacts keys, tokens, and content fields. Read-only tool results are not retained as content. Completed model turns and consequential tool results may be kept as compressed, deduplicated local payloads, with secret-bearing tools excluded. File-write details are retained for revert detection while the local audit trail is on.
+
+Settings > Workspace has a Local audit trail toggle. Turning it off asks for confirmation, deletes the existing local audit events and retained content for that workspace, and stops future local trace writes. This does not change anonymous Usage data, which has its own toggle and kill switches. Open Advanced to change retention and budgets, disable optional content capture, inspect storage use, or clean immediately.
 
 Open Monitor in the Navigator to review what Mim, the agent, and apps have done in your workspace. The Monitor tab shows review items -- errors, denials, reverted outputs -- and a narrated list of runs. The Audit tab shows consequential events, with a full-log toggle for the raw stream.
 
-Traces are yours, on your machine. Default retention is 90 days. Set `traceRetentionDays` in `.mim/settings.json` to change it, or set it to `0` to keep everything.
+Traces are yours, on your machine. Compact audit events default to 90 days. Retained content expires after 7 days and has a 250 MB soft budget by default. Advanced shows audit and content sizes separately and lets you change retention, budgets, and content capture or run cleanup immediately. Recent file-write details are protected inside the content window, so accountability and revert detection can temporarily exceed the soft content budget.
 
 ## What can be undone
 

@@ -13,11 +13,13 @@ verified: bf1358ebd68b1348a9fd85c6576c5b71e5f11880
 
 # history & recovery
 
-Edits by you or the agent can be undone. Mim keeps local file history, preserves past chats and runs, and can manage git sync on your behalf.
+Edits by you or the agent can be undone. Mim keeps bounded local file history, preserves past chats and runs, and can manage git sync on your behalf.
 
 ## File history
 
-Every workspace file that matters — documents, code, data, configuration — has file history under `.mim/`. Mim captures baseline versions automatically and records before-and-after snapshots around edits, saves, renames, deletions, and restores — whether the change comes from you, the agent, an app, or an external editor. Files in generated directories like `node_modules` or `dist` are excluded. No configuration is required.
+Mim keeps file history under `.mim/` by default. It takes small, bounded baselines of authored text so a closed file's pre-change state survives an overwrite by an external editor. Bulk data, PDFs, Office files, images, and machine JSON streams are not baselined. Mim still records eligible data and binary files immediately before it overwrites, renames, deletes, or restores them. New downloads and imports do not get a redundant one-version history. Files in generated directories like `node_modules` or `dist` are excluded.
+
+Settings > Workspace has a File recovery toggle. Turning it off asks for confirmation and stops new recovery points, but keeps existing versions available to preview or restore. Open Advanced to clear those versions explicitly or change storage limits.
 
 File history is independent of git. Mim never reads or writes your `.git` directory on its own.
 
@@ -25,7 +27,7 @@ File history is independent of git. Mim never reads or writes your `.git` direct
 File history works in every workspace, whether or not it uses git. You do not need to commit to protect your work.
 :::
 
-To browse a file's history, click the Version history button in the editor toolbar, or right-click a file in Files and choose Version history.... The History rail opens beside the editor, showing the current file at the top — marked Current — followed by previous saves listed newest-first. Each entry shows a relative time as its primary label, a detail line describing what happened and who did it (for example, Edited by assistant or Saved by you), and line-change counts compared with the current file.
+To browse a file's history, click the Version history button in the editor toolbar, or right-click a file in Files and choose Version history.... The History rail opens beside the editor, showing the current file at the top — marked Current — followed by previous saves listed newest-first. Each entry shows a relative time as its primary label, a detail line describing what happened and who did it (for example, Edited by agent or Saved by you), and line-change counts compared with the current file.
 
 Clicking a text entry previews that version read-only in the editor. A banner shows the version's age and line-change counts, and offers Use this version and Cancel. Using a previous version restores it and records the action — the restore itself becomes a history entry, so it can be undone. If the current file has unsaved edits, Mim saves that state first so it remains recoverable. Cancel, switching tabs, or closing the rail returns to the live file. Binary versions cannot be previewed inline; the rail offers Open copy, which writes a temporary file you can inspect in its native application.
 
@@ -67,7 +69,7 @@ File history captures a version before any deletion, so the content is recoverab
 ::: under-the-hood
 Local history lives in `.mim/history/`. `index.json` holds version metadata; `blobs/<prefix>/<sha256>` holds content-addressed file bytes. The default per-file size cap is 5 MB. Files in generated or dependency directories (`.git`, `node_modules`, `dist`, and similar) are excluded, and `.gitignore` and `.mim/historyignore` patterns are honored.
 
-Settings > Workspace shows the total size and version count of file history under the Recovery group. The rail's default view targets around 30 versions per file. Older entries are folded using a policy that keeps the newest version, anchored events, the latest recent versions, one daily anchor for recent days, and one weekly anchor for older history. Thin old versions physically removes folded versions and garbage-collects unreferenced blobs. Clear local history removes all recovery data for the workspace without touching workspace files.
+Settings > Workspace keeps File recovery as the normal control. Advanced shows the total size and version count. History keeps every point for 3 days, then one per day through day 30, then one per week. Delete, rename, and restore boundaries receive 30 days of protection. The 512 MB default soft budget can be changed there; recent recovery points may temporarily exceed it. Optimize history applies the policy immediately and garbage-collects unreferenced content. Clear local history removes all recovery data without touching workspace files.
 
 Managed sync internals and the full tool catalog are documented in [sync tools](/develop/tools).
 :::

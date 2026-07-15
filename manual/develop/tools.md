@@ -201,9 +201,12 @@ approval.
 |---|---|---|---|
 | `routine.list` | List workspace routines and validation diagnostics | read | auto |
 | `routine.get` | Get a workspace routine definition | read | auto |
-| `routine.create` | Create a disabled workspace routine file | **mutate** | ask |
-| `routine.pause` | Pause a routine on this machine | **mutate** | ask |
-| `routine.resume` | Enable a routine on this machine after acknowledging its current authority | **mutate** | ask |
+| `routine.create` | Create a workspace routine definition; automatic runs require local review | **mutate** | ask |
+| `routine.update` | Update a workspace routine definition if it has not changed since it was opened | **mutate** | ask |
+| `routine.duplicate` | Duplicate a workspace routine; automatic runs require local review | **mutate** | ask |
+| `routine.enable` | Enable automatic runs on this machine after reviewing the routine authority | **mutate** | ask |
+| `routine.disable` | Disable automatic runs for a routine on this machine | **mutate** | ask |
+| `routine.remove` | Move a workspace routine definition to the OS trash and clear its local run state | **mutate** | ask |
 | `routine.run` | Run a workspace routine once as a normal chat turn and wait for completion | **mutate** | ask |
 | `routine.start` | Start a workspace routine once and return its chat session immediately | **mutate** | ask |
 | `routine.webhook.secret.status` | Check whether a webhook-triggered routine has its local signing secret configured | **mutate** | ask |
@@ -293,7 +296,7 @@ approval.
 | `slack.bot.connect` | Store Slack bot and app-level Socket Mode tokens and verify both. Accepts a JSON file with bot_token and app_token, or i | **mutate** | ask |
 | `slack.bot.disconnect` | Remove Slack bot and app-level Socket Mode tokens from the OS keychain. | **mutate** | ask |
 | `slack.bot.setup` | Set up a workspace Slack bot in one step: optionally store bot credentials, create/update the Slack routine, and enable  | **mutate** | ask |
-| `slack.bot.check` | Return one workspace Slack bot readiness checklist: routine binding, local enablement, credentials, and live listener av | read | auto |
+| `slack.bot.check` | Return one workspace Slack bot readiness checklist: routine binding, activation, credentials, and live listener availabi | read | auto |
 | `slack.listener.status` | Check the local Slack Socket Mode listener runtime. | read | auto |
 | `slack.replies` | Read threaded Slack replies for a message. | external | ask |
 
@@ -333,6 +336,8 @@ approval.
 | `trace.query` | Read filtered trace digest events from the current workspace. Payload blob refs are returned by pointer only. | read | auto |
 | `trace.stats` | Aggregate trace counts, errors, durations, model cost, gate decisions, job health, and outcome signals. | read | auto |
 | `trace.payload` | Read a captured trace payload blob by its payloadRef (redacted model I/O or tool result). | **mutate** | ask |
+| `trace.storage` | Report local trace digest and payload storage usage. | read | auto |
+| `trace.prune` | Apply trace digest retention, payload retention, and the payload byte budget now. | **mutate** | ask |
 
 ## web
 
