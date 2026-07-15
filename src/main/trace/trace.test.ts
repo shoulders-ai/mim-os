@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { gzipSync, gunzipSync } from 'zlib'
 import { createTraceLog, newTraceId, newSpanId, type TraceEvent } from '@main/trace/trace.js'
 
 function readTraceLines(dir: string): TraceEvent[] {
@@ -108,7 +109,7 @@ describe('TraceLog', () => {
     expect(seen[0].ts).toBeTruthy()
   })
 
-  it('writePayload stores full payload as a blob and returns a ref', () => {
+  it('writePayload stores compressed content-addressed payloads and returns a ref', () => {
     const trace = createTraceLog({ devConsole: false })
     trace.setWorkspacePath(dir)
     const traceId = newTraceId()
@@ -116,9 +117,20 @@ describe('TraceLog', () => {
 
     const ref = trace.writePayload(traceId, spanId, 'params', { content: 'full raw text' })
 
-    expect(ref).toBe(`blobs/${traceId}/${spanId}.params.json`)
+    expect(ref).toMatch(/^objects\/[a-f0-9]{2}\/[a-f0-9]{64}\.json\.gz$/)
     const blobPath = join(dir, '.mim', 'traces', ref!)
-    expect(JSON.parse(readFileSync(blobPath, 'utf-8'))).toEqual({ content: 'full raw text' })
+    expect(JSON.parse(gunzipSync(readFileSync(blobPath)).toString('utf-8'))).toEqual({ content: 'full raw text' })
+  })
+
+  it('deduplicates identical payload content across traces and spans', () => {
+    const trace = createTraceLog({ devConsole: false })
+    trace.setWorkspacePath(dir)
+
+    const first = trace.writePayload('trace-a', 'span-a', 'result', { repeated: 'same value' })
+    const second = trace.writePayload('trace-b', 'span-b', 'messages', { repeated: 'same value' })
+
+    expect(second).toBe(first)
+    expect(trace.storageStats().payloadCount).toBe(1)
   })
 
   it('writePayload returns null with no workspace and never throws', () => {
@@ -159,22 +171,23 @@ describe('TraceLog', () => {
     expect(readTraceLines(dir)).toHaveLength(1)
   })
 
-  it('prunes day files outside retention and removes blobs for deleted-only traces', () => {
+  it('prunes day files outside retention and removes payload objects referenced only by expired events', () => {
     const tracesDir = join(dir, '.mim', 'traces')
-    mkdirSync(join(tracesDir, 'blobs', 'old-trace'), { recursive: true })
-    mkdirSync(join(tracesDir, 'blobs', 'shared-trace'), { recursive: true })
-    mkdirSync(join(tracesDir, 'blobs', 'kept-trace'), { recursive: true })
+    const oldRef = 'objects/aa/' + 'a'.repeat(64) + '.json.gz'
+    const sharedRef = 'objects/bb/' + 'b'.repeat(64) + '.json.gz'
+    const keptRef = 'objects/cc/' + 'c'.repeat(64) + '.json.gz'
+    for (const [ref, payload] of [[oldRef, { old: true }], [sharedRef, { shared: true }], [keptRef, { kept: true }]] as const) {
+      mkdirSync(join(tracesDir, ref, '..'), { recursive: true })
+      writeFileSync(join(tracesDir, ref), gzipSync(JSON.stringify(payload)))
+    }
     writeFileSync(join(tracesDir, '2026-06-10.jsonl'), [
-      JSON.stringify({ ts: '2026-06-10T10:00:00.000Z', traceId: 'old-trace', spanId: 'old-span', kind: 'tool.call', actor: 'ai' }),
-      JSON.stringify({ ts: '2026-06-10T10:01:00.000Z', traceId: 'shared-trace', spanId: 'old-shared', kind: 'tool.call', actor: 'ai' }),
+      JSON.stringify({ ts: '2026-06-10T10:00:00.000Z', traceId: 'old-trace', spanId: 'old-span', kind: 'tool.call', actor: 'ai', payloadRef: oldRef }),
+      JSON.stringify({ ts: '2026-06-10T10:01:00.000Z', traceId: 'shared-trace', spanId: 'old-shared', kind: 'tool.call', actor: 'ai', payloadRef: sharedRef }),
     ].join('\n') + '\n')
     writeFileSync(join(tracesDir, '2026-06-12.jsonl'), [
-      JSON.stringify({ ts: '2026-06-12T10:00:00.000Z', traceId: 'kept-trace', spanId: 'kept-span', kind: 'tool.call', actor: 'ai' }),
-      JSON.stringify({ ts: '2026-06-12T10:01:00.000Z', traceId: 'shared-trace', spanId: 'kept-shared', kind: 'tool.call', actor: 'ai' }),
+      JSON.stringify({ ts: '2026-06-12T10:00:00.000Z', traceId: 'kept-trace', spanId: 'kept-span', kind: 'tool.call', actor: 'ai', payloadRef: keptRef }),
+      JSON.stringify({ ts: '2026-06-12T10:01:00.000Z', traceId: 'shared-trace', spanId: 'kept-shared', kind: 'tool.call', actor: 'ai', payloadRef: sharedRef }),
     ].join('\n') + '\n')
-    writeFileSync(join(tracesDir, 'blobs', 'old-trace', 'old-span.params.json'), '{}')
-    writeFileSync(join(tracesDir, 'blobs', 'shared-trace', 'old-shared.params.json'), '{}')
-    writeFileSync(join(tracesDir, 'blobs', 'kept-trace', 'kept-span.params.json'), '{}')
 
     const trace = createTraceLog({
       devConsole: false,
@@ -189,12 +202,56 @@ describe('TraceLog', () => {
     expect(existsSync(join(tracesDir, '2026-06-10.jsonl'))).toBe(false)
     expect(existsSync(join(tracesDir, '2026-06-12.jsonl'))).toBe(true)
     expect(existsSync(join(tracesDir, '2026-06-13.jsonl'))).toBe(true)
-    expect(existsSync(join(tracesDir, 'blobs', 'old-trace'))).toBe(false)
-    expect(existsSync(join(tracesDir, 'blobs', 'shared-trace'))).toBe(true)
-    expect(existsSync(join(tracesDir, 'blobs', 'kept-trace'))).toBe(true)
+    expect(existsSync(join(tracesDir, oldRef))).toBe(false)
+    expect(existsSync(join(tracesDir, sharedRef))).toBe(true)
+    expect(existsSync(join(tracesDir, keptRef))).toBe(true)
   })
 
-  it('does not prune traces when retention is disabled', () => {
+  it('expires payload content independently of longer digest retention', () => {
+    let now = new Date('2026-06-01T12:00:00.000Z')
+    const trace = createTraceLog({
+      devConsole: false,
+      getRetentionDays: () => 90,
+      getPayloadRetentionDays: () => 7,
+      retentionCheckIntervalMs: 0,
+      now: () => now,
+    })
+    trace.setWorkspacePath(dir)
+    const ref = trace.writePayload('trace-old', 'span-old', 'result', { content: 'diagnostic' })!
+    trace.append({ kind: 'tool.result', actor: 'ai', traceId: 'trace-old', spanId: 'span-old', payloadRef: ref })
+
+    now = new Date('2026-06-09T12:00:00.000Z')
+    trace.append({ kind: 'tool.call', actor: 'ai' })
+
+    expect(readTraceLines(dir).some(event => event.traceId === 'trace-old')).toBe(true)
+    expect(existsSync(join(dir, '.mim', 'traces', ref))).toBe(false)
+  })
+
+  it('keeps recent mutation params when the payload budget evicts diagnostics', () => {
+    const trace = createTraceLog({
+      devConsole: false,
+      getPayloadRetentionDays: () => 7,
+      getPayloadMaxBytes: () => 1,
+      retentionCheckIntervalMs: 0,
+      now: () => new Date('2026-06-09T12:00:00.000Z'),
+    })
+    trace.setWorkspacePath(dir)
+    const mutationRef = trace.writePayload('mutation', 'span-m', 'params', { path: 'a.md', content: 'm'.repeat(300) })!
+    trace.append({
+      kind: 'tool.call', actor: 'ai', traceId: 'mutation', spanId: 'span-m', tool: 'fs.write', payloadRef: mutationRef,
+    })
+    const diagnosticRef = trace.writePayload('diagnostic', 'span-d', 'result', { content: 'd'.repeat(300) })!
+    trace.append({
+      kind: 'tool.result', actor: 'ai', traceId: 'diagnostic', spanId: 'span-d', tool: 'fs.read', payloadRef: diagnosticRef,
+    })
+
+    trace.prune()
+
+    expect(existsSync(join(dir, '.mim', 'traces', mutationRef))).toBe(true)
+    expect(existsSync(join(dir, '.mim', 'traces', diagnosticRef))).toBe(false)
+  })
+
+  it('zero retention purges local audit data and suppresses future local writes', () => {
     const tracesDir = join(dir, '.mim', 'traces')
     mkdirSync(tracesDir, { recursive: true })
     writeFileSync(join(tracesDir, '2026-06-10.jsonl'), JSON.stringify({
@@ -204,16 +261,27 @@ describe('TraceLog', () => {
       kind: 'tool.call',
       actor: 'ai',
     }) + '\n')
+    const objectRef = `objects/aa/${'a'.repeat(64)}.json.gz`
+    mkdirSync(join(tracesDir, 'objects', 'aa'), { recursive: true })
+    writeFileSync(join(tracesDir, objectRef), gzipSync(JSON.stringify({ content: 'old audit content' })))
+    const seen: TraceEvent[] = []
     const trace = createTraceLog({
       devConsole: false,
+      sinks: [{ write: event => seen.push(event) }],
       getRetentionDays: () => 0,
       retentionCheckIntervalMs: 0,
       now: () => new Date('2026-06-13T12:00:00.000Z'),
     })
     trace.setWorkspacePath(dir)
 
+    expect(trace.writePayload('disabled', 'span', 'result', { content: 'new content' })).toBeNull()
+    const pruned = trace.prune()
     trace.append({ kind: 'tool.call', actor: 'ai' })
 
-    expect(existsSync(join(tracesDir, '2026-06-10.jsonl'))).toBe(true)
+    expect(pruned.removedDigestFiles).toBe(1)
+    expect(pruned.removedPayloads).toBe(1)
+    expect(readdirSync(tracesDir).filter(file => file.endsWith('.jsonl'))).toHaveLength(0)
+    expect(trace.storageStats()).toEqual({ digestBytes: 0, payloadBytes: 0, payloadCount: 0, totalBytes: 0 })
+    expect(seen).toHaveLength(1)
   })
 })

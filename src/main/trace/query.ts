@@ -1,12 +1,7 @@
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { createInterface } from 'readline'
-import { join, resolve, sep } from 'path'
-import type { TraceEvent } from '@main/trace/trace.js'
-
-// A payloadRef is always `blobs/<traceId>/<spanId>.<name>.json` written by
-// trace.writePayload. Validate the shape and confine the resolved path to the
-// traces dir so a crafted ref can never read arbitrary files.
-const PAYLOAD_REF_RE = /^blobs\/[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+\.json$/
+import { join } from 'path'
+import { readTracePayloadObject, type TraceEvent } from '@main/trace/trace.js'
 
 export interface TracePayloadResult {
   ref: string
@@ -15,16 +10,10 @@ export interface TracePayloadResult {
 }
 
 export function readTracePayload(workspacePath: string, ref: unknown): TracePayloadResult | null {
-  if (typeof ref !== 'string' || ref.includes('..') || !PAYLOAD_REF_RE.test(ref)) return null
   const tracesDir = join(workspacePath, '.mim', 'traces')
-  const resolved = resolve(tracesDir, ref)
-  if (resolved !== resolve(tracesDir) && !resolved.startsWith(resolve(tracesDir) + sep)) return null
-  if (!existsSync(resolved)) return { ref, found: false }
-  try {
-    return { ref, found: true, payload: JSON.parse(readFileSync(resolved, 'utf-8')) }
-  } catch {
-    return { ref, found: false }
-  }
+  const result = readTracePayloadObject(tracesDir, ref)
+  if (!result || typeof ref !== 'string') return null
+  return { ref, ...result }
 }
 
 export interface TraceQueryFilters {

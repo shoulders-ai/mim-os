@@ -80,6 +80,9 @@ describe('trace tools', () => {
 
   it('trace.payload reads a captured blob by ref', async () => {
     const ref = tools.trace.writePayload('trace-1', 'span-1', 'result', { content: 'captured body' })
+    tools.trace.append({
+      kind: 'tool.result', actor: 'ai', traceId: 'trace-1', spanId: 'span-1', payloadRef: ref ?? undefined,
+    })
     const result = await tools.call('trace.payload', { ref }, ctx) as {
       ref: string
       found: boolean
@@ -92,5 +95,36 @@ describe('trace tools', () => {
   it('trace.payload rejects malformed and traversal refs', async () => {
     await expect(tools.call('trace.payload', { ref: '../secrets.json' }, ctx)).rejects.toThrow('Invalid payload ref')
     await expect(tools.call('trace.payload', { ref: 'blobs/../../etc/passwd' }, ctx)).rejects.toThrow('Invalid payload ref')
+  })
+
+  it('trace.storage reports digest and payload usage', async () => {
+    const ref = tools.trace.writePayload('trace-1', 'span-1', 'result', { content: 'captured body' })
+    tools.trace.append({
+      kind: 'tool.result', actor: 'ai', traceId: 'trace-1', spanId: 'span-1', payloadRef: ref ?? undefined,
+    })
+
+    const result = await tools.call('trace.storage', {}, ctx) as {
+      digestBytes: number
+      payloadBytes: number
+      payloadCount: number
+    }
+
+    expect(result.payloadCount).toBe(1)
+    expect(result.payloadBytes).toBeGreaterThan(0)
+    expect(result.digestBytes).toBeGreaterThan(0)
+  })
+
+  it('trace.prune leaves no unreferenced payload content', async () => {
+    const trace = createTraceLog({ devConsole: false, retentionCheckIntervalMs: 60_000 })
+    tools = createToolRegistry(trace)
+    tools.setWorkspacePath(dir)
+    registerTraceTools(tools)
+    tools.trace.append({ kind: 'tool.call', actor: 'user' })
+    tools.trace.writePayload('trace-1', 'span-1', 'result', { content: 'orphan' })
+
+    const result = await tools.call('trace.prune', {}, ctx) as { removedPayloads: number; payloadCount: number }
+
+    expect(result.removedPayloads).toBeGreaterThanOrEqual(0)
+    expect(result.payloadCount).toBe(0)
   })
 })

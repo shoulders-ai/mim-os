@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { gzipSync } from 'zlib'
 import {
   computeTraceStats,
   queryTraceEvents,
@@ -55,7 +56,7 @@ describe('trace query', () => {
         actor: 'ai',
         tool: 'fs.write',
         subject: 'docs/a.md',
-        payloadRef: 'blobs/t-hit/s-hit.params.json',
+        payloadRef: `objects/aa/${'a'.repeat(64)}.json.gz`,
         summary: { path: 'docs/a.md', content: '[redacted]' },
       }),
       event({
@@ -66,8 +67,8 @@ describe('trace query', () => {
         tool: 'search',
       }),
     ])
-    mkdirSync(join(dir, '.mim', 'traces', 'blobs', 't-hit'), { recursive: true })
-    writeFileSync(join(dir, '.mim', 'traces', 'blobs', 't-hit', 's-hit.params.json'), '{"content":"raw"}')
+    mkdirSync(join(dir, '.mim', 'traces', 'objects', 'aa'), { recursive: true })
+    writeFileSync(join(dir, '.mim', 'traces', 'objects', 'aa', `${'a'.repeat(64)}.json.gz`), gzipSync('{"content":"raw"}'))
 
     const result = await queryTraceEvents(dir, {
       actor: 'ai',
@@ -81,7 +82,7 @@ describe('trace query', () => {
       traceId: 't-hit',
       spanId: 's-hit',
       tool: 'fs.write',
-      payloadRef: 'blobs/t-hit/s-hit.params.json',
+      payloadRef: `objects/aa/${'a'.repeat(64)}.json.gz`,
       summary: { path: 'docs/a.md', content: '[redacted]' },
     })
     expect(JSON.stringify(result.events[0])).not.toContain('"raw"')
@@ -324,24 +325,26 @@ describe('readTracePayload', () => {
   function writeBlob(ref: string, payload: unknown): void {
     const full = join(dir, '.mim', 'traces', ref)
     mkdirSync(join(full, '..'), { recursive: true })
-    writeFileSync(full, JSON.stringify(payload))
+    writeFileSync(full, gzipSync(JSON.stringify(payload)))
   }
 
   it('reads a valid blob by ref', () => {
-    writeBlob('blobs/trace-1/span-1.result.json', { content: 'hello' })
-    const result = readTracePayload(dir, 'blobs/trace-1/span-1.result.json')
-    expect(result).toEqual({ ref: 'blobs/trace-1/span-1.result.json', found: true, payload: { content: 'hello' } })
+    const ref = `objects/aa/${'a'.repeat(64)}.json.gz`
+    writeBlob(ref, { content: 'hello' })
+    const result = readTracePayload(dir, ref)
+    expect(result).toEqual({ ref, found: true, payload: { content: 'hello' } })
   })
 
   it('reports not-found for a well-formed ref with no blob', () => {
-    const result = readTracePayload(dir, 'blobs/trace-x/span-x.messages.json')
-    expect(result).toEqual({ ref: 'blobs/trace-x/span-x.messages.json', found: false })
+    const ref = `objects/bb/${'b'.repeat(64)}.json.gz`
+    const result = readTracePayload(dir, ref)
+    expect(result).toEqual({ ref, found: false })
   })
 
   it('rejects traversal and malformed refs', () => {
-    expect(readTracePayload(dir, 'blobs/../../etc/passwd')).toBeNull()
+    expect(readTracePayload(dir, 'objects/../../etc/passwd')).toBeNull()
     expect(readTracePayload(dir, '../secrets.json')).toBeNull()
-    expect(readTracePayload(dir, 'blobs/trace-1/span-1.result.txt')).toBeNull()
+    expect(readTracePayload(dir, `objects/aa/${'a'.repeat(64)}.json`)).toBeNull()
     expect(readTracePayload(dir, 'not-a-blob.json')).toBeNull()
     expect(readTracePayload(dir, 42 as unknown as string)).toBeNull()
   })

@@ -47,6 +47,27 @@ describe('workspace history store', () => {
     expect(afterRestore.versions[0].event).toBe('restore')
   })
 
+  it('suppresses every new recovery capture while file recovery is disabled', () => {
+    let enabled = false
+    const controlled = createHistoryStore({
+      getWorkspacePath: () => root,
+      isEnabled: () => enabled,
+      clock: () => now,
+    })
+    writeFileSync(join(root, 'paper.md'), 'first draft')
+
+    expect(controlled.captureFile('paper.md', { actor: 'user', event: 'save' })).toBeNull()
+    expect(controlled.baselineWorkspace()).toMatchObject({ captured: 0, truncated: false })
+    const observer = controlled.toolObserver()
+    const pending = observer.beforeToolCall(root, 'fs.write', { path: 'paper.md', content: 'second draft' }, { actor: 'ai' })
+    writeFileSync(join(root, 'paper.md'), 'second draft')
+    observer.afterToolCall(root, 'fs.write', { path: 'paper.md', content: 'second draft' }, { written: true }, { actor: 'ai' }, pending)
+    expect(controlled.listFileVersions('paper.md').versions).toHaveLength(0)
+
+    enabled = true
+    expect(controlled.captureFile('paper.md', { actor: 'user', event: 'save' })).not.toBeNull()
+  })
+
   it('stores binary artifacts and restores them without text decoding', () => {
     mkdirSync(join(root, 'docs'), { recursive: true })
     writeFileSync(join(root, 'docs', 'model.xlsx'), Buffer.from([0, 1, 2, 3]))
@@ -142,6 +163,9 @@ describe('workspace history store', () => {
     mkdirSync(join(root, 'private'), { recursive: true })
 
     writeFileSync(join(root, 'docs', 'paper.md'), '# Paper')
+    writeFileSync(join(root, 'docs', 'source.pdf'), Buffer.from([1, 2, 3]))
+    writeFileSync(join(root, 'docs', 'dataset.csv'), 'a,b\n1,2\n')
+    writeFileSync(join(root, 'docs', 'events.jsonl'), '{"a":1}\n')
     writeFileSync(join(root, 'node_modules', 'pkg', 'dep.md'), '# Dependency')
     writeFileSync(join(root, '.mim', 'agent-context.md'), '# Runtime')
     writeFileSync(join(root, 'ignored.md'), '# Ignored')
@@ -151,6 +175,9 @@ describe('workspace history store', () => {
     const result = store.baselineWorkspace()
     expect(result.captured).toBe(1)
     expect(store.listFileVersions('docs/paper.md').versions).toHaveLength(1)
+    expect(store.listFileVersions('docs/source.pdf').versions).toHaveLength(0)
+    expect(store.listFileVersions('docs/dataset.csv').versions).toHaveLength(0)
+    expect(store.listFileVersions('docs/events.jsonl').versions).toHaveLength(0)
     expect(store.listFileVersions('node_modules/pkg/dep.md').versions).toHaveLength(0)
     expect(store.listFileVersions('ignored.md').versions).toHaveLength(0)
     expect(store.listFileVersions('private/secret.md').versions).toHaveLength(0)
@@ -171,6 +198,112 @@ describe('workspace history store', () => {
     expect(stats.versionCount).toBe(2)
   })
 
+  it('resumes bounded baselines instead of rescanning the same prefix forever', () => {
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    for (let i = 0; i < 5; i++) {
+      writeFileSync(join(root, 'docs', `paper-${i}.md`), `# Paper ${i}`)
+    }
+
+    const first = store.baselineWorkspace({ maxScanned: 2, maxCaptured: 2 })
+    const second = store.baselineWorkspace({ maxScanned: 2, maxCaptured: 2 })
+    const third = store.baselineWorkspace({ maxScanned: 2, maxCaptured: 2 })
+
+    expect(first).toMatchObject({ captured: 2, truncated: true })
+    expect(second).toMatchObject({ captured: 2, truncated: true })
+    expect(third).toMatchObject({ captured: 1, truncated: false })
+    expect(store.stats().versionCount).toBe(5)
+  })
+
+  it('does not create history for external adds or external binary refreshes', () => {
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'new.md'), '# Newly downloaded')
+    writeFileSync(join(root, 'docs', 'paper.pdf'), Buffer.from([1, 2, 3]))
+
+    store.observeFileChange({ path: 'docs/new.md', kind: 'add' })
+    store.observeFileChange({ path: 'docs/paper.pdf', kind: 'change' })
+
+    expect(store.listFileVersions('docs/new.md').versions).toHaveLength(0)
+    expect(store.listFileVersions('docs/paper.pdf').versions).toHaveLength(0)
+
+    writeFileSync(join(root, 'docs', 'new.md'), '# Edited elsewhere')
+    store.observeFileChange({ path: 'docs/new.md', kind: 'change' })
+    expect(store.listFileVersions('docs/new.md').versions).toHaveLength(1)
+  })
+
+  it('automatically compacts old saves using the existing daily and weekly policy', () => {
+    writeFileSync(join(root, 'analysis.md'), 'v0')
+    const start = now - 90 * 86400000
+    for (let i = 0; i < 180; i++) {
+      now = start + i * Math.floor((90 * 86400000) / 180)
+      writeFileSync(join(root, 'analysis.md'), `version ${i}`)
+      store.captureFile('analysis.md', { actor: 'user', event: 'save' })
+    }
+
+    const retained = store.listFileVersions('analysis.md', { includeFolded: true }).versions
+    expect(retained.length).toBeLessThan(90)
+    expect(retained.some(version => version.at.slice(0, 10) === new Date(start).toISOString().slice(0, 10))).toBe(true)
+  })
+
+  it('treats ordinary anchors as priority rather than permanent retention', () => {
+    writeFileSync(join(root, 'analysis.md'), 'v0')
+    const start = now - 90 * 86400000
+    for (let i = 0; i < 80; i++) {
+      now = start + i * 86400000
+      writeFileSync(join(root, 'analysis.md'), `agent version ${i}`)
+      store.captureFile('analysis.md', { actor: 'agent', event: 'after-write', anchor: true })
+    }
+
+    const retained = store.listFileVersions('analysis.md', { includeFolded: true }).versions
+    expect(retained.length).toBeLessThan(50)
+  })
+
+  it('keeps recent destructive recovery points during automatic compaction', () => {
+    writeFileSync(join(root, 'notes.txt'), 'important')
+    const protectedVersion = store.captureFile('notes.txt', {
+      actor: 'agent',
+      event: 'before-delete',
+      anchor: true,
+    })
+    for (let i = 0; i < 60; i++) {
+      now += 2 * 60 * 60 * 1000
+      writeFileSync(join(root, 'notes.txt'), `rewrite ${i}`)
+      store.captureFile('notes.txt', { actor: 'user', event: 'save' })
+    }
+
+    expect(store.listFileVersions('notes.txt', { includeFolded: true }).versions)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ id: protectedVersion!.id })]))
+  })
+
+  it('enforces a soft blob budget by evicting old low-priority versions', () => {
+    store = createHistoryStore({
+      getWorkspacePath: () => root,
+      clock: () => now,
+      maxFileBytes: 1024 * 1024,
+      maxBytes: 240,
+    })
+    writeFileSync(join(root, 'budget.md'), 'x'.repeat(100))
+    store.captureFile('budget.md', { actor: 'user', event: 'save' })
+    for (let i = 1; i <= 5; i++) {
+      now += 10 * 86400000
+      writeFileSync(join(root, 'budget.md'), String(i).repeat(100))
+      store.captureFile('budget.md', { actor: 'user', event: 'save' })
+    }
+
+    expect(store.stats().blobBytes).toBeLessThanOrEqual(240)
+    expect(store.listFileVersions('budget.md', { includeFolded: true }).versions[0].bytes).toBe(100)
+  })
+
+  it('removes legacy singleton external-add anchors when the live file still exists', () => {
+    writeFileSync(join(root, 'download.md'), '# Live copy')
+    store.captureFile('download.md', { actor: 'external', event: 'external', anchor: true })
+
+    const result = store.prune()
+
+    expect(result.removedVersions).toBe(1)
+    expect(store.listFileVersions('download.md', { includeFolded: true }).versions).toHaveLength(0)
+    expect(readFileSync(join(root, 'download.md'), 'utf-8')).toBe('# Live copy')
+  })
+
   // 1000 real file writes: crosses the default 5s timeout under full-suite load.
   it('folds a thousand saves into a short default rail', { timeout: 20000 }, () => {
     writeFileSync(join(root, 'analysis.md'), 'v0')
@@ -185,7 +318,7 @@ describe('workspace history store', () => {
     const expandedList = store.listFileVersions('analysis.md', { includeFolded: true })
 
     expect(defaultList.versions.length).toBeLessThanOrEqual(30)
-    expect(defaultList.foldedCount).toBeGreaterThan(900)
+    expect(defaultList.foldedCount).toBeGreaterThan(40)
     expect(expandedList.versions.length).toBeGreaterThan(defaultList.versions.length)
     expect(defaultList.versions[0].path).toBe('analysis.md')
   })
@@ -227,7 +360,7 @@ describe('workspace history store', () => {
   })
 
   // 1000 real file writes: crosses the default 5s timeout under full-suite load.
-  it('physically prunes folded versions and garbage-collects unused blobs', { timeout: 20000 }, () => {
+  it('keeps manual pruning idempotent after automatic compaction', { timeout: 20000 }, () => {
     writeFileSync(join(root, 'analysis.md'), 'v0')
     const start = now - 90 * 86400000
     for (let i = 0; i < 1000; i++) {
@@ -240,8 +373,9 @@ describe('workspace history store', () => {
     const result = store.prune()
     const after = store.stats()
 
-    expect(result.removedVersions).toBeGreaterThan(900)
-    expect(after.versionCount).toBeLessThan(before.versionCount)
+    expect(before.versionCount).toBeLessThan(100)
+    expect(result.removedVersions).toBe(0)
+    expect(after.versionCount).toBe(before.versionCount)
     expect(store.listFileVersions('analysis.md', { includeFolded: true }).versions.length).toBe(after.versionCount)
   })
 })

@@ -58,4 +58,20 @@ export function registerTraceTools(tools: ToolRegistry): void {
       return result
     },
   })
+
+  tools.register({
+    name: 'trace.storage',
+    description: 'Report local trace digest and payload storage usage.',
+    inputSchema: objectSchema({}),
+    captureResult: false,
+    execute: async () => tools.trace.storageStats(),
+  })
+
+  tools.register({
+    name: 'trace.prune',
+    description: 'Apply trace digest retention, payload retention, and the payload byte budget now.',
+    inputSchema: objectSchema({}),
+    captureResult: false,
+    execute: async () => tools.trace.prune(),
+  })
 }

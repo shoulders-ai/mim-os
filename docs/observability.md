@@ -18,22 +18,25 @@ The user-facing Review surface follows the design rationale in
 
 ## Trace Stream
 
-The trace stream is append-only JSONL written under:
+When local audit storage is enabled, the trace stream is append-only JSONL
+written under:
 
 ```text
 .mim/traces/YYYY-MM-DD.jsonl
-.mim/traces/blobs/<traceId>/<spanId>.<name>.json
+.mim/traces/objects/<sha256-prefix>/<sha256>.json.gz
 ```
 
-The JSONL files contain small redacted digest events. Raw payload blobs are pointer-referenced by `payloadRef`.
+The JSONL files contain small redacted digest events. Retained content is gzip
+compressed, addressed by the SHA-256 of its serialized value, and referenced by
+`payloadRef`. Identical values share one object across tools, spans, and turns.
 
 Content capture (enabled by default, workspace setting `traceCaptureContent` in `.mim/settings.json`):
 
 - **File-mutation params** — `fs.write`/`fs.edit`/`fs.create` params are always blobbed (the edit-distance raw material; independent of `traceCaptureContent` because outcome/revert detection depends on it).
-- **Tool results** — every successful tool's result is blobbed on its `tool.result` event, unless the tool is secret-bearing or the serialized result exceeds the 1 MB cap (the digest still records the call). `isSecretBearingTool` denies key/OAuth/code-exchange tools and any tool whose name contains `secret`, `token`, or `credential` in any casing, so `package.secrets.*`, camelCase token setters, and credential helpers never capture.
-- **Model I/O** — the full chat-turn message array (input + assistant output + tool calls/results) is blobbed on `chat.turn.done`. This content already lives in the session DB; the blob makes it reachable from the trace surface. Single-shot calls (ghost, task-label, summary) capture usage only.
+- **Tool results** — read-effect results are digest-only. Successful mutate or external-effect results may retain content unless the tool opts out, is secret-bearing, or exceeds the 1 MB per-result cap. `isSecretBearingTool` denies key/OAuth/code-exchange tools and any tool whose name contains `secret`, `token`, or `credential` in any casing, so `package.secrets.*`, camelCase token setters, and credential helpers never capture.
+- **Model I/O** — `chat.turn.done` retains only the completed turn slice (the last user message plus that turn's assistant/tool messages), not the cumulative session history. This content already lives in the session DB; the payload makes the turn reachable from the trace surface. Single-shot calls (ghost, task-label, summary) capture usage only.
 
-Setting `traceCaptureContent: false` disables tool-result and model-I/O capture (file-mutation params still capture). Blobs are read back through the `trace.payload` kernel tool, which validates the ref shape and confines reads to `.mim/traces/blobs/`.
+Setting `traceCaptureContent: false` disables consequential tool-result and model-I/O capture (file-mutation params still capture while the local audit trail is enabled). Payloads are read back through the `trace.payload` kernel tool, which validates the content-addressed ref shape and confines reads to `.mim/traces/objects/`.
 
 Every trace event carries:
 
@@ -62,8 +65,11 @@ stream remains the complete audit record.
 Core emitters:
 
 - `src/main/tools/registry.ts`: `tool.call`, `tool.result`, `tool.error`; one span per tool call.
-- `src/main/security/gate.ts`: `gate.decision`, parented to the gated tool span.
+- `src/main/security/gate.ts`: meaningful `gate.decision` events (requested,
+  approved, denied, or bypassed), parented to the gated tool span. Routine
+  allowed read-through is omitted from the audit stream.
 - `src/main/ai/aiRuntime.ts`: `chat.turn`, per-step `model.call`, `chat.turn.done`, `chat.compaction`, plus single-shot model calls for ghost, task labels, and summaries. The `chat.turn` root span is created up front so the turn's pre-flight `skill.list`/`package.tools.list` listing, context-compaction checks, overflow-retry summaries, and closing `session.update` persistence nest under it — one chat send is one trace, not a scatter of orphan traces. Compaction summaries emit a `model.call` with `profile: "chat.compaction"` and a `chat.compaction` event containing the trigger, cut point, token counts, and saved ratio. The single-shot housekeeping calls (ghost/task-label/summary) trace on their own ids and are intentionally excluded from the Review Run feed; they remain visible in Audit Full log and trace statistics.
+- `src/main/subagents/subagentManager.ts`: `subagent.spawn`, `subagent.start`, `subagent.steer`, `subagent.follow-up`, `subagent.done`, `subagent.interrupt`, and `subagent.stop`. Events carry root/parent session ids, recursion depth, and turn id. When spawn has parent trace context, the child turn and its tool spans nest beneath that delegation.
 - `src/main/packages/packageJobs.ts`: `job.started`, `job.step`, `job.progress`, `job.log`, `job.done`, `job.failed`, `job.cancelled`; the app run id is the trace id.
 - `src/main/packages/packageRuntime.ts`: app audit, HTTP, and app tool activity with app version.
 - `src/main/trace/outcomes.ts`: `outcome.edit` after user edits following AI/app file mutations.
@@ -86,7 +92,10 @@ When a user edit follows an AI/app mutation within the correlation window, it em
 - origin actor/tool/session/app fields
 - `reverted` when the user content matches the pre-AI snapshot
 
-On restart, the tracker lazily rebuilds recent write/create correlations from trace blobs. It does not scan day files on every watcher tick.
+On restart, the tracker lazily rebuilds recent write/create correlations from
+file-mutation parameter payloads. Those payloads are protected from budget
+eviction inside the content-retention window. The tracker does not scan day
+files on every watcher tick.
 
 ## Query Tools
 
@@ -94,14 +103,17 @@ Kernel tools:
 
 - `trace.query`: streams day-file JSONL and returns capped redacted digest events. Filters: `from`, `to`, `days`, `kind`, `actor`, `tool`, `packageId`, `sessionId`, `runId`, `traceId`, `status`, `order`, `limit`. Chronological order is the default; `order: "desc"` returns newest events first for UI timelines.
 - `trace.stats`: aggregates tool calls/errors/durations, app errors, model tokens/cost, day trends, gate approvals/denials, job health, and outcome signals.
-- `trace.payload`: reads one captured blob by its `payloadRef`. Validates the ref shape (`blobs/<traceId>/<spanId>.<name>.json`) and confines reads to the traces dir. Returns `{ ref, found, payload? }`. Kernel-only — not exposed to chat (blobs can carry full content).
+- `trace.payload`: reads one retained payload by its `payloadRef`. Validates the ref shape (`objects/<prefix>/<sha256>.json.gz`) and confines reads to the traces dir. Returns `{ ref, found, payload? }`. Kernel-only — not exposed to chat because payloads can carry full content.
+- `trace.storage`: reports audit-event bytes, retained-content bytes, object count, and total bytes.
+- `trace.prune`: applies audit retention, content retention, garbage collection, and the content byte budget immediately.
 
 Chat exposes the same read-only surface as:
 
 - `trace_query`
 - `trace_stats`
 
-Blob payloads are never inlined into query results; `trace.query`/`trace.stats` callers receive `payloadRef` only. Fetch a blob explicitly via `trace.payload`.
+Payloads are never inlined into query results; `trace.query`/`trace.stats`
+callers receive `payloadRef` only. Fetch content explicitly via `trace.payload`.
 
 ## In-App Access
 
@@ -146,7 +158,7 @@ Direct inspection is also valid:
 
 ```text
 .mim/traces/YYYY-MM-DD.jsonl
-.mim/traces/blobs/<traceId>/
+.mim/traces/objects/<sha256-prefix>/
 .mim/agent-context.md
 ```
 
@@ -172,21 +184,47 @@ trace events. It maps only allowlisted low-cardinality fields and ignores
 
 ## Retention
 
-Local trace retention is enabled by default. The workspace setting `traceRetentionDays` lives in `.mim/settings.json` and defaults to `90`.
+Audit events and retained content have independent policies:
 
-- Positive values keep that many UTC day files, including the current day.
-- `0` disables local pruning.
-- Invalid or missing values fall back to `90`.
+- `traceRetentionDays` defaults to 90 and controls compact UTC day files. A
+  positive value keeps that many days including the current day. `0` means no
+  local audit trail: it suppresses future day-file and payload writes and
+  purges the existing local trace day files and object store.
+- `tracePayloadRetentionDays` defaults to 7. A payload is live only while a
+  retained event references it inside this content window.
+- `tracePayloadMaxBytes` defaults to a 250 MB soft limit over compressed,
+  deduplicated objects.
 
-The trace writer checks retention opportunistically after appends. Pruning is best-effort and never blocks the traced action. When a day file is deleted, blob directories for trace ids that appear only in deleted day files are removed; blob directories are kept when the trace id still appears in any retained day file.
+Garbage collection removes objects with no live references. If referenced
+content remains over budget, the oldest diagnostic objects go first. Recent
+`fs.write`/`fs.edit`/`fs.create` parameter objects are never evicted inside the
+content window because outcome/revert reconstruction consumes them; this can
+make the soft limit overflow.
+
+The trace writer checks maintenance opportunistically after appends, at most
+hourly per workspace. Settings > Workspace shows a **Local audit trail** toggle
+and asks for confirmation before disabling it because existing local audit and
+content are deleted immediately. Re-enabling uses the 90-day default. Sizes,
+retention, the content budget, content capture, and Clean now are hidden under a
+closed-by-default **Advanced** section. `trace.prune` runs the same maintenance
+explicitly. All maintenance is best-effort and never blocks the action being
+traced.
+
+Local audit storage and anonymous telemetry are separate controls. Disabling
+the local audit trail does not disable extra trace sinks: the telemetry sink may
+still receive events, projects only its allowlisted anonymous fields, and is
+controlled by the separate **Usage data** toggle and telemetry kill switches.
 
 ## Tests
 
 Primary coverage:
 
-- `src/main/trace/trace.test.ts`: writer, ids, principal stamping, sinks, payload blobs, retention pruning, never-throw behavior.
+- `src/main/trace/trace.test.ts`: writer, ids, principal stamping, sinks,
+  compressed content-addressed payloads, deduplication, retention, budgets, and
+  never-throw behavior.
 - `src/main/trace/query.test.ts`: query filters, result caps, stats aggregation, health rendering.
-- `src/main/trace/outcomes.test.ts`: post-AI edit outcomes, revert detection, watcher echo suppression, lazy rebuild from blobs, registry integration.
+- `src/main/trace/outcomes.test.ts`: post-AI edit outcomes, revert detection,
+  watcher echo suppression, lazy rebuild from payload objects, registry integration.
 - `src/main/tools/trace.test.ts`: kernel tool behavior.
 - `src/main/tools/registry.test.ts`: tracing, remote caller attribution, and
   payload capture at dispatch.

@@ -150,8 +150,13 @@ export interface HistoryStore {
 
 export interface HistoryStoreOptions {
   getWorkspacePath: () => string | null
+  isEnabled?: () => boolean
   clock?: () => number
   maxFileBytes?: number
+  maxBytes?: number
+  getMaxBytes?: () => number
+  maxBaselineBytes?: number
+  maxBaselineFileBytes?: number
 }
 
 interface HistoryIndex {
@@ -175,9 +180,14 @@ interface PendingSnapshot {
 
 const HISTORY_SCHEMA_VERSION = 1
 const DEFAULT_MAX_FILE_BYTES = 5 * 1024 * 1024
+const DEFAULT_MAX_HISTORY_BYTES = 512 * 1024 * 1024
+const DEFAULT_MAX_BASELINE_BYTES = 64 * 1024 * 1024
+const DEFAULT_MAX_BASELINE_FILE_BYTES = 512 * 1024
 const DISPLAY_TARGET = 30
 const RECENT_VISIBLE_COUNT = 8
+const EXACT_RETENTION_DAYS = 3
 const DAILY_ANCHOR_DAYS = 30
+const DESTRUCTIVE_ANCHOR_DAYS = 30
 
 const GENERATED_SEGMENTS = new Set([
   '.git',
@@ -246,6 +256,28 @@ const TEXT_EXTENSIONS = new Set([
   'yml',
 ])
 
+// Baselines exist to protect authored text from external overwrites while a
+// file is closed. Bulk tables, machine JSON streams, and binary artifacts are
+// deliberately excluded; Mim-mediated mutations still capture those formats
+// immediately before they are changed or deleted.
+const BASELINE_EXTENSIONS = new Set([
+  'bib',
+  'do',
+  'html',
+  'htm',
+  'md',
+  'markdown',
+  'mdx',
+  'py',
+  'r',
+  'rmd',
+  'sql',
+  'tex',
+  'txt',
+  'yaml',
+  'yml',
+])
+
 const HISTORY_BASENAMES = new Set([
   'AGENTS.md',
   'CLAUDE.md',
@@ -264,9 +296,21 @@ export function isHistoryEligiblePath(path: string): boolean {
   return HISTORY_EXTENSIONS.has(ext)
 }
 
+function isHistoryBaselineEligiblePath(path: string): boolean {
+  const normalized = normalizeRelPath(path)
+  if (!isHistoryEligiblePath(normalized)) return false
+  const name = basename(normalized)
+  if (HISTORY_BASENAMES.has(name)) return true
+  return BASELINE_EXTENSIONS.has(extensionOf(name))
+}
+
 export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
   const clock = options.clock ?? Date.now
   const maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES
+  const historyMaxBytes = () => options.getMaxBytes?.() ?? options.maxBytes ?? DEFAULT_MAX_HISTORY_BYTES
+  const maxBaselineBytes = options.maxBaselineBytes ?? Math.min(DEFAULT_MAX_BASELINE_BYTES, Math.floor(historyMaxBytes() / 4))
+  const maxBaselineFileBytes = options.maxBaselineFileBytes ?? Math.min(DEFAULT_MAX_BASELINE_FILE_BYTES, maxFileBytes)
+  const historyEnabled = () => options.isEnabled?.() ?? true
 
   function workspace(): string {
     const path = options.getWorkspacePath()
@@ -275,6 +319,7 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
   }
 
   function captureFile(path: string, meta: HistoryCaptureMeta): HistoryVersion | null {
+    if (!historyEnabled()) return null
     const ws = workspace()
     const snapshot = snapshotFile(ws, path)
     if (!snapshot || snapshot.bytes > maxFileBytes) return null
@@ -282,6 +327,7 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
   }
 
   function captureDeletion(path: string, meta: HistoryCaptureMeta): HistoryVersion | null {
+    if (!historyEnabled()) return null
     const ws = workspace()
     const relPath = normalizeWorkspaceRelPath(ws, path)
     if (!isHistoryEligibleForWorkspace(ws, relPath)) return null
@@ -295,15 +341,19 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
   }
 
   function baselineWorkspace(options: HistoryBaselineOptions = {}): HistoryBaselineResult {
+    if (!historyEnabled()) return { scanned: 0, captured: 0, skipped: 0, truncated: false }
     const ws = workspace()
     const ignore = loadIgnoreMatcher(ws)
     const index = readIndex(ws)
+    const resumeAfter = readBaselineCursor(ws)
     const startedAt = Date.now()
     let scanned = 0
     let captured = 0
     let skipped = 0
     let truncated = false
     let changed = false
+    let lastScannedPath = resumeAfter
+    let baselineBytes = referencedBlobBytes(index)
 
     function hitLimit(): boolean {
       if (options.maxScanned !== undefined && scanned >= options.maxScanned) return true
@@ -320,6 +370,7 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
       let entries: ReturnType<typeof readdirSync>
       try {
         entries = readdirSync(dir, { withFileTypes: true })
+          .sort((a, b) => a.name.localeCompare(b.name))
       } catch {
         return
       }
@@ -343,9 +394,15 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
           skipped++
           continue
         }
+        if (resumeAfter && relPath.localeCompare(resumeAfter) <= 0) continue
         scanned++
+        lastScannedPath = relPath
         const before = statsSafe(fullPath)
-        if (!before || before.size > maxFileBytes || !isHistoryEligiblePath(relPath)) {
+        if (
+          !before
+          || before.size > maxBaselineFileBytes
+          || !isHistoryBaselineEligiblePath(relPath)
+        ) {
           skipped++
           continue
         }
@@ -354,29 +411,44 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
           skipped++
           continue
         }
+        const alreadyStored = indexReferencesHash(index, snapshot.hash)
+        if (!alreadyStored && baselineBytes + snapshot.bytes > maxBaselineBytes) {
+          skipped++
+          truncated = true
+          return
+        }
         if (appendSnapshotVersion(index, ws, snapshot, { actor: 'system', event: 'baseline' }, { assumeEligible: true })) {
           captured++
+          if (!alreadyStored) baselineBytes += snapshot.bytes
           changed = true
         }
       }
     }
 
     walk(ws)
-    if (changed) writeIndex(ws, index)
+    if (truncated && lastScannedPath) writeBaselineCursor(ws, lastScannedPath)
+    else clearBaselineCursor(ws)
+    if (changed) {
+      const maintained = applyRetentionPolicy(index, ws, clock(), historyMaxBytes(), false)
+      writeIndex(ws, maintained.index)
+      if (maintained.removedVersions > 0) collectGarbageBlobs(ws, maintained.index)
+    }
     return { scanned, captured, skipped, truncated }
   }
 
   function observeFileChange(change: { path: string; kind: string }): void {
+    if (!historyEnabled()) return
     try {
       if (change.kind === 'unlink') {
         captureDeletion(change.path, { actor: 'external', event: 'delete', anchor: true })
         return
       }
-      if (change.kind === 'change' || change.kind === 'add') {
+      if (change.kind === 'add') return
+      if (change.kind === 'change' && isHistoryBaselineEligiblePath(change.path)) {
         captureFile(change.path, {
           actor: 'external',
           event: 'external',
-          anchor: change.kind === 'add',
+          anchor: false,
         })
       }
     } catch {
@@ -392,7 +464,7 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
       .map((version, index) => ({ version, index }))
       .sort((a, b) => b.version.at.localeCompare(a.version.at) || b.index - a.index)
       .map(item => item.version)
-    const versions = listOptions.includeFolded ? raw : foldVisibleVersions(raw)
+    const versions = listOptions.includeFolded ? raw : foldVisibleVersions(raw, clock())
     return {
       path: relPath,
       current: currentVersion(ws, relPath),
@@ -450,29 +522,35 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
     const relPath = normalizeWorkspaceRelPath(ws, path)
     const version = findVersion(ws, relPath, versionId)
 
-    const current = snapshotFile(ws, relPath)
-    if (current) {
-      persistSnapshot(ws, current, { actor: 'user', event: 'before-restore', anchor: true })
-    } else {
-      persistSnapshot(ws, {
-        path: relPath,
-        kind: 'deleted',
-        hash: '',
-        bytes: 0,
-        deleted: true,
-      }, { actor: 'user', event: 'before-restore', anchor: true })
+    if (historyEnabled()) {
+      const current = snapshotFile(ws, relPath)
+      if (current) {
+        persistSnapshot(ws, current, { actor: 'user', event: 'before-restore', anchor: true })
+      } else {
+        persistSnapshot(ws, {
+          path: relPath,
+          kind: 'deleted',
+          hash: '',
+          bytes: 0,
+          deleted: true,
+        }, { actor: 'user', event: 'before-restore', anchor: true })
+      }
     }
 
     const target = resolveWorkspaceFilePath(ws, relPath)
     if (version.deleted) {
       if (existsSync(target)) unlinkSync(target)
-      return captureDeletion(relPath, { actor: 'user', event: 'restore', anchor: true })
+      return historyEnabled()
+        ? captureDeletion(relPath, { actor: 'user', event: 'restore', anchor: true })
+        : version
     }
 
     const buffer = readBlob(ws, version.hash)
     mkdirSync(dirname(target), { recursive: true })
     writeFileSync(target, buffer)
-    return captureFile(relPath, { actor: 'user', event: 'restore', anchor: true })
+    return historyEnabled()
+      ? captureFile(relPath, { actor: 'user', event: 'restore', anchor: true })
+      : version
   }
 
   function stats(): HistoryStats {
@@ -496,7 +574,7 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
       blobBytes,
       fileCount: Object.keys(index.files).length,
       versionCount,
-      prunedVersionCount: countPrunableVersions(index),
+      prunedVersionCount: countPrunableVersions(index, ws, clock(), historyMaxBytes()),
     }
   }
 
@@ -505,21 +583,11 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
     const bytesBefore = directorySize(historyDir(ws))
     const index = readIndex(ws)
     const beforeVersions = countVersions(index)
-    const next = emptyIndex()
+    const maintained = applyRetentionPolicy(index, ws, clock(), historyMaxBytes(), true)
 
-    for (const [path, file] of Object.entries(index.files)) {
-      const raw = file.versions
-        .map((version, index) => ({ version, index }))
-        .sort((a, b) => b.version.at.localeCompare(a.version.at) || b.index - a.index)
-        .map(item => item.version)
-      const kept = foldVisibleVersions(raw)
-      const ordered = [...kept].sort((a, b) => a.at.localeCompare(b.at))
-      if (ordered.length > 0) next.files[path] = { versions: ordered.map(({ foldedCount, ...version }) => version) }
-    }
-
-    writeIndex(ws, next)
-    const removedBlobs = collectGarbageBlobs(ws, next)
-    const afterVersions = countVersions(next)
+    writeIndex(ws, maintained.index)
+    const removedBlobs = collectGarbageBlobs(ws, maintained.index)
+    const afterVersions = countVersions(maintained.index)
     const bytesAfter = directorySize(historyDir(ws))
     return {
       beforeVersions,
@@ -539,16 +607,16 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
   function toolObserver(): HistoryToolObserver {
     return {
       beforeToolCall(workspacePath, tool, params, ctx) {
-        if (!workspacePath) return []
+        if (!workspacePath || !historyEnabled()) return []
         return buildPendingSnapshots(workspacePath, tool, params, ctx)
       },
-      afterToolCall(workspacePath, tool, params, result, ctx, pending) {
-        if (!workspacePath) return
+      afterToolCall(workspacePath, tool, params, _result, ctx, pending) {
+        if (!workspacePath || !historyEnabled()) return
         try {
           for (const item of Array.isArray(pending) ? pending as PendingSnapshot[] : []) {
             persistSnapshot(workspacePath, item.snapshot, item.meta)
           }
-          captureAfterTool(workspacePath, tool, params, result, ctx, pending)
+          captureAfterTool(workspacePath, tool, params, ctx, pending)
         } catch {
           // Recovery capture is best-effort and must not make a successful tool fail.
         }
@@ -564,7 +632,7 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
   ): PendingSnapshot[] {
     const actor = actorFromContext(ctx)
     const out: PendingSnapshot[] = []
-    const add = (path: unknown, event: HistoryEvent, anchor = actor !== 'user') => {
+    const add = (path: unknown, event: HistoryEvent, anchor = false) => {
       if (typeof path !== 'string') return
       const snapshot = snapshotFile(ws, path)
       if (!snapshot || snapshot.bytes > maxFileBytes) return
@@ -586,14 +654,13 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
     ws: string,
     tool: string,
     params: Record<string, unknown>,
-    result: unknown,
     ctx: ToolContext,
     pending: unknown,
   ): void {
     const actor = actorFromContext(ctx)
-    const meta = (event: HistoryEvent, anchor = actor !== 'user') =>
+    const meta = (event: HistoryEvent, anchor = false) =>
       metaFromContext(ctx, actor, event, tool, anchor)
-    const capture = (path: unknown, event: HistoryEvent, anchor = actor !== 'user') => {
+    const capture = (path: unknown, event: HistoryEvent, anchor = false) => {
       if (typeof path !== 'string') return
       const snapshot = snapshotFile(ws, path)
       if (!snapshot || snapshot.bytes > maxFileBytes) return
@@ -614,18 +681,13 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
 
     const pendingCount = Array.isArray(pending) ? pending.length : 0
 
-    if (tool === 'fs.write' || tool === 'fs.writeBytes') capture(params.path, pendingCount === 0 ? 'create' : 'after-write')
+    if ((tool === 'fs.write' || tool === 'fs.writeBytes') && pendingCount > 0) capture(params.path, 'after-write')
     else if (tool === 'fs.edit' || isCommentMutationTool(tool)) capture(params.path, 'after-edit')
-    else if (tool === 'fs.create') capture(params.path, 'create', true)
     else if (tool === 'fs.delete' || tool === 'fs.trash') deletion(params.path, 'delete', true)
     else if (tool === 'fs.rename') {
       deletion(params.old_path, 'rename', true)
       capture(params.new_path, 'rename', true)
-    } else if (tool === 'fs.copy') {
-      capture(copiedTo(result) ?? params.new_path, 'copy', true)
-    } else if (tool === 'fs.import') {
-      capture(importedPath(result), 'import', true)
-    } else if (tool === 'documents.importMarkdown') {
+    } else if (tool === 'documents.importMarkdown' && pendingCount > 0) {
       capture(params.output_path, 'after-write')
     }
   }
@@ -635,10 +697,13 @@ export function createHistoryStore(options: HistoryStoreOptions): HistoryStore {
   }
 
   function persistSnapshot(ws: string, snapshot: Snapshot, meta: HistoryCaptureMeta): HistoryVersion | null {
+    if (!historyEnabled()) return null
     const index = readIndex(ws)
     const version = appendSnapshotVersion(index, ws, snapshot, meta)
     if (!version) return null
-    writeIndex(ws, index)
+    const maintained = applyRetentionPolicy(index, ws, clock(), historyMaxBytes(), false)
+    writeIndex(ws, maintained.index)
+    if (maintained.removedVersions > 0) collectGarbageBlobs(ws, maintained.index)
     return version
   }
 
@@ -757,32 +822,29 @@ function currentVersion(workspacePath: string, relPath: string): HistoryCurrentV
   }
 }
 
-function foldVisibleVersions(versions: HistoryVersion[]): HistoryVersion[] {
+function foldVisibleVersions(versions: HistoryVersion[], nowMs = Date.now()): HistoryVersion[] {
   if (versions.length <= DISPLAY_TARGET) return versions
-
   const visible = new Map<string, { version: HistoryVersion; priority: number }>()
   const add = (version: HistoryVersion, priority: number) => {
     const existing = visible.get(version.id)
     if (!existing || existing.priority < priority) visible.set(version.id, { version, priority })
   }
 
-  const nowMs = Date.now()
   for (let index = 0; index < versions.length; index++) {
     const version = versions[index]
-    const atMs = Date.parse(version.at)
     if (index === 0) add(version, 1000)
-    if (version.anchor) add(version, 900)
+    if (isProtectedDestructiveVersion(version, nowMs)) add(version, 900)
     if (index < RECENT_VISIBLE_COUNT) add(version, 800 - index)
-    const ageDays = Number.isFinite(atMs) ? Math.max(0, Math.floor((nowMs - atMs) / 86400000)) : 0
+    const ageDays = versionAgeDays(version, nowMs)
     if (ageDays <= DAILY_ANCHOR_DAYS && firstForDay(versions, index)) add(version, 600 - ageDays)
     if (ageDays > DAILY_ANCHOR_DAYS && firstForWeek(versions, index)) add(version, 400 - Math.min(ageDays, 365))
   }
 
   const anchors = [...visible.values()]
-    .filter(item => item.version.anchor)
+    .filter(item => isProtectedDestructiveVersion(item.version, nowMs))
     .map(item => item.version)
   const fill = [...visible.values()]
-    .filter(item => !item.version.anchor)
+    .filter(item => !isProtectedDestructiveVersion(item.version, nowMs))
     .sort((a, b) => b.priority - a.priority || b.version.at.localeCompare(a.version.at))
     .slice(0, Math.max(0, DISPLAY_TARGET - anchors.length))
     .map(item => item.version)
@@ -794,6 +856,39 @@ function foldVisibleVersions(versions: HistoryVersion[]): HistoryVersion[] {
     ...version,
     foldedCount: countFoldedAfter(versions, visibleIds, version.id, index === out.length - 1 ? null : out[index + 1].id),
   }))
+}
+
+function selectRetainedVersions(versions: HistoryVersion[], nowMs: number): HistoryVersion[] {
+  if (versions.length === 0) return []
+  const kept = new Map<string, HistoryVersion>()
+  const add = (version: HistoryVersion) => kept.set(version.id, version)
+  add(versions[0])
+
+  for (let index = 0; index < versions.length; index++) {
+    const version = versions[index]
+    const ageDays = versionAgeDays(version, nowMs)
+    if (ageDays <= EXACT_RETENTION_DAYS) add(version)
+    if (isProtectedDestructiveVersion(version, nowMs)) add(version)
+    if (ageDays > EXACT_RETENTION_DAYS && ageDays <= DAILY_ANCHOR_DAYS && firstForDay(versions, index)) add(version)
+    if (ageDays > DAILY_ANCHOR_DAYS && firstForWeek(versions, index)) add(version)
+  }
+
+  return [...kept.values()].sort((a, b) => b.at.localeCompare(a.at))
+}
+
+function versionAgeDays(version: HistoryVersion, nowMs: number): number {
+  const atMs = Date.parse(version.at)
+  return Number.isFinite(atMs) ? Math.max(0, Math.floor((nowMs - atMs) / 86400000)) : 0
+}
+
+function isProtectedDestructiveVersion(version: HistoryVersion, nowMs: number): boolean {
+  if (!version.anchor || versionAgeDays(version, nowMs) > DESTRUCTIVE_ANCHOR_DAYS) return false
+  return version.event === 'before-delete'
+    || version.event === 'delete'
+    || version.event === 'before-restore'
+    || version.event === 'restore'
+    || version.event === 'before-rename'
+    || version.event === 'rename'
 }
 
 function countFoldedAfter(
@@ -849,16 +944,115 @@ function countVersions(index: HistoryIndex): number {
   return Object.values(index.files).reduce((sum, file) => sum + file.versions.length, 0)
 }
 
-function countPrunableVersions(index: HistoryIndex): number {
-  let count = 0
-  for (const file of Object.values(index.files)) {
+function countPrunableVersions(index: HistoryIndex, workspacePath: string, nowMs: number, maxBytes: number): number {
+  return applyRetentionPolicy(index, workspacePath, nowMs, maxBytes, true).removedVersions
+}
+
+function applyRetentionPolicy(
+  index: HistoryIndex,
+  workspacePath: string,
+  nowMs: number,
+  maxBytes: number,
+  dropLegacyExternalAdds: boolean,
+): { index: HistoryIndex; removedVersions: number } {
+  const next = emptyIndex()
+  const beforeVersions = countVersions(index)
+
+  for (const [path, file] of Object.entries(index.files)) {
     const raw = file.versions
       .map((version, index) => ({ version, index }))
       .sort((a, b) => b.version.at.localeCompare(a.version.at) || b.index - a.index)
       .map(item => item.version)
-    count += Math.max(0, raw.length - foldVisibleVersions(raw).length)
+    if (
+      dropLegacyExternalAdds
+      && raw.length === 1
+      && raw[0].actor === 'external'
+      && raw[0].event === 'external'
+      && raw[0].anchor
+      && existsSync(resolveWorkspaceFilePath(workspacePath, path))
+    ) {
+      continue
+    }
+    const retained = selectRetainedVersions(raw, nowMs)
+    if (retained.length > 0) {
+      const retainedIds = new Set(retained.map(version => version.id))
+      next.files[path] = {
+        versions: file.versions
+          .filter(version => retainedIds.has(version.id))
+          .map(({ foldedCount, ...version }) => version)
+      }
+    }
   }
-  return count
+
+  enforceHistoryBudget(next, nowMs, maxBytes)
+  return {
+    index: next,
+    removedVersions: Math.max(0, beforeVersions - countVersions(next)),
+  }
+}
+
+function enforceHistoryBudget(index: HistoryIndex, nowMs: number, maxBytes: number): void {
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) return
+  const hashRefs = new Map<string, { bytes: number; count: number }>()
+  const protectedIds = new Set<string>()
+  const candidates: Array<{ path: string; version: HistoryVersion }> = []
+
+  for (const [path, file] of Object.entries(index.files)) {
+    const newestFirst = [...file.versions].sort((a, b) => b.at.localeCompare(a.at))
+    if (newestFirst[0]) protectedIds.add(historyVersionKey(path, newestFirst[0].id))
+    for (const version of newestFirst) {
+      if (version.hash) {
+        const current = hashRefs.get(version.hash)
+        if (current) current.count++
+        else hashRefs.set(version.hash, { bytes: version.bytes, count: 1 })
+      }
+      const key = historyVersionKey(path, version.id)
+      if (versionAgeDays(version, nowMs) <= EXACT_RETENTION_DAYS || isProtectedDestructiveVersion(version, nowMs)) {
+        protectedIds.add(key)
+      } else {
+        candidates.push({ path, version })
+      }
+    }
+  }
+
+  let bytes = [...hashRefs.values()].reduce((sum, item) => sum + item.bytes, 0)
+  if (bytes <= maxBytes) return
+  candidates.sort((a, b) => a.version.at.localeCompare(b.version.at))
+  const removed = new Set<string>()
+  for (const candidate of candidates) {
+    if (bytes <= maxBytes) break
+    const key = historyVersionKey(candidate.path, candidate.version.id)
+    if (protectedIds.has(key)) continue
+    removed.add(key)
+    if (candidate.version.hash) {
+      const ref = hashRefs.get(candidate.version.hash)
+      if (ref) {
+        ref.count--
+        if (ref.count === 0) bytes -= ref.bytes
+      }
+    }
+  }
+
+  for (const [path, file] of Object.entries(index.files)) {
+    file.versions = file.versions.filter(version => !removed.has(historyVersionKey(path, version.id)))
+    if (file.versions.length === 0) delete index.files[path]
+  }
+}
+
+function historyVersionKey(path: string, id: string): string {
+  return `${path}\n${id}`
+}
+
+function referencedBlobBytes(index: HistoryIndex): number {
+  const hashes = new Map<string, number>()
+  for (const file of Object.values(index.files)) {
+    for (const version of file.versions) if (version.hash) hashes.set(version.hash, version.bytes)
+  }
+  return [...hashes.values()].reduce((sum, bytes) => sum + bytes, 0)
+}
+
+function indexReferencesHash(index: HistoryIndex, hash: string): boolean {
+  return Object.values(index.files).some(file => file.versions.some(version => version.hash === hash))
 }
 
 function writeIndex(workspacePath: string, index: HistoryIndex): void {
@@ -875,6 +1069,27 @@ function historyDir(workspacePath: string): string {
 
 function indexPath(workspacePath: string): string {
   return join(historyDir(workspacePath), 'index.json')
+}
+
+function baselineCursorPath(workspacePath: string): string {
+  return join(historyDir(workspacePath), 'baseline-state.json')
+}
+
+function readBaselineCursor(workspacePath: string): string {
+  try {
+    const parsed = JSON.parse(readFileSync(baselineCursorPath(workspacePath), 'utf-8')) as { cursor?: unknown }
+    return typeof parsed.cursor === 'string' ? normalizeRelPath(parsed.cursor) : ''
+  } catch {
+    return ''
+  }
+}
+
+function writeBaselineCursor(workspacePath: string, cursor: string): void {
+  atomicWriteJson(baselineCursorPath(workspacePath), { cursor })
+}
+
+function clearBaselineCursor(workspacePath: string): void {
+  rmSync(baselineCursorPath(workspacePath), { force: true })
 }
 
 function blobPath(workspacePath: string, hash: string): string {
@@ -1059,22 +1274,6 @@ function metaFromContext(
     ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
     ...(ctx.package_id ? { packageId: ctx.package_id } : {}),
   }
-}
-
-function copiedTo(result: unknown): string | undefined {
-  if (!isRecord(result)) return undefined
-  const copied = result.copied
-  if (!isRecord(copied)) return undefined
-  return typeof copied.to === 'string' ? copied.to : undefined
-}
-
-function importedPath(result: unknown): string | undefined {
-  if (!isRecord(result)) return undefined
-  return typeof result.imported === 'string' ? result.imported : undefined
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 function statsSafe(path: string): ReturnType<typeof statSync> | null {

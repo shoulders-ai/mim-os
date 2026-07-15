@@ -47,7 +47,7 @@ describe('HistoryRail', () => {
               id: 'v-old',
               path: params.path,
               at: '2026-06-14T11:30:00Z',
-              actor: 'user',
+              actor: 'agent',
               event: 'save',
               kind: 'text',
               bytes: 10,
@@ -107,6 +107,8 @@ describe('HistoryRail', () => {
     await flushUi()
 
     expect(mounted.root.textContent).toContain('30 minutes ago')
+    expect(mounted.root.textContent).toContain('Saved by agent')
+    expect(mounted.root.textContent).not.toContain('Saved by assistant')
     expect(mounted.root.textContent).toContain('+1')
     expect(mounted.root.textContent).toContain('-0')
     expect(mounted.root.textContent).toContain('Show older saves')

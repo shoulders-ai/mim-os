@@ -35,7 +35,7 @@ describe('history tools', () => {
       versions: Array<{ id: string; event: string; actor: string }>
     }
     expect(list.versions.some(version => version.actor === 'agent')).toBe(true)
-    const first = list.versions.find(version => version.event === 'create')
+    const first = list.versions.find(version => version.event === 'before-write')
     expect(first).toBeDefined()
 
     const preview = await tools.call('history.preview', {
@@ -71,13 +71,14 @@ describe('history tools', () => {
 
   it('reports storage stats and clears only recovery points', async () => {
     await tools.call('fs.write', { path: 'paper.md', content: 'draft' }, { actor: 'user' })
+    await tools.call('fs.write', { path: 'paper.md', content: 'revised' }, { actor: 'user' })
 
     const stats = await tools.call('history.stats', {}, { actor: 'user' }) as { versionCount: number; bytes: number }
     expect(stats.versionCount).toBeGreaterThan(0)
     expect(stats.bytes).toBeGreaterThan(0)
 
     await tools.call('history.clear', {}, { actor: 'user' })
-    expect(readFileSync(join(root, 'paper.md'), 'utf-8')).toBe('draft')
+    expect(readFileSync(join(root, 'paper.md'), 'utf-8')).toBe('revised')
     const after = await tools.call('history.stats', {}, { actor: 'user' }) as { versionCount: number }
     expect(after.versionCount).toBe(0)
   })
@@ -89,7 +90,7 @@ describe('history tools', () => {
     const list = await tools.call('history.list', { path: 'paper.md', include_folded: true }, { actor: 'user' }) as {
       versions: Array<{ id: string; event: string }>
     }
-    const first = list.versions.find(version => version.event === 'create')
+    const first = list.versions.find(version => version.event === 'before-write')
     const temp = await tools.call('history.openVersion', {
       path: 'paper.md',
       version_id: first!.id,

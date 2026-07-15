@@ -239,7 +239,7 @@ function versionLabel(version: HistoryVersion): string {
 }
 
 function actorLabel(actor: HistoryVersion['actor']): string {
-  if (actor === 'agent') return 'assistant'
+  if (actor === 'agent') return 'agent'
   if (actor === 'package') return 'app'
   if (actor === 'external') return 'outside Mim'
   if (actor === 'system') return 'Mim'

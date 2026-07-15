@@ -1,7 +1,7 @@
 import { createHash } from 'crypto'
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { isAbsolute, join, relative, resolve } from 'path'
-import type { TraceEvent, TraceLog } from '@main/trace/trace.js'
+import { readTracePayloadObject, type TraceEvent, type TraceLog } from '@main/trace/trace.js'
 
 export interface TextSnapshot {
   content: string
@@ -262,15 +262,8 @@ function changedBytes(a: string, b: string): number {
 }
 
 function readPayload(tracesDir: string, payloadRef: string | undefined): unknown {
-  if (!payloadRef) return null
-  try {
-    const resolved = resolve(tracesDir, payloadRef)
-    const rel = relative(resolve(tracesDir), resolved)
-    if (rel.startsWith('..') || isAbsolute(rel)) return null
-    return JSON.parse(readFileSync(resolved, 'utf-8'))
-  } catch {
-    return null
-  }
+  const result = readTracePayloadObject(tracesDir, payloadRef)
+  return result?.found ? result.payload : null
 }
 
 function parseEvent(line: string): TraceEvent | null {
