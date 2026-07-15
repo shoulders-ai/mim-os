@@ -11,7 +11,7 @@ The app ships three integrated surfaces:
 
 - **Chat** — streaming AI agent with tool use, approval gate, model/effort picker, cost tracking.
 - **Document pane** — unified text/PDF/file-card tabs; text uses CodeMirror 6 with formatting, live preview, comments, citations, export, and ghost suggestions.
-- **Terminal** — multi-tab shell (xterm.js + node-pty); detected CLI coding agents (Claude Code, Codex, Gemini CLI, Pi) launch as first-class agent sessions with status, persisted scrollback, and history.
+- **Terminal** — multi-tab shell (xterm.js + node-pty); detected CLI coding agents (Claude Code, Codex, Gemini CLI, Pi) launch as first-class agent sessions with status, persisted scrollback, history, and access to Mim tools. Pi's tool bridge is built into Mim-launched sessions.
 
 Apps extend the shell with custom UI mounted in sandboxed iframes, backed by a WebSocket SDK that gives them access to the full tool registry.
 
@@ -20,6 +20,18 @@ execution, trace logging, and per-file local history under `.mim/` so important
 workspace artifacts can be restored without Mim touching the user's `.git`
 repository. Workspaces can also opt into managed git sync when a user wants Mim
 to handle the ordinary save, pull, and push loop.
+
+Agents can delegate long-running work to durable **subagents**. Each child has
+its own session, transcript, model/tool loop, inherited permission lineage, and
+Navigator status. Spawning is asynchronous; parents can wait, steer an active
+turn, interrupt it, or send follow-up work into the same context. Wait timeouts
+are long-poll heartbeats, not worker deadlines. See
+[docs/subagents.md](docs/subagents.md).
+
+Routines can also listen from Slack. A Slack bot mention activates a thread as
+a normal Mim routine session; replies in that Slack thread continue the same
+transcript without repeated mentions, and setup uses capability groups instead
+of raw tool plumbing. See [docs/integrations.md](docs/integrations.md#slack).
 
 Mim can also run headless with `mim serve`, exposing a shared workspace over
 authenticated MCP HTTP. Human desktop users join from a single-use invite link

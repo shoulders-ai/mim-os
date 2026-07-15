@@ -39,6 +39,7 @@ function makeHarness(overrides: Partial<AppKernelEventDeps> = {}) {
     dispatchTerminalRun: vi.fn(),
     onPackageJobEvent: vi.fn(),
     onAgentSessionEvent: vi.fn(),
+    refreshSubagentSession: vi.fn(),
     pushToast: vi.fn(),
     downloadUpdate: vi.fn().mockResolvedValue(undefined),
     quitAndInstall: vi.fn().mockResolvedValue(undefined),
@@ -88,6 +89,7 @@ describe('app shell kernel events', () => {
       'bridge:terminal:run',
       'package:job:event',
       'agent:session-event',
+      'subagent:event',
       'app:update-available',
       'app:update-progress',
       'app:update-downloaded',
@@ -98,7 +100,7 @@ describe('app shell kernel events', () => {
 
     unregister()
 
-    expect(kernel.off).toHaveBeenCalledTimes(31)
+    expect(kernel.off).toHaveBeenCalledTimes(32)
     expect(registeredChannels()).toEqual([])
     expect(deps.refreshApps).not.toHaveBeenCalled()
   })
@@ -160,6 +162,7 @@ describe('app shell kernel events', () => {
     const approval = { requestId: 'req-1' }
     const packageEvent = { runId: 'run-1' }
     const agentEvent = { session: { sessionId: 's1' } }
+    const subagentEvent = { sessionId: 'child-1', status: 'done' }
 
     emit('workspace:changed', '/workspace')
     emit('ai:keys-changed')
@@ -175,6 +178,7 @@ describe('app shell kernel events', () => {
     emit('menu:welcome')
     emit('package:job:event', packageEvent)
     emit('agent:session-event', agentEvent)
+    emit('subagent:event', subagentEvent)
 
     expect(deps.handleWorkspaceChanged).toHaveBeenCalledWith('/workspace')
     expect(deps.refreshKeyStatuses).toHaveBeenCalledOnce()
@@ -190,6 +194,7 @@ describe('app shell kernel events', () => {
     expect(deps.openWelcome).toHaveBeenCalledOnce()
     expect(deps.onPackageJobEvent).toHaveBeenCalledWith(packageEvent)
     expect(deps.onAgentSessionEvent).toHaveBeenCalledWith(agentEvent)
+    expect(deps.refreshSubagentSession).toHaveBeenCalledWith('child-1')
   })
 
   it('shows a persistent download toast when an app update is available', async () => {

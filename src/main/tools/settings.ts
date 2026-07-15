@@ -4,6 +4,9 @@ import type { ToolRegistry } from '@main/tools/registry.js'
 import { atomicWriteJson } from '@main/atomicJson.js'
 
 export const DEFAULT_TRACE_RETENTION_DAYS = 90
+export const DEFAULT_TRACE_PAYLOAD_RETENTION_DAYS = 7
+export const DEFAULT_TRACE_PAYLOAD_MAX_BYTES = 250 * 1024 * 1024
+export const DEFAULT_HISTORY_MAX_BYTES = 512 * 1024 * 1024
 export const DEFAULT_REFERENCES_BIB_PATH = 'references/references.bib'
 
 interface Settings {
@@ -19,13 +22,17 @@ interface Settings {
   rightPanelWidth: number
   terminalHeight: number
   automationApprovalMode: 'normal' | 'strict' | 'developer'
-  // Positive day count prunes old trace day files; 0 disables local pruning.
+  // Positive day count prunes old trace day files; 0 disables local storage.
   traceRetentionDays: number
   // Capture redacted model I/O and tool results as trace payload blobs so the
   // Activity surface can show what the AI said and what tools returned. Costs
-  // disk, not tokens; governed by the same retention as the trace stream.
+  // disk, not tokens; governed by independent content retention and budget.
   // Secret-bearing tools never capture regardless of this flag.
   traceCaptureContent: boolean
+  tracePayloadRetentionDays: number
+  tracePayloadMaxBytes: number
+  historyEnabled: boolean
+  historyMaxBytes: number
   // CLI coding agents the user has opted into showing as Navigator launchers.
   // Detection alone never surfaces an agent (docs/agent-sessions.md).
   enabledAgents: string[]
@@ -49,6 +56,10 @@ const DEFAULTS: Settings = {
   automationApprovalMode: 'normal',
   traceRetentionDays: DEFAULT_TRACE_RETENTION_DAYS,
   traceCaptureContent: true,
+  tracePayloadRetentionDays: DEFAULT_TRACE_PAYLOAD_RETENTION_DAYS,
+  tracePayloadMaxBytes: DEFAULT_TRACE_PAYLOAD_MAX_BYTES,
+  historyEnabled: true,
+  historyMaxBytes: DEFAULT_HISTORY_MAX_BYTES,
   enabledAgents: [],
   agentFlags: {},
   'references.bibPath': DEFAULT_REFERENCES_BIB_PATH,
@@ -96,6 +107,68 @@ export function readTraceCaptureContent(workspacePath: string | null | undefined
   }
 }
 
+export function readHistoryEnabled(workspacePath: string | null | undefined): boolean {
+  if (!workspacePath) return true
+  try {
+    const path = join(workspacePath, '.mim', 'settings.json')
+    if (!existsSync(path)) return true
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as { historyEnabled?: unknown }
+    return raw.historyEnabled !== false
+  } catch {
+    return true
+  }
+}
+
+export function readTracePayloadRetentionDays(workspacePath: string | null | undefined): number {
+  return readNumericWorkspaceSetting(
+    workspacePath,
+    'tracePayloadRetentionDays',
+    DEFAULT_TRACE_PAYLOAD_RETENTION_DAYS,
+    value => Math.max(1, Math.min(365, Math.floor(value))),
+  )
+}
+
+export function readTracePayloadMaxBytes(workspacePath: string | null | undefined): number {
+  return readNumericWorkspaceSetting(
+    workspacePath,
+    'tracePayloadMaxBytes',
+    DEFAULT_TRACE_PAYLOAD_MAX_BYTES,
+    value => normalizeStorageBytes(value, DEFAULT_TRACE_PAYLOAD_MAX_BYTES),
+  )
+}
+
+export function readHistoryMaxBytes(workspacePath: string | null | undefined): number {
+  return readNumericWorkspaceSetting(
+    workspacePath,
+    'historyMaxBytes',
+    DEFAULT_HISTORY_MAX_BYTES,
+    value => normalizeStorageBytes(value, DEFAULT_HISTORY_MAX_BYTES),
+  )
+}
+
+function readNumericWorkspaceSetting(
+  workspacePath: string | null | undefined,
+  key: string,
+  fallback: number,
+  normalize: (value: number) => number,
+): number {
+  if (!workspacePath) return fallback
+  try {
+    const path = join(workspacePath, '.mim', 'settings.json')
+    if (!existsSync(path)) return fallback
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>
+    const value = raw[key]
+    return typeof value === 'number' && Number.isFinite(value) ? normalize(value) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function normalizeStorageBytes(value: number, fallback: number): number {
+  if (!Number.isFinite(value) || value <= 0) return fallback
+  return Math.max(1024 * 1024, Math.min(100 * 1024 * 1024 * 1024, Math.floor(value)))
+}
+
 export function readReferencesBibPath(workspacePath: string | null | undefined): string {
   return readReferencesBibPathSetting(workspacePath).path
 }
@@ -138,7 +211,7 @@ function normalizeReferencesBibPath(value: unknown): string {
 }
 
 function normalizeTraceRetentionDays(value: unknown): number | undefined {
-  if (value === 0) return undefined
+  if (value === 0) return 0
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
     return DEFAULT_TRACE_RETENTION_DAYS
   }
@@ -189,6 +262,7 @@ export function registerSettingsTools(
       ;(settings as Record<string, unknown>)[key] = value
       writeSettings(tools, settings)
       options?.onChange?.()
+      if (key === 'traceRetentionDays') tools.trace.prune()
       return { ok: true, key, value }
     }
   })

@@ -488,7 +488,7 @@ Tool descriptor fields:
 | `label` | No | Defaults to tool id. |
 | `description` | Yes | Used by the chat model. Write this like tool-use guidance. |
 | `inputSchema` | No | JSON Schema object. Defaults to empty object schema. |
-| `audience` | No | Defaults to `["chat"]`. |
+| `audience` | No | Defaults to `["chat"]`. A tool without the `chat` audience is omitted from the chat toolset **and refused at dispatch for AI callers** (including via `package.tools.execute`); it stays callable by the owning app's UI and the local user. Apps use `audience: ["ui"]` for human-only actions (approve, send). |
 | `execute(ctx, input)` | Yes | Runs under app identity. |
 
 The runtime validates tool input against the declared schema before calling

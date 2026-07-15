@@ -650,6 +650,29 @@ segment, 11px sans labels (never 9px mono — safety-relevant options like
 Props: `modelValue`, `options` (`{ value, label, title? }[]`), `ariaLabel`,
 `disabled`.
 
+### 6.17 Routines Work Surface
+
+Routines use a dense automation list, not a card gallery. Each flat row leads
+with the human description and keeps the stable Markdown identifier in quiet
+monospace beneath it. The second line translates the trigger into plain language
+and summarizes tool access. A thin last-to-next timeline may show operational
+context without turning the row into a dashboard card. Rows with a last failure
+or authority review requirement sort above healthy active and manual routines.
+
+Run is the persistent primary row action: `Run` for manual definitions and
+`Run now` for automatic definitions. Automatic routines use `MimToggle` with
+the label `Automatic`; turning it on opens an authority-review `MimDialog`, and
+turning it off acts immediately. Do not use Resume/Pause language for routine
+activation. Secondary lifecycle actions live in one `MimMenu`: edit, open the
+definition, view the last run, duplicate, and move to Trash.
+
+Create and edit share one fixed-height structured dialog. Common trigger modes
+use human fields (time/day, interval, watched path, webhook connection, or Slack
+channel rows); custom schedules remain available for definitions the simple
+controls cannot represent. Agent, tools, unattended permissions, step limit, and
+missed-run behavior sit behind an Automatic access disclosure. The Markdown file
+remains canonical and directly accessible from both the editor and row menu.
+
 ---
 
 ## 7. Interaction Conventions

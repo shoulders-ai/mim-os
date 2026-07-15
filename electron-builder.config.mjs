@@ -48,6 +48,7 @@ export default {
     'node_modules/keytar/**',
     'node_modules/sharp/**',
     'resources/r/**',
+    'resources/pi/**',
   ],
 
   mac: {

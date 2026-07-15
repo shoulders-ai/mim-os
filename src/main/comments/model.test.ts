@@ -198,7 +198,7 @@ describe('comment model', () => {
 
   describe('isAgentAuthor', () => {
     it('recognizes AI and known CLI agent handles', () => {
-      for (const handle of ['ai', 'AI', 'assistant', 'agent', 'claude', 'claude-code', 'Claude-Code', 'codex', 'gemini', 'gemini-cli']) {
+      for (const handle of ['ai', 'AI', 'assistant', 'agent', 'claude', 'claude-code', 'Claude-Code', 'codex', 'gemini', 'gemini-cli', 'pi', 'pi-extension']) {
         expect(isAgentAuthor(handle), handle).toBe(true)
       }
     })

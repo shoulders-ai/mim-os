@@ -53,6 +53,9 @@ export interface PermissionApprovalRequest {
   sessionId?: string
   routineId?: string
   routineRunId?: string
+  subagentRootSessionId?: string
+  subagentParentSessionId?: string
+  subagentDepth?: number
   category: ToolCategory
   risk: ToolRisk
   mode: ApprovalMode
@@ -86,6 +89,9 @@ export interface PermissionDecisionEvent {
   sessionId?: string
   routineId?: string
   routineRunId?: string
+  subagentRootSessionId?: string
+  subagentParentSessionId?: string
+  subagentDepth?: number
   // Trace context of the tool call being gated, so the recorded decision
   // parents under the tool span in the unified trace stream.
   traceId?: string
@@ -311,9 +317,21 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'routine.list': { category: 'read', risk: 'low' },
   'routine.get': { category: 'read', risk: 'low', targetParam: 'name' },
   'routine.create': { category: 'write', risk: 'medium', targetParam: 'name' },
-  'routine.pause': { category: 'settings', risk: 'medium', targetParam: 'name' },
-  'routine.resume': { category: 'settings', risk: 'medium', targetParam: 'name' },
+  'routine.update': { category: 'write', risk: 'medium', targetParam: 'name' },
+  'routine.duplicate': { category: 'write', risk: 'medium', targetParam: 'newName' },
+  'routine.enable': { category: 'settings', risk: 'medium', targetParam: 'name' },
+  'routine.disable': { category: 'settings', risk: 'medium', targetParam: 'name' },
+  'routine.remove': { category: 'write', risk: 'high', targetParam: 'name' },
   'routine.run': { category: 'general', risk: 'medium', targetParam: 'name' },
+  'subagent.spawn': { category: 'general', risk: 'medium', targetParam: 'label' },
+  'subagent.wait': { category: 'read', risk: 'low' },
+  'subagent.send': { category: 'general', risk: 'low', targetParam: 'sessionId' },
+  'subagent.interrupt': { category: 'general', risk: 'medium', targetParam: 'sessionId' },
+  'subagent.stop': { category: 'general', risk: 'medium', targetParam: 'sessionId' },
+  'subagent.status': { category: 'read', risk: 'low', targetParam: 'sessionId' },
+  'subagent.list': { category: 'read', risk: 'low' },
+  'subagent.result': { category: 'read', risk: 'low', targetParam: 'sessionId' },
+  'routine.start': { category: 'general', risk: 'medium', targetParam: 'name' },
   'chat.send': { category: 'ui', risk: 'low' },
   'editor.open': { category: 'ui', risk: 'low', pathParam: 'path' },
   'editor.state': { category: 'read', risk: 'low' },
@@ -346,6 +364,8 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   search: { category: 'search', risk: 'low', targetParam: 'query' },
   'trace.query': { category: 'read', risk: 'low' },
   'trace.stats': { category: 'read', risk: 'low' },
+  'trace.storage': { category: 'read', risk: 'low' },
+  'trace.prune': { category: 'settings', risk: 'medium' },
   'telemetry.track': { category: 'ui', risk: 'low' },
   'telemetry.status': { category: 'read', risk: 'low' },
   'telemetry.setEnabled': { category: 'settings', risk: 'medium' },
@@ -441,6 +461,7 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
     const pathInfo = getPathInfo(policy, params, options.getWorkspacePath())
     const target = getTarget(policy, params, pathInfo?.absolutePath ?? undefined)
     const routineContext = ctx.routine
+    const subagentContext = ctx.subagent
     const baseEvent = {
       tool: tool.name,
       actor: ctx.actor,
@@ -451,6 +472,9 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       sessionId: ctx.sessionId,
       routineId: routineContext?.id,
       routineRunId: routineContext?.runId,
+      subagentRootSessionId: subagentContext?.rootSessionId,
+      subagentParentSessionId: subagentContext?.parentSessionId,
+      subagentDepth: subagentContext?.depth,
       traceId: ctx.traceId,
       parentSpanId: ctx.spanId,
       category: policy.category,
@@ -498,7 +522,46 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       throw new PermissionDeniedError(`Permission denied: ${reason}`)
     }
 
-    if (ctx.actor === 'remote') {
+    if (tool.name.startsWith('subagent.') && ctx.actor === 'package') {
+      const reason = 'Apps cannot create or control subagents'
+      record({ ...baseEvent, decision: 'denied', reason })
+      throw new PermissionDeniedError(`Permission denied: ${reason}`)
+    }
+
+    if (
+      ctx.actor === 'ai' &&
+      subagentContext?.toolAllowlist &&
+      !subagentContext.toolAllowlist.includes(tool.name)
+    ) {
+      const reason = `${tool.name} is outside the delegated tool surface`
+      record({ ...baseEvent, decision: 'denied', reason })
+      throw new PermissionDeniedError(`Permission denied: ${reason}`)
+    }
+
+    const requestedGrants = tool.name === 'subagent.spawn' && Array.isArray(params.requestedGrants)
+      ? params.requestedGrants.filter((item): item is string => typeof item === 'string' && item.length > 0)
+      : []
+    if (subagentContext?.toolAllowlist) {
+      const invalidGrant = requestedGrants.find(toolName => !subagentContext.toolAllowlist!.includes(toolName))
+      if (invalidGrant) {
+        const reason = `Requested grant is outside the delegated tool surface: ${invalidGrant}`
+        record({ ...baseEvent, decision: 'denied', reason })
+        throw new PermissionDeniedError(`Permission denied: ${reason}`)
+      }
+    }
+
+    const remoteCtx: ToolContext | null = ctx.actor === 'remote'
+      ? ctx
+      : subagentContext?.originActor === 'remote'
+        ? {
+            ...ctx,
+            actor: 'remote',
+            principal: subagentContext.principal,
+            callerName: subagentContext.callerName,
+            transport: subagentContext.transport,
+          }
+        : null
+    if (remoteCtx) {
       if (!options.resolveRemoteGrant) {
         const reason = 'Remote caller is not authorized'
         record({ ...baseEvent, decision: 'denied', reason })
@@ -508,7 +571,7 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       const resolved = options.resolveRemoteGrant({
         toolName: tool.name,
         params,
-        ctx,
+        ctx: remoteCtx,
         policy,
         effect,
         target,
@@ -521,7 +584,7 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
         throw new PermissionDeniedError(`Permission denied: ${decision.reason}`)
       }
       record({ ...baseEvent, decision: 'allowed', reason: decision.reason })
-      return
+      if (ctx.actor === 'remote') return
     }
 
     if (ctx.actor === 'user' || ctx.actor === 'system') {
@@ -550,8 +613,11 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       savedBrowserSession = isPromiseLike(resolved) ? (await resolved) ?? null : resolved ?? null
     }
 
-    const allowKey = ctx.sessionId ? `${ctx.sessionId}:${tool.name}` : null
-    const reason = approvalReason(tool.name, policy, mode, pathInfo?.kind, pathInfo?.reason)
+    const allowScopeId = subagentContext?.rootSessionId ?? ctx.sessionId
+    const allowKey = allowScopeId ? `${allowScopeId}:${tool.name}` : null
+    const reason = tool.name.startsWith('subagent.') && requestedGrants.length === 0 && mode === 'normal'
+      ? null
+      : approvalReason(tool.name, policy, mode, pathInfo?.kind, pathInfo?.reason)
     const pathFloorActive = pathInfo?.kind === 'sensitive' || pathInfo?.kind === 'outside-workspace'
     const needsSavedBrowserGrant = Boolean(savedBrowserSession && !savedBrowserSession.granted)
 
@@ -567,6 +633,9 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
         sessionId: ctx.sessionId,
         routineId: routineContext?.id,
         routineRunId: routineContext?.runId,
+        subagentRootSessionId: subagentContext?.rootSessionId,
+        subagentParentSessionId: subagentContext?.parentSessionId,
+        subagentDepth: subagentContext?.depth,
         category: policy.category,
         risk: policy.risk,
         mode,
@@ -606,6 +675,9 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       if (allowKey && opts.allowSessionRemember && decision.alwaysAllow) {
         sessionToolAllows.add(allowKey)
       }
+      if (allowScopeId) {
+        for (const grantedTool of requestedGrants) sessionToolAllows.add(`${allowScopeId}:${grantedTool}`)
+      }
       await grantSavedBrowserSessionIfNeeded(savedBrowserSession, params, ctx, options)
       record({ ...baseEvent, decision: 'approved', reason: approvalRequestReason })
     }
@@ -626,6 +698,16 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
         return
       }
       await requestApproval(routineReason, { allowSessionRemember: false })
+      return
+    }
+
+    if (
+      ctx.actor === 'ai' &&
+      (subagentContext?.requestedGrants?.includes(tool.name) || subagentContext?.approvalAllow?.includes(tool.name)) &&
+      !pathFloorActive &&
+      !needsSavedBrowserGrant
+    ) {
+      record({ ...baseEvent, decision: 'allowed', reason: 'delegated task grant' })
       return
     }
 
@@ -695,6 +777,9 @@ async function grantSavedBrowserSessionIfNeeded(
 // Map a gate decision into the unified trace stream, parented under the tool
 // call span being gated. Shared by the Electron and headless kernels.
 export function traceGateDecision(trace: TraceLog, event: PermissionDecisionEvent): void {
+  // Automatic allows duplicate the tool span without recording a meaningful
+  // trust boundary. Keep only events where the gate was actually exercised.
+  if (event.decision === 'allowed') return
   trace.append({
     kind: 'gate.decision',
     actor: event.actor,
@@ -716,6 +801,9 @@ export function traceGateDecision(trace: TraceLog, event: PermissionDecisionEven
       pathKind: event.pathKind,
       ...(event.routineId ? { routineId: event.routineId } : {}),
       ...(event.routineRunId ? { routineRunId: event.routineRunId } : {}),
+      ...(event.subagentRootSessionId ? { subagentRootSessionId: event.subagentRootSessionId } : {}),
+      ...(event.subagentParentSessionId ? { subagentParentSessionId: event.subagentParentSessionId } : {}),
+      ...(event.subagentDepth !== undefined ? { subagentDepth: event.subagentDepth } : {}),
     },
   })
 }

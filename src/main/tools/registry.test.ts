@@ -5,6 +5,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { PermissionDeniedError } from '@main/security/gate.js'
+import { readTracePayload } from '@main/trace/query.js'
 
 function readTraceLines(dir: string): TraceEvent[] {
   const tracesDir = join(dir, '.mim', 'traces')
@@ -187,8 +188,7 @@ describe('ToolRegistry', () => {
     const [call] = readTraceLines(dir)
     expect(call.summary?.content).toBe('[redacted]')
     expect(call.payloadRef).toBeTruthy()
-    const blob = JSON.parse(readFileSync(join(dir, '.mim', 'traces', call.payloadRef!), 'utf-8'))
-    expect(blob.content).toBe('full secret-free file body')
+    expect(readTracePayload(dir, call.payloadRef!)?.payload).toMatchObject({ content: 'full secret-free file body' })
   })
 
   it('does not capture payload blobs for non-mutating tools', async () => {
@@ -204,7 +204,7 @@ describe('ToolRegistry', () => {
     expect(call.payloadRef).toBeUndefined()
   })
 
-  it('captures the tool result as a payload blob by default', async () => {
+  it('does not capture raw results for read-effect tools by default', async () => {
     tools.register({
       name: 'fs.read',
       description: 'Read file',
@@ -214,9 +214,21 @@ describe('ToolRegistry', () => {
     await tools.call('fs.read', { path: 'a.md' }, { actor: 'ai' })
 
     const result = readTraceLines(dir).find(l => l.kind === 'tool.result')!
+    expect(result.payloadRef).toBeUndefined()
+  })
+
+  it('captures bounded results for consequential tools by default', async () => {
+    tools.register({
+      name: 'shell.run',
+      description: 'Run command',
+      execute: async () => ({ stdout: 'important mutation result' }),
+    })
+
+    await tools.call('shell.run', { command: 'work' }, { actor: 'ai' })
+
+    const result = readTraceLines(dir).find(l => l.kind === 'tool.result')!
     expect(result.payloadRef).toBeTruthy()
-    const blob = JSON.parse(readFileSync(join(dir, '.mim', 'traces', result.payloadRef!), 'utf-8'))
-    expect(blob.content).toBe('full returned file body')
+    expect(readTracePayload(dir, result.payloadRef!)?.payload).toMatchObject({ stdout: 'important mutation result' })
   })
 
   it('never captures results for secret-bearing tools', async () => {
@@ -257,12 +269,12 @@ describe('ToolRegistry', () => {
 
   it('skips result blobs for payloads over the size cap', async () => {
     tools.register({
-      name: 'fs.read',
-      description: 'Read file',
+      name: 'shell.run',
+      description: 'Run command',
       execute: async () => ({ content: 'x'.repeat(1_000_001) }),
     })
 
-    await tools.call('fs.read', { path: 'big.md' }, { actor: 'ai' })
+    await tools.call('shell.run', { command: 'big' }, { actor: 'ai' })
 
     const result = readTraceLines(dir).find(l => l.kind === 'tool.result')!
     expect(result.payloadRef).toBeUndefined()

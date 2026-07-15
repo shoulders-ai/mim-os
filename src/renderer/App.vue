@@ -453,6 +453,11 @@ async function stopAgentSession(sessionId: string) {
   await runActions.stopAgentSession(sessionId)
 }
 
+async function stopSubagentSession(sessionId: string) {
+  await window.kernel.call('subagent.stop', { sessionId })
+  await sessionStore.refresh(sessionId)
+}
+
 async function archiveAgentSession(sessionId: string) {
   await runActions.archiveAgentSession(sessionId)
 }
@@ -1130,6 +1135,7 @@ onMounted(async () => {
     dispatchTerminalRun: (command, options) => dispatchWorkbenchCommand({ type: 'terminal.run', command, reveal: options?.reveal }),
     onPackageJobEvent,
     onAgentSessionEvent,
+    refreshSubagentSession: sessionId => sessionStore.refresh(sessionId),
     pushToast: toast => { toastStore.push(toast) },
     downloadUpdate: () => window.kernel.downloadUpdate(),
     quitAndInstall: () => window.kernel.quitAndInstall(),
@@ -1176,6 +1182,7 @@ onBeforeUnmount(() => {
           @archive-agent-session="archiveAgentSession"
           @delete-agent-session="deleteAgentSession"
           @stop-agent-session="stopAgentSession"
+          @stop-subagent-session="stopSubagentSession"
           @open-folder="openWorkspace"
           @open-recent-workspace="openWorkspacePath"
           @add-project="showAddProject"

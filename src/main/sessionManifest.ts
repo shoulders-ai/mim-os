@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { atomicWriteJson } from '@main/atomicJson.js'
+import { normalizeSubagentMetadata, type SubagentSessionMetadata } from '@main/subagents/types.js'
 
 /**
  * Lightweight session metadata stored in a single manifest file so
@@ -32,6 +33,7 @@ export interface ManifestEntry {
   routineError?: string
   routineFiredAt?: string
   routineCompletedAt?: string
+  subagent?: SubagentSessionMetadata
   createdAt: string
   updatedAt: string
 }
@@ -159,6 +161,8 @@ export function extractManifestEntry(session: Record<string, unknown>): Manifest
   if (typeof session.routineError === 'string') entry.routineError = session.routineError
   if (typeof session.routineFiredAt === 'string') entry.routineFiredAt = session.routineFiredAt
   if (typeof session.routineCompletedAt === 'string') entry.routineCompletedAt = session.routineCompletedAt
+  const subagent = normalizeSubagentMetadata(session.subagent)
+  if (subagent) entry.subagent = subagent
   return entry
 }
 

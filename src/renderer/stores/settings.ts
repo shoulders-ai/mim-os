@@ -28,6 +28,11 @@ const DEFAULTS = {
   terminalHeight: 220,
   automationApprovalMode: 'normal' as AutomationApprovalMode,
   traceRetentionDays: 90,
+  traceCaptureContent: true,
+  tracePayloadRetentionDays: 7,
+  tracePayloadMaxBytes: 250 * 1024 * 1024,
+  historyEnabled: true,
+  historyMaxBytes: 512 * 1024 * 1024,
   recentFiles: [] as string[],
   navigatorAppOrder: [] as string[],
   navigatorActivityOrder: [] as string[],
@@ -95,6 +100,11 @@ export const useSettingsStore = defineStore('settings', () => {
   const terminalHeight = ref(DEFAULTS.terminalHeight)
   const automationApprovalMode = ref<AutomationApprovalMode>(DEFAULTS.automationApprovalMode)
   const traceRetentionDays = ref(DEFAULTS.traceRetentionDays)
+  const traceCaptureContent = ref(DEFAULTS.traceCaptureContent)
+  const tracePayloadRetentionDays = ref(DEFAULTS.tracePayloadRetentionDays)
+  const tracePayloadMaxBytes = ref(DEFAULTS.tracePayloadMaxBytes)
+  const historyEnabled = ref(DEFAULTS.historyEnabled)
+  const historyMaxBytes = ref(DEFAULTS.historyMaxBytes)
   const recentFiles = ref<string[]>([...DEFAULTS.recentFiles])
   const navigatorAppOrder = ref<string[]>([...DEFAULTS.navigatorAppOrder])
   const navigatorActivityOrder = ref<string[]>([...DEFAULTS.navigatorActivityOrder])
@@ -128,7 +138,8 @@ export const useSettingsStore = defineStore('settings', () => {
     theme, editorFontFamily, editorFontSize,
     editorWordWrap, editorLineNumbers, editorSpellCheck, editorLivePreview,
     lastChatModel, lastInlineModel, lastGhostModel, sidebarWidth, rightPanelWidth, terminalHeight,
-    automationApprovalMode, traceRetentionDays, recentFiles, navigatorAppOrder, navigatorActivityOrder, enabledAgents, agentFlags,
+    automationApprovalMode, traceRetentionDays, traceCaptureContent, tracePayloadRetentionDays, tracePayloadMaxBytes, historyEnabled, historyMaxBytes,
+    recentFiles, navigatorAppOrder, navigatorActivityOrder, enabledAgents, agentFlags,
     'references.bibPath': referencesBibPath,
   }
 
@@ -293,6 +304,11 @@ export const useSettingsStore = defineStore('settings', () => {
     terminalHeight,
     automationApprovalMode,
     traceRetentionDays,
+    traceCaptureContent,
+    tracePayloadRetentionDays,
+    tracePayloadMaxBytes,
+    historyEnabled,
+    historyMaxBytes,
     recentFiles,
     navigatorAppOrder,
     navigatorActivityOrder,

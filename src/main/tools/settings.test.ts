@@ -1,8 +1,15 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createTraceLog } from '@main/trace/trace.js'
 import { createToolRegistry } from '@main/tools/registry.js'
-import { readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
-import { mkdtempSync, rmSync } from 'fs'
+import {
+  readHistoryEnabled,
+  readHistoryMaxBytes,
+  readTracePayloadMaxBytes,
+  readTracePayloadRetentionDays,
+  readTraceRetentionDays,
+  registerSettingsTools,
+} from '@main/tools/settings.js'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -13,7 +20,10 @@ describe('main settings tools', () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'mim-settings-test-'))
-    tools = createToolRegistry(createTraceLog())
+    tools = createToolRegistry(createTraceLog({
+      devConsole: false,
+      getRetentionDays: () => readTraceRetentionDays(dir),
+    }))
     tools.setWorkspacePath(dir)
     registerSettingsTools(tools)
   })
@@ -29,6 +39,10 @@ describe('main settings tools', () => {
 
     expect(result.settings.automationApprovalMode).toBe('normal')
     expect(result.settings.traceRetentionDays).toBe(90)
+    expect(result.settings.tracePayloadRetentionDays).toBe(7)
+    expect(result.settings.tracePayloadMaxBytes).toBe(250 * 1024 * 1024)
+    expect(result.settings.historyMaxBytes).toBe(512 * 1024 * 1024)
+    expect(result.settings.historyEnabled).toBe(true)
     expect(result.settings['references.bibPath']).toBe('references/references.bib')
   })
 
@@ -92,10 +106,34 @@ describe('main settings tools', () => {
     expect(readTraceRetentionDays(dir)).toBe(14)
   })
 
-  it('treats zero trace retention days as disabled', async () => {
+  it('persists zero trace retention days as no local audit trail', async () => {
+    const tracesDir = join(dir, '.mim', 'traces')
+    const objectDir = join(tracesDir, 'objects', 'aa')
+    mkdirSync(objectDir, { recursive: true })
+    writeFileSync(join(tracesDir, '2026-06-10.jsonl'), '{}\n')
+    writeFileSync(join(objectDir, `${'a'.repeat(64)}.json.gz`), 'retained content')
+
     await tools.call('settings.set', { key: 'traceRetentionDays', value: 0 }, ctx)
 
-    expect(readTraceRetentionDays(dir)).toBeUndefined()
+    expect(readTraceRetentionDays(dir)).toBe(0)
+    expect(readdirSync(tracesDir).filter(file => file.endsWith('.jsonl'))).toHaveLength(0)
+    expect(existsSync(join(tracesDir, 'objects'))).toBe(false)
+  })
+
+  it('persists the file recovery toggle', async () => {
+    await tools.call('settings.set', { key: 'historyEnabled', value: false }, ctx)
+
+    expect(readHistoryEnabled(dir)).toBe(false)
+  })
+
+  it('persists and resolves storage budgets and payload retention', async () => {
+    await tools.call('settings.set', { key: 'historyMaxBytes', value: 256 * 1024 * 1024 }, ctx)
+    await tools.call('settings.set', { key: 'tracePayloadRetentionDays', value: 14 }, ctx)
+    await tools.call('settings.set', { key: 'tracePayloadMaxBytes', value: 100 * 1024 * 1024 }, ctx)
+
+    expect(readHistoryMaxBytes(dir)).toBe(256 * 1024 * 1024)
+    expect(readTracePayloadRetentionDays(dir)).toBe(14)
+    expect(readTracePayloadMaxBytes(dir)).toBe(100 * 1024 * 1024)
   })
 
   it('defaults codeInterpreters to rscript, r, quarto', async () => {

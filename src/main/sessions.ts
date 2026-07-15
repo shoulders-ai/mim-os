@@ -6,6 +6,7 @@ import { writeAgentContext } from '@main/ai/agentContext.js'
 import { atomicWriteJson } from '@main/atomicJson.js'
 import { loadManifest, upsertManifestEntry, removeManifestEntry, extractManifestEntry } from '@main/sessionManifest.js'
 import type { ContextCompactionRecord } from '@main/ai/compaction.js'
+import { normalizeSubagentMetadata, type SubagentSessionMetadata } from '@main/subagents/types.js'
 
 export interface Session {
   id: string
@@ -26,6 +27,7 @@ export interface Session {
   routineError?: string
   routineFiredAt?: string
   routineCompletedAt?: string
+  subagent?: SubagentSessionMetadata
   compactions: ContextCompactionRecord[]
   createdAt: string
   updatedAt: string
@@ -33,7 +35,7 @@ export interface Session {
 
 export type RoutineRunStatus = 'working' | 'needs-approval' | 'done' | 'error' | 'stopped'
 
-interface SessionMessage {
+export interface SessionMessage {
   id: string
   role: 'user' | 'assistant' | 'system'
   content?: string
@@ -70,6 +72,8 @@ function normalizeSession(raw: Session): Session {
   if (typeof raw.routineError === 'string') session.routineError = raw.routineError
   if (typeof raw.routineFiredAt === 'string') session.routineFiredAt = raw.routineFiredAt
   if (typeof raw.routineCompletedAt === 'string') session.routineCompletedAt = raw.routineCompletedAt
+  const subagent = normalizeSubagentMetadata(raw.subagent)
+  if (subagent) session.subagent = subagent
   return session
 }
 
@@ -96,6 +100,7 @@ export function registerSessionTools(tools: ToolRegistry, options: SessionToolOp
       const routineError = typeof params.routineError === 'string' && params.routineError.length > 0 ? params.routineError : undefined
       const routineFiredAt = typeof params.routineFiredAt === 'string' && params.routineFiredAt.length > 0 ? params.routineFiredAt : undefined
       const routineCompletedAt = typeof params.routineCompletedAt === 'string' && params.routineCompletedAt.length > 0 ? params.routineCompletedAt : undefined
+      const subagent = normalizeSubagentMetadata(params.subagent)
       const session: Session = {
         id,
         label: (params.label as string) || 'New chat',
@@ -117,6 +122,7 @@ export function registerSessionTools(tools: ToolRegistry, options: SessionToolOp
       if (routineError) session.routineError = routineError
       if (routineFiredAt) session.routineFiredAt = routineFiredAt
       if (routineCompletedAt) session.routineCompletedAt = routineCompletedAt
+      if (subagent) session.subagent = subagent
 
       const dir = join(ws, '.mim', 'sessions')
       mkdirSync(dir, { recursive: true })
@@ -222,6 +228,10 @@ export function registerSessionTools(tools: ToolRegistry, options: SessionToolOp
         if (typeof params.routineCompletedAt === 'string' && params.routineCompletedAt.length > 0) session.routineCompletedAt = params.routineCompletedAt
         else delete session.routineCompletedAt
       }
+      if (params.subagent !== undefined) {
+        const subagent = normalizeSubagentMetadata(params.subagent, session.subagent)
+        if (subagent) session.subagent = subagent
+      }
       session.updatedAt = new Date().toISOString()
 
       atomicWriteJson(path, session)
@@ -283,9 +293,16 @@ export function appendSessionCompaction(
 
   const session = normalizeSession(JSON.parse(readFileSync(path, 'utf-8')) as Session)
   const normalizedRecord = normalizeCompactionRecord(record)
+  const effectiveContextTokens = typeof normalizedRecord.tokensAfter === 'number'
+    ? Math.max(0, Math.floor(normalizedRecord.tokensAfter))
+    : undefined
   const nextSession: Session = {
     ...session,
     compactions: [...session.compactions, normalizedRecord],
+    ...(effectiveContextTokens !== undefined ? {
+      lastContextTokens: effectiveContextTokens,
+      lastInputTokens: effectiveContextTokens,
+    } : {}),
   }
   atomicWriteJson(path, nextSession)
   upsertManifestEntry(dir, sessionId, extractManifestEntry(nextSession))

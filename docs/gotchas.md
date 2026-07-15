@@ -174,10 +174,11 @@ Generic `mim tool` dispatch must stay on the `ai` actor and pass through the hea
 ## Routine state is not the routine registry
 
 Routine definitions live in `routines/*.md` and are reported by `routine.list`
-via `loadRoutineCatalog()`. `.mim/routines/state.json` stores only
-machine-local enablement, authority acknowledgements, scheduler heartbeat, and
-last-run metadata. An empty `routines` object in that state file does not mean
-routine files failed to load; it means no routine has been enabled or recorded
+via `loadRoutineCatalog()`. Version 2 of `.mim/routines/state.json` stores only
+machine-local activation, authority acknowledgements, scheduler heartbeat, and
+last-run metadata; older unversioned state is intentionally ignored. An empty
+`routines` object in that state file does not mean
+routine files failed to load; it means no routine has been reviewed or recorded
 local run state yet. For Slack bot readiness, use `slack_bot_check` instead of
 inferring status from hidden runtime files.
 
@@ -327,6 +328,34 @@ inside that state machine, not as a substring scan.
 
 Headless UI v1's Dialog stack counter does not properly decrement when a nested Dialog is unmounted via `v-if`. After the child unmounts, the parent dialog's Escape and click-outside-to-close permanently break. Always keep nested MimDialog/PermissionConfirmDialog instances mounted and control visibility via the `:open` prop. Guard prop accesses with optional chaining when the backing data is null.
 
+## History baselines are for authored text, not workspace mirroring
+
+Automatic file-history baselines protect the pre-overwrite state of authored
+text that an external editor may change while Mim is not watching it. Keep that
+coverage narrow and bounded. Bulk data, JSON streams, PDFs, Office files, and
+other binary artifacts are captured only immediately before a Mim-mediated
+destructive mutation. Adding them to the baseline set or treating external adds
+as recovery points turns `.mim/history` into a duplicate dataset store.
+
+## Trace payload budgets must preserve recent file-mutation params
+
+`TraceOutcomeTracker` lazily rebuilds write correlations after restart from the
+raw params attached to `fs.write`, `fs.edit`, and `fs.create` calls. Those
+payloads are functional recovery state, not optional diagnostics. Content
+capture can skip read results and the payload budget can evict older diagnostic
+objects, but it must not evict mutation params inside the payload-retention
+window. The content budget is intentionally soft when protected params alone
+exceed it. The explicit Local audit trail off state is the exception: it
+deletes the whole local trace object store and suppresses future payload writes,
+because a user requesting no local audit takes precedence over reconstruction.
+
+## Zero trace retention means no local audit, not unlimited retention
+
+`traceRetentionDays: 0` is the Workspace Local audit trail off state. It must
+purge existing local trace day files and payload objects, suppress new local
+writes, and continue delivering stamped events to separately controlled extra
+sinks such as anonymous telemetry. Never reinterpret zero as “keep forever.”
+
 ## Nothing synchronous on main that scales with workspace or history size
 
 Never add synchronous I/O to the main process that grows with the number of workspace files, sessions, or history entries. Use `fs/promises` or `child_process` async variants for anything that walks directories or reads multiple files. Synchronous reads that block the event loop freeze the entire app — streaming, IPC, window rendering, everything. The FTS reindex, file content search, and git-log author lookup were all converted from sync to async for this reason. New features that touch workspace-sized data must be async from the start.
@@ -334,6 +363,11 @@ Never add synchronous I/O to the main process that grows with the number of work
 ## resources/ ships inside asar — spawned processes cannot read it
 
 Electron packages `resources/` inside `app.asar`. External processes (Rscript, quarto) cannot read files from inside the archive. Anything spawned as a child process must be listed in `electron-builder.config.mjs` `asarUnpack` and the resolved path must map `app.asar` to `app.asar.unpacked` at runtime. `resources/r/**` is asarUnpack'd for the plot-capture harness (`mim-run.R`).
+
+`resources/pi/**` follows the same rule: the external Pi process loads
+`mim-extension.mjs`, resolved through `agentResources.ts`. Leaving it only in
+`files` works in development but silently removes Mim tools from packaged Pi
+sessions, because Pi cannot traverse Electron's virtual archive.
 
 ## Knitr fence info strings need normalization before language matching
 
@@ -361,11 +395,21 @@ Every other channel stays on `sendToRenderer` (main-window-only):
 
 - `gate:request` -- approval cards live only in the main window's chat. Broadcasting would enqueue duplicates and risk double-handled approvals.
 - `packages:changed`, `resources:changed` -- only the main window's Navigator reacts; pop-outs have no Navigator or resource UI.
-- Package job events, agent session events, auto-updater -- main window surfaces only.
+- Package job events, agent session events, subagent events, auto-updater -- main window surfaces only.
 - `bridge:*` commands -- always target one specific window (the main window).
 - `menu:*` commands -- Phase 2 will add focused-window routing; until then they target main.
 
 When adding a new IPC event, default to `sendToRenderer` (main-only). Promote to `broadcastToRenderers` only when pop-out windows genuinely consume the event, and verify no handler on the receiving side has side effects that break when invoked twice.
+
+## A subagent wait timeout is not a worker timeout
+
+`subagent.wait` is an event-driven long-poll whose timeout only returns control
+to the caller. It must never abort, interrupt, or stop the child: repository
+surveys and implementation turns can legitimately run for minutes or hours.
+When a subagent waits for one of its own descendants, the manager releases its
+execution-pool lease for the duration of that wait and reacquires it before the
+parent resumes. Removing that lease handoff can deadlock a saturated pool with
+every running parent waiting on children that cannot start.
 
 ## Agent tool allowlists use canonical dotted ids, not AI SDK keys
 

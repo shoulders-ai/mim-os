@@ -95,6 +95,29 @@ specially:
   are policy-listed (`general`/`medium`) but unreachable for `ai` because of
   the hard deny.
 
+## Subagents (`subagent.*`)
+
+Subagents are Mim-native AI threads, not user-authority PTYs. Their control
+surface is available to `ai`, `user`, `system`, and allowlisted MCP callers;
+`package` actors are hard-denied before normal app permission checks.
+
+The main process creates trusted `ctx.subagent` metadata for child turns. The
+gate enforces its effective tool allowlist on every AI call, independently of
+what the model can currently see. The effective list is the intersection of
+the parent profile, selected child profile, optional spawn narrowing, and the
+workspace tool policy.
+
+Normal mode treats spawn/wait/send/interrupt/stop/status/list/result as
+coordination and does not prompt merely for those controls. Strict mode keeps
+its every-action rule. `subagent.spawn.requestedGrants` is different: it forces
+a real approval and only an approved request becomes a durable task-lineage
+grant. The requested tool must already be in the child's inherited surface.
+
+Serve-mode delegation preserves `originActor: "remote"`, principal, caller,
+and transport. Every child tool call must first satisfy the originating remote
+grant resolver, then the ordinary AI gate. Local desktop MCP remains
+`actor: "user"` as described below.
+
 ## Sensitive paths (`src/main/security/gate-paths.ts`)
 
 Locations: `.ssh .gnupg .aws .config/gcloud .kube .docker .npmrc .pypirc /etc
@@ -112,8 +135,8 @@ surfaces. The remote resolver hard-denies mutating path writes to `AGENTS.md`,
 `CLAUDE.md`, `mim.yaml`, `skills/`, `routines/`, workspace package directories,
 and package manifests inside those directories. It also hard-denies higher-level
 management tools that can change those surfaces, including app/package install
-and trust tools, skill authoring/import/delete tools, and routine create/run
-tools.
+and trust tools, skill authoring/import/delete tools, and routine create, update,
+duplicate, enable, disable, remove, run, and start tools.
 
 Remote denials are recorded in the normal trace stream and in the serve denial
 ledger (`mim serve denials list --json`) so operators can review grant misses
@@ -126,21 +149,25 @@ without opening trace files.
   `preview` with **un-redacted** file content (`buildApprovalPreview`, from raw
   params). The un-redacted content is deliberate — it's the user's own file, shown
   so they can review the change. It never enters event summaries.
-- **Persisted audit** is the unified trace stream (`.mim/traces/YYYY-MM-DD.jsonl`,
+- **Persisted local audit**, when enabled, is the unified trace stream (`.mim/traces/YYYY-MM-DD.jsonl`,
   `src/main/trace/trace.ts`), with event `summary` fields produced in
   `src/main/tools/registry.ts` by a **broader** redactor:
   `/(^|_)(body|code|content|key|password|secret|snippet|subject|text|token)($|_)/i`
   — so send payloads (subject/body/text) are redacted there even though the card
   shows them. The same known-safe file-mutation set as the approval preview
   (`fs.write`/`fs.edit`/`fs.create`) additionally stores its raw params as
-  payload blobs under `.mim/traces/blobs/` — user-own-content, never keys or
+  compressed content-addressed payloads under `.mim/traces/objects/` —
+  user-own-content, never keys or
   tokens; this is the edit-distance raw material for the learning loop
-  (`plan-observability.md`).
+  (`plan-observability.md`). The workspace Local audit trail toggle can disable
+  new local trace and payload writes and delete the existing local store.
 - **Gate decision audit** is durable in both kernels: `index.ts` and
   `headless.ts` inject a `recordDecision` callback (`traceGateDecision`) that
-  writes each gate decision (allowed/denied/requested/approved/bypassed) as a
-  `gate.decision` trace event parented under the gated tool-call span. Params
-  stay redacted. Logging is best-effort and never blocks.
+  writes meaningful gate decisions (denied/requested/approved/bypassed) as a
+  `gate.decision` trace event parented under the gated tool-call span. Routine
+  allowed read-through is omitted. Params stay redacted. Logging is best-effort
+  and never blocks; local persistence is skipped when the workspace audit trail
+  is off.
 
 ## Code Execution Gate
 
@@ -167,11 +194,14 @@ interpreters `code.run` accepts.
 
 ## Session "Always allow"
 
-The checkbox sets `sessionToolAllows` key `${sessionId}:${tool.name}` — a full
-allow of that exact tool for that session (no per-action carve-outs), subject
-to the path floor (sensitive/outside-workspace paths still prompt even with
-session allow). Cleared by `cancelSession(sessionId)`, which also resolves all
-pending approval promises for that session as denied. The renderer calls
+The checkbox sets an allow key for the exact tool. Ordinary chats use
+`${sessionId}:${tool.name}`. Delegated calls use
+`${rootSessionId}:${tool.name}`, so descendants in the same task lineage share
+the user's explicit trust while unrelated roots do not. There are no
+per-action carve-outs, and the path floor still wins for
+sensitive/outside-workspace paths. `cancelSession(rootSessionId)` clears a
+lineage allow; cancelling any session also resolves its own pending approval
+promises as denied. The renderer calls
 `cancelGateSession` via the `gate:cancel-session` IPC in `handleStop`, and
 clears the approval store queue so inline cards disappear immediately.
 
@@ -193,7 +223,7 @@ clears the approval store queue so inline cards disappear immediately.
   the app's own `127.0.0.1:<port>`, `localhost:<port>`, `null` (file://), and
   the dev server origin. Foreign web pages get no CORS headers.
 - **Routine webhooks**: `POST /api/hooks/:routine` is a local server route for
-  enabled webhook routines. It requires an OS-keychain secret, timestamp-bound
+  active webhook routines. It requires an OS-keychain secret, timestamp-bound
   HMAC signature over the raw JSON body, and optional delivery-id idempotency
   before any routine run is created. Payloads enter the prompt as data, not as
   hidden instructions.

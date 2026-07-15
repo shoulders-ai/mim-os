@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync } from 'fs'
 import { isAbsolute, relative, resolve } from 'path'
 import { textSnapshot, type TextSnapshot, type TraceOutcomeTracker } from '@main/trace/outcomes.js'
 import type { HistoryToolObserver } from '@main/history/history.js'
+import type { SubagentStatus } from '@main/subagents/types.js'
 
 export interface ToolDef {
   name: string
@@ -24,6 +25,21 @@ export interface ToolContext {
     id: string
     runId: string
     approvalAllow?: string[]
+  }
+  subagent?: {
+    rootSessionId: string
+    parentSessionId: string
+    depth: number
+    modelId?: string
+    profileId?: string
+    toolAllowlist?: string[]
+    approvalAllow?: string[]
+    requestedGrants?: string[]
+    originActor: 'user' | 'ai' | 'system' | 'remote'
+    principal?: string
+    callerName?: string
+    transport?: string
+    status?: SubagentStatus
   }
   // Connected MCP client identity (e.g. 'claude-code'); used for attribution,
   // not authorization. The actor field stays the security boundary.
@@ -135,7 +151,16 @@ export function createToolRegistry(
         ...(ctx.agent ? { agent: ctx.agent } : {}),
         ...(ctx.package_id ? { packageId: ctx.package_id } : {}),
         ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
-        ...(ctx.routine ? { data: { routineId: ctx.routine.id, routineRunId: ctx.routine.runId } } : {}),
+        ...((ctx.routine || ctx.subagent) ? {
+          data: {
+            ...(ctx.routine ? { routineId: ctx.routine.id, routineRunId: ctx.routine.runId } : {}),
+            ...(ctx.subagent ? {
+              subagentRootSessionId: ctx.subagent.rootSessionId,
+              subagentParentSessionId: ctx.subagent.parentSessionId,
+              subagentDepth: ctx.subagent.depth,
+            } : {}),
+          },
+        } : {}),
       }
 
       trace.append({
@@ -152,7 +177,10 @@ export function createToolRegistry(
         const beforeMutation = mutationPath ? snapshotWorkspaceFile(workspacePath, mutationPath) : null
         const historyPending = safeBeforeHistory(options.history, workspacePath, name, params, spanCtx)
         const result = await tool.execute(params, spanCtx)
-        const resultRef = captureContent() && !isSecretBearingTool(name) && tool.captureResult !== false
+        const resultRef = effect !== 'read'
+          && captureContent()
+          && !isSecretBearingTool(name)
+          && tool.captureResult !== false
           ? trace.writePayload(traceId, spanId, 'result', result, RESULT_CAPTURE_MAX_BYTES)
           : null
         trace.append({

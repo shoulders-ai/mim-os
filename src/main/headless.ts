@@ -43,7 +43,15 @@ import { registerSyncTools } from '@main/tools/sync.js'
 import { registerTraceTools } from '@main/tools/trace.js'
 import { createHistoryStore } from '@main/history/history.js'
 import { registerHistoryTools } from '@main/tools/history.js'
-import { readTraceCaptureContent, readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
+import {
+  readHistoryMaxBytes,
+  readHistoryEnabled,
+  readTraceCaptureContent,
+  readTracePayloadMaxBytes,
+  readTracePayloadRetentionDays,
+  readTraceRetentionDays,
+  registerSettingsTools,
+} from '@main/tools/settings.js'
 import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
 import { registerToolchainTools } from '@main/tools/toolchain.js'
 import { registerCodeTools } from '@main/tools/code.js'
@@ -54,6 +62,9 @@ import { readAccountToken, registerAccountTools } from '@main/tools/account.js'
 import { registerWorkspaceTools } from '@main/tools/workspace.js'
 import { registerSessionTools } from '@main/sessions.js'
 import { registerRoutineTools } from '@main/tools/routines.js'
+import { registerSubagentTools } from '@main/tools/subagents.js'
+import { createSubagentManager, type SubagentManager } from '@main/subagents/subagentManager.js'
+import { chatProfile } from '@main/ai/aiRuntime.js'
 import { parseAllowedHttpUrl } from '@main/web/urlPolicy.js'
 import { addBrowserSessionDomain, isBrowserSessionAllowed, readBrowserSessionSettings } from '@main/web/browserSessionSettings.js'
 import { resolveTelemetryConfig } from '@main/telemetry/config.js'
@@ -120,6 +131,8 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       return user.email ?? user.name
     },
     getRetentionDays: () => readTraceRetentionDays(tools?.getWorkspacePath() ?? null),
+    getPayloadRetentionDays: () => readTracePayloadRetentionDays(tools?.getWorkspacePath() ?? null),
+    getPayloadMaxBytes: () => readTracePayloadMaxBytes(tools?.getWorkspacePath() ?? null),
   })
   let packages: Awaited<ReturnType<typeof createPackageLoader>> | null = null
   let packageEnablement: ReturnType<typeof createPackageEnablementStore> | null = null
@@ -127,6 +140,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   let namedToolsRef: NamedPackageToolSync | null = null
   let sharedWorkspaceToolsRef: SharedWorkspaceToolMount | null = null
   let agentMountsRef: ReturnType<typeof createAgentMounts> | null = null
+  let subagentManagerRef: SubagentManager | null = null
   const gate = createHeadlessGate(
     () => tools.getWorkspacePath(),
     options,
@@ -135,6 +149,9 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
     (sessionId, data) => {
       void tools.call('session.update', { id: sessionId, ...data }, { actor: 'system' }).catch(() => {})
     },
+    (sessionId, status, error) => {
+      void subagentManagerRef?.markApproval(sessionId, status, error)
+    },
   )
   const traceOutcomes = createTraceOutcomeTracker({
     trace: traceLog,
@@ -142,6 +159,8 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   })
   const history = createHistoryStore({
     getWorkspacePath: () => tools?.getWorkspacePath() ?? null,
+    isEnabled: () => readHistoryEnabled(tools?.getWorkspacePath() ?? null),
+    getMaxBytes: () => readHistoryMaxBytes(tools?.getWorkspacePath() ?? null),
   })
   tools = createToolRegistry(traceLog, gate, {
     outcomes: traceOutcomes,
@@ -157,6 +176,16 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   registerToolchainTools(tools)
   registerCodeTools(tools)
   registerSessionTools(tools)
+  subagentManagerRef = createSubagentManager({
+    tools,
+    cancelApprovals: sessionId => gate.cancelSession(sessionId),
+    getAgentProfile: async (agentId) => {
+      if (!agentId) return chatProfile
+      if (!agentMountsRef) throw new Error('Agent profiles are not available until a workspace is open')
+      return agentMountsRef.resolveProfile(agentId)
+    },
+  })
+  registerSubagentTools(tools, subagentManagerRef)
   registerRoutineTools(tools, { getAgentMounts: () => agentMountsRef })
   registerArchiveTools(tools)
   registerAiTools(tools)
@@ -221,6 +250,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       return agentMountsRef
     },
     async openWorkspace(path: string) {
+      await subagentManagerRef?.interruptActive()
       sharedWorkspaceToolsRef?.unmount()
       sharedWorkspaceToolsRef = null
       await tools.call('workspace.open', { path }, { actor: 'system' })
@@ -263,6 +293,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
         canShadowTool: (name) => namedTools.ownedNames().includes(name),
         onWarning: warnSharedWorkspace,
       })
+      await subagentManagerRef?.reconcile()
 
       const cacheRoot = DEFAULT_CACHE_ROOT
       const globalDir = join(HOME, '.mim', 'packages')
@@ -291,6 +322,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       })
     },
     async shutdown() {
+      await subagentManagerRef?.dispose()
       sharedWorkspaceToolsRef?.unmount()
       sharedWorkspaceToolsRef = null
       namedToolsRef = null
@@ -303,6 +335,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
         packages?.close?.(),
       ])
       packages = null
+      subagentManagerRef = null
     },
   }
 }
@@ -313,6 +346,7 @@ function createHeadlessGate(
   traceLog: TraceLog,
   getDynamicToolPolicy: (name: string) => ReturnType<NamedPackageToolSync['getPolicy']>,
   updateRoutineSession: (sessionId: string, data: Record<string, unknown>) => void,
+  updateSubagentApproval: (sessionId: string, status: 'needs-approval' | 'working' | 'error', error?: string) => void,
 ): PermissionGate {
   const approvals = options.approvals ?? 'deny'
   let gate!: PermissionGate
@@ -341,10 +375,14 @@ function createHeadlessGate(
     },
     resolveRemoteGrant: options.resolveRemoteGrant,
     onApprovalRequested: (request) => {
+      if (request.sessionId && request.subagentRootSessionId) updateSubagentApproval(request.sessionId, 'needs-approval')
       if (!request.routineId || !request.sessionId) return
       updateRoutineSession(request.sessionId, { routineStatus: 'needs-approval' })
     },
     onApprovalResolved: (request, decision) => {
+      if (request.sessionId && request.subagentRootSessionId) {
+        updateSubagentApproval(request.sessionId, 'working')
+      }
       if (!request.routineId || !request.sessionId) return
       if (decision.approved) {
         updateRoutineSession(request.sessionId, { routineStatus: 'working', routineError: '' })

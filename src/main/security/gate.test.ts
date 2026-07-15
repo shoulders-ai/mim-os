@@ -5,6 +5,7 @@ import {
   createPermissionGate,
   getToolPolicy,
   redactPermissionParams,
+  traceGateDecision,
   toolEffect,
   type PermissionApprovalRequest,
   type PermissionDecisionEvent,
@@ -12,6 +13,7 @@ import {
 } from '@main/security/gate.js'
 import type { PackagePermissions } from '@main/packages/packageManifest.js'
 import type { ToolDef } from '@main/tools/registry.js'
+import type { TraceLog } from '@main/trace/trace.js'
 
 function tool(name: string): ToolDef {
   return {
@@ -75,6 +77,10 @@ describe('tool policy metadata', () => {
     expect(getToolPolicy('terminal.run')).toMatchObject({ category: 'system', risk: 'high', targetParam: 'command' })
     expect(getToolPolicy('package.delete')).toMatchObject({ category: 'write', risk: 'high' })
     expect(getToolPolicy('package.readme')).toMatchObject({ category: 'read', risk: 'low', targetParam: 'id' })
+    expect(getToolPolicy('routine.update')).toMatchObject({ category: 'write', risk: 'medium', targetParam: 'name' })
+    expect(getToolPolicy('routine.enable')).toMatchObject({ category: 'settings', risk: 'medium', targetParam: 'name' })
+    expect(getToolPolicy('routine.remove')).toMatchObject({ category: 'write', risk: 'high', targetParam: 'name' })
+    expect(getToolPolicy('routine.start')).toMatchObject({ category: 'general', risk: 'medium', targetParam: 'name' })
     expect(getToolPolicy('workbench.openArtifact')).toMatchObject({ category: 'ui', risk: 'low', targetParam: 'packageId' })
     expect(getToolPolicy('slack.search')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'query' })
     expect(getToolPolicy('slack.send')).toMatchObject({ category: 'network', risk: 'high', targetParam: 'channel' })
@@ -1494,6 +1500,31 @@ describe('sensitive-path floor beats session always-allow (Fix 1)', () => {
 })
 
 describe('durable approval-decision audit (Fix 2)', () => {
+  it('persists only decisions that represent a real approval, denial, or bypass', () => {
+    const append = vi.fn()
+    const trace = { append } as unknown as TraceLog
+    const base: PermissionDecisionEvent = {
+      decision: 'allowed',
+      tool: 'fs.read',
+      actor: 'user',
+      category: 'read',
+      risk: 'low',
+      mode: 'normal',
+      reason: 'direct user action',
+    }
+
+    traceGateDecision(trace, base)
+    traceGateDecision(trace, { ...base, actor: 'ai', decision: 'requested' })
+    traceGateDecision(trace, { ...base, actor: 'ai', decision: 'approved' })
+    traceGateDecision(trace, { ...base, actor: 'ai', decision: 'denied' })
+    traceGateDecision(trace, { ...base, actor: 'ai', decision: 'bypassed' })
+
+    expect(append).toHaveBeenCalledTimes(4)
+    expect(append.mock.calls.map(([event]) => event.data.decision)).toEqual([
+      'requested', 'approved', 'denied', 'bypassed',
+    ])
+  })
+
   it('emits a permission.decision event via recordDecision for each gate decision', async () => {
     const decisions: PermissionDecisionEvent[] = []
     const { gate, requests } = makeGate({ decisions })
@@ -1605,6 +1636,130 @@ describe('cancel session resolves pending approvals as denied (Fix 4)', () => {
     // s2 is still pending, respond to it normally
     gate.respond(requests[1].requestId, { approved: true })
     await expect(pending2).resolves.toBeUndefined()
+  })
+})
+
+describe('subagent authority', () => {
+  const parentDelegation = {
+    rootSessionId: 'root',
+    parentSessionId: 'root',
+    depth: 0,
+    toolAllowlist: ['subagent.spawn', 'fs.read', 'fs.write'],
+    originActor: 'ai' as const,
+  }
+
+  it('classifies delegation controls and hard-denies package actors', async () => {
+    expect(getToolPolicy('subagent.spawn')).toMatchObject({ category: 'general', risk: 'medium' })
+    expect(getToolPolicy('subagent.wait')).toMatchObject({ category: 'read', risk: 'low' })
+    const { gate } = makeGate({ mode: 'developer' })
+    await expect(gate.check(
+      tool('subagent.spawn'),
+      { prompt: 'escape' },
+      { actor: 'package', package_id: 'app' },
+    )).rejects.toThrow('Apps cannot create or control subagents')
+  })
+
+  it('enforces the inherited effective tool surface at the gate', async () => {
+    const { gate } = makeGate({ mode: 'developer' })
+    await expect(gate.check(
+      tool('web.read'),
+      { url: 'https://example.com' },
+      { actor: 'ai', sessionId: 'child', subagent: parentDelegation },
+    )).rejects.toThrow('outside the delegated tool surface')
+  })
+
+  it('shares always-allow grants across one task lineage but not an unrelated root', async () => {
+    const { gate, requests } = makeGate()
+    const parent = gate.check(
+      tool('fs.write'),
+      { path: 'docs/a.md', content: 'a' },
+      { actor: 'ai', sessionId: 'root', subagent: parentDelegation },
+    )
+    await Promise.resolve()
+    gate.respond(requests[0].requestId, { approved: true, alwaysAllow: true })
+    await parent
+
+    await gate.check(
+      tool('fs.write'),
+      { path: 'docs/b.md', content: 'b' },
+      {
+        actor: 'ai',
+        sessionId: 'child',
+        subagent: { ...parentDelegation, parentSessionId: 'root', depth: 1 },
+      },
+    )
+    expect(requests).toHaveLength(1)
+
+    const unrelated = gate.check(
+      tool('fs.write'),
+      { path: 'docs/c.md', content: 'c' },
+      {
+        actor: 'ai',
+        sessionId: 'other-child',
+        subagent: { ...parentDelegation, rootSessionId: 'other', parentSessionId: 'other', depth: 1 },
+      },
+    )
+    await Promise.resolve()
+    expect(requests).toHaveLength(2)
+    gate.respond(requests[1].requestId, { approved: false })
+    await expect(unrelated).rejects.toThrow(PermissionDeniedError)
+  })
+
+  it('mints requested grants only after spawn approval and carries lineage into the request', async () => {
+    const { gate, requests } = makeGate()
+    const pending = gate.check(
+      tool('subagent.spawn'),
+      { prompt: 'Implement it', requestedGrants: ['fs.write'] },
+      { actor: 'ai', sessionId: 'root', subagent: parentDelegation },
+    )
+    await Promise.resolve()
+    expect(requests[0]).toMatchObject({
+      subagentRootSessionId: 'root',
+      subagentParentSessionId: 'root',
+      subagentDepth: 0,
+    })
+    gate.respond(requests[0].requestId, { approved: true })
+    await pending
+
+    await gate.check(
+      tool('fs.write'),
+      { path: 'docs/from-child.md', content: 'ok' },
+      {
+        actor: 'ai',
+        sessionId: 'child',
+        subagent: { ...parentDelegation, parentSessionId: 'root', depth: 1, requestedGrants: ['fs.write'] },
+      },
+    )
+    expect(requests).toHaveLength(1)
+  })
+
+  it('preserves remote origin checks on every delegated child call', async () => {
+    const resolveRemoteGrant = vi.fn(() => ({ allowed: true, reason: 'token grant' }))
+    const { gate } = makeGate({ mode: 'developer', resolveRemoteGrant })
+    await gate.check(
+      tool('fs.read'),
+      { path: 'README.md' },
+      {
+        actor: 'ai',
+        sessionId: 'child',
+        subagent: {
+          ...parentDelegation,
+          originActor: 'remote',
+          principal: 'token_1',
+          callerName: 'codex',
+          transport: 'mcp-http',
+        },
+      },
+    )
+    expect(resolveRemoteGrant).toHaveBeenCalledWith(expect.objectContaining({
+      toolName: 'fs.read',
+      ctx: expect.objectContaining({
+        actor: 'remote',
+        principal: 'token_1',
+        callerName: 'codex',
+        transport: 'mcp-http',
+      }),
+    }))
   })
 })
 

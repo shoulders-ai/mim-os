@@ -55,6 +55,12 @@ describe('renderer settings store', () => {
     expect(store.rightPanelWidth).toBe(480)
     expect(store.terminalHeight).toBe(220)
     expect(store.automationApprovalMode).toBe('normal')
+    expect(store.traceRetentionDays).toBe(90)
+    expect(store.traceCaptureContent).toBe(true)
+    expect(store.tracePayloadRetentionDays).toBe(7)
+    expect(store.tracePayloadMaxBytes).toBe(250 * 1024 * 1024)
+    expect(store.historyMaxBytes).toBe(512 * 1024 * 1024)
+    expect(store.historyEnabled).toBe(true)
     expect(store.navigatorAppOrder).toEqual([])
     expect(store.navigatorActivityOrder).toEqual([])
     expect(store.enabledAgents).toEqual([])
@@ -86,6 +92,12 @@ describe('renderer settings store', () => {
       lastInlineModel: 'gemini-3.5-flash',
       lastGhostModel: 'gemini-3.1-flash-lite',
       automationApprovalMode: 'strict',
+      traceRetentionDays: 30,
+      traceCaptureContent: false,
+      tracePayloadRetentionDays: 14,
+      tracePayloadMaxBytes: 100 * 1024 * 1024,
+      historyMaxBytes: 1024 * 1024 * 1024,
+      historyEnabled: false,
       navigatorAppOrder: ['slides', 'docx-review'],
       navigatorActivityOrder: ['chat:s2', 'package:run-a'],
       unknownLegacyKey: 'ignored',
@@ -101,6 +113,12 @@ describe('renderer settings store', () => {
     expect(store.lastInlineModel).toBe('gemini-3.5-flash')
     expect(store.lastGhostModel).toBe('gemini-3.1-flash-lite')
     expect(store.automationApprovalMode).toBe('strict')
+    expect(store.traceRetentionDays).toBe(30)
+    expect(store.traceCaptureContent).toBe(false)
+    expect(store.tracePayloadRetentionDays).toBe(14)
+    expect(store.tracePayloadMaxBytes).toBe(100 * 1024 * 1024)
+    expect(store.historyMaxBytes).toBe(1024 * 1024 * 1024)
+    expect(store.historyEnabled).toBe(false)
     expect(store.navigatorAppOrder).toEqual(['slides', 'docx-review'])
     expect(store.navigatorActivityOrder).toEqual(['chat:s2', 'package:run-a'])
     expect(store.editorFontFamily).toBe('serif')
@@ -172,6 +190,31 @@ describe('renderer settings store', () => {
     expect(call).toHaveBeenCalledWith('settings.set', {
       key: 'automationApprovalMode',
       value: 'developer',
+    })
+  })
+
+  it('set() persists storage policy settings', async () => {
+    const call = stubRendererGlobals()
+    const store = useSettingsStore()
+
+    await store.set('historyMaxBytes', 256 * 1024 * 1024)
+    await store.set('historyEnabled', false)
+    await store.set('traceCaptureContent', false)
+    await store.set('tracePayloadRetentionDays', 14)
+    await store.set('tracePayloadMaxBytes', 100 * 1024 * 1024)
+
+    expect(store.historyMaxBytes).toBe(256 * 1024 * 1024)
+    expect(store.historyEnabled).toBe(false)
+    expect(store.traceCaptureContent).toBe(false)
+    expect(store.tracePayloadRetentionDays).toBe(14)
+    expect(store.tracePayloadMaxBytes).toBe(100 * 1024 * 1024)
+    expect(call).toHaveBeenCalledWith('settings.set', {
+      key: 'historyMaxBytes',
+      value: 256 * 1024 * 1024,
+    })
+    expect(call).toHaveBeenCalledWith('settings.set', {
+      key: 'traceCaptureContent',
+      value: false,
     })
   })
 

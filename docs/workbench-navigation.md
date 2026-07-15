@@ -66,7 +66,7 @@ Examples:
 | Workflow launch config | Work |
 | Running workflow transcript/status | Work |
 | Workflow output/diff/report | Artifact |
-| CLI agent launcher row (Claude Code, Codex, Gemini CLI) | Navigator (Apps) |
+| CLI agent launcher row (Claude Code, Codex, Gemini CLI, Pi) | Navigator (Apps) |
 | Agent session (launched CLI agent, live terminal or replay) | Work |
 | Time-aware file browser/search/recent/changed flow | Work |
 | Opened document | Artifact document tab |

@@ -34,6 +34,46 @@ describe('Session tools', () => {
     expect(existsSync(join(dir, '.mim', 'sessions', `${id}.json`))).toBe(true)
   })
 
+  it('persists and lists durable subagent metadata', async () => {
+    const created = await tools.call('session.create', {
+      label: 'Child',
+      subagent: {
+        rootSessionId: 'session_root',
+        parentSessionId: 'session_parent',
+        depth: 2,
+        status: 'queued',
+        currentTurnId: 'turn_1',
+        modelId: 'test-model',
+        effectiveToolAllowlist: ['fs.read'],
+        inbox: [],
+        createdAt: '2026-07-14T10:00:00.000Z',
+        updatedAt: '2026-07-14T10:00:00.000Z',
+      },
+    }, ctx) as { id: string }
+
+    await tools.call('session.update', {
+      id: created.id,
+      subagent: {
+        status: 'working',
+        lastActivity: 'Reading the repository',
+        updatedAt: '2026-07-14T10:01:00.000Z',
+      },
+    }, ctx)
+
+    const got = await tools.call('session.get', { id: created.id }, ctx) as Record<string, any>
+    expect(got.subagent).toMatchObject({
+      rootSessionId: 'session_root',
+      parentSessionId: 'session_parent',
+      depth: 2,
+      status: 'working',
+      currentTurnId: 'turn_1',
+      lastActivity: 'Reading the repository',
+      effectiveToolAllowlist: ['fs.read'],
+    })
+    const listed = await tools.call('session.list', {}, ctx) as { sessions: Array<Record<string, any>> }
+    expect(listed.sessions[0].subagent).toMatchObject({ parentSessionId: 'session_parent', status: 'working' })
+  })
+
   it('lists sessions', async () => {
     await tools.call('session.create', { label: 'A' }, ctx)
     await tools.call('session.create', { label: 'B' }, ctx)
@@ -80,10 +120,15 @@ describe('Session tools', () => {
     expect(got.compactions).toEqual([])
   })
 
-  it('appends compaction records without changing messages or manifest payload', async () => {
+  it('appends compaction records without changing messages and updates effective context counters', async () => {
     const created = await tools.call('session.create', { label: 'Compaction append' }, ctx) as { id: string }
     const messages = [{ id: 'm1', role: 'user', content: 'keep me' }]
-    await tools.call('session.update', { id: created.id, messages }, ctx)
+    await tools.call('session.update', {
+      id: created.id,
+      messages,
+      lastContextTokens: 1200,
+      lastInputTokens: 1200,
+    }, ctx)
 
     appendSessionCompaction(dir, created.id, {
       id: 'cmp_1',
@@ -102,14 +147,20 @@ describe('Session tools', () => {
     const got = await tools.call('session.get', { id: created.id }, ctx) as {
       messages: typeof messages
       compactions: Array<{ id: string; summary: string }>
+      lastContextTokens: number
+      lastInputTokens: number
     }
     expect(got.messages).toEqual(messages)
+    expect(got.lastContextTokens).toBe(800)
+    expect(got.lastInputTokens).toBe(800)
     expect(got.compactions).toEqual([
       expect.objectContaining({ id: 'cmp_1', summary: 'Earlier context summary.' }),
     ])
 
     const listed = await tools.call('session.list', {}, ctx) as { sessions: Array<Record<string, unknown>> }
     expect(listed.sessions[0].compactions).toBeUndefined()
+    expect(listed.sessions[0].lastContextTokens).toBe(800)
+    expect(listed.sessions[0].lastInputTokens).toBe(800)
   })
 
   it('reorders sessions without touching updatedAt', async () => {

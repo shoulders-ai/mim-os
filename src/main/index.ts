@@ -34,12 +34,29 @@ import { registerInstallTools } from '@main/tools/install.js'
 import { DEFAULT_CACHE_ROOT } from '@main/packages/cacheLayout.js'
 import { registerBridgeTools } from '@main/tools/bridge.js'
 import { clearEditorState, dropWindow as dropEditorWindow, findWindowIdForPath, noteWindowFocused, registerEditorStateTools, setMainWindowId, updateWindowEditorState } from '@main/tools/editorState.js'
-import { readTraceCaptureContent, readTraceRetentionDays, registerSettingsTools } from '@main/tools/settings.js'
+import {
+  readHistoryMaxBytes,
+  readHistoryEnabled,
+  readTraceCaptureContent,
+  readTracePayloadMaxBytes,
+  readTracePayloadRetentionDays,
+  readTraceRetentionDays,
+  registerSettingsTools,
+} from '@main/tools/settings.js'
 import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
 import { registerToolchainTools } from '@main/tools/toolchain.js'
 import { registerCodeTools } from '@main/tools/code.js'
 import { registerSessionTools } from '@main/sessions.js'
-import { createRoutineChatSession, registerRoutineTools, runRoutineOnce } from '@main/tools/routines.js'
+import { registerSubagentTools } from '@main/tools/subagents.js'
+import { createSubagentManager, type SubagentManager } from '@main/subagents/subagentManager.js'
+import { chatProfile } from '@main/ai/aiRuntime.js'
+import {
+  continueRoutineRunInSession,
+  createRoutineChatSession,
+  registerRoutineTools,
+  runRoutineOnce,
+  startRoutineRun,
+} from '@main/tools/routines.js'
 import { createRoutineAutomation } from '@main/routines/automation.js'
 import { loadRoutineCatalog } from '@main/routines/routines.js'
 import { registerArchiveTools } from '@main/tools/archive.js'
@@ -131,6 +148,7 @@ const popoutWindows = new Map<number, BrowserWindow>()
 let recentFiles: string[] = []
 let workspaceFileWatcher: ReturnType<typeof createWorkspaceFileWatcher> | null = null
 let telemetryShutdown: (() => Promise<void>) | null = null
+let subagentShutdown: (() => Promise<void>) | null = null
 let appUpdateInitialTimer: ReturnType<typeof setTimeout> | null = null
 let appUpdateInterval: ReturnType<typeof setInterval> | null = null
 let historyBaselineTimer: ReturnType<typeof setTimeout> | null = null
@@ -437,16 +455,20 @@ async function boot(): Promise<void> {
       return user.email ?? user.name
     },
     getRetentionDays: () => readTraceRetentionDays(tools?.getWorkspacePath() ?? null),
+    getPayloadRetentionDays: () => readTracePayloadRetentionDays(tools?.getWorkspacePath() ?? null),
+    getPayloadMaxBytes: () => readTracePayloadMaxBytes(tools?.getWorkspacePath() ?? null),
   })
   let server: Awaited<ReturnType<typeof createServer>> | null = null
   let packages: Awaited<ReturnType<typeof createPackageLoader>> | null = null
   let namedPackageTools: NamedPackageToolSync | null = null
   let sharedWorkspaceTools: SharedWorkspaceToolMount | null = null
   let agentMountsRef: ReturnType<typeof createAgentMounts> | null = null
+  let subagentManagerRef: SubagentManager | null = null
   let packageEnablement: ReturnType<typeof createPackageEnablementStore> | null = null
   let appUpdater: ReturnType<typeof initAutoUpdater> | null = null
   let routineAutomation: ReturnType<typeof createRoutineAutomation> | null = null
   let slackListener: ReturnType<typeof createSlackSocketModeListener> | null = null
+  let routineDefinitionRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
   // Git mirrors live in a single per-machine cache shared across workspaces, so
   // a repo is cloned once no matter how many workspaces mount it.
@@ -539,9 +561,18 @@ async function boot(): Promise<void> {
       addBrowserSessionDomain(ws, grant.domain)
     },
     onApprovalRequested: (request) => {
+      if (request.sessionId && request.subagentRootSessionId) {
+        void subagentManagerRef?.markApproval(request.sessionId, 'needs-approval')
+      }
       updateRoutineApprovalSession(request.sessionId, request.routineId, { routineStatus: 'needs-approval' })
     },
     onApprovalResolved: (request, decision) => {
+      if (request.sessionId && request.subagentRootSessionId) {
+        void subagentManagerRef?.markApproval(
+          request.sessionId,
+          'working',
+        )
+      }
       if (decision.approved) {
         updateRoutineApprovalSession(request.sessionId, request.routineId, { routineStatus: 'working', routineError: '' })
       } else {
@@ -572,6 +603,8 @@ async function boot(): Promise<void> {
   })
   const history = createHistoryStore({
     getWorkspacePath: () => tools?.getWorkspacePath() ?? null,
+    isEnabled: () => readHistoryEnabled(tools?.getWorkspacePath() ?? null),
+    getMaxBytes: () => readHistoryMaxBytes(tools?.getWorkspacePath() ?? null),
   })
   tools = createToolRegistry(traceLog, gate, {
     outcomes: traceOutcomes,
@@ -581,6 +614,21 @@ async function boot(): Promise<void> {
   workspaceFileWatcher = createWorkspaceFileWatcher({
     emit: (channel, payload) => {
       broadcastToRenderers(channel, payload)
+      if (payload.changes.some(change => change.path.startsWith('routines/'))) {
+        if (routineDefinitionRefreshTimer) clearTimeout(routineDefinitionRefreshTimer)
+        routineDefinitionRefreshTimer = setTimeout(() => {
+          routineDefinitionRefreshTimer = null
+          void Promise.all([
+            routineAutomation?.refresh(),
+            slackListener?.refresh(),
+          ]).then(() => {
+            broadcastToRenderers('routines:changed', {})
+            server?.broadcast('routines:changed', {})
+          }).catch((err) => {
+            console.error('[routines] definition refresh failed', err)
+          })
+        }, 50)
+      }
       for (const change of payload.changes) {
         traceOutcomes.observeFileChange(change)
         history.observeFileChange(change)
@@ -635,6 +683,21 @@ async function boot(): Promise<void> {
     }),
   })
   registerSessionTools(tools)
+  subagentManagerRef = createSubagentManager({
+    tools,
+    cancelApprovals: sessionId => gate.cancelSession(sessionId),
+    getAgentProfile: async (agentId) => {
+      if (!agentId) return chatProfile
+      if (!agentMountsRef) throw new Error('Agent profiles are not available until a workspace is open')
+      return agentMountsRef.resolveProfile(agentId)
+    },
+    emit: (event) => {
+      sendToRenderer('subagent:event', event)
+      server?.broadcast('subagent:event', event)
+    },
+  })
+  registerSubagentTools(tools, subagentManagerRef)
+  subagentShutdown = () => subagentManagerRef?.dispose() ?? Promise.resolve()
   const packageSecretStore = createKeytarSecretStore()
   slackListener = createSlackSocketModeListener({
     getWorkspacePath: () => tools.getWorkspacePath(),
@@ -644,6 +707,9 @@ async function boot(): Promise<void> {
       return loadRoutineCatalog(ws, { knownTools: new Set(tools.list().map(tool => tool.name)) }).routines
     },
     runRoutine: (routine, context) => runRoutineOnce(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+    startRoutine: (routine, context) => startRoutineRun(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+    continueRoutine: (routine, context, thread) =>
+      continueRoutineRunInSession(tools, routine, context, thread.sessionId, { getAgentMounts: () => agentMountsRef }),
     getSessionReplyText: (sessionId) => latestAssistantReply(tools, sessionId),
     slack: new SlackIntegration({ secrets: packageSecretStore }),
     trace: traceLog,
@@ -813,6 +879,7 @@ async function boot(): Promise<void> {
   // yields a real, existing workspace path so sessions load on every launch.
   const bootWorkspace = resolveBootWorkspace(HOME_DIR)
   await tools.call('workspace.open', { path: bootWorkspace }, { actor: 'system' })
+  await subagentManagerRef.reconcile()
   telemetry.track('workspace_open')
 
   // Auto-initialize the default workspace the app itself created, so the
@@ -1046,9 +1113,11 @@ async function boot(): Promise<void> {
   refreshAppUpdates(tools.getWorkspacePath())
 
   async function openWorkspacePath(path: string): Promise<string> {
+    await subagentManagerRef?.interruptActive()
     sharedWorkspaceTools?.unmount()
     sharedWorkspaceTools = null
     await tools.call('workspace.open', { path }, { actor: 'user' })
+    await subagentManagerRef?.reconcile()
     telemetry.track('workspace_open')
     // Drop the previous workspace's tab snapshot; the remounted editor re-pushes.
     clearEditorState()
@@ -1555,6 +1624,8 @@ app.on('before-quit', () => {
   }
   void telemetryShutdown?.()
   telemetryShutdown = null
+  void subagentShutdown?.()
+  subagentShutdown = null
   void workspaceFileWatcher?.close()
   workspaceFileWatcher = null
   deleteMcpDiscoveryFile(HOME_DIR)

@@ -46,6 +46,7 @@ export interface AppKernelEventDeps {
   dispatchTerminalRun(command: string, options?: { reveal?: boolean }): Promise<unknown> | unknown
   onPackageJobEvent(payload: unknown): void
   onAgentSessionEvent(payload: unknown): void
+  refreshSubagentSession(sessionId: string): Promise<unknown> | unknown
   pushToast(toast: AppShellToast): void
   downloadUpdate(): Promise<unknown> | unknown
   quitAndInstall(): Promise<unknown> | unknown
@@ -114,6 +115,10 @@ export function registerAppKernelEvents(
     }],
     ['package:job:event', deps.onPackageJobEvent],
     ['agent:session-event', deps.onAgentSessionEvent],
+    ['subagent:event', (payload: unknown) => {
+      const sessionId = isRecord(payload) ? payload.sessionId : undefined
+      if (typeof sessionId === 'string') void deps.refreshSubagentSession(sessionId)
+    }],
     ['app:update-available', (payload: unknown) => {
       const version = updateVersion(payload)
       deps.pushToast({

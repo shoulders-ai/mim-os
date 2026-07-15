@@ -277,9 +277,9 @@ export function sanitizeAuthorHandle(value: unknown): string {
 }
 
 // Known machine-author handles: desktop chat writes 'ai'; MCP connections are
-// attributed by client name (claude-code, codex, gemini-cli, and versioned or
+// attributed by client name (claude-code, codex, gemini-cli, pi, and versioned or
 // suffixed variants of those). Used for presentation only, never authorization.
-const AGENT_AUTHOR_PATTERN = /^(ai|assistant|agent|mim|claude(-[\w.-]+)?|codex(-[\w.-]+)?|gemini(-[\w.-]+)?)$/i
+const AGENT_AUTHOR_PATTERN = /^(ai|assistant|agent|mim|claude(-[\w.-]+)?|codex(-[\w.-]+)?|gemini(-[\w.-]+)?|pi(-[\w.-]+)?)$/i
 
 export function isAgentAuthor(by: string): boolean {
   return AGENT_AUTHOR_PATTERN.test(String(by ?? '').trim())

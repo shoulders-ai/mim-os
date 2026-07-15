@@ -28,6 +28,10 @@ describe('electron-builder updater configuration', () => {
     expect(config.files).toContain('!sdk/**/*.test.*')
   })
 
+  it('unpacks the Pi extension so the external CLI can load it', () => {
+    expect(config.asarUnpack).toContain('resources/pi/**')
+  })
+
   it('keeps CI manual-publish only while uploading builder metadata', async () => {
     const workflow = await readFile('.github/workflows/release.yml', 'utf8')
 

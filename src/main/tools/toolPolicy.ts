@@ -42,6 +42,17 @@ const GOOGLE_DRIVE_READ_TOOLS = ['drive.search', 'drive.meta', 'docs.read', 'she
 
 export const CORE_TOOL_POLICY_ROWS: ToolPolicyRow[] = [
   {
+    id: 'system.subagents',
+    domain: 'system',
+    label: 'Delegate work to subagents',
+    description: 'Create and coordinate durable child agent threads. Child tools still follow their inherited tool policy and approval grants.',
+    defaultEnabled: true,
+    toolIds: ['subagent.spawn', 'subagent.wait', 'subagent.send', 'subagent.interrupt', 'subagent.stop', 'subagent.status', 'subagent.list', 'subagent.result'],
+    aiToolKeys: ['subagent_spawn', 'subagent_wait', 'subagent_send', 'subagent_interrupt', 'subagent_stop', 'subagent_status', 'subagent_list', 'subagent_result'],
+    mcpToolNames: ['subagent_spawn', 'subagent_wait', 'subagent_send', 'subagent_interrupt', 'subagent_stop', 'subagent_status', 'subagent_list', 'subagent_result'],
+    risk: 'sensitive',
+  },
+  {
     id: 'files.read',
     domain: 'files',
     label: 'Read workspace files',
