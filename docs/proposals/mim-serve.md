@@ -48,7 +48,7 @@ Phases 0-4 below are deliberately incremental and are the committed plan.
 The strategic-direction section sketches the rest of the road so near-term
 decisions don't foreclose it.
 
-## Current Status - 2026-07-09
+## Current Status - 2026-07-14
 
 This proposal is no longer a pure future plan. The repo now contains a large
 part of the serve and shared-workspace plumbing, but the product is not ready
@@ -89,6 +89,9 @@ Phase status:
   language, approval-card team-space chip, and live catalog refresh exist.
 - [ ] Phase 3 mim-web identity is not implemented.
 - [ ] Phase 4 unattended server-hosted agent runs are not implemented.
+
+For a timestamped reconciliation of what is implemented in the current working
+tree versus what remains open, see [mim-server-status.md](../mim-server-status.md).
 
 User confusion report:
 
@@ -1068,6 +1071,8 @@ files comments/issues, and leaves a normal session and trace.
 Sketches, not commitments, and tracks, not phases: they are not strictly
 ordered and none is implementation-ready. They exist so phases 0-4 don't
 paint the road shut. Each needs its own proposal before implementation.
+Tracks A-D are now chartered in [web-shell.md](web-shell.md); track E still
+needs its own proposal.
 
 ### Track A — thin-client workspace editing
 
@@ -1228,8 +1233,9 @@ Phase one is not complete until these are automated:
   caller identity.
 - [context-compaction.md](context-compaction.md) - long-run context compaction
   in the AI runtime. Required before unattended server-side agent runs.
-- Async review queue - no proposal exists yet; the track C sketch above is
-  its charter.
+- [web-shell.md](web-shell.md) - charters tracks A-D and the north-star
+  renderer migration: the member-facing Shell API, browser shell, thin file
+  editing, remote chat, review queue, and gated remote terminal.
 - Managed replica sync - no proposal exists yet; the track E sketch and the
   conflict-posture paragraph under Consumption Models are its charter.
 

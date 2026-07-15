@@ -66,6 +66,14 @@ export const MCP_TOOL_SPECS: McpToolSpec[] = [
   { name: 'editor_open', mimName: 'editor.open', description: 'Open a file in the editor' },
   { name: 'editor_state', mimName: 'editor.state', description: 'See open editor tabs and the active document, including unsaved (dirty) status' },
   { name: 'chat_send', mimName: 'chat.send', description: 'Send a message to chat' },
+  { name: 'subagent_spawn', mimName: 'subagent.spawn', description: 'Create a durable child agent thread and return immediately' },
+  { name: 'subagent_wait', mimName: 'subagent.wait', description: 'Wait for child state changes without limiting child runtime' },
+  { name: 'subagent_send', mimName: 'subagent.send', description: 'Steer a child or start a contextual follow-up turn' },
+  { name: 'subagent_interrupt', mimName: 'subagent.interrupt', description: 'Interrupt and optionally redirect a child turn' },
+  { name: 'subagent_stop', mimName: 'subagent.stop', description: 'Stop child work while retaining its transcript' },
+  { name: 'subagent_status', mimName: 'subagent.status', description: 'Read one child thread status' },
+  { name: 'subagent_list', mimName: 'subagent.list', description: 'List child threads in this task lineage' },
+  { name: 'subagent_result', mimName: 'subagent.result', description: 'Read a child final response by character page' },
   { name: 'comments_list', mimName: 'comments.list', description: 'List inline review comment threads in a file (markdown or code)' },
   { name: 'comments_add', mimName: 'comments.add', description: 'Add an inline review comment anchored to a short exact passage of visible text; never hand-edit <comment> tags or @mim marker lines with file tools' },
   { name: 'comments_reply', mimName: 'comments.reply', description: 'Append a reply note to an existing inline review comment thread' },
@@ -271,7 +279,10 @@ export async function createServer(
         const caller = await authenticateMcpHttpRequest(req, res, options?.authenticateMcpHttpToken)
         if (!caller) return
 
-        const sessionId = caller.sessionId ?? `mcp-http-${randomUUID()}`
+        // The authenticated principal is the durable task root for stateless
+        // HTTP MCP requests. A random id per request would make a caller lose
+        // access to subagents it spawned on the preceding request.
+        const sessionId = caller.sessionId ?? `mcp-http:${caller.principal}`
         const client: McpDesktopClient = {
           tools: () => mcpToolMetadata(tools, getNamedMcpTools()),
           async callTool(mimName, args) {

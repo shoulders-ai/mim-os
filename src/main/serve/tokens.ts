@@ -335,9 +335,13 @@ const EXECUTABLE_WORKSPACE_TOOLS = new Set([
   'skill.delete',
   'skill.setDisabled',
   'routine.create',
-  'routine.pause',
-  'routine.resume',
+  'routine.update',
+  'routine.duplicate',
+  'routine.enable',
+  'routine.disable',
+  'routine.remove',
   'routine.run',
+  'routine.start',
 ])
 
 function shellQuote(value: string): string {

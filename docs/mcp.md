@@ -30,6 +30,16 @@ Mim Desktop
     Tool registry
 ```
 
+Pi uses the same authenticated desktop tool surface through Mim's bundled Pi
+extension, without starting an MCP server:
+
+```
+Pi 0.76+
+    bundled Mim extension (WebSocket JSON-RPC)
+Mim Desktop
+    Tool registry
+```
+
 Serve mode:
 
 ```
@@ -51,8 +61,9 @@ That discovery token is valid for the desktop process lifetime.
 
 Agent sessions launched from Settings > Apps receive per-session `MIM_PORT`
 and `MIM_TOKEN` environment variables. Running `mim mcp` outside Mim falls back
-to `~/.mim/server.json`. Per-agent tokens are revoked when the live agent
-session exits, is killed, or fails during launch after token creation.
+to `~/.mim/server.json`. Pi's bundled extension consumes the per-session values
+directly. Per-agent tokens are revoked when the live agent session exits, is
+killed, or fails during launch after token creation.
 
 ## Security Boundary
 
@@ -66,6 +77,12 @@ execution, so a cached/raw client cannot call a disabled tool. The stdio bridge
 also maps only curated MCP names, but that is not the security boundary because
 local processes can speak WebSocket directly if they have the bearer token.
 
+The bundled Pi extension authenticates as the same local `user` actor and uses
+the same curated metadata and execution checks. It calls `__meta.client` with
+`pi`, so traces and comment authorship distinguish Pi from other CLI clients.
+The internal WebSocket identity reuses the MCP-authenticated allowlist; the Pi
+integration itself is a direct extension adapter, not an MCP transport.
+
 `packages.list` stays package-only. `__meta.tools` is MCP-only and requires
 successful MCP identification.
 
@@ -78,6 +95,8 @@ Serve-mode HTTP MCP authenticates every request with
 `Authorization: Bearer <token>` and binds tool calls as `actor: "remote"` with
 `principal`, `callerName`, and `transport: "mcp-http"` attribution. Remote
 authorization is the serve grant resolver, not the desktop MCP allowlist alone.
+Stateless requests from one authenticated principal share a stable task root,
+so a later request can wait for, steer, and collect a subagent spawned earlier.
 `GET /mcp/events` is an authenticated SSE stream and emits
 `notifications/tools/list_changed` when package reloads or named-tool changes
 invalidate cached tool catalogs.
@@ -98,6 +117,14 @@ enabled in Settings > Tools:
 | `editor_open` | `editor.open` |
 | `editor_state` | `editor.state` |
 | `chat_send` | `chat.send` |
+| `subagent_spawn` | `subagent.spawn` |
+| `subagent_wait` | `subagent.wait` |
+| `subagent_send` | `subagent.send` |
+| `subagent_interrupt` | `subagent.interrupt` |
+| `subagent_stop` | `subagent.stop` |
+| `subagent_status` | `subagent.status` |
+| `subagent_list` | `subagent.list` |
+| `subagent_result` | `subagent.result` |
 | `comments_list` | `comments.list` |
 | `comments_add` | `comments.add` |
 | `comments_reply` | `comments.reply` |
@@ -231,8 +258,10 @@ command behind the scenes:
 | Codex | `codex mcp add mim -- mim mcp` |
 | Gemini CLI | `gemini mcp add mim mim mcp` |
 
-Pi sessions are supported, but Pi has no built-in MCP client. Its Settings row
-therefore reports **Mim tools unavailable** and does not offer connection controls.
+Pi has no Connect/Disconnect control. Mim appends its bundled extension to each
+Pi launch and resume; the extension registers the same enabled tool catalog
+directly with Pi. Settings therefore reports **Mim tools built in**. If the
+desktop connection drops, Pi remains usable and `/mim-reconnect` retries it.
 
 This is a one-time setup — the config persists across sessions. The
 **Disconnect** option is in the agent's Customise section.
@@ -258,5 +287,7 @@ smoke tests.
 - WebSocket MCP auth and allowlist: `src/main/server/server.ts`
 - CLI command: `src/main/cli.ts`
 - Agent env injection: `src/main/agents/agentSessions.ts`, `src/main/pty.ts`
+- Pi direct adapter: `resources/pi/mim-extension.mjs`,
+  `src/main/agents/agentResources.ts`
 - Tests: `src/main/mcp/stdio.test.ts`, `src/main/server/server.test.ts`,
   `src/main/agents/agentSessions.test.ts`, `src/main/cli.test.ts`

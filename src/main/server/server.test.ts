@@ -431,8 +431,20 @@ describe('app server', () => {
       principal: 'caller_anna',
       callerName: 'Anna',
       transport: 'mcp-http',
-      sessionId: expect.any(String),
+      sessionId: 'mcp-http:caller_anna',
     })
+
+    await postMcp(server.port, 'good', {
+      jsonrpc: '2.0',
+      id: 'call-2',
+      method: 'tools/call',
+      params: { name: 'subagent_status', arguments: { sessionId: 'child-1' } },
+    })
+    expect(call).toHaveBeenLastCalledWith('subagent.status', { sessionId: 'child-1' }, expect.objectContaining({
+      actor: 'remote',
+      principal: 'caller_anna',
+      sessionId: 'mcp-http:caller_anna',
+    }))
   })
 
   it('redeems shared workspace invites through the only tokenless serve-mode join route', async () => {

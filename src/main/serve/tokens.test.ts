@@ -116,7 +116,7 @@ describe('serve token store', () => {
         token: 'mim_serve_writer',
         grants: {
           effects: ['read', 'mutate'],
-          tools: ['fs.read', 'fs.write', 'skill.create'],
+          tools: ['fs.read', 'fs.write', 'skill.create', 'routine.start'],
           paths: ['docs'],
         },
       })
@@ -192,6 +192,18 @@ describe('serve token store', () => {
         params: { name: 'dangerous', content: 'name: dangerous' },
         ctx,
         policy: { category: 'write', risk: 'medium', targetParam: 'name' },
+        effect: 'mutate',
+        paths: [],
+      })).toMatchObject({
+        allowed: false,
+        reason: 'Remote callers cannot change executable or prompt-bearing workspace surfaces',
+      })
+
+      expect(resolver({
+        toolName: 'routine.start',
+        params: { name: 'nightly' },
+        ctx,
+        policy: { category: 'general', risk: 'medium', targetParam: 'name' },
         effect: 'mutate',
         paths: [],
       })).toMatchObject({
