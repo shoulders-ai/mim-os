@@ -170,6 +170,43 @@ describe('app runtime capabilities', () => {
     expect(ctx.data.kv.get('counter')).toEqual({ count: 2 })
   })
 
+  it('refuses non-chat-audience tools for AI callers but allows the owning app and the user', async () => {
+    writePackage('mail', `
+      export const tools = {
+        draft_send: {
+          description: 'Send the approved draft',
+          inputSchema: { type: 'object', properties: {} },
+          audience: ['ui'],
+          async execute() { return { sent: true } }
+        },
+        search: {
+          description: 'Search mail',
+          inputSchema: { type: 'object', properties: {} },
+          async execute() { return { threads: [] } }
+        }
+      }
+    `)
+    const { enablement, runtime, packages } = await makeRuntime()
+    enablement.setEnabled('mail', true)
+    enablement.ackTrust(packages.get('mail')!)
+    const capabilities = await runtime.listCapabilities()
+    const mailTools = capabilities.find(capability => capability.packageId === 'mail')!.tools
+    const uiTool = mailTools.find(tool => tool.id === 'draft_send')!
+    const chatTool = mailTools.find(tool => tool.id === 'search')!
+
+    // ui-audience tools are absent from the chat toolset and refused at dispatch
+    // for AI callers; the owning app UI and the local user remain able to call them.
+    expect((await runtime.listChatTools()).some(tool => tool.id === 'draft_send')).toBe(false)
+    await expect(runtime.executeTool(uiTool.publicName, {}, { actor: 'ai', sessionId: 's1' }))
+      .rejects.toThrow(/not available to AI callers/)
+    await expect(runtime.executeTool(uiTool.publicName, {}, { actor: 'package', package_id: 'mail' }))
+      .resolves.toEqual({ sent: true })
+    await expect(runtime.executeTool(uiTool.publicName, {}, { actor: 'user' }))
+      .resolves.toEqual({ sent: true })
+    await expect(runtime.executeTool(chatTool.publicName, {}, { actor: 'ai' }))
+      .resolves.toEqual({ threads: [] })
+  })
+
   it('caps oversized tool results for the AI caller but returns them intact to app and user callers', async () => {
     writePackage('knowledge', `
       export const tools = {

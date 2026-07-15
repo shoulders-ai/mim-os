@@ -292,6 +292,13 @@ export function createPackageRuntime(options: PackageRuntimeOptions): PackageRun
       if (ctx.actor === 'package' && ctx.package_id && ctx.package_id !== entry.pkg.manifest.id) {
         throw new Error(`Package ${ctx.package_id} cannot execute tools owned by package ${entry.pkg.manifest.id}`)
       }
+      // Audience is a dispatch boundary, not just a listing filter: a tool that
+      // does not declare the 'chat' audience must stay unreachable for model
+      // callers even via package.tools.execute (apps rely on this for
+      // human-only actions like approving or sending).
+      if (ctx.actor === 'ai' && !entry.tool.audience.includes('chat')) {
+        throw new Error(`Package tool ${publicName} is not available to AI callers`)
+      }
       const validationErrors = validateJsonSchema(entry.tool.inputSchema, input)
       if (validationErrors.length > 0) {
         throw new Error(`Invalid input for ${publicName}: ${validationErrors.join('; ')}`)
