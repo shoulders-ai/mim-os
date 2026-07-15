@@ -3,9 +3,10 @@
 Status: desktop runtime implemented for the core loop. Routine `slack` trigger
 validation, duplicate binding diagnostics, bot/app-token credential tools, a
 metadata-only event ledger, one-shot setup/check tools, Socket Mode lifecycle,
-event dispatch, and bot thread replies are implemented. Durable per-thread
-sessions, debounce/replay, parked approvals, and [mim-serve.md](mim-serve.md)
-as an always-on host remain proposal work.
+event dispatch, durable per-thread Mim sessions, follow-up routing without
+repeated mentions, capability-based setup, and bot thread replies are
+implemented. Debounce/replay, parked approvals, and
+[mim-serve.md](mim-serve.md) as an always-on host remain proposal work.
 
 Mim hosts a Slack-triggered routine: a Socket Mode listener in the main
 process watches configured channels and answers by running a mounted agent,
@@ -24,7 +25,7 @@ credentials and socket health. v1 should bias toward `mode: mention`, because
 The division of labour with routines: **the listener is trigger
 infrastructure; the responder binding is a routine.** A `slack` trigger kind
 joins schedule/webhook/files/after, so the bot's authority, trust, and
-enablement story is the routine story — one subsystem, not two permission
+activation story is the routine story — one subsystem, not two permission
 models. What is genuinely new here is the conversational shape: a Slack
 thread is a continuing conversation, so fires map to a persistent
 per-thread session rather than one-shot runs.
@@ -70,11 +71,11 @@ out, so no public endpoint, no tunnel, no reverse proxy.
   #general" cannot retarget the send. Broader Slack sends are an explicit
   allowlist entry a user must opt into, and earn the load-time warning
   diagnostic.
-- **Threads should become sessions.** The implemented desktop loop creates a
-  routine session per Slack event and replies in the originating thread. The
-  north star is one durable chat session per Slack thread, carrying the agent's
-  identity, visible in Activity, replayable in History, and reusable for
-  follow-up memory. The operator surface is Mim itself, not a dashboard.
+- **Threads are sessions.** A mention-mode routine uses the first bot mention
+  to activate a Slack thread; later replies in that thread continue the same
+  Mim routine session without another mention. The session carries the agent's
+  identity, is visible in Activity/History, and provides follow-up memory. The
+  operator surface is Mim itself, not a dashboard.
 - **Slack text has an explicit retention boundary.** Slack thread content is
   persisted only where the feature needs it: the per-thread session transcript
   under `.mim/sessions/`. Trace payload blobs, tool result blobs, event
@@ -111,13 +112,14 @@ docs; say so when you cannot. Keep replies short — this is Slack.
 
 - `mode: mention` — respond only when the bot user is @-mentioned;
   `always` — respond to every non-bot message (sf-bot's channel modes).
-- The listener adds a built-in grant floor beyond `tools:`: internal bot-token
-  thread reads (`conversations.replies` for the bound thread, `users.info` or
-  `users.list` for name resolution) and the pinned thread reply. These are not
-  the general personal-token Slack tools exposed to AI/MCP. Everything else
-  follows the routine allowlist rules, including the sensitive-path floor and
-  per-machine enablement — a pulled routine that binds a Slack channel loads
-  paused until acked on this machine.
+- The listener adds a built-in delivery floor beyond `tools:`: Socket Mode
+  receipt and the pinned thread reply are owned by the runner, not by the
+  model. General Slack reading/searching remains an explicit routine capability
+  such as `slack_read` and still follows the Slack policy and token boundary.
+  Everything else follows the routine allowlist rules, including the
+  sensitive-path floor and per-machine activation — a pulled routine that binds
+  a Slack channel loads `review-required` until its authority is reviewed on
+  this machine.
 - Trigger-scoped template variables: `{{slack.channel}}`,
   `{{slack.thread_ts}}`, `{{slack.sender}}`. Message text arrives as the
   user turn (fenced, framed as untrusted input), never interpolated into
@@ -161,9 +163,9 @@ the routine runner and gate mechanics come from routines phases 1 and 3.
 
 - **Socket lifecycle** (`listener.ts`): implemented with the existing `ws`
   dependency, not `@slack/bolt` or a Slack SDK. The listener opens Socket Mode
-  URLs with `apps.connections.open`, keeps one socket per enabled Slack routine
+  URLs with `apps.connections.open`, keeps one socket per active Slack routine
   account, handles `hello` and `disconnect` frames, reconnects with bounded
-  backoff, extracts enabled-routine bindings, matches mention/always modes,
+  backoff, extracts active-routine bindings, matches mention/always modes,
   ignores bot/self messages, records metadata in the ledger, acknowledges
   event envelopes after local metadata persistence, dispatches matching events
   into the routine runner, and posts the final assistant text back to the
@@ -194,7 +196,7 @@ the routine runner and gate mechanics come from routines phases 1 and 3.
   channel/thread come from the fire, not the model. It is not exposed as a
   general AI/MCP tool.
 - **Lifecycle**: the listener starts when the active workspace has at
-  least one enabled `slack`-triggered routine and stops on workspace
+  least one active `slack`-triggered routine and stops on workspace
   switch/close. One listener connection per app instance per account.
   Kernel tool `slack.listener.status` reports socket state, connected-as
   identity, and last-event age; `slack.bot.check` folds this into the
@@ -210,7 +212,7 @@ internal bot thread reply helper, `slack.bot.status`, `slack.bot.connect`,
 `slack_bot_connect`, `slack_bot_disconnect`, `slack_bot_setup`,
 `slack_bot_check`, `slack.listener.status`, gate policy, and trace secret
 handling. The desktop listener consumes these credentials when at least one
-enabled Slack-triggered routine references the account.
+active Slack-triggered routine references the account.
 
 - `SlackIntegration` (`client.ts`) gains token-kind-aware storage
   (`slack:{account}` existing personal/user token,
@@ -270,7 +272,7 @@ enabled Slack-triggered routine references the account.
 
 Implemented for the desktop single-turn loop.
 
-- Implemented: `listener.ts` helpers for enabled-routine binding,
+- Implemented: `listener.ts` helpers for active-routine binding,
   mention/always-mode routing, bot/self-message exclusion, dedup before fire,
   metadata-only ledger writes, Socket Mode connection lifecycle, envelope ack,
   reconnect/backoff, injected routine fire callback, and bot thread replies.
@@ -291,11 +293,12 @@ Depends on routines phase 1 (store + runner) and phase 3 (allowlist grant
 - Implemented: `slack` trigger kind in the routine frontmatter schema with
   load-time diagnostics for malformed channel config and duplicate
   account/channel bindings.
-- Deferred: missing bot credential diagnostics, conversational sessions, and
-  response posting.
-- `responder.ts`: thread↔session mapping, first-touch context fetch,
-  fenced untrusted-input framing of message text, pinned thread reply,
-  park notice posted to the thread, error notice path.
+- Implemented: missing bot credential diagnostics, thread↔session mapping,
+  follow-up routing in active mention-mode threads, response posting, and error
+  notice path.
+- Deferred: first-touch context fetch, fenced untrusted-input framing of
+  message text, park notice posted to the thread, restart replay from ledger,
+  and debounce.
 - Session record extension in `sessions.ts` + manifest; Activity/History
   rows show the routine/agent name and a Slack-thread origin, not an ordinary
   user chat row. Slack-origin sessions bypass raw text indexing in v1.
@@ -311,11 +314,12 @@ Depends on routines phase 1 (store + runner) and phase 3 (allowlist grant
 - Settings > Connections > Slack: bot row with masked "connected as
   @name", connect-from-file, disconnect, socket status dot. No
   instruction prose — the manual carries the walkthrough.
-- Agent-led setup: `slack_bot_connect(file?)` AI tool and
+- Agent-led setup: `slack_bot_connect(file?)`, `slack_bot_setup(capabilities?)`,
+  and
   `connections_status` coverage, so the chat can run the whole
   conversation: "create the app from this manifest, install it, give me
-  the token file path." Routine authoring is already conversational via
-  `routine.create`.
+  the token file path, pick the bot capabilities." Routine authoring is already
+  conversational via `routine.create`.
 - Channel ids resolve to names in diagnostics and Settings via the
   existing `slack.channels`.
 - Docs: `integrations.md` listener section, `security.md` pinned-reply

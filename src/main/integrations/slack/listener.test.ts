@@ -9,6 +9,7 @@ import {
   slackRoutineBindings,
   type SlackWebSocketLike,
 } from './listener.js'
+import { createMemorySlackThreadSessionStore } from './threadSessions.js'
 
 function routine(id: string, channel: string, mode: 'mention' | 'always' = 'mention'): RoutineDefinition {
   return {
@@ -25,16 +26,15 @@ function routine(id: string, channel: string, mode: 'mention' | 'always' = 'ment
     approvalAllow: [],
     body: 'Answer.',
     authorityHash: 'hash',
-    enabled: true,
-    paused: false,
-    needsEnablement: false,
+    revision: 'revision',
+    activation: 'active',
   }
 }
 
 describe('Slack routine listener foundations', () => {
   it('extracts Slack routine bindings from enabled routines only', () => {
     const enabled = routine('support-bot', 'C1')
-    const disabled = { ...routine('paused-bot', 'C2'), enabled: false }
+    const disabled = { ...routine('paused-bot', 'C2'), activation: 'disabled' as const }
 
     expect(slackRoutineBindings([enabled, disabled])).toEqual([
       expect.objectContaining({
@@ -216,6 +216,39 @@ describe('Slack routine listener foundations', () => {
       text: 'help',
     })).resolves.toMatchObject({ status: 'queued', routineId: 'support-bot' })
   })
+
+  it('routes unmentioned replies inside an active mention-mode Slack thread', async () => {
+    const onFire = vi.fn(async () => {})
+    const hasActiveThread = vi.fn(() => true)
+    const dispatcher = createSlackRoutineDispatcher({
+      ledger: createMemorySlackEventLedger(),
+      botUserId: 'U_BOT',
+      getRoutines: () => [routine('support-bot', 'C1')],
+      hasActiveThread,
+      onFire,
+    })
+
+    await expect(dispatcher.handleMessage({
+      eventId: 'EvThreadReply',
+      account: 'default',
+      teamId: 'T1',
+      type: 'message',
+      channel: 'C1',
+      ts: '100.2',
+      threadTs: '100.1',
+      user: 'U_USER',
+      text: 'continue without a mention',
+    })).resolves.toMatchObject({ status: 'queued', routineId: 'support-bot' })
+
+    expect(hasActiveThread).toHaveBeenCalledWith({
+      account: 'default',
+      teamId: 'T1',
+      channel: 'C1',
+      threadTs: '100.1',
+      routineId: 'support-bot',
+    })
+    expect(onFire).toHaveBeenCalledOnce()
+  })
 })
 
 class FakeSocket extends EventEmitter implements SlackWebSocketLike {
@@ -252,6 +285,7 @@ describe('Slack Socket Mode listener', () => {
       getWorkspacePath: () => '/workspace',
       getRoutines: () => [routine('support-bot', 'C1')],
       createLedger: () => ledger,
+      createThreadSessionStore: () => createMemorySlackThreadSessionStore(),
       slack,
       runRoutine,
       getSessionReplyText: vi.fn(async () => 'Here is the answer.'),
@@ -380,5 +414,101 @@ describe('Slack Socket Mode listener', () => {
     await flush()
 
     expect(ledger.get('Ev1')).toMatchObject({ status: 'error', reason: 'model unavailable' })
+  })
+
+  it('continues follow-up Slack thread replies in the same Mim routine session', async () => {
+    const socket = new FakeSocket()
+    const ledger = createMemorySlackEventLedger()
+    const threadSessions = createMemorySlackThreadSessionStore()
+    const startRoutine = vi.fn(async () => ({
+      result: { sessionId: 'session_thread', routineRunId: 'rr1', status: 'working' },
+      completion: Promise.resolve({ sessionId: 'session_thread', routineRunId: 'rr1', status: 'done' }),
+    }))
+    const continueRoutine = vi.fn(async () => ({
+      sessionId: 'session_thread',
+      routineRunId: 'rr2',
+      status: 'done',
+    }))
+    const runRoutine = vi.fn(async () => ({ sessionId: 'new_session', routineRunId: 'rr_unused', status: 'done' as const }))
+    const listener = createSlackSocketModeListener({
+      getWorkspacePath: () => '/workspace',
+      getRoutines: () => [routine('support-bot', 'C1')],
+      createLedger: () => ledger,
+      createThreadSessionStore: () => threadSessions,
+      slack: {
+        hasBotTokens: vi.fn(async () => ({ configured: true, botTokenConfigured: true, appTokenConfigured: true })),
+        botAuthTest: vi.fn(async () => ({ user_id: 'U_BOT', team_id: 'T1' })),
+        connectionsOpen: vi.fn(async () => 'wss://slack.example/socket'),
+        botPostThreadReply: vi.fn(async () => ({ ok: true })),
+      },
+      runRoutine,
+      startRoutine,
+      continueRoutine,
+      getSessionReplyText: vi.fn(async () => 'Thread answer.'),
+      socketFactory: vi.fn(() => socket),
+    })
+
+    await listener.refresh()
+    socket.emit('open')
+    socket.emit('message', JSON.stringify({
+      envelope_id: 'En1',
+      type: 'events_api',
+      payload: {
+        event_id: 'Ev1',
+        team_id: 'T1',
+        event: {
+          type: 'app_mention',
+          channel: 'C1',
+          ts: '100.1',
+          user: 'U_USER',
+          text: '<@U_BOT> start',
+        },
+      },
+    }))
+    await flush()
+
+    socket.emit('message', JSON.stringify({
+      envelope_id: 'En2',
+      type: 'events_api',
+      payload: {
+        event_id: 'Ev2',
+        team_id: 'T1',
+        event: {
+          type: 'message',
+          channel: 'C1',
+          ts: '100.2',
+          thread_ts: '100.1',
+          user: 'U_USER',
+          text: 'follow up without tagging the bot',
+        },
+      },
+    }))
+    await flush()
+
+    expect(startRoutine).toHaveBeenCalledOnce()
+    expect(continueRoutine).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'support-bot' }),
+      expect.objectContaining({
+        trigger: 'slack',
+        payload: expect.objectContaining({
+          slack: expect.objectContaining({ threadTs: '100.1' }),
+          text: 'follow up without tagging the bot',
+        }),
+      }),
+      expect.objectContaining({ sessionId: 'session_thread' }),
+    )
+    expect(runRoutine).not.toHaveBeenCalled()
+    expect(threadSessions.get({
+      account: 'default',
+      teamId: 'T1',
+      channel: 'C1',
+      threadTs: '100.1',
+      routineId: 'support-bot',
+    })).toMatchObject({
+      sessionId: 'session_thread',
+      routineId: 'support-bot',
+      lastEventTs: '100.2',
+      lastRoutineRunId: 'rr2',
+    })
   })
 })

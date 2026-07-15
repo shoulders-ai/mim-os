@@ -7,7 +7,7 @@ import { loadUserConfig } from '@main/userConfig.js'
 import { parseMimYaml } from '@main/workspace/workspaceContract.js'
 import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
 import type { IntegrationMcpState } from '@main/integrations/mcpState.js'
-import { loadRoutineCatalog, resumeRoutine, routineSlackTrigger, type RoutineDefinition, type RoutineSlackTriggerMode } from '@main/routines/routines.js'
+import { enableRoutine, loadRoutineCatalog, routineSlackTrigger, type RoutineDefinition, type RoutineSlackTriggerMode } from '@main/routines/routines.js'
 import { SlackIntegration, type SlackBotTokens } from './client.js'
 import { readSlackPolicy } from './policy.js'
 import type { SlackListenerStatus } from './listener.js'
@@ -58,6 +58,42 @@ export type { IntegrationMcpState } from '@main/integrations/mcpState.js'
 const DEFAULT_BOT_ACCOUNT = 'bot'
 const DEFAULT_BOT_ROUTINE = 'channel-bot'
 const DEFAULT_BOT_TOOLS = ['fs.read', 'search.files']
+const DEFAULT_BOT_CAPABILITIES = ['workspace_read'] as const
+const SLACK_BOT_CAPABILITY_CONFIG = {
+  workspace_read: {
+    tools: ['fs.read', 'search.files'],
+    approvalAllow: ['fs.read', 'search.files'],
+  },
+  sessions_read: {
+    tools: ['search.sessions', 'session.list', 'session.get'],
+    approvalAllow: ['search.sessions', 'session.list', 'session.get'],
+  },
+  issues_read: {
+    tools: ['issues.list', 'issues.get'],
+    approvalAllow: ['issues.list', 'issues.get'],
+  },
+  issues_write: {
+    tools: ['issues.list', 'issues.get', 'issues.create', 'issues.update'],
+    approvalAllow: ['issues.list', 'issues.get'],
+  },
+  files_write: {
+    tools: ['fs.read', 'search.files', 'fs.write', 'fs.edit', 'fs.create'],
+    approvalAllow: ['fs.read', 'search.files'],
+  },
+  slack_read: {
+    tools: ['slack.channels', 'slack.history', 'slack.replies', 'slack.search', 'slack.users'],
+    approvalAllow: ['slack.channels', 'slack.history', 'slack.replies', 'slack.search', 'slack.users'],
+  },
+  slack_send: {
+    tools: ['slack.send'],
+    approvalAllow: [],
+  },
+  terminal: {
+    tools: ['shell.run'],
+    approvalAllow: [],
+  },
+} as const
+type SlackBotCapability = keyof typeof SLACK_BOT_CAPABILITY_CONFIG
 const DEFAULT_BOT_PROMPT = [
   'Answer Slack questions using this workspace as your source of truth.',
   '',
@@ -340,6 +376,10 @@ export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}
       name: { type: 'string' },
       description: { type: 'string' },
       body: { type: 'string' },
+      capabilities: {
+        type: 'array',
+        items: { type: 'string', enum: Object.keys(SLACK_BOT_CAPABILITY_CONFIG) },
+      },
       tools: { type: 'array', items: { type: 'string' } },
       approvalAllow: { type: 'array', items: { type: 'string' } },
     }, ['channel']),
@@ -350,6 +390,7 @@ export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}
       const credentials = tokens
         ? await connectSlackBot(slack, account, tokens)
         : await slackBotCredentialStatus(slack, account)
+      const capabilityPlan = resolveSlackBotCapabilityPlan(params)
       const routine = writeSlackBotRoutine(workspace, {
         account,
         channel: requireString(params, 'channel'),
@@ -357,22 +398,25 @@ export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}
         name: optionalString(params.name) ?? DEFAULT_BOT_ROUTINE,
         description: optionalString(params.description) ?? 'Answer mentions in my Slack channel.',
         body: optionalString(params.body) ?? DEFAULT_BOT_PROMPT,
-        tools: optionalStringArray(params.tools) ?? DEFAULT_BOT_TOOLS,
-        approvalAllow: optionalStringArray(params.approvalAllow),
+        tools: capabilityPlan.tools,
+        approvalAllow: capabilityPlan.approvalAllow,
       })
       await deps.listener?.refresh()
-      return slackBotReadiness({
-        account,
-        routine,
-        credentials,
-        listener: deps.listener?.status(),
-      })
+      return {
+        ...slackBotReadiness({
+          account,
+          routine,
+          credentials,
+          listener: deps.listener?.status(),
+        }),
+        capabilities: capabilityPlan.capabilities,
+      }
     },
   })
 
   tools.register({
     name: 'slack.bot.check',
-    description: 'Return one workspace Slack bot readiness checklist: routine binding, local enablement, credentials, and live listener availability.',
+    description: 'Return one workspace Slack bot readiness checklist: routine binding, activation, credentials, and live listener availability.',
     inputSchema: objectSchema({
       account: { type: 'string' },
       channel: { type: 'string' },
@@ -556,6 +600,36 @@ interface SlackBotRoutineInput {
   approvalAllow?: string[]
 }
 
+interface SlackBotCapabilityPlan {
+  capabilities: SlackBotCapability[]
+  tools: string[]
+  approvalAllow: string[]
+}
+
+function resolveSlackBotCapabilityPlan(params: Record<string, unknown>): SlackBotCapabilityPlan {
+  const explicitTools = optionalStringArray(params.tools)
+  const explicitApprovalAllow = optionalStringArray(params.approvalAllow)
+  const requestedCapabilities = optionalSlackBotCapabilities(params.capabilities)
+  const capabilities = requestedCapabilities ?? (explicitTools ? [] : [...DEFAULT_BOT_CAPABILITIES])
+  const mappedTools = unique(capabilities.flatMap(capability => SLACK_BOT_CAPABILITY_CONFIG[capability].tools))
+  const mappedApprovalAllow = unique(capabilities.flatMap(capability =>
+    SLACK_BOT_CAPABILITY_CONFIG[capability].approvalAllow))
+  return {
+    capabilities,
+    tools: explicitTools ?? (mappedTools.length ? mappedTools : DEFAULT_BOT_TOOLS),
+    approvalAllow: explicitApprovalAllow ?? (explicitTools ? explicitTools : mappedApprovalAllow),
+  }
+}
+
+function optionalSlackBotCapabilities(value: unknown): SlackBotCapability[] | undefined {
+  if (value === undefined) return undefined
+  const raw = optionalStringArray(value)
+  const valid = new Set(Object.keys(SLACK_BOT_CAPABILITY_CONFIG))
+  const invalid = raw.filter(item => !valid.has(item))
+  if (invalid.length) throw new Error(`Unknown Slack bot capability: ${invalid.join(', ')}`)
+  return raw as SlackBotCapability[]
+}
+
 function writeSlackBotRoutine(workspace: string, input: SlackBotRoutineInput): RoutineDefinition {
   const name = routineName(input.name)
   const channel = input.channel.trim()
@@ -589,7 +663,7 @@ function writeSlackBotRoutine(workspace: string, input: SlackBotRoutineInput): R
     }
     throw new Error(`Slack bot routine could not be written: ${name}`)
   }
-  resumeRoutine(workspace, routine)
+  enableRoutine(workspace, routine)
   return loadRoutineCatalog(workspace).routines.find(item => item.id === name) ?? routine
 }
 
@@ -618,7 +692,7 @@ function slackBotReadiness(input: {
 }): Record<string, unknown> {
   const trigger = input.routine ? routineSlackTrigger(input.routine) : null
   const channel = trigger?.channels[0]
-  const routineReady = Boolean(input.routine?.enabled && !input.routine.paused && !input.routine.needsEnablement)
+  const routineReady = input.routine?.activation === 'active'
   const credentialsReady = input.credentials.configured === true && !input.credentials.error
   const listener = slackBotListenerReadiness(input.account, input.listener)
   const listenerReady = listener.implemented === true && listener.connected === true
@@ -639,9 +713,7 @@ function slackBotReadiness(input: {
           exists: true,
           id: input.routine.id,
           path: input.routine.path,
-          enabled: input.routine.enabled,
-          paused: input.routine.paused,
-          needsEnablement: input.routine.needsEnablement,
+          activation: input.routine.activation,
           ...(trigger ? { account: trigger.account } : {}),
           ...(channel ? { channel: channel.id, mode: channel.mode } : {}),
         }
@@ -673,7 +745,7 @@ function slackBotListenerReadiness(account: string, status?: SlackListenerStatus
       connected: false,
       status: 'stopped',
       account,
-      message: 'No enabled Slack routine is currently bound to this account.',
+      message: 'No active Slack routine is currently bound to this account.',
     }
   }
   return {
@@ -717,6 +789,10 @@ function optionalStringArray(value: unknown): string[] | undefined {
     .filter(Boolean)
   if (strings.length !== value.length) throw new Error('Expected a string list')
   return [...new Set(strings)]
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values)]
 }
 
 function requireWorkspace(tools: ToolRegistry): string {

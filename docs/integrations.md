@@ -52,7 +52,7 @@ Source:
 - Tools: `src/main/integrations/slack/tools.ts`
 - AI tools: `src/main/integrations/slack/aiTools.ts`
 - Policy: `src/main/integrations/slack/policy.ts`
-- Tests: `src/main/integrations/slack/client.test.ts`, `src/main/integrations/slack/listener.test.ts`, `src/main/integrations/slack/tools.test.ts`, `src/main/integrations/slack/aiTools.test.ts`, `src/main/integrations/slack/policy.test.ts`
+- Tests: `src/main/integrations/slack/client.test.ts`, `src/main/integrations/slack/listener.test.ts`, `src/main/integrations/slack/threadSessions.test.ts`, `src/main/integrations/slack/tools.test.ts`, `src/main/integrations/slack/aiTools.test.ts`, `src/main/integrations/slack/policy.test.ts`
 - Settings UI: `src/renderer/components/settings/ConnectionsSettingsPanel.vue`
 
 Tools:
@@ -70,17 +70,27 @@ Tools:
 the bot token and app-level Socket Mode token, verifies the bot with
 `auth.test`, verifies Socket Mode with `apps.connections.open`, and never
 returns the websocket URL. The desktop runtime owns the live Socket Mode
-listener: it opens one websocket per enabled Slack routine account, acknowledges
+listener: it opens one websocket per active Slack routine account, acknowledges
 event envelopes after metadata is recorded locally, dispatches matching Slack
 messages into the routine runner, and posts the assistant's final response back
-to the Slack thread as the bot.
+to the Slack thread as the bot. Mention-mode Slack routines activate a durable
+Mim session for the Slack thread; later replies in that same thread continue the
+session without requiring another bot mention. The thread-to-session routing
+metadata lives under `.mim/slack/thread-sessions.json` and does not store Slack
+message text.
 
 For user-facing bot setup, prefer `slack.bot.setup`. It accepts the channel,
-optional credential file/token fields, optional account, mode, and prompt body;
-then creates or updates the Slack routine, enables it locally, verifies
+optional credential file/token fields, optional account, mode, prompt body, and
+capability groups. Capability groups are product-level names such as
+`workspace_read`, `sessions_read`, `issues_read`, `issues_write`,
+`files_write`, `slack_read`, `slack_send`, and `terminal`; setup maps them to
+routine `tools` plus unattended `approval.allow` grants. Read capabilities are
+auto-granted, while consequential write/send/terminal capabilities are present
+for the routine but still require live approval unless explicitly granted. The
+tool creates or updates the Slack routine, enables it locally, verifies
 credentials when provided, and returns a readiness checklist. `slack.bot.check`
 is the diagnostic surface for agents and Settings: it reports routine binding,
-local enablement, credentials, and live listener state without inspecting
+activation state, credentials, and live listener state without inspecting
 workspace runtime files.
 
 ### Tool Policy

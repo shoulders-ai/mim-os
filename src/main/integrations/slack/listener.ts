@@ -1,6 +1,12 @@
 import type { RoutineDefinition } from '@main/routines/routines.js'
 import { routineSlackTrigger, type RoutineSlackTriggerMode } from '@main/routines/routines.js'
 import { createSlackEventLedger, type SlackEventLedger } from './eventLedger.js'
+import {
+  createSlackThreadSessionStore,
+  type SlackThreadSessionLookup,
+  type SlackThreadSessionRecord,
+  type SlackThreadSessionStore,
+} from './threadSessions.js'
 import { WebSocket } from 'ws'
 
 export interface SlackRoutineBinding {
@@ -41,6 +47,17 @@ export interface SlackRoutineFire {
   }
 }
 
+export interface SlackRoutineRunResult {
+  sessionId: string
+  routineRunId: string
+  status: string
+}
+
+export interface SlackStartedRoutineRun {
+  result: SlackRoutineRunResult
+  completion: Promise<SlackRoutineRunResult>
+}
+
 export type SlackDispatchResult =
   | { status: 'duplicate'; eventId: string }
   | { status: 'ignored'; eventId: string; reason: string }
@@ -50,6 +67,7 @@ export interface SlackRoutineDispatcherOptions {
   ledger: SlackEventLedger
   botUserId: string
   getRoutines: () => RoutineDefinition[]
+  hasActiveThread?: (thread: SlackThreadSessionLookup) => boolean
   acknowledge?: (eventId: string) => void
   onFire?: (fire: SlackRoutineFire) => Promise<void> | void
 }
@@ -82,10 +100,20 @@ export interface SlackSocketModeListenerOptions {
   runRoutine(
     routine: RoutineDefinition,
     context: { trigger: 'slack'; payload: Record<string, unknown> },
-  ): Promise<{ sessionId: string; routineRunId: string; status: string }>
+  ): Promise<SlackRoutineRunResult>
+  startRoutine?(
+    routine: RoutineDefinition,
+    context: { trigger: 'slack'; payload: Record<string, unknown> },
+  ): Promise<SlackStartedRoutineRun>
+  continueRoutine?(
+    routine: RoutineDefinition,
+    context: { trigger: 'slack'; payload: Record<string, unknown> },
+    thread: SlackThreadSessionRecord,
+  ): Promise<SlackRoutineRunResult>
   getSessionReplyText(sessionId: string): Promise<string | null>
   slack: SlackListenerSlackClient
   createLedger?: (workspacePath: string) => SlackEventLedger
+  createThreadSessionStore?: (workspacePath: string) => SlackThreadSessionStore
   socketFactory?: (url: string) => SlackWebSocketLike
   reconnectDelayMs?: (attempt: number) => number
   trace?: {
@@ -126,6 +154,7 @@ interface SlackAccountRuntime extends SlackListenerAccountStatus {
   desired: boolean
   socket?: SlackWebSocketLike
   ledger?: SlackEventLedger
+  threadSessions?: SlackThreadSessionStore
   reconnectTimer?: ReturnType<typeof setTimeout>
 }
 
@@ -143,7 +172,7 @@ const MAX_REPLY_CHARS = 3_500
 export function slackRoutineBindings(routines: RoutineDefinition[]): SlackRoutineBinding[] {
   const bindings: SlackRoutineBinding[] = []
   for (const routine of routines) {
-    if (!routine.enabled) continue
+    if (routine.activation !== 'active') continue
     const slack = routineSlackTrigger(routine)
     if (!slack) continue
     for (const channel of slack.channels) {
@@ -194,6 +223,7 @@ export function createSlackRoutineDispatcher(options: SlackRoutineDispatcherOpti
         slackRoutineBindings(options.getRoutines()),
         event,
         options.botUserId,
+        options.hasActiveThread,
       )
       if (!binding) {
         options.ledger.updateStatus(event.eventId, 'ignored', { reason: 'no-binding' })
@@ -225,6 +255,7 @@ export function createSlackRoutineDispatcher(options: SlackRoutineDispatcherOpti
 
 export function createSlackSocketModeListener(options: SlackSocketModeListenerOptions) {
   const createLedger = options.createLedger ?? createSlackEventLedger
+  const createThreadSessionStore = options.createThreadSessionStore ?? createSlackThreadSessionStore
   const socketFactory = options.socketFactory ?? ((url: string) => new WebSocket(url) as SlackWebSocketLike)
   const reconnectDelayMs = options.reconnectDelayMs ?? ((attempt: number) =>
     Math.min(DEFAULT_RECONNECT_DELAY_MS * Math.max(1, attempt), 30_000))
@@ -255,7 +286,14 @@ export function createSlackSocketModeListener(options: SlackSocketModeListenerOp
 
   function status(): SlackListenerStatus {
     const accountStatuses = [...accounts.values()]
-      .map(({ socket: _socket, ledger: _ledger, reconnectTimer: _timer, desired: _desired, ...item }) => ({ ...item }))
+      .map(({
+        socket: _socket,
+        ledger: _ledger,
+        threadSessions: _threadSessions,
+        reconnectTimer: _timer,
+        desired: _desired,
+        ...item
+      }) => ({ ...item }))
       .sort((a, b) => a.account.localeCompare(b.account))
     return {
       implemented: true,
@@ -273,6 +311,7 @@ export function createSlackSocketModeListener(options: SlackSocketModeListenerOp
     runtime.lastStartedAt = now()
     runtime.lastError = undefined
     runtime.ledger = createLedger(workspace)
+    runtime.threadSessions = createThreadSessionStore(workspace)
 
     try {
       const credentialStatus = await options.slack.hasBotTokens(runtime.account)
@@ -359,6 +398,7 @@ export function createSlackSocketModeListener(options: SlackSocketModeListenerOp
       ledger: runtime.ledger,
       botUserId: runtime.botUserId,
       getRoutines: options.getRoutines,
+      hasActiveThread: thread => Boolean(runtime.threadSessions?.get(thread)),
       acknowledge: () => {
         if (message.envelope_id) acknowledge(runtime, message.envelope_id)
       },
@@ -376,9 +416,24 @@ export function createSlackSocketModeListener(options: SlackSocketModeListenerOp
 
   async function processFire(runtime: SlackAccountRuntime, fire: SlackRoutineFire): Promise<void> {
     try {
-      const result = await options.runRoutine(fire.routine, {
-        trigger: 'slack',
-        payload: fire.input,
+      const threadLookup = slackThreadLookup(fire)
+      const existingThread = runtime.threadSessions?.get(threadLookup) ?? null
+      const context = {
+        trigger: 'slack' as const,
+        payload: {
+          ...fire.input,
+          slack: {
+            ...fire.input.slack,
+            ...(existingThread ? { threadSessionId: existingThread.sessionId } : {}),
+          },
+        },
+      }
+      const result = await runFireRoutine(runtime, fire, context, existingThread)
+      runtime.threadSessions?.upsert({
+        ...threadLookup,
+        sessionId: result.sessionId,
+        lastEventTs: fire.input.slack.ts,
+        lastRoutineRunId: result.routineRunId,
       })
       const reply = await safeSessionReply(result.sessionId)
       await options.slack.botPostThreadReply({
@@ -392,6 +447,7 @@ export function createSlackSocketModeListener(options: SlackSocketModeListenerOp
         routineId: fire.routine.id,
         routineRunId: result.routineRunId,
         sessionId: result.sessionId,
+        threadSessionReused: Boolean(existingThread),
       })
     } catch (err) {
       const message = errorMessage(err)
@@ -405,6 +461,30 @@ export function createSlackSocketModeListener(options: SlackSocketModeListenerOp
       }).catch(() => {})
       throw err
     }
+  }
+
+  async function runFireRoutine(
+    runtime: SlackAccountRuntime,
+    fire: SlackRoutineFire,
+    context: { trigger: 'slack'; payload: Record<string, unknown> },
+    existingThread: SlackThreadSessionRecord | null,
+  ): Promise<SlackRoutineRunResult> {
+    if (existingThread && options.continueRoutine) {
+      return options.continueRoutine(fire.routine, context, existingThread)
+    }
+
+    if (!existingThread && options.startRoutine) {
+      const started = await options.startRoutine(fire.routine, context)
+      runtime.threadSessions?.upsert({
+        ...slackThreadLookup(fire),
+        sessionId: started.result.sessionId,
+        lastEventTs: fire.input.slack.ts,
+        lastRoutineRunId: started.result.routineRunId,
+      })
+      return started.completion
+    }
+
+    return options.runRoutine(fire.routine, context)
   }
 
   async function safeSessionReply(sessionId: string): Promise<string> {
@@ -439,6 +519,7 @@ export function createSlackSocketModeListener(options: SlackSocketModeListenerOp
     clearReconnect(runtime)
     try { runtime.socket?.close() } catch { /* best effort */ }
     runtime.socket = undefined
+    runtime.threadSessions = undefined
     runtime.connected = false
     runtime.state = 'stopped'
     accounts.delete(account)
@@ -481,16 +562,36 @@ export function createSlackSocketModeListener(options: SlackSocketModeListenerOp
 
 export function resolveSlackRoutineBinding(
   bindings: SlackRoutineBinding[],
-  event: Pick<SlackMessageEvent, 'account' | 'channel' | 'type' | 'text'>,
+  event: Pick<SlackMessageEvent, 'account' | 'teamId' | 'channel' | 'type' | 'ts' | 'threadTs' | 'text'>,
   botUserId: string,
+  hasActiveThread?: (thread: SlackThreadSessionLookup) => boolean,
 ): SlackRoutineBinding | null {
   for (const binding of bindings) {
     if (binding.account !== event.account) continue
     if (binding.channelId !== event.channel) continue
     if (binding.mode === 'always') return binding
     if (event.type === 'app_mention' || messageMentionsBot(event.text, botUserId)) return binding
+    if (event.threadTs && hasActiveThread?.({
+      account: binding.account,
+      teamId: event.teamId,
+      channel: event.channel,
+      threadTs: event.threadTs,
+      routineId: binding.routine.id,
+    })) {
+      return binding
+    }
   }
   return null
+}
+
+function slackThreadLookup(fire: SlackRoutineFire): SlackThreadSessionLookup {
+  return {
+    account: fire.binding.account,
+    teamId: fire.input.slack.teamId,
+    channel: fire.input.slack.channel,
+    threadTs: fire.input.slack.threadTs,
+    routineId: fire.routine.id,
+  }
 }
 
 function isBotMessage(event: SlackMessageEvent, botUserId: string): boolean {
