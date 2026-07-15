@@ -1,10 +1,11 @@
-import { createHash } from 'crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'fs'
+import { createHash, randomBytes } from 'crypto'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { basename, join } from 'path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { atomicWriteJson } from '@main/atomicJson.js'
 
 export type RoutineRunStatus = 'working' | 'needs-approval' | 'done' | 'error' | 'stopped'
+export type RoutineActivation = 'manual' | 'active' | 'disabled' | 'review-required'
 export type RoutineSlackTriggerMode = 'mention' | 'always'
 export type RoutineFileTriggerEvent = 'add' | 'change' | 'unlink'
 
@@ -44,9 +45,8 @@ export interface RoutineDefinition {
   missed?: 'skip' | 'once'
   body: string
   authorityHash: string
-  enabled: boolean
-  paused: boolean
-  needsEnablement: boolean
+  revision: string
+  activation: RoutineActivation
   nextRunAt?: string
   lastRunId?: string
   lastSuccessAt?: string
@@ -91,6 +91,10 @@ export interface CreateRoutineInput {
   knownTools?: Set<string>
 }
 
+export interface UpdateRoutineInput extends CreateRoutineInput {
+  expectedRevision: string
+}
+
 export interface ParsedRoutine {
   id: string
   path: string
@@ -105,11 +109,11 @@ export interface ParsedRoutine {
   missed?: 'skip' | 'once'
   body: string
   authorityHash: string
+  revision: string
 }
 
 export interface RoutineState {
   enabled?: boolean
-  paused?: boolean
   authorityHash?: string
   updatedAt?: string
   nextRunAt?: string
@@ -123,6 +127,7 @@ export interface RoutineSchedulerState {
 }
 
 export interface RoutineStateFile {
+  version: 2
   routines?: Record<string, RoutineState>
   scheduler?: RoutineSchedulerState
   webhookDeliveries?: Record<string, string>
@@ -236,6 +241,7 @@ export function parseRoutineDefinition(path: string, content: string): ParsedRou
     approvalAllow,
     body: prompt,
     authorityHash: '',
+    revision: routineRevision(content),
   }
   if (description) parsed.description = description
   if (trigger) parsed.trigger = trigger
@@ -257,19 +263,8 @@ export function createRoutineFile(workspacePath: string, input: CreateRoutineInp
   const path = join(routinesDir, `${name}.md`)
   if (existsSync(path)) throw new Error(`Routine already exists: ${name}`)
 
-  const approvalAllow = input.approvalAllow ?? input.approval?.allow ?? []
-  const frontmatter: Record<string, unknown> = { name }
-  if (input.description) frontmatter.description = input.description
-  if (input.trigger) frontmatter.trigger = input.trigger
-  if (input.agent) frontmatter.agent = input.agent
-  if (input.model) frontmatter.model = input.model
-  if (input.tools?.length) frontmatter.tools = input.tools
-  if (approvalAllow.length) frontmatter.approval = { allow: approvalAllow }
-  if (input.steps !== undefined) frontmatter.steps = input.steps
-  if (input.missed) frontmatter.missed = input.missed
-
   mkdirSync(routinesDir, { recursive: true })
-  const content = `---\n${stringifyYaml(frontmatter).trimEnd()}\n---\n\n${body.trim()}\n`
+  const content = serializeRoutineDefinition({ ...input, name, body })
   writeFileSync(path, content)
 
   const catalog = loadRoutineCatalog(workspacePath, { knownTools: input.knownTools })
@@ -284,28 +279,105 @@ export function createRoutineFile(workspacePath: string, input: CreateRoutineInp
   return created
 }
 
-export function resumeRoutine(workspacePath: string, routine: Pick<RoutineDefinition, 'id' | 'authorityHash'>): void {
+export function updateRoutineFile(workspacePath: string, input: UpdateRoutineInput): RoutineDefinition {
+  const name = requiredString(input.name, 'name')
+  const path = join(workspacePath, 'routines', `${name}.md`)
+  if (!existsSync(path)) throw new Error(`Routine not found: ${name}`)
+
+  const previous = readFileSync(path, 'utf-8')
+  if (routineRevision(previous) !== requiredString(input.expectedRevision, 'expectedRevision')) {
+    throw new Error(`Routine changed since it was opened: ${name}`)
+  }
+  const previousDefinition = parseRoutineDefinition(`routines/${name}.md`, previous)
+
+  const content = serializeRoutineDefinition(input)
+  const parsed = parseRoutineDefinition(`routines/${name}.md`, content)
+  if (parsed.name !== name) throw new Error(`Routine name must match filename: ${name}`)
+  const diagnostics = validateRoutine(parsed, input.knownTools)
+  if (diagnostics.length) throw new Error(diagnostics[0])
+
+  atomicWriteText(path, content)
+  const catalog = loadRoutineCatalog(workspacePath, { knownTools: input.knownTools })
+  const updated = catalog.routines.find(routine => routine.id === name)
+  if (!updated) {
+    atomicWriteText(path, previous)
+    const message = catalog.diagnostics.find(item => item.routineId === name)?.message
+    throw new Error(message ?? `Routine could not be updated: ${name}`)
+  }
+  if (previousDefinition.authorityHash !== parsed.authorityHash && invalidateRoutineActivation(workspacePath, name)) {
+    return loadRoutineCatalog(workspacePath, { knownTools: input.knownTools }).routines.find(routine => routine.id === name) ?? updated
+  }
+  return updated
+}
+
+export function duplicateRoutineFile(
+  workspacePath: string,
+  source: RoutineDefinition,
+  name: string,
+  knownTools?: Set<string>,
+): RoutineDefinition {
+  return createRoutineFile(workspacePath, {
+    name,
+    description: source.description,
+    trigger: source.trigger,
+    agent: source.agent,
+    model: source.model,
+    tools: source.tools,
+    approvalAllow: source.approvalAllow,
+    steps: source.steps,
+    missed: source.missed,
+    body: source.body,
+    knownTools,
+  })
+}
+
+export function enableRoutine(workspacePath: string, routine: Pick<RoutineDefinition, 'id' | 'authorityHash' | 'trigger'>): void {
+  if (!isAutomaticRoutine(routine)) throw new Error(`Manual routines do not have automatic runs: ${routine.id}`)
   const state = readRoutineState(workspacePath)
   state.routines ??= {}
   state.routines[routine.id] = {
     ...(state.routines[routine.id] ?? {}),
     enabled: true,
-    paused: false,
     authorityHash: routine.authorityHash,
     updatedAt: new Date().toISOString(),
   }
   writeRoutineState(workspacePath, state)
 }
 
-export function pauseRoutine(workspacePath: string, routineId: string): void {
+export function disableRoutine(workspacePath: string, routine: Pick<RoutineDefinition, 'id' | 'trigger'>): void {
+  if (!isAutomaticRoutine(routine)) throw new Error(`Manual routines do not have automatic runs: ${routine.id}`)
   const state = readRoutineState(workspacePath)
   state.routines ??= {}
-  state.routines[routineId] = {
-    ...(state.routines[routineId] ?? {}),
-    paused: true,
+  state.routines[routine.id] = {
+    ...(state.routines[routine.id] ?? {}),
+    enabled: false,
     updatedAt: new Date().toISOString(),
   }
   writeRoutineState(workspacePath, state)
+}
+
+export function removeRoutineState(workspacePath: string, routineId: string): void {
+  const state = readRoutineState(workspacePath)
+  if (!state.routines?.[routineId]) return
+  delete state.routines[routineId]
+  writeRoutineState(workspacePath, state)
+}
+
+function invalidateRoutineActivation(workspacePath: string, routineId: string): boolean {
+  const state = readRoutineState(workspacePath)
+  const existing = state.routines?.[routineId]
+  if (existing?.enabled !== true) return false
+  state.routines![routineId] = {
+    ...existing,
+    enabled: false,
+    updatedAt: new Date().toISOString(),
+  }
+  writeRoutineState(workspacePath, state)
+  return true
+}
+
+export function isAutomaticRoutine(routine: Pick<ParsedRoutine, 'trigger'>): boolean {
+  return ROUTINE_TRIGGER_KINDS.some(kind => routine.trigger?.[kind] !== undefined)
 }
 
 export function recordRoutineAutomationState(
@@ -360,13 +432,16 @@ export function routineScheduleExpression(routine: Pick<RoutineDefinition, 'trig
 }
 
 function applyRoutineState(routine: ParsedRoutine, state: RoutineState | undefined): RoutineDefinition {
-  const needsEnablement = state?.enabled !== true || state.authorityHash !== routine.authorityHash
-  const paused = state?.paused === true
+  const activation: RoutineActivation = !isAutomaticRoutine(routine)
+    ? 'manual'
+    : state?.authorityHash !== routine.authorityHash
+      ? 'review-required'
+      : state.enabled === true
+        ? 'active'
+        : 'disabled'
   return {
     ...routine,
-    enabled: state?.enabled === true && !paused && !needsEnablement,
-    paused,
-    needsEnablement,
+    activation,
     ...(state?.nextRunAt ? { nextRunAt: state.nextRunAt } : {}),
     ...(state?.lastRunId ? { lastRunId: state.lastRunId } : {}),
     ...(state?.lastSuccessAt ? { lastSuccessAt: state.lastSuccessAt } : {}),
@@ -634,20 +709,22 @@ function optionalEnum<T extends string>(value: unknown, key: string, allowed: re
 
 export function readRoutineState(workspacePath: string): RoutineStateFile {
   const path = join(workspacePath, STATE_PATH)
-  if (!existsSync(path)) return { routines: {} }
+  if (!existsSync(path)) return { version: 2, routines: {} }
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { routines: {} }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { version: 2, routines: {} }
     const state = parsed as RoutineStateFile
+    if (state.version !== 2) return { version: 2, routines: {} }
     const routines = state.routines
-    if (!routines || typeof routines !== 'object' || Array.isArray(routines)) return { routines: {} }
+    if (!routines || typeof routines !== 'object' || Array.isArray(routines)) return { version: 2, routines: {} }
     return {
+      version: 2,
       routines,
       ...(state.scheduler && typeof state.scheduler === 'object' && !Array.isArray(state.scheduler) ? { scheduler: state.scheduler } : {}),
       ...(state.webhookDeliveries && typeof state.webhookDeliveries === 'object' && !Array.isArray(state.webhookDeliveries) ? { webhookDeliveries: state.webhookDeliveries } : {}),
     }
   } catch {
-    return { routines: {} }
+    return { version: 2, routines: {} }
   }
 }
 
@@ -668,6 +745,37 @@ function routineAuthorityHash(routine: Pick<ParsedRoutine, 'trigger' | 'agent' |
     missed: routine.missed ?? null,
   }
   return createHash('sha256').update(stableStringify(authority)).digest('hex')
+}
+
+function routineRevision(content: string): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+function serializeRoutineDefinition(input: CreateRoutineInput): string {
+  const name = requiredString(input.name, 'name')
+  const body = requiredString(input.body, 'body')
+  const approvalAllow = input.approvalAllow ?? input.approval?.allow ?? []
+  const frontmatter: Record<string, unknown> = { name }
+  if (input.description) frontmatter.description = input.description
+  if (input.trigger) frontmatter.trigger = input.trigger
+  if (input.agent) frontmatter.agent = input.agent
+  if (input.model) frontmatter.model = input.model
+  if (input.tools?.length) frontmatter.tools = input.tools
+  if (approvalAllow.length) frontmatter.approval = { allow: approvalAllow }
+  if (input.steps !== undefined) frontmatter.steps = input.steps
+  if (input.missed) frontmatter.missed = input.missed
+  return `---\n${stringifyYaml(frontmatter).trimEnd()}\n---\n\n${body.trim()}\n`
+}
+
+function atomicWriteText(path: string, content: string): void {
+  const tmp = `${path}.tmp-${randomBytes(6).toString('hex')}`
+  try {
+    writeFileSync(tmp, content, 'utf-8')
+    renameSync(tmp, path)
+  } catch (err) {
+    try { unlinkSync(tmp) } catch { /* tmp may not exist */ }
+    throw err
+  }
 }
 
 function stableStringify(value: unknown): string {

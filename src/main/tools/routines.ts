@@ -6,15 +6,19 @@ import type { ToolRegistry } from '@main/tools/registry.js'
 import { createKeytarSecretStore, MIM_KEYCHAIN_SERVICE, type SecretStore } from '@main/integrations/secrets.js'
 import {
   createRoutineFile,
+  disableRoutine,
+  duplicateRoutineFile,
+  enableRoutine,
   loadRoutineCatalog,
-  pauseRoutine,
-  resumeRoutine,
+  removeRoutineState,
   routineWebhookSecretAccount,
   routineWebhookTrigger,
+  updateRoutineFile,
   type CreateRoutineInput,
   type RoutineDefinition,
   type RoutineRunContext,
   type RoutineRunStatus,
+  type UpdateRoutineInput,
 } from '@main/routines/routines.js'
 
 export interface RoutineRunResult {
@@ -69,7 +73,7 @@ export function registerRoutineTools(tools: ToolRegistry, options: RegisterRouti
 
   tools.register({
     name: 'routine.create',
-    description: 'Create a disabled workspace routine file',
+    description: 'Create a workspace routine definition; automatic runs require local review',
     inputSchema: {
       type: 'object',
       properties: {
@@ -102,8 +106,61 @@ export function registerRoutineTools(tools: ToolRegistry, options: RegisterRouti
   })
 
   tools.register({
-    name: 'routine.pause',
-    description: 'Pause a routine on this machine',
+    name: 'routine.update',
+    description: 'Update a workspace routine definition if it has not changed since it was opened',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        expectedRevision: { type: 'string' },
+        description: { type: 'string' },
+        trigger: { type: 'object' },
+        agent: { type: 'string' },
+        model: { type: 'string' },
+        tools: { type: 'array', items: { type: 'string' } },
+        approvalAllow: { type: 'array', items: { type: 'string' } },
+        steps: { type: 'number' },
+        missed: { type: 'string', enum: ['skip', 'once'] },
+        body: { type: 'string' },
+      },
+      required: ['name', 'expectedRevision', 'body'],
+    },
+    execute: async (params) => {
+      const ws = requireWorkspace(tools)
+      const routine = updateRoutineFile(ws, normalizeUpdateInput(params, runtimeOptions.knownTools?.()))
+      await runtimeOptions.onChange?.()
+      return { routine }
+    },
+  })
+
+  tools.register({
+    name: 'routine.duplicate',
+    description: 'Duplicate a workspace routine; automatic runs require local review',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        newName: { type: 'string' },
+      },
+      required: ['name', 'newName'],
+    },
+    execute: async (params) => {
+      const ws = requireWorkspace(tools)
+      const routine = requireRoutine(ws, String(params.name ?? ''), runtimeOptions)
+      const duplicate = duplicateRoutineFile(
+        ws,
+        routine,
+        String(params.newName ?? ''),
+        runtimeOptions.knownTools?.(),
+      )
+      await runtimeOptions.onChange?.()
+      return { routine: duplicate }
+    },
+  })
+
+  tools.register({
+    name: 'routine.enable',
+    description: 'Enable automatic runs on this machine after reviewing the routine authority',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string' } },
@@ -112,15 +169,15 @@ export function registerRoutineTools(tools: ToolRegistry, options: RegisterRouti
     execute: async (params) => {
       const ws = requireWorkspace(tools)
       const routine = requireRoutine(ws, String(params.name ?? ''), runtimeOptions)
-      pauseRoutine(ws, routine.id)
+      enableRoutine(ws, routine)
       await runtimeOptions.onChange?.()
       return { routine: requireRoutine(ws, routine.id, runtimeOptions) }
     },
   })
 
   tools.register({
-    name: 'routine.resume',
-    description: 'Enable a routine on this machine after acknowledging its current authority',
+    name: 'routine.disable',
+    description: 'Disable automatic runs for a routine on this machine',
     inputSchema: {
       type: 'object',
       properties: { name: { type: 'string' } },
@@ -129,9 +186,38 @@ export function registerRoutineTools(tools: ToolRegistry, options: RegisterRouti
     execute: async (params) => {
       const ws = requireWorkspace(tools)
       const routine = requireRoutine(ws, String(params.name ?? ''), runtimeOptions)
-      resumeRoutine(ws, routine)
+      disableRoutine(ws, routine)
       await runtimeOptions.onChange?.()
       return { routine: requireRoutine(ws, routine.id, runtimeOptions) }
+    },
+  })
+
+  tools.register({
+    name: 'routine.remove',
+    description: 'Move a workspace routine definition to the OS trash and clear its local run state',
+    inputSchema: {
+      type: 'object',
+      properties: { name: { type: 'string' } },
+      required: ['name'],
+    },
+    execute: async (params, ctx) => {
+      const ws = requireWorkspace(tools)
+      const routine = requireRoutine(ws, String(params.name ?? ''), runtimeOptions)
+      const webhook = routineWebhookTrigger(routine)
+      const sharedWebhookSecret = webhook
+        ? loadRoutineCatalog(ws).routines.some(item =>
+            item.id !== routine.id && routineWebhookTrigger(item)?.secret === webhook.secret)
+        : false
+      await tools.call('fs.trash', { path: routine.path }, ctx)
+      removeRoutineState(ws, routine.id)
+      if (webhook && !sharedWebhookSecret) {
+        await secretStore(runtimeOptions).delete(
+          MIM_KEYCHAIN_SERVICE,
+          routineWebhookSecretAccount(webhook.secret),
+        ).catch(() => false)
+      }
+      await runtimeOptions.onChange?.()
+      return { removed: routine.id, path: routine.path }
     },
   })
 
@@ -234,6 +320,101 @@ export async function runRoutineOnce(
 ): Promise<RoutineRunResult> {
   const started = await startRoutineRun(tools, routine, context, options)
   return started.completion
+}
+
+export async function continueRoutineRunInSession(
+  tools: ToolRegistry,
+  routine: RoutineDefinition,
+  context: RoutineRunContext,
+  sessionId: string,
+  options: Pick<RegisterRoutineToolsOptions, 'getAgentMounts'> = {},
+): Promise<RoutineRunResult> {
+  const routineRunId = `routine_run_${Date.now()}_${randomUUID().slice(0, 8)}`
+  const firedAt = new Date().toISOString()
+  const profile = await resolveRoutineProfile(routine, options.getAgentMounts?.())
+  const session = await tools.call('session.get', { id: sessionId }, { actor: 'system' }) as { messages?: UIMessage[] }
+  const messages = [
+    ...(Array.isArray(session.messages) ? session.messages : []),
+    routineRunPromptMessageForContext(routine, context, routineRunId),
+  ]
+  const traceId = newTraceId()
+  const spanId = newSpanId()
+
+  tools.trace.append({
+    kind: 'routine.fired',
+    actor: 'ai',
+    traceId,
+    spanId,
+    sessionId,
+    data: {
+      routineId: routine.id,
+      routineRunId,
+      trigger: context.trigger,
+      continued: true,
+    },
+  })
+
+  await tools.call('session.update', {
+    id: sessionId,
+    routineStatus: 'working',
+    routineFiredAt: firedAt,
+    routineCompletedAt: '',
+    routineError: '',
+    messages,
+  }, { actor: 'system' })
+
+  try {
+    const response = await streamProfileResponse({
+      profile,
+      tools,
+      request: {
+        id: sessionId,
+        modelId: routine.model ?? profile.defaultModelId,
+        messages,
+        routine: {
+          id: routine.id,
+          runId: routineRunId,
+          approvalAllow: routine.approvalAllow,
+        },
+        trace: { traceId, spanId },
+      },
+    })
+    await drainResponse(response)
+    await tools.call('session.update', {
+      id: sessionId,
+      routineStatus: 'done',
+      routineCompletedAt: new Date().toISOString(),
+      routineError: '',
+    }, { actor: 'system' })
+    tools.trace.append({
+      kind: 'routine.done',
+      actor: 'ai',
+      traceId,
+      parentSpanId: spanId,
+      sessionId,
+      status: 'ok',
+      data: { routineId: routine.id, routineRunId, continued: true },
+    })
+    return { sessionId, routineRunId, status: 'done' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    await tools.call('session.update', {
+      id: sessionId,
+      routineStatus: 'error',
+      routineError: message,
+      routineCompletedAt: new Date().toISOString(),
+    }, { actor: 'system' }).catch(() => {})
+    tools.trace.append({
+      kind: 'routine.error',
+      actor: 'ai',
+      traceId,
+      parentSpanId: spanId,
+      sessionId,
+      status: 'error',
+      data: { routineId: routine.id, routineRunId, continued: true, error: message },
+    })
+    throw err
+  }
 }
 
 export async function createRoutineChatSession(
@@ -444,6 +625,14 @@ function normalizeCreateInput(params: Record<string, unknown>): CreateRoutineInp
   }
 }
 
+function normalizeUpdateInput(params: Record<string, unknown>, knownTools: Set<string> | undefined): UpdateRoutineInput {
+  return {
+    ...normalizeCreateInput(params),
+    expectedRevision: String(params.expectedRevision ?? ''),
+    knownTools,
+  }
+}
+
 async function resolveRoutineProfile(
   routine: RoutineDefinition,
   agentMounts: { resolveProfile(agentId: string): Promise<AgentProfile> } | null | undefined,
@@ -499,6 +688,26 @@ function routineQueuedPromptMessageForContext(
         runId: routineRunId,
         trigger: context.trigger,
         queued: true,
+      },
+    },
+  } as UIMessage
+}
+
+function routineRunPromptMessageForContext(
+  routine: RoutineDefinition,
+  context: RoutineRunContext,
+  routineRunId: string,
+): UIMessage {
+  const message = routinePromptMessageForContext(routine, context) as UIMessage & { metadata?: Record<string, unknown> }
+  return {
+    ...message,
+    id: `routine_prompt_${routine.id}_${routineRunId}`,
+    metadata: {
+      ...(message.metadata ?? {}),
+      routine: {
+        id: routine.id,
+        runId: routineRunId,
+        trigger: context.trigger,
       },
     },
   } as UIMessage

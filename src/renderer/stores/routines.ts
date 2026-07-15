@@ -3,17 +3,20 @@ import { ref } from 'vue'
 
 export interface RoutineDefinition {
   id: string
-  path?: string
+  path: string
   name: string
   description?: string
   trigger?: Record<string, unknown>
+  agent?: string
   model?: string
-  tools?: string[]
-  approvalAllow?: string[]
-  body?: string
-  enabled: boolean
-  paused: boolean
-  needsEnablement: boolean
+  tools: string[]
+  approvalAllow: string[]
+  steps?: number
+  missed?: 'skip' | 'once'
+  body: string
+  authorityHash: string
+  revision: string
+  activation: 'manual' | 'active' | 'disabled' | 'review-required'
   nextRunAt?: string
   lastRunId?: string
   lastSuccessAt?: string
@@ -37,8 +40,17 @@ export interface CreateRoutineInput {
   name: string
   description?: string
   trigger?: Record<string, unknown>
+  agent?: string
   model?: string
+  tools?: string[]
+  approvalAllow?: string[]
+  steps?: number
+  missed?: 'skip' | 'once'
   body: string
+}
+
+export interface UpdateRoutineInput extends CreateRoutineInput {
+  expectedRevision: string
 }
 
 export const useRoutineStore = defineStore('routines', () => {
@@ -69,7 +81,19 @@ export const useRoutineStore = defineStore('routines', () => {
 
   async function create(input: CreateRoutineInput): Promise<RoutineDefinition | null> {
     const result = await window.kernel.call('routine.create', input) as { routine?: RoutineDefinition }
-    updateRoutine(result.routine)
+    upsertRoutine(result.routine)
+    return result.routine ?? null
+  }
+
+  async function update(input: UpdateRoutineInput): Promise<RoutineDefinition | null> {
+    const result = await window.kernel.call('routine.update', input) as { routine?: RoutineDefinition }
+    upsertRoutine(result.routine)
+    return result.routine ?? null
+  }
+
+  async function duplicate(name: string, newName: string): Promise<RoutineDefinition | null> {
+    const result = await window.kernel.call('routine.duplicate', { name, newName }) as { routine?: RoutineDefinition }
+    upsertRoutine(result.routine)
     return result.routine ?? null
   }
 
@@ -85,17 +109,22 @@ export const useRoutineStore = defineStore('routines', () => {
     }
   }
 
-  async function resume(name: string): Promise<void> {
-    const result = await window.kernel.call('routine.resume', { name }) as { routine?: RoutineDefinition }
-    updateRoutine(result.routine)
+  async function enable(name: string): Promise<void> {
+    const result = await window.kernel.call('routine.enable', { name }) as { routine?: RoutineDefinition }
+    upsertRoutine(result.routine)
   }
 
-  async function pause(name: string): Promise<void> {
-    const result = await window.kernel.call('routine.pause', { name }) as { routine?: RoutineDefinition }
-    updateRoutine(result.routine)
+  async function disable(name: string): Promise<void> {
+    const result = await window.kernel.call('routine.disable', { name }) as { routine?: RoutineDefinition }
+    upsertRoutine(result.routine)
   }
 
-  function updateRoutine(routine: RoutineDefinition | undefined): void {
+  async function remove(name: string): Promise<void> {
+    await window.kernel.call('routine.remove', { name })
+    routines.value = routines.value.filter(item => item.id !== name)
+  }
+
+  function upsertRoutine(routine: RoutineDefinition | undefined): void {
     if (!routine?.id) return
     const idx = routines.value.findIndex(item => item.id === routine.id)
     if (idx >= 0) routines.value[idx] = { ...routines.value[idx], ...routine }
@@ -115,9 +144,12 @@ export const useRoutineStore = defineStore('routines', () => {
     runningIds,
     load,
     create,
+    update,
+    duplicate,
     runNow,
-    resume,
-    pause,
+    enable,
+    disable,
+    remove,
     isRunning,
   }
 })

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createMemorySecretStore } from '@main/integrations/secrets.js'
-import { loadRoutineCatalog, resumeRoutine, routineWebhookSecretAccount } from './routines.js'
+import { enableRoutine, loadRoutineCatalog, routineWebhookSecretAccount } from './routines.js'
 import { createRoutineAutomation } from './automation.js'
 
 describe('routine automation', () => {
@@ -199,7 +199,7 @@ describe('routine automation', () => {
   function enable(name: string) {
     const routine = loadRoutineCatalog(dir).routines.find(item => item.id === name)
     if (!routine) throw new Error(`missing routine: ${name}`)
-    resumeRoutine(dir, routine)
+    enableRoutine(dir, routine)
   }
 })
 

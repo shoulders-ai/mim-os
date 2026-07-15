@@ -88,7 +88,7 @@ export function createRoutineAutomation(options: RoutineAutomationOptions) {
     writeRoutineState(loaded.workspace, state)
 
     for (const routine of loaded.catalog.routines) {
-      if (!routine.enabled) continue
+      if (routine.activation !== 'active') continue
       if (!routineEveryMs(routine) && !routineScheduleExpression(routine)) continue
       const next = routine.nextRunAt ? parseDate(routine.nextRunAt) : null
       if (!next) {
@@ -111,7 +111,7 @@ export function createRoutineAutomation(options: RoutineAutomationOptions) {
     if (!loaded) return
     const at = now()
     for (const routine of loaded.catalog.routines) {
-      if (!routine.enabled) continue
+      if (routine.activation !== 'active') continue
       const trigger = routineFileTrigger(routine)
       if (!trigger) continue
       const matches = changes.filter(change =>
@@ -130,7 +130,7 @@ export function createRoutineAutomation(options: RoutineAutomationOptions) {
     if (!loaded) return { status: 404, ok: false, error: 'No workspace open' }
     const routine = loaded.catalog.routines.find(item => item.id === name || item.name === name)
     if (!routine) return { status: 404, ok: false, error: 'Routine not found' }
-    if (!routine.enabled) return { status: 409, ok: false, error: 'Routine is not enabled on this machine' }
+    if (routine.activation !== 'active') return { status: 409, ok: false, error: 'Automatic runs are not enabled on this machine' }
     const trigger = routineWebhookTrigger(routine)
     if (!trigger) return { status: 404, ok: false, error: 'Routine has no webhook trigger' }
 
@@ -170,7 +170,7 @@ export function createRoutineAutomation(options: RoutineAutomationOptions) {
     const loaded = catalog()
     if (!loaded) return
     for (const routine of loaded.catalog.routines) {
-      if (!routine.enabled) continue
+      if (routine.activation !== 'active') continue
       const trigger = routineFileTrigger(routine)
       if (!trigger) continue
       const watchPath = watchRootForTrigger(workspace, trigger.path)

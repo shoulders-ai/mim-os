@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RoutineDefinition } from '@main/routines/routines.js'
-import { createRoutineChatSession, runRoutineOnce, startRoutineRun } from './routines.js'
+import { continueRoutineRunInSession, createRoutineChatSession, runRoutineOnce, startRoutineRun } from './routines.js'
 
 const ai = vi.hoisted(() => ({
   streamProfileResponse: vi.fn(),
@@ -44,9 +44,8 @@ describe('routine runner', () => {
       approvalAllow: ['fs.write'],
       tools: ['fs.read', 'fs.write'],
       authorityHash: 'hash',
-      enabled: false,
-      paused: false,
-      needsEnablement: true,
+      revision: 'revision',
+      activation: 'manual',
     } satisfies RoutineDefinition
 
     const result = await runRoutineOnce(tools, routine, { trigger: 'manual' })
@@ -108,9 +107,8 @@ describe('routine runner', () => {
       approvalAllow: [],
       tools: [],
       authorityHash: 'hash',
-      enabled: false,
-      paused: false,
-      needsEnablement: true,
+      revision: 'revision',
+      activation: 'manual',
     } satisfies RoutineDefinition
 
     const started = await startRoutineRun(tools, routine, { trigger: 'manual' })
@@ -147,9 +145,8 @@ describe('routine runner', () => {
       tools: ['fs.create'],
       model: 'claude-sonnet-5',
       authorityHash: 'hash',
-      enabled: false,
-      paused: false,
-      needsEnablement: true,
+      revision: 'revision',
+      activation: 'manual',
     } satisfies RoutineDefinition
 
     const result = await createRoutineChatSession(tools, routine, { trigger: 'manual' })
@@ -183,6 +180,94 @@ describe('routine runner', () => {
           }),
         ],
       },
+      ctx: { actor: 'system' },
+    })
+  })
+
+  it('continues a routine inside an existing session with prior messages', async () => {
+    const existingMessages = [
+      { id: 'u0', role: 'user', parts: [{ type: 'text', text: 'Earlier question' }] },
+      { id: 'a0', role: 'assistant', parts: [{ type: 'text', text: 'Earlier answer' }] },
+    ]
+    const calls: Array<{ name: string; params: Record<string, unknown>; ctx: Record<string, unknown> }> = []
+    const tools = {
+      call: vi.fn(async (name: string, params: Record<string, unknown>, ctx: Record<string, unknown>) => {
+        calls.push({ name, params, ctx })
+        if (name === 'session.get') {
+          return {
+            id: 'session_thread',
+            messages: existingMessages,
+            routineId: 'support-bot',
+            routineRunId: 'routine_run_previous',
+          }
+        }
+        return { ok: true, ...params }
+      }),
+      trace: { append: vi.fn() },
+    } as any
+    const routine = {
+      id: 'support-bot',
+      name: 'support-bot',
+      path: 'routines/support-bot.md',
+      body: 'Handle the support request.',
+      approvalAllow: ['fs.read'],
+      tools: ['fs.read'],
+      authorityHash: 'hash',
+      revision: 'revision',
+      activation: 'active',
+    } satisfies RoutineDefinition
+
+    const result = await continueRoutineRunInSession(
+      tools,
+      routine,
+      { trigger: 'slack', payload: { text: 'Follow up', slack: { channel: 'C1', threadTs: '100.1' } } },
+      'session_thread',
+    )
+
+    expect(result).toMatchObject({ sessionId: 'session_thread', status: 'done' })
+    expect(calls.some(call => call.name === 'session.create')).toBe(false)
+    expect(calls[1]).toMatchObject({
+      name: 'session.update',
+      params: {
+        id: 'session_thread',
+        routineStatus: 'working',
+        routineError: '',
+        routineCompletedAt: '',
+        messages: [
+          existingMessages[0],
+          existingMessages[1],
+          expect.objectContaining({
+            role: 'user',
+            id: expect.stringMatching(/^routine_prompt_support-bot_routine_run_/),
+          }),
+        ],
+      },
+      ctx: { actor: 'system' },
+    })
+    expect(ai.streamProfileResponse).toHaveBeenCalledWith(expect.objectContaining({
+      request: expect.objectContaining({
+        id: 'session_thread',
+        messages: [
+          existingMessages[0],
+          existingMessages[1],
+          expect.objectContaining({
+            role: 'user',
+            parts: [expect.objectContaining({
+              type: 'text',
+              text: expect.stringContaining('Follow up'),
+            })],
+          }),
+        ],
+        routine: {
+          id: 'support-bot',
+          runId: expect.stringMatching(/^routine_run_/),
+          approvalAllow: ['fs.read'],
+        },
+      }),
+    }))
+    expect(calls.at(-1)).toMatchObject({
+      name: 'session.update',
+      params: { id: 'session_thread', routineStatus: 'done', routineError: '' },
       ctx: { actor: 'system' },
     })
   })

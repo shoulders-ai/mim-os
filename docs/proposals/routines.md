@@ -1,7 +1,7 @@
 # Routines
 
 Status: proposal for hosted scheduling/trigger phases. Store, validation,
-manual runner, enablement, session metadata, Navigator classification,
+manual runner, activation, session metadata, Navigator classification,
 routine-aware permission gating, trigger schema validation, and pure
 interval/file/webhook automation helpers are implemented; see
 [routines.md](../routines.md) for current behavior.
@@ -164,9 +164,9 @@ entry with the citation. Write a short digest to `reports/lit/{{DATE}}.md`.
 
 Definition and machine state are strictly split: the definition lives in git;
 `nextRunAt`, last-run ids, heartbeat, lock, scheduler ownership, and
-per-machine enablement live under `.mim/routines/` (gitignored). A `git pull`
+per-machine activation live under `.mim/routines/` (gitignored). A `git pull`
 can change what a routine *is*; it can never change what your machine has
-*agreed to run* (§Enablement).
+*agreed to run* (§Activation and trust).
 
 ### Naming
 
@@ -340,40 +340,42 @@ in the gate, not per host. The concrete gate change is a routine-aware policy
 resolver on `ToolContext` metadata, not a new actor that bypasses the normal
 AI/app distinction.
 
-### Enablement and trust
+### Activation and trust
 
 Routine files are prose with standing authority: a `git pull` can introduce
 one that runs at 05:00 with pre-granted tools. The trust story mirrors app
-enablement rather than inventing a new one:
+activation rather than inventing a new one:
 
-- Workspace `routines/*.md` files are **enabled per machine**: a routine not
-  yet acked on this machine loads paused, and a banner (the
-  `MissingAppsBanner` pattern) offers "review and enable". Team sharing stays
-  one click — but it is a click, taken after reading the diff of what will
-  run unattended.
+- Workspace `routines/*.md` files are **activated per machine**: a new automatic
+  routine loads `review-required`, and its Automatic toggle opens a focused
+  authority review before enabling. Team sharing stays one click — but it is a
+  click taken after reviewing what will run unattended.
 - Acknowledgement is keyed to the authority-bearing parts of the definition:
   automatic trigger type, scheduler eligibility, agent, model, `tools`, and
   `approval.allow`. Widening `approval.allow`, adding an automatic trigger,
   or switching to a more capable agent re-requires the ack. Prompt edits do
   not require a new ack, but the management surface should show "definition
-  changed since enabled" so review is cheap.
+  changed since activation review" so review is cheap.
 - Manual starts and runs are available for disabled routines to support
   authoring, but a disabled routine cannot fire from schedule, file, webhook,
   or chain triggers.
-- Pausing is two distinct acts: `enabled: false` in the file is the shared
-  kill switch (in git, for everyone); `routine.pause` writes personal state
-  under `.mim/routines/` (this machine only).
+- `routine.disable` turns automatic runs off in personal state under
+  `.mim/routines/` for this machine. Definition files no longer carry a second,
+  overlapping enabled flag.
 
 ### Authoring — conversational first
 
-`src/main/tools/routines.ts` exposes `routine.create / list / get / run /
-pause / resume` plus webhook secret status/set/delete tools, so the primary
+`src/main/tools/routines.ts` exposes `routine.create / update / duplicate /
+list / get / enable / disable / remove / run / start` plus webhook secret
+status/set/delete tools, so the primary
 authoring surface is the chat: "every weekday at 7, triage the board and draft
 a standup note" becomes a validated file the user can read, diff, and commit.
 `routine.create` validates frontmatter and trigger expressions before writing
-(the `skill.create` discipline), writes the definition disabled for automatic
-triggers on this machine, and points the user at manual run-now as the test
-loop. The file is the artifact, so hand-editing is equally first-class. A
+(the `skill.create` discipline), leaves automatic triggers awaiting authority
+review on this machine, and points the user at manual Run now as the test loop.
+Revision-aware updates reject stale editor saves, duplicate creates a new
+review-required definition, and remove moves the file to the OS Trash. The file
+is the artifact, so hand-editing is equally first-class. A
 routines starter lands in the `build-app` skill's decision table: prose on a
 schedule → routine; imperative code on demand → app job; knowledge for the
 agent → skill.
@@ -404,9 +406,9 @@ Each phase is independently shippable.
    routine run metadata, `'routine'` `RunKind` replaces `'workflow'`,
    History/Review/trace integration, `routine.*` tools. Already useful:
    "run this saved prompt now, as a tracked run."
-2. **Routine permission policy + enablement.** Implemented core: visible tools
+2. **Routine permission policy + activation.** Implemented core: visible tools
    versus `approval.allow` grants, park via session `needs-approval`, path
-   floor, mode independence, and per-machine enablement ack. Crash
+   floor, mode independence, and per-machine authority review. Crash
    reconciliation for parked/working runs remains before automatic triggers.
 3. **Ticker.** Implemented for desktop: cron/interval validation, lifecycle
    one-minute tick, scheduler heartbeat, `nextRunAt`, last-success/error
@@ -451,7 +453,7 @@ permission design is not optional decoration.
   binding stays loopback; internet exposure is exclusively the server host's
   concern, behind its own auth story.
 - **The git vector.** A malicious or careless PR can add or widen a routine.
-  Per-machine enablement with re-ack on grant widening means pulled
+  Per-machine activation with a fresh review on grant widening means pulled
   changes never gain authority silently; the diff is small, human-readable
   prose — which is exactly why the definition format is markdown.
 - **Approval fatigue is a security failure.** If routines park constantly,
@@ -489,8 +491,10 @@ permission design is not optional decoration.
   fan-out, joins, conditionals, and retries-with-backoff live in prompts and
   tools, not in a graph runtime. If a graph is ever needed, it will be argued
   from real routines that hit the wall.
-- **A visual schedule builder.** Files and conversation are the editor;
-  Settings gets management (list, pause, health), not authoring.
+- **A workflow-canvas schedule builder.** The Routines work surface provides
+  focused daily, weekly, interval, file, webhook, and Slack fields, while the
+  Markdown definition remains the canonical advanced editor. It does not add a
+  calendar canvas or workflow graph.
 - **A generic event bus.** A small named trigger set, each with a concrete contract.
   Arbitrary app-emitted events wait for a real consumer.
 - **App-contributed routines.** Apps may eventually scaffold or suggest
@@ -517,6 +521,5 @@ permission design is not optional decoration.
   decided when the server host lands.
 - **Hard budget caps.** Per-run spend limits beyond step caps — enforced
   abort vs. health reporting only.
-- **Health surface.** The Routines work surface shows definition and enablement
-  state. A deeper fire-history/last-success/parked-run health panel is still
-  open.
+- **Deeper health surface.** Rows show last success/failure and next-run context.
+  A dedicated fire-history and parked-run health panel is still open.

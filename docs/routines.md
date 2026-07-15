@@ -38,18 +38,33 @@ declares an automatic trigger it must declare exactly one of:
   in the OS keychain under `routine:webhook:<name>`, not in the routine file.
 - `slack: { account, channels }` — Slack routine trigger. Channels use
   `{ id, mode }`, where mode is `mention` or `always`; `account` defaults to
-  `default`. Two enabled routines may not bind the same Slack account/channel.
+  `default`. In `mention` mode, the first bot mention activates the Slack
+  thread; later replies in that thread continue the same Mim routine session
+  without another mention. Two routines may not bind the same Slack
+  account/channel.
 
 Routine files are clean-break schema files: invalid fields are diagnostics, not
-silently migrated. Corrupt local state is ignored so a bad state file cannot
-prevent the workspace from loading.
+silently migrated. Each loaded definition carries a revision hash used by the
+editor to reject stale saves. Corrupt or pre-v2 local state is ignored so bad
+or legacy state cannot prevent the workspace from loading.
 
-## Enablement
+## Activation
 
-Machine-local enablement lives in `.mim/routines/state.json`. Enabling stores an
-authority hash over trigger/model/agent/tools/approval/steps/missed fields. If
-those fields change, the routine needs enablement again before scheduled
-execution can trust its authority.
+The catalog exposes one explicit activation state instead of overlapping
+enabled/paused flags:
+
+- `manual` — the definition has no automatic trigger. It only shows Run.
+- `active` — automatic runs are enabled on this machine for the current
+  authority-bearing definition.
+- `disabled` — the current authority was reviewed, but automatic runs are off.
+- `review-required` — the routine is new on this machine or its trigger, model,
+  agent, tools, approvals, step limit, or missed-run policy changed.
+
+Machine-local activation lives in version 2 of `.mim/routines/state.json`.
+Enabling stores an authority hash over trigger/model/agent/tools/approval/steps/
+missed fields. A prompt or description edit preserves active state; an
+authority-bearing edit moves the routine to `review-required` until the user
+reviews and enables automatic runs again.
 
 Manual starts and runs are allowed for disabled routines so authors can test a
 routine before enabling it.
@@ -63,10 +78,13 @@ definitions and `slack.bot.check` for Slack bot readiness.
 The main-process routine tools are:
 
 - `routine.create`
+- `routine.update`
+- `routine.duplicate`
 - `routine.list`
 - `routine.get`
-- `routine.pause`
-- `routine.resume`
+- `routine.enable`
+- `routine.disable`
+- `routine.remove`
 - `routine.run`
 - `routine.start`
 - `routine.webhook.secret.status`
@@ -86,22 +104,42 @@ authority.
 main process, which is useful for schedulers and headless callers. The renderer
 maps routine sessions to `routine` runs in the Navigator.
 
+`routine.update` requires the full definition plus the revision returned by
+`routine.get` or `routine.list`; it writes atomically and rejects a save if the
+file changed in the meantime. `routine.duplicate` copies the complete definition
+under a new identifier and leaves automatic runs awaiting review. `routine.remove`
+moves the Markdown definition to the OS Trash, clears its machine-local state,
+and removes a uniquely owned webhook signing secret. Existing run transcripts
+remain in Activity and History.
+
 Webhook secret tools take a routine name. They resolve the routine's
 `trigger.webhook.secret` name and store/remove only the local OS keychain value;
 they never return the signing secret itself.
 
 ## Work Surface
 
-The Navigator has a Routines surface. It lists valid routine files plus
-diagnostics, shows trigger/tool/enablement state, and provides Run, Pause, and
-Resume controls. If the workspace has no routines, the surface shows a compact
-new-routine form; the header plus button opens the same form later. Creating a
-routine chooses a model, uses plain-language run choices such as daily, weekly,
-simple interval, file changes, or external request, writes `routines/<name>.md`,
-and opens the file for editing. The UI may generate `schedule` frontmatter
-internally; users do not need to write cron syntax. Run creates a routine chat
-session and opens that transcript. Routine sessions appear in Activity as
-routine run rows, not duplicate ordinary chat rows.
+The Navigator has a dense Routines work surface. Rows lead with the human
+description, keep the stable identifier secondary, translate triggers into
+plain language, summarize access, and show last/next-run context. Failed and
+review-required routines sort to the top. Run or Run now is always visible;
+automatic routines use one Automatic toggle. Turning it on opens an authority
+review rather than relying on an ambiguous Resume action.
+
+Each row has an action menu for Edit routine, Open definition file, View last
+run, Duplicate, and Move to Trash. New and Edit share one structured dialog for
+description, trigger, instructions, model, agent, tools, unattended approvals,
+limits, and missed-run behavior. Daily, weekly, interval, file, webhook, and
+Slack choices avoid requiring users to write implementation syntax; custom cron
+definitions still remain editable. Slack editing preserves every configured
+channel and response mode. Source editing stays first-class: changes under
+`routines/` refresh the catalog, automation services, Slack listener, and work
+surface through the workspace watcher.
+
+Run creates a routine chat session and opens that transcript. Slack-triggered
+routines keep one Mim routine session per Slack thread so follow-up replies
+share memory with prior thread turns. Routine sessions appear in Activity as
+routine run rows, not duplicate ordinary chat rows. The empty state explains
+the feature and opens the same New routine dialog.
 
 ## Automation
 
@@ -111,7 +149,7 @@ for that workspace.
 - `schedule` and `every` triggers are checked by a one-minute lifecycle ticker.
   `nextRunAt`, scheduler heartbeat, last run id, last success, and last error
   timestamps are stored in `.mim/routines/state.json`.
-- `files` triggers start chokidar watchers for enabled routines. File event
+- `files` triggers start chokidar watchers for active routines. File event
   payloads contain workspace-relative paths and event kinds as data; the runner
   does not read file contents unless the routine prompt asks to use file tools.
 - `webhook` triggers are exposed at `POST /api/hooks/:routine` on the local
@@ -119,8 +157,12 @@ for that workspace.
   `x-mim-timestamp` (Unix seconds) and `x-mim-signature` (`sha256=<hex>` over
   `<timestamp>.<raw body>`). Optional `x-mim-delivery` enables 24-hour local
   idempotency.
+- `slack` triggers are delivered by the desktop Socket Mode listener. The
+  event ledger stores only metadata for dedupe, while
+  `.mim/slack/thread-sessions.json` maps active Slack threads to Mim session
+  ids so thread replies can continue the existing transcript.
 
-Automatic triggers only fire enabled routines. If a routine is already running,
+Automatic triggers only fire routines whose activation is `active`. If a routine is already running,
 the overlapping fire is skipped and traced. Manual starts still work for
 disabled routines.
 
@@ -138,11 +180,12 @@ browser session grants still require approval even when a tool is in
 
 ## Current Scope
 
-Implemented scope is definition storage, validation, enablement state, manual
+Implemented scope is definition storage, validation, revision-aware create/edit/
+duplicate/remove lifecycle, four-state activation and authority review, manual
 runs, session metadata, Navigator classification, routine-aware permission
-gating, the Routines work surface, desktop lifecycle ticker, file watchers,
-signed local webhooks, webhook secret tools, run state persistence, and trace
-events for fires/skips/completions/errors.
+gating, the dense Routines work surface, source-file live refresh, desktop
+lifecycle ticker, file watchers, signed local webhooks, webhook secret tools,
+run state persistence, and trace events for fires/skips/completions/errors.
 
 Slack trigger validation, duplicate binding diagnostics, bot/app-token
 credential tools, one-shot setup/check tools that create/update and enable the

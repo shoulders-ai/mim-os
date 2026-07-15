@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { createTraceLog } from '@main/trace/trace.js'
@@ -29,39 +29,88 @@ describe('routine tools', () => {
     vi.restoreAllMocks()
   })
 
-  it('creates, lists, gets, pauses, and resumes routine definitions', async () => {
-    registerRoutineTools(tools)
+  it('creates, lists, gets, updates, duplicates, enables, and disables routine definitions', async () => {
+    const onChange = vi.fn()
+    registerRoutineTools(tools, { onChange })
 
-    await tools.call('routine.create', {
+    const created = await tools.call('routine.create', {
       name: 'standup',
       description: 'Draft standup note.',
+      trigger: { every: '4h' },
       body: 'Read the board and draft a note.',
       tools: ['fs.read'],
       approval: { allow: ['fs.read'] },
-    }, { actor: 'user' })
+    }, { actor: 'user' }) as { routine: { revision: string } }
 
     let listed = await tools.call('routine.list', {}, { actor: 'user' }) as {
-      routines: Array<{ id: string; enabled: boolean; needsEnablement: boolean }>
+      routines: Array<{ id: string; activation: string; revision: string }>
       diagnostics: unknown[]
     }
     expect(listed.diagnostics).toEqual([])
     expect(listed.routines).toEqual([
-      expect.objectContaining({ id: 'standup', enabled: false, needsEnablement: true }),
+      expect.objectContaining({ id: 'standup', activation: 'review-required' }),
     ])
 
-    await tools.call('routine.resume', { name: 'standup' }, { actor: 'user' })
+    await tools.call('routine.enable', { name: 'standup' }, { actor: 'user' })
     listed = await tools.call('routine.list', {}, { actor: 'user' }) as typeof listed
-    expect(listed.routines[0]).toMatchObject({ enabled: true, needsEnablement: false })
+    expect(listed.routines[0]).toMatchObject({ activation: 'active' })
 
     const got = await tools.call('routine.get', { name: 'standup' }, { actor: 'user' }) as {
-      routine: { body: string; approvalAllow: string[] }
+      routine: { body: string; approvalAllow: string[]; revision: string }
     }
     expect(got.routine.body).toBe('Read the board and draft a note.')
     expect(got.routine.approvalAllow).toEqual(['fs.read'])
 
-    await tools.call('routine.pause', { name: 'standup' }, { actor: 'user' })
+    const updated = await tools.call('routine.update', {
+      name: 'standup',
+      expectedRevision: got.routine.revision,
+      description: 'Draft a concise standup note.',
+      trigger: { every: '4h' },
+      body: 'Read the board and draft a concise note.',
+      tools: ['fs.read'],
+      approvalAllow: ['fs.read'],
+    }, { actor: 'user' }) as { routine: { body: string; activation: string } }
+    expect(updated.routine).toMatchObject({
+      body: 'Read the board and draft a concise note.',
+      activation: 'active',
+    })
+
+    const duplicate = await tools.call('routine.duplicate', {
+      name: 'standup',
+      newName: 'standup-copy',
+    }, { actor: 'user' }) as { routine: { id: string; activation: string } }
+    expect(duplicate.routine).toMatchObject({ id: 'standup-copy', activation: 'review-required' })
+
+    await tools.call('routine.disable', { name: 'standup' }, { actor: 'user' })
     listed = await tools.call('routine.list', {}, { actor: 'user' }) as typeof listed
-    expect(listed.routines[0]).toMatchObject({ enabled: false, paused: true })
+    expect(listed.routines.find(item => item.id === 'standup')).toMatchObject({ activation: 'disabled' })
+    expect(tools.get('routine.pause')).toBeUndefined()
+    expect(tools.get('routine.resume')).toBeUndefined()
+    expect(onChange).toHaveBeenCalledTimes(5)
+    expect(created.routine.revision).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('moves routine definitions to trash, clears state, and preserves the high-level result', async () => {
+    const trash = vi.fn(async (params: Record<string, unknown>) => {
+      rmSync(join(dir, String(params.path)), { force: true })
+      return { trashed: params.path }
+    })
+    tools.register({ name: 'fs.trash', description: 'trash', execute: trash })
+    registerRoutineTools(tools)
+    await tools.call('routine.create', {
+      name: 'pulse',
+      trigger: { every: '4h' },
+      body: 'Check the project pulse.',
+    }, { actor: 'user' })
+    await tools.call('routine.enable', { name: 'pulse' }, { actor: 'user' })
+
+    const removed = await tools.call('routine.remove', { name: 'pulse' }, { actor: 'user' })
+
+    expect(removed).toEqual({ removed: 'pulse', path: 'routines/pulse.md' })
+    expect(trash).toHaveBeenCalledWith({ path: 'routines/pulse.md' }, expect.objectContaining({ actor: 'user' }))
+    expect(existsSync(join(dir, 'routines', 'pulse.md'))).toBe(false)
+    const listed = await tools.call('routine.list', {}, { actor: 'user' }) as { routines: unknown[] }
+    expect(listed.routines).toEqual([])
   })
 
   it('manual run is allowed for disabled routines and delegates to the runner', async () => {

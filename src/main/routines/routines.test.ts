@@ -4,10 +4,14 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import {
   createRoutineFile,
+  disableRoutine,
+  duplicateRoutineFile,
+  enableRoutine,
   loadRoutineCatalog,
-  pauseRoutine,
-  resumeRoutine,
+  readRoutineState,
+  removeRoutineState,
   routineWebhookSecretAccount,
+  updateRoutineFile,
 } from './routines.js'
 
 describe('routine definitions', () => {
@@ -50,9 +54,8 @@ describe('routine definitions', () => {
         approvalAllow: ['web.search', 'web.read'],
         steps: 42,
         body: 'Search the standing questions.',
-        enabled: false,
-        paused: false,
-        needsEnablement: true,
+        activation: 'manual',
+        revision: expect.any(String),
       }),
     ])
   })
@@ -131,12 +134,14 @@ describe('routine definitions', () => {
     expect(catalog.diagnostics.map(d => d.message)).toContain('Unknown tool id: made.up')
   })
 
-  it('resumes and pauses routines through per-machine state keyed by authority hash', () => {
+  it('enables and disables automatic routines through versioned per-machine authority state', () => {
     mkdirSync(join(dir, 'routines'), { recursive: true })
     writeFileSync(join(dir, 'routines', 'triage.md'), [
       '---',
       'name: triage',
       'description: Triage issues.',
+      'trigger:',
+      '  every: 4h',
       'tools: [fs.read]',
       '---',
       '',
@@ -144,27 +149,38 @@ describe('routine definitions', () => {
     ].join('\n'))
 
     let catalog = loadRoutineCatalog(dir, { knownTools: new Set(['fs.read']) })
-    expect(catalog.routines[0].enabled).toBe(false)
-    expect(catalog.routines[0].needsEnablement).toBe(true)
+    expect(catalog.routines[0].activation).toBe('review-required')
 
-    resumeRoutine(dir, catalog.routines[0])
+    enableRoutine(dir, catalog.routines[0])
     catalog = loadRoutineCatalog(dir, { knownTools: new Set(['fs.read']) })
-    expect(catalog.routines[0]).toMatchObject({
-      enabled: true,
-      paused: false,
-      needsEnablement: false,
-    })
+    expect(catalog.routines[0].activation).toBe('active')
 
-    pauseRoutine(dir, 'triage')
+    disableRoutine(dir, catalog.routines[0])
     catalog = loadRoutineCatalog(dir, { knownTools: new Set(['fs.read']) })
-    expect(catalog.routines[0]).toMatchObject({
-      enabled: false,
-      paused: true,
-      needsEnablement: false,
-    })
+    expect(catalog.routines[0].activation).toBe('disabled')
+    expect(readRoutineState(dir).version).toBe(2)
   })
 
-  it('creates disabled routine files with validated frontmatter', () => {
+  it('ignores legacy state and requires automatic routines to be reviewed again', () => {
+    mkdirSync(join(dir, 'routines'), { recursive: true })
+    mkdirSync(join(dir, '.mim', 'routines'), { recursive: true })
+    writeFileSync(join(dir, 'routines', 'pulse.md'), [
+      '---',
+      'name: pulse',
+      'trigger:',
+      '  every: 4h',
+      '---',
+      '',
+      'Check the project pulse.',
+    ].join('\n'))
+    writeFileSync(join(dir, '.mim', 'routines', 'state.json'), JSON.stringify({
+      routines: { pulse: { enabled: true, authorityHash: 'legacy' } },
+    }))
+
+    expect(loadRoutineCatalog(dir).routines[0].activation).toBe('review-required')
+  })
+
+  it('creates routine files with validated frontmatter', () => {
     const routine = createRoutineFile(dir, {
       name: 'standup',
       description: 'Draft standup note.',
@@ -177,8 +193,105 @@ describe('routine definitions', () => {
     const path = join(dir, 'routines', 'standup.md')
     expect(existsSync(path)).toBe(true)
     expect(readFileSync(path, 'utf-8')).toContain('approval:')
-    expect(routine.enabled).toBe(false)
-    expect(routine.needsEnablement).toBe(true)
+    expect(routine.activation).toBe('manual')
+    expect(routine.revision).toMatch(/^[a-f0-9]{64}$/)
+  })
+
+  it('updates definitions with stale-write protection and invalidates only authority changes', () => {
+    let routine = createRoutineFile(dir, {
+      name: 'standup',
+      description: 'Draft standup note.',
+      trigger: { every: '4h' },
+      body: 'Read the board.',
+      tools: ['fs.read'],
+      knownTools: new Set(['fs.read']),
+    })
+    enableRoutine(dir, routine)
+    routine = loadRoutineCatalog(dir, { knownTools: new Set(['fs.read']) }).routines[0]
+
+    const promptUpdate = updateRoutineFile(dir, {
+      name: routine.id,
+      expectedRevision: routine.revision,
+      description: 'Draft the daily standup note.',
+      trigger: routine.trigger,
+      body: 'Read the board and summarize it.',
+      tools: routine.tools,
+      approvalAllow: routine.approvalAllow,
+      knownTools: new Set(['fs.read']),
+    })
+    expect(promptUpdate.activation).toBe('active')
+    expect(promptUpdate.body).toBe('Read the board and summarize it.')
+
+    expect(() => updateRoutineFile(dir, {
+      name: routine.id,
+      expectedRevision: routine.revision,
+      body: 'Overwrite a newer edit.',
+    })).toThrow('Routine changed since it was opened')
+
+    const authorityUpdate = updateRoutineFile(dir, {
+      name: promptUpdate.id,
+      expectedRevision: promptUpdate.revision,
+      description: promptUpdate.description,
+      trigger: { every: '8h' },
+      body: promptUpdate.body,
+      tools: promptUpdate.tools,
+      approvalAllow: promptUpdate.approvalAllow,
+      knownTools: new Set(['fs.read']),
+    })
+    expect(authorityUpdate.activation).toBe('review-required')
+
+    const revertedAuthority = updateRoutineFile(dir, {
+      name: authorityUpdate.id,
+      expectedRevision: authorityUpdate.revision,
+      description: authorityUpdate.description,
+      trigger: { every: '4h' },
+      body: authorityUpdate.body,
+      tools: authorityUpdate.tools,
+      approvalAllow: authorityUpdate.approvalAllow,
+      knownTools: new Set(['fs.read']),
+    })
+    expect(revertedAuthority.activation).toBe('disabled')
+  })
+
+  it('duplicates routine definitions as new review-required automatic routines', () => {
+    const source = createRoutineFile(dir, {
+      name: 'standup',
+      description: 'Draft standup note.',
+      trigger: { schedule: '0 9 * * *' },
+      model: 'model-a',
+      body: 'Read the board.',
+      tools: ['fs.read'],
+      approvalAllow: ['fs.read'],
+      knownTools: new Set(['fs.read']),
+    })
+    enableRoutine(dir, source)
+
+    const duplicate = duplicateRoutineFile(dir, source, 'standup-copy', new Set(['fs.read']))
+
+    expect(duplicate).toMatchObject({
+      id: 'standup-copy',
+      description: 'Draft standup note.',
+      trigger: { schedule: '0 9 * * *' },
+      model: 'model-a',
+      tools: ['fs.read'],
+      approvalAllow: ['fs.read'],
+      body: 'Read the board.',
+      activation: 'review-required',
+    })
+  })
+
+  it('removes only a routine local-state entry', () => {
+    const routine = createRoutineFile(dir, {
+      name: 'pulse',
+      trigger: { every: '4h' },
+      body: 'Check the project pulse.',
+    })
+    enableRoutine(dir, routine)
+
+    removeRoutineState(dir, routine.id)
+
+    expect(readRoutineState(dir).routines?.pulse).toBeUndefined()
+    expect(existsSync(join(dir, 'routines', 'pulse.md'))).toBe(true)
   })
 
   it('loads schedule, interval, file, and webhook trigger definitions', () => {
