@@ -15,6 +15,7 @@ const AGENT_FLAGS_PLACEHOLDER: Record<string, string> = {
   'claude-code': 'e.g. --dangerously-skip-permissions --verbose',
   'codex': 'e.g. --model o3 --full-auto',
   'gemini-cli': 'e.g. --model gemini-2.5-pro --sandbox',
+  'pi': 'e.g. --model openai/gpt-5',
 }
 
 function agentFlagsPlaceholder(agentId: string): string {
@@ -31,7 +32,7 @@ async function onAgentFlagsChange(agentId: string, event: Event) {
 }
 
 async function toggleAgent(agent: DetectedAgent, enabled: boolean) {
-  if (!agent.installed) return
+  if (!agentAvailable(agent)) return
   agentBusyId.value = agent.id
   error.value = null
   try {
@@ -43,14 +44,27 @@ async function toggleAgent(agent: DetectedAgent, enabled: boolean) {
   }
 }
 
+function agentAvailable(agent: DetectedAgent): boolean {
+  return agent.installed && agent.compatible !== false
+}
+
+function agentEnabled(agent: DetectedAgent): boolean {
+  return agentAvailable(agent) && agentsStore.isEnabled(agent.id)
+}
+
+function supportsMcp(agent: DetectedAgent): boolean {
+  return agentAvailable(agent) && (agent.mimToolConnection ?? 'mcp') === 'mcp'
+}
+
 function agentToggleTitle(agent: DetectedAgent): string {
   if (!agent.installed) return 'Not installed on this machine'
-  return agentsStore.isEnabled(agent.id) ? 'Hide launcher in Navigator' : 'Show launcher in Navigator'
+  if (agent.compatible === false) return agent.compatibilityMessage ?? `${agent.name} is not compatible`
+  return agentEnabled(agent) ? 'Hide launcher in Navigator' : 'Show launcher in Navigator'
 }
 
 async function checkMcpStatus() {
   for (const agent of agentsStore.agents) {
-    if (agent.installed) mcpStatus.value[agent.id] = 'checking'
+    if (supportsMcp(agent)) mcpStatus.value[agent.id] = 'checking'
   }
   try {
     const result = await window.kernel.call('agent.mcp.status', {}) as { statuses: Record<string, boolean> }
@@ -59,7 +73,7 @@ async function checkMcpStatus() {
     }
   } catch {
     for (const agent of agentsStore.agents) {
-      if (agent.installed && mcpStatus.value[agent.id] === 'checking') {
+      if (supportsMcp(agent) && mcpStatus.value[agent.id] === 'checking') {
         mcpStatus.value[agent.id] = 'disconnected'
       }
     }
@@ -131,33 +145,55 @@ onBeforeUnmount(() => {
                   <span class="truncate font-mono">{{ agent.installed ? agent.binPath : 'Not installed' }}</span>
                   <template v-if="agent.installed">
                     <span
+                      v-if="agent.version"
+                      class="shrink-0 rounded-[3px] bg-chrome-mid px-1 font-mono text-[9.5px] text-ink-3"
+                    >
+                      {{ agent.version }}
+                    </span>
+                    <span
                       v-if="agentsStore.getFlags(agent.id)"
                       class="max-w-[180px] truncate rounded-[3px] bg-chrome-mid px-1 font-mono text-[9.5px] text-ink-2"
                       :title="agentsStore.getFlags(agent.id)"
                     >
                       {{ agentsStore.getFlags(agent.id) }}
                     </span>
-                    <button
-                      v-if="mcpStatus[agent.id] === 'disconnected'"
-                      type="button"
-                      :data-testid="`agent-mcp-connect-${agent.id}`"
-                      class="shrink-0 rounded-[4px] px-1 text-[10px] font-medium text-accent hover:bg-accent-tint hover:text-accent"
-                      @click="connectMcp(agent.id)"
-                    >
-                      Connect
-                    </button>
+                    <template v-if="supportsMcp(agent)">
+                      <button
+                        v-if="mcpStatus[agent.id] === 'disconnected'"
+                        type="button"
+                        :data-testid="`agent-mcp-connect-${agent.id}`"
+                        class="shrink-0 rounded-[4px] px-1 text-[10px] font-medium text-accent hover:bg-accent-tint hover:text-accent"
+                        @click="connectMcp(agent.id)"
+                      >
+                        Connect
+                      </button>
+                      <span
+                        v-else-if="mcpStatus[agent.id] === 'connected'"
+                        :data-testid="`agent-mcp-status-${agent.id}`"
+                        class="shrink-0 px-1 text-[10px] text-ink-4"
+                      >
+                        Connected
+                      </span>
+                      <span
+                        v-else-if="mcpStatus[agent.id] === 'busy' || mcpStatus[agent.id] === 'checking'"
+                        class="shrink-0 px-1 text-[10px] text-ink-4"
+                      >
+                        {{ mcpStatus[agent.id] === 'checking' ? 'Checking…' : 'Connecting…' }}
+                      </span>
+                    </template>
                     <span
-                      v-else-if="mcpStatus[agent.id] === 'connected'"
-                      :data-testid="`agent-mcp-status-${agent.id}`"
+                      v-else-if="agent.mimToolConnection === 'extension'"
+                      :data-testid="`agent-tools-integrated-${agent.id}`"
                       class="shrink-0 px-1 text-[10px] text-ink-4"
                     >
-                      Connected
+                      Mim tools built in
                     </span>
                     <span
-                      v-else-if="mcpStatus[agent.id] === 'busy' || mcpStatus[agent.id] === 'checking'"
+                      v-else-if="agent.mimToolConnection === 'none'"
+                      :data-testid="`agent-tools-unavailable-${agent.id}`"
                       class="shrink-0 px-1 text-[10px] text-ink-4"
                     >
-                      {{ mcpStatus[agent.id] === 'checking' ? 'Checking…' : 'Connecting…' }}
+                      Mim tools unavailable
                     </span>
                     <button
                       type="button"
@@ -169,14 +205,20 @@ onBeforeUnmount(() => {
                     </button>
                   </template>
                 </span>
+                <span
+                  v-if="agent.installed && agent.compatible === false"
+                  class="mt-1 block text-[10px] leading-4 text-rem"
+                >
+                  {{ agent.compatibilityMessage }}
+                </span>
               </span>
             </div>
             <div class="flex items-center gap-1.5 px-3">
               <MimToggle
                 :data-testid="`apps-toggle-agent-${agent.id}`"
-                :model-value="agent.installed && agentsStore.isEnabled(agent.id)"
-                :disabled="!agent.installed || agentBusyId === agent.id"
-                :aria-label="`${agent.name} ${agentsStore.isEnabled(agent.id) ? 'enabled' : 'disabled'}`"
+                :model-value="agentEnabled(agent)"
+                :disabled="!agentAvailable(agent) || agentBusyId === agent.id"
+                :aria-label="`${agent.name} ${agentEnabled(agent) ? 'enabled' : 'disabled'}`"
                 :title="agentToggleTitle(agent)"
                 @update:model-value="toggleAgent(agent, $event)"
               />
@@ -197,7 +239,7 @@ onBeforeUnmount(() => {
               <span class="text-[10px] text-ink-4">Appended to the launch command. Saved per workspace.</span>
             </div>
 
-            <div class="flex items-center gap-2">
+            <div v-if="supportsMcp(agent)" class="flex items-center gap-2">
               <span class="text-[10px] font-medium text-ink-3">MCP</span>
               <span v-if="mcpStatus[agent.id] === 'connected'" class="text-[10px] text-ink-4">
                 Connected to Mim
@@ -214,6 +256,22 @@ onBeforeUnmount(() => {
               >
                 Disconnect
               </button>
+            </div>
+
+            <div
+              v-else-if="agent.mimToolConnection === 'extension'"
+              :data-testid="`agent-tools-explanation-${agent.id}`"
+              class="text-[10px] leading-4 text-ink-4"
+            >
+              Mim tools load automatically in sessions launched from Mim. No separate connection setup is needed.
+            </div>
+
+            <div
+              v-else-if="agent.mimToolConnection === 'none'"
+              :data-testid="`agent-tools-explanation-${agent.id}`"
+              class="text-[10px] leading-4 text-ink-4"
+            >
+              {{ agent.name }} runs as a full CLI session, but cannot call Mim tools yet.
             </div>
 
             <div v-if="mcpError[agent.id]" class="text-[10px] text-rem">

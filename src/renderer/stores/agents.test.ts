@@ -107,6 +107,35 @@ describe('agents store', () => {
     expect(store.isEnabled('gemini-cli')).toBe(false)
   })
 
+  it('keeps incompatible installed agents visible in Settings but out of launchers', async () => {
+    vi.stubGlobal('window', {
+      kernel: {
+        call: vi.fn(async () => ({
+          agents: [
+            agent({
+              id: 'pi',
+              name: 'Pi',
+              bin: 'pi',
+              installed: true,
+              binPath: '/usr/local/bin/pi',
+              compatible: false,
+              compatibilityMessage: 'Pi 0.75.5 found; version 0.76.0 or newer is required',
+            }),
+          ],
+        })),
+      },
+    })
+    const settings = useSettingsStore()
+    settings.enabledAgents = ['pi']
+    const store = useAgentsStore()
+
+    await store.refresh()
+
+    expect(store.installedAgents.map(item => item.id)).toEqual(['pi'])
+    expect(store.availableAgents).toEqual([])
+    expect(store.enabledAgents).toEqual([])
+  })
+
   it('persists enable/disable through the settings store', async () => {
     const call = vi.fn(async () => ({}))
     vi.stubGlobal('window', { kernel: { call } })

@@ -5,8 +5,8 @@
 // 1. OSC 9;4;N; — terminal progress protocol (Claude Code):
 //    4;3; → working, 4;0; → done.
 //
-// 2. Title spinner — Braille characters (U+2800-U+28FF) in OSC 0/1/2 title
-//    (Claude Code, Codex, Gemini CLI all use Braille spinners):
+// 2. TUI title — OSC 0/1/2 titles establish that the CLI exposes lifecycle
+//    state. Its first plain title means ready/idle; spinner prefixes mean work:
 //    Title gains Braille prefix → working.
 //    Title loses Braille prefix → needs-input (catches plan mode, approval
 //    prompts, and task completion for agents without OSC 9).
@@ -14,15 +14,15 @@
 // 3. OSC 777 — desktop notification (Claude Code permission prompts):
 //    Any OSC 777 → needs-input.
 //
-// Fallback (agents with none of the above): BEL → needs-input,
-// printable output → working.
+// Fallback (agents with none of the above): BEL → needs-input, printable
+// output → working after a short startup grace period. The grace prevents CLI
+// boot banners/redraws from reporting work before the first user prompt.
 //
-// Once any TUI signal (OSC 9, title spinner, or OSC 777) is seen, printable
+// Once any TUI signal (OSC 9, title, or OSC 777) is seen, printable
 // output no longer drives status — TUI agents redraw constantly.
 //
-// Idle is time-derived: done + 5s → idle. needs-input + 5s → idle only in
-// pure fallback mode (BEL is ambiguous). With TUI signals, needs-input is
-// genuinely blocking and stays until the agent resumes.
+// Idle is both the initial ready state and a settled state: done + 5s → idle;
+// needs-input + 5s → idle unless OSC 777 marked it as genuinely blocking.
 //
 // Dependency-free; the parser carries state across feed() chunk boundaries.
 
@@ -59,31 +59,37 @@ export function isSpinnerPrefix(ch: string): boolean {
 }
 
 export function createAgentStatusTracker(
-  deps: { now?: () => number; idleThresholdMs?: number } = {},
+  deps: { now?: () => number; idleThresholdMs?: number; fallbackActivityDelayMs?: number } = {},
 ): AgentStatusTracker {
   const now = deps.now ?? (() => Date.now())
   const idleThresholdMs = deps.idleThresholdMs ?? 5000
+  const fallbackActivityDelayMs = deps.fallbackActivityDelayMs ?? idleThresholdMs
+  const startedAt = now()
 
-  let _status: 'working' | 'needs-input' | 'done' = 'working'
+  let _status: AgentRuntimeStatus = 'idle'
   let titleHint: string | undefined
   let state: ParserState = 'text'
   let oscBuffer = ''
-  let lastSignalAt = now()
+  let lastSignalAt = startedAt
 
-  // Set when ANY TUI-level signal is seen (OSC 9, Braille title, OSC 777).
+  // Set when ANY TUI-level signal is seen (OSC 9, title, OSC 777).
   // Suppresses the fallback printable → working heuristic.
   let hasTuiSignals = false
   // Set specifically when OSC 777 notification fires. When true,
   // needs-input is genuinely blocking (permission prompt) and should NOT
   // degrade to idle. Reset when the agent resumes working.
   let needsInputIsBlocking = false
-  // Tracks whether the most recent title started with a Braille spinner char.
-  let lastTitleBraille = false
+  // Tracks whether the most recent title started with a known spinner char.
+  let lastTitleSpinner = false
+  let hasSeenTitle = false
+  // Unlike printable startup output, these signals describe lifecycle state.
+  // A first plain title may only establish idle if none arrived before it.
+  let hasStatusSignal = false
 
-  function setStatus(next: 'working' | 'needs-input' | 'done'): void {
+  function setStatus(next: AgentRuntimeStatus): void {
     _status = next
     lastSignalAt = now()
-    if (next === 'working' || next === 'done') needsInputIsBlocking = false
+    if (next === 'working' || next === 'done' || next === 'idle') needsInputIsBlocking = false
   }
 
   function commitOsc(): void {
@@ -94,27 +100,37 @@ export function createAgentStatusTracker(
 
       // Title sequences — also carry the Braille spinner signal.
       if (code === '0' || code === '1' || code === '2') {
-        const nowBraille = payload.length > 0 && isSpinnerPrefix(payload.charAt(0))
+        const nowSpinner = payload.length > 0 && isSpinnerPrefix(payload.charAt(0))
+        hasTuiSignals = true
+        // Supported CLIs publish a plain title once their initial prompt is
+        // ready. Reset any printable startup noise without overriding a real
+        // progress, permission, or BEL signal that arrived first.
+        if (!hasSeenTitle && !nowSpinner && !hasStatusSignal) {
+          hasStatusSignal = true
+          setStatus('idle')
+        }
         // Spinner started: title gained Braille prefix → working
-        if (nowBraille && !lastTitleBraille) {
-          hasTuiSignals = true
+        if (nowSpinner && !lastTitleSpinner) {
+          hasStatusSignal = true
           setStatus('working')
         }
         // Spinner stopped: title lost Braille prefix → needs-input
         // (catches plan mode, approval prompts, and Codex task completion).
         // For Claude Code, OSC 9;4;0; may follow in the same chunk and
         // override this to 'done'.
-        if (lastTitleBraille && !nowBraille) {
-          hasTuiSignals = true
+        if (lastTitleSpinner && !nowSpinner) {
+          hasStatusSignal = true
           setStatus('needs-input')
         }
-        lastTitleBraille = nowBraille
+        lastTitleSpinner = nowSpinner
+        hasSeenTitle = true
         titleHint = payload
       }
 
       // OSC 9;4;N; — terminal progress protocol.
       if (code === '9' && payload.startsWith('4;')) {
         hasTuiSignals = true
+        hasStatusSignal = true
         const progressState = payload.charAt(2)
         if (progressState === '0') setStatus('done')
         else if (progressState === '3') setStatus('working')
@@ -123,6 +139,7 @@ export function createAgentStatusTracker(
       // OSC 777 — desktop notification (permission prompts).
       if (code === '777') {
         hasTuiSignals = true
+        hasStatusSignal = true
         needsInputIsBlocking = true
         setStatus('needs-input')
       }
@@ -146,8 +163,14 @@ export function createAgentStatusTracker(
       switch (state) {
         case 'text':
           if (ch === ESC) state = 'esc'
-          else if (ch === BEL) setStatus('needs-input')
-          else if (isPrintable(ch) && !hasTuiSignals) setStatus('working')
+          else if (ch === BEL) {
+            hasStatusSignal = true
+            setStatus('needs-input')
+          } else if (
+            isPrintable(ch)
+            && !hasTuiSignals
+            && (hasStatusSignal || now() - startedAt >= fallbackActivityDelayMs)
+          ) setStatus('working')
           break
 
         case 'esc':

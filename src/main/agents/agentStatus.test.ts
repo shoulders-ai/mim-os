@@ -2,15 +2,44 @@ import { describe, expect, it } from 'vitest'
 import { createAgentStatusTracker } from './agentStatus.js'
 
 describe('createAgentStatusTracker', () => {
-  it('starts in working status with no title hint', () => {
+  it('starts idle before the user sends the first prompt', () => {
     const tracker = createAgentStatusTracker()
-    expect(tracker.status()).toBe('working')
+    expect(tracker.status()).toBe('idle')
     expect(tracker.titleHint()).toBeUndefined()
+  })
+
+  it.each([
+    ['Claude Code', '✳ Claude Code'],
+    ['Codex', 'Codex'],
+    ['Gemini CLI', '◇  Ready (tmp)'],
+    ['Pi', 'Pi'],
+  ])('treats the first plain %s title as ready after noisy startup output', (_agent, title) => {
+    let t = 0
+    const tracker = createAgentStatusTracker({ now: () => t, idleThresholdMs: 100 })
+    tracker.feed('Loading CLI…')
+    expect(tracker.status()).toBe('idle')
+
+    tracker.feed(`\x1b]0;${title}\x07`)
+    expect(tracker.status()).toBe('idle')
+
+    tracker.feed('redrawing the prompt')
+    expect(tracker.status()).toBe('idle')
+  })
+
+  it('enables printable-output fallback after the startup grace period', () => {
+    let t = 0
+    const tracker = createAgentStatusTracker({ now: () => t, idleThresholdMs: 100 })
+    tracker.feed('booting')
+    expect(tracker.status()).toBe('idle')
+
+    t = 101
+    tracker.feed('agent response')
+    expect(tracker.status()).toBe('working')
   })
 
   it('accepts an injected clock without changing signal-ordered behavior', () => {
     let t = 0
-    const tracker = createAgentStatusTracker({ now: () => ++t })
+    const tracker = createAgentStatusTracker({ now: () => ++t, fallbackActivityDelayMs: 0 })
     tracker.feed('hello')
     expect(tracker.status()).toBe('working')
     tracker.feed('\x07')
@@ -63,7 +92,7 @@ describe('createAgentStatusTracker', () => {
     const tracker = createAgentStatusTracker()
     tracker.feed('\x1b]2;Claude Code\x07')
     expect(tracker.titleHint()).toBe('Claude Code')
-    expect(tracker.status()).toBe('working')
+    expect(tracker.status()).toBe('idle')
   })
 
   it('parses OSC 0 and OSC 1 titles', () => {
@@ -86,7 +115,7 @@ describe('createAgentStatusTracker', () => {
     const tracker = createAgentStatusTracker()
     tracker.feed('\x1b]2;st terminated\x1b\\')
     expect(tracker.titleHint()).toBe('st terminated')
-    expect(tracker.status()).toBe('working')
+    expect(tracker.status()).toBe('idle')
   })
 
   it('parses an OSC sequence split across feed() chunks without a spurious needs-input', () => {
@@ -103,7 +132,7 @@ describe('createAgentStatusTracker', () => {
     tracker.feed('\x1b')
     tracker.feed(']2;late join\x07')
     expect(tracker.titleHint()).toBe('late join')
-    expect(tracker.status()).toBe('working')
+    expect(tracker.status()).toBe('idle')
   })
 
   it('parses a split ST terminator (ESC in one chunk, backslash in the next)', () => {
@@ -111,7 +140,7 @@ describe('createAgentStatusTracker', () => {
     tracker.feed('\x1b]2;split st\x1b')
     tracker.feed('\\')
     expect(tracker.titleHint()).toBe('split st')
-    expect(tracker.status()).toBe('working')
+    expect(tracker.status()).toBe('idle')
   })
 
   it('overwrites titleHint with successive titles', () => {
@@ -131,22 +160,22 @@ describe('createAgentStatusTracker', () => {
     const tracker = createAgentStatusTracker()
     tracker.feed('\x1b]133;A\x07')
     expect(tracker.titleHint()).toBeUndefined()
-    expect(tracker.status()).toBe('working')
+    expect(tracker.status()).toBe('idle')
   })
 
   it('lands on the right final status for interleaved output, OSC, BEL, output', () => {
-    const tracker = createAgentStatusTracker()
+    const tracker = createAgentStatusTracker({ fallbackActivityDelayMs: 0 })
     tracker.feed('Running tests...\n')
     expect(tracker.status()).toBe('working')
-    tracker.feed('\x1b]2;mim agent\x07')
+    tracker.feed('\x1b]2;⠴ mim agent\x07')
     expect(tracker.status()).toBe('working')
     tracker.feed('\x1b[33mAllow this command?\x1b[0m \x07')
     expect(tracker.status()).toBe('needs-input')
     tracker.feed('\x1b[2K') // redraw while blocked
     expect(tracker.status()).toBe('needs-input')
-    tracker.feed('Proceeding.')
+    tracker.feed('\x1b]9;4;3;\x07')
     expect(tracker.status()).toBe('working')
-    expect(tracker.titleHint()).toBe('mim agent')
+    expect(tracker.titleHint()).toBe('⠴ mim agent')
   })
 
   it('transitions from needs-input to idle after the silence threshold', () => {
@@ -180,7 +209,7 @@ describe('createAgentStatusTracker', () => {
 
   it('working status never transitions to idle', () => {
     let t = 0
-    const tracker = createAgentStatusTracker({ now: () => t, idleThresholdMs: 100 })
+    const tracker = createAgentStatusTracker({ now: () => t, idleThresholdMs: 100, fallbackActivityDelayMs: 0 })
     tracker.feed('hello')
     t += 200
     expect(tracker.status()).toBe('working')
@@ -310,7 +339,7 @@ describe('createAgentStatusTracker', () => {
   it('detects title Braille prefix as a spinner signal', () => {
     const tracker = createAgentStatusTracker()
     tracker.feed('\x1b]0;tmp\x07') // no Braille → no status change
-    expect(tracker.status()).toBe('working') // initial
+    expect(tracker.status()).toBe('idle')
     tracker.feed('\x1b]0;⠴ tmp\x07') // Braille spinner starts
     expect(tracker.status()).toBe('working')
     tracker.feed('\x1b]0;tmp\x07') // spinner stops → needs-input
@@ -331,7 +360,7 @@ describe('createAgentStatusTracker', () => {
     const tracker = createAgentStatusTracker({ now: () => t, idleThresholdMs: 5000 })
     // Boot: title without Braille
     tracker.feed('\x1b]0;tmp\x07')
-    expect(tracker.status()).toBe('working') // initial, no signal yet
+    expect(tracker.status()).toBe('idle')
     // Work starts: title gains Braille spinner
     t += 1000
     tracker.feed('\x1b]0;⠴ tmp\x07')
@@ -353,7 +382,7 @@ describe('createAgentStatusTracker', () => {
     const tracker = createAgentStatusTracker({ now: () => t, idleThresholdMs: 5000 })
     // Boot: ◇ Ready
     tracker.feed('\x1b]0;◇  Ready (tmp)\x07')
-    expect(tracker.status()).toBe('working') // no spinner seen yet
+    expect(tracker.status()).toBe('idle')
     // Work starts: ✦ Working…
     t += 2000
     tracker.feed('\x1b]0;✦  Working… (tmp)\x07')

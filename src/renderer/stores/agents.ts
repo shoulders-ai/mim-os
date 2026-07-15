@@ -1,4 +1,4 @@
-// Detected CLI coding agents (Claude Code, Codex, Gemini CLI) from the
+// Detected CLI coding agents (Claude Code, Codex, Gemini CLI, Pi) from the
 // main-process catalog. Refreshed on workspace open. Detection alone never
 // surfaces an agent: launcher rows show only agents the user enabled in
 // the Apps surface (persisted as the `enabledAgents` workspace setting).
@@ -16,6 +16,12 @@ export interface DetectedAgent {
   args: string[]
   installed: boolean
   binPath?: string
+  minimumVersion?: string
+  mimToolConnection?: 'mcp' | 'extension' | 'none'
+  extensionResource?: string
+  version?: string
+  compatible?: boolean
+  compatibilityMessage?: string
 }
 
 export const useAgentsStore = defineStore('agents', () => {
@@ -26,10 +32,14 @@ export const useAgentsStore = defineStore('agents', () => {
     agents.value.filter(agent => agent.installed)
   )
 
-  // Launcher rows: installed AND user-enabled. Enablement controls visibility
+  const availableAgents = computed<DetectedAgent[]>(() =>
+    installedAgents.value.filter(agent => agent.compatible !== false)
+  )
+
+  // Launcher rows: installed, compatible, AND user-enabled. Enablement controls visibility
   // only — session records and resume are unaffected by toggling off.
   const enabledAgents = computed<DetectedAgent[]>(() =>
-    installedAgents.value.filter(agent => settings.enabledAgents.includes(agent.id))
+    availableAgents.value.filter(agent => settings.enabledAgents.includes(agent.id))
   )
 
   function isEnabled(id: string): boolean {
@@ -45,7 +55,7 @@ export const useAgentsStore = defineStore('agents', () => {
   }
 
   // Custom CLI flags per agent (e.g. --dangerously-skip-permissions for
-  // Claude Code, --model for Codex/Gemini). Parsed to string[] at launch.
+  // Claude Code, --model for Codex/Gemini/Pi). Parsed to string[] at launch.
   function getFlags(id: string): string {
     return settings.agentFlags[id] ?? ''
   }
@@ -81,6 +91,7 @@ export const useAgentsStore = defineStore('agents', () => {
   return {
     agents,
     installedAgents,
+    availableAgents,
     enabledAgents,
     isEnabled,
     setEnabled,

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 // Coding agents section: detected CLI agents with opt-in launcher visibility,
-// per-agent custom flags, and one-click MCP connection.
+// per-agent custom flags, compatibility state, and capability-aware Mim tool connection.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick } from 'vue'
@@ -29,6 +29,19 @@ describe('AgentsSettingsPanel', () => {
     detectedAgents = [
       { id: 'claude-code', name: 'Claude Code', bin: 'claude', args: [], installed: true, binPath: '/usr/local/bin/claude' },
       { id: 'codex', name: 'Codex', bin: 'codex', args: [], installed: false },
+      {
+        id: 'pi',
+        name: 'Pi',
+        bin: 'pi',
+        args: [],
+        installed: true,
+        binPath: '/usr/local/bin/pi',
+        version: '0.80.6',
+        compatible: true,
+        minimumVersion: '0.76.0',
+        mimToolConnection: 'extension',
+        extensionResource: 'pi/mim-extension.mjs',
+      },
     ]
 
     call = vi.fn(async (tool: string) => {
@@ -105,6 +118,39 @@ describe('AgentsSettingsPanel', () => {
     const connectBtn = root.querySelector('[data-testid="agent-mcp-connect-claude-code"]')
     expect(connectBtn).toBeTruthy()
     expect(connectBtn!.textContent?.trim()).toBe('Connect')
+  })
+
+  it('shows Pi version and tool capability without offering MCP controls', async () => {
+    mount()
+    await flushUi()
+
+    const row = root.querySelector('[data-testid="apps-row-agent-pi"]')
+    expect(row?.textContent).toContain('0.80.6')
+    expect(row?.querySelector('[data-testid="agent-tools-integrated-pi"]')?.textContent)
+      .toContain('Mim tools built in')
+    expect(root.querySelector('[data-testid="agent-mcp-connect-pi"]')).toBeNull()
+
+    root.querySelector<HTMLButtonElement>('[data-testid="agent-advanced-pi"]')!.click()
+    await flushUi()
+
+    expect(root.querySelector('[data-testid="agent-mcp-disconnect-pi"]')).toBeNull()
+    expect(root.querySelector('[data-testid="agent-tools-explanation-pi"]')?.textContent)
+      .toContain('Mim tools load automatically in sessions launched from Mim.')
+  })
+
+  it('explains and disables an installed Pi version below the requirement', async () => {
+    detectedAgents[2] = {
+      ...detectedAgents[2],
+      version: '0.75.5',
+      compatible: false,
+      compatibilityMessage: 'Pi 0.75.5 found; version 0.76.0 or newer is required',
+    }
+    mount()
+    await flushUi()
+
+    const row = root.querySelector('[data-testid="apps-row-agent-pi"]')
+    expect(row?.textContent).toContain('Pi 0.75.5 found; version 0.76.0 or newer is required')
+    expect(root.querySelector<HTMLButtonElement>('[data-testid="apps-toggle-agent-pi"]')?.disabled).toBe(true)
   })
 
   it('shows Connected status when MCP is configured', async () => {

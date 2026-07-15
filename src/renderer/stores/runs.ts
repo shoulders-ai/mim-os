@@ -5,6 +5,7 @@ import { useSessionStore, type Session, type SessionStatusKind } from './session
 export type RunStatus =
   | 'ready'
   | 'working'
+  | 'waiting'
   | 'needs-input'
   | 'idle'
   | 'needs-approval'
@@ -15,7 +16,7 @@ export type RunStatus =
   | 'stopped'
   | 'missing'
 
-export type RunKind = 'chat' | 'routine' | 'package-job' | 'agent-session'
+export type RunKind = 'chat' | 'routine' | 'subagent' | 'package-job' | 'agent-session'
 
 export interface NavigatorRun {
   id: string
@@ -26,6 +27,9 @@ export interface NavigatorRun {
   updatedAt?: string
   packageId?: string
   jobId?: string
+  parentSessionId?: string
+  rootSessionId?: string
+  lastActivity?: string
 }
 
 export type PackageRunStatus = 'running' | 'completed' | 'failed' | 'cancelled'
@@ -233,6 +237,7 @@ export const useRunsStore = defineStore('runs', () => {
 })
 
 function sessionToRun(session: Session): NavigatorRun {
+  if (session.subagent) return subagentSessionToRun(session)
   if (session.routineId) return routineSessionToRun(session)
 
   const sessionStore = useSessionStore()
@@ -243,6 +248,21 @@ function sessionToRun(session: Session): NavigatorRun {
     title: session.label,
     status: mapSessionStatus(sessionStore.sessionStatusKind(session)),
     updatedAt: session.updatedAt,
+  }
+}
+
+function subagentSessionToRun(session: Session): NavigatorRun {
+  const metadata = session.subagent!
+  return {
+    id: `subagent:${session.id}`,
+    kind: 'subagent',
+    sourceId: session.id,
+    title: session.label,
+    status: mapSubagentStatus(metadata.status),
+    updatedAt: metadata.completedAt ?? metadata.lastActivityAt ?? metadata.updatedAt ?? session.updatedAt,
+    parentSessionId: metadata.parentSessionId,
+    rootSessionId: metadata.rootSessionId,
+    ...(metadata.lastActivity ? { lastActivity: metadata.lastActivity } : {}),
   }
 }
 
@@ -273,6 +293,16 @@ function mapRoutineStatus(status: Session['routineStatus'], fallback: SessionSta
   if (status === 'error') return 'error'
   if (status === 'stopped') return 'stopped'
   return mapSessionStatus(fallback)
+}
+
+function mapSubagentStatus(status: NonNullable<Session['subagent']>['status']): RunStatus {
+  if (status === 'queued' || status === 'working') return 'working'
+  if (status === 'waiting') return 'waiting'
+  if (status === 'needs-approval') return 'needs-approval'
+  if (status === 'done') return 'done'
+  if (status === 'error') return 'error'
+  if (status === 'stopped' || status === 'interrupted') return 'stopped'
+  return 'missing'
 }
 
 function packageRunToNavigatorRun(run: PackageRunRecord): NavigatorRun {

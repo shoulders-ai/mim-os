@@ -51,8 +51,8 @@ interface LoadedPackage {
   source: string
 }
 
-// 'run' rows carry a NavigatorRun whose own kind ('package-job' or
-// 'agent-session') decides where clicks and commands route.
+// 'run' rows carry a NavigatorRun whose own kind decides where clicks and
+// commands route.
 type ActivityRow =
   | { key: string; kind: 'chat'; session: Session }
   | { key: string; kind: 'run'; run: NavigatorRun }
@@ -111,6 +111,7 @@ const emit = defineEmits<{
   archiveAgentSession: [sessionId: string]
   deleteAgentSession: [sessionId: string]
   stopAgentSession: [sessionId: string]
+  stopSubagentSession: [sessionId: string]
   openFolder: []
   openRecentWorkspace: [path: string]
   addProject: [mode: 'new' | 'clone']
@@ -204,15 +205,15 @@ const appRows = computed<AppRow[]>(() => {
 })
 
 const activityRows = computed<ActivityRow[]>(() => {
-  const routineRuns = runsStore.chatRuns.filter(run => run.kind === 'routine')
+  const sessionRuns = runsStore.chatRuns.filter(run => run.kind === 'routine' || run.kind === 'subagent')
   const rows: (ActivityRow & { ts: number })[] = [
-    ...sessionStore.visibleSessions.filter(session => !session.routineId).map(session => ({
+    ...sessionStore.visibleSessions.filter(session => !session.routineId && !session.subagent).map(session => ({
       key: activityKeyForSession(session.id),
       kind: 'chat' as const,
       session,
       ts: new Date(session.updatedAt).getTime(),
     })),
-    ...[...routineRuns, ...runsStore.packageJobRuns, ...runsStore.agentSessionRuns].map(run => ({
+    ...[...sessionRuns, ...runsStore.packageJobRuns, ...runsStore.agentSessionRuns].map(run => ({
       key: activityKeyForRun(run),
       kind: 'run' as const,
       run,
@@ -305,7 +306,7 @@ function activityRowTitle(row: ActivityRow): string {
 
 function activityRowActive(row: ActivityRow): boolean {
   if (row.kind === 'chat') return props.activeWorkId === `work:chat:${row.session.id}`
-  if (row.run.kind === 'routine') return props.activeWorkId === `work:chat:${row.run.sourceId}`
+  if (row.run.kind === 'routine' || row.run.kind === 'subagent') return props.activeWorkId === `work:chat:${row.run.sourceId}`
   if (row.run.kind === 'agent-session') return props.activeWorkId === agentSessionWorkId(row.run)
   return props.activeWorkId === packageRunWorkId(row.run)
 }
@@ -464,7 +465,7 @@ function onSelectionKeydown(event: KeyboardEvent) {
 
 function selectRun(run: NavigatorRun) {
   if (suppressActivityClick.value) return
-  if (run.kind === 'routine') {
+  if (run.kind === 'routine' || run.kind === 'subagent') {
     selectSession(run.sourceId)
   } else if (run.kind === 'package-job' && run.packageId) {
     emit('selectPackageRun', run.packageId, run.sourceId)
@@ -563,7 +564,7 @@ function batchArchive() {
   clearActivitySelection()
   for (const row of rows) {
     if (row.kind === 'chat') emit('archiveSession', row.session.id)
-    else if (row.run.kind === 'routine') emit('archiveSession', row.run.sourceId)
+    else if (row.run.kind === 'routine' || row.run.kind === 'subagent') emit('archiveSession', row.run.sourceId)
     else if (row.run.kind === 'agent-session') emit('archiveAgentSession', row.run.sourceId)
     else if (row.run.packageId) emit('archivePackageRun', row.run.packageId, row.run.sourceId)
   }
@@ -575,7 +576,7 @@ function batchDelete() {
   clearActivitySelection()
   for (const row of rows) {
     if (row.kind === 'chat') emit('deleteSession', row.session.id)
-    else if (row.run.kind === 'routine') emit('deleteSession', row.run.sourceId)
+    else if (row.run.kind === 'routine' || row.run.kind === 'subagent') emit('deleteSession', row.run.sourceId)
     else if (row.run.kind === 'agent-session') {
       // Running sessions cannot be deleted (stop first); skip them silently
       // rather than surface a main-process error mid-batch.
@@ -614,6 +615,11 @@ function closeRunContextMenu() {
 // Stop applies only to live agent sessions; Delete is withheld from them
 // until the pty has ended (stop first, then delete).
 const runCtxIsLiveAgent = computed(() => !!runCtxMenu.run && agentRunIsLive(runCtxMenu.run))
+const runCtxIsLiveSubagent = computed(() => {
+  const run = runCtxMenu.run
+  return !!run && run.kind === 'subagent' && ['working', 'waiting', 'needs-approval'].includes(run.status)
+})
+const runCtxCanStop = computed(() => runCtxIsLiveAgent.value || runCtxIsLiveSubagent.value)
 
 const ctxPingArmed = computed(() =>
   !!ctxMenu.session && pingsStore.isArmed(activityKeyForSession(ctxMenu.session.id)),
@@ -645,7 +651,7 @@ function onRunCtxArchive() {
   closeRunContextMenu()
   if (run?.kind === 'agent-session') {
     emit('archiveAgentSession', run.sourceId)
-  } else if (run?.kind === 'routine') {
+  } else if (run?.kind === 'routine' || run?.kind === 'subagent') {
     emit('archiveSession', run.sourceId)
   } else if (run?.kind === 'package-job' && run.packageId) {
     emit('archivePackageRun', run.packageId, run.sourceId)
@@ -657,7 +663,7 @@ function onRunCtxDelete() {
   closeRunContextMenu()
   if (run?.kind === 'agent-session') {
     emit('deleteAgentSession', run.sourceId)
-  } else if (run?.kind === 'routine') {
+  } else if (run?.kind === 'routine' || run?.kind === 'subagent') {
     emit('deleteSession', run.sourceId)
   } else if (run?.kind === 'package-job' && run.packageId) {
     emit('deletePackageRun', run.packageId, run.sourceId)
@@ -669,6 +675,8 @@ function onRunCtxStop() {
   closeRunContextMenu()
   if (run?.kind === 'agent-session') {
     emit('stopAgentSession', run.sourceId)
+  } else if (run?.kind === 'subagent') {
+    emit('stopSubagentSession', run.sourceId)
   }
 }
 
@@ -723,7 +731,7 @@ function activityRowIsLive(row: ActivityRow): boolean {
     return kind === 'working' || kind === 'error' || kind === 'needs-approval' || kind === 'unread'
   }
   const s = row.run.status
-  return s === 'working' || s === 'needs-input' || s === 'idle' || s === 'needs-approval' || s === 'error' || s === 'paused'
+  return s === 'working' || s === 'waiting' || s === 'needs-input' || s === 'idle' || s === 'needs-approval' || s === 'error' || s === 'paused'
 }
 
 const archivableRows = computed(() =>
@@ -734,7 +742,7 @@ function confirmArchiveAll() {
   archiveAllDialogOpen.value = false
   for (const row of archivableRows.value) {
     if (row.kind === 'chat') emit('archiveSession', row.session.id)
-    else if (row.run.kind === 'routine') emit('archiveSession', row.run.sourceId)
+    else if (row.run.kind === 'routine' || row.run.kind === 'subagent') emit('archiveSession', row.run.sourceId)
     else if (row.run.kind === 'agent-session') emit('archiveAgentSession', row.run.sourceId)
     else if (row.run.packageId) emit('archivePackageRun', row.run.packageId, row.run.sourceId)
   }
@@ -1312,10 +1320,10 @@ onUnmounted(() => {
       v-if="runCtxMenu.visible"
       :x="runCtxMenu.x"
       :y="runCtxMenu.y"
-      :can-stop="runCtxIsLiveAgent"
-      :can-delete="!runCtxIsLiveAgent"
+      :can-stop="runCtxCanStop"
+      :can-delete="!runCtxCanStop"
       :ping-armed="runCtxPingArmed"
-      :can-rename="runCtxMenu.run?.kind !== 'routine'"
+      :can-rename="runCtxMenu.run?.kind !== 'routine' && runCtxMenu.run?.kind !== 'subagent'"
       @close="closeRunContextMenu"
       @rename="onRunCtxRename"
       @stop="onRunCtxStop"

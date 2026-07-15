@@ -34,6 +34,12 @@ describe('terminalOsShortcutSequence', () => {
     }
   })
 
+  it('maps Pi Shift+Enter to its CSI-u newline binding', () => {
+    expect(terminalOsShortcutSequence(event({ key: 'Enter', shiftKey: true }), {
+      profile: 'pi',
+    })).toBe('\x1b[13;2u')
+  })
+
   it('maps macOS line-boundary shortcuts to readline control bytes', () => {
     expect(terminalOsShortcutSequence(event({ key: 'ArrowLeft', metaKey: true }), { platform: 'MacIntel' })).toBe('\x01')
     expect(terminalOsShortcutSequence(event({ key: 'ArrowRight', metaKey: true }), { platform: 'MacIntel' })).toBe('\x05')

@@ -11,6 +11,19 @@ const detected: DetectedAgent[] = [
   { id: 'claude-code', name: 'Claude Code', bin: 'claude', args: [], installed: true, binPath: '/opt/homebrew/bin/claude' },
   { id: 'codex', name: 'Codex', bin: 'codex', args: [], installed: false },
   { id: 'gemini-cli', name: 'Gemini CLI', bin: 'gemini', args: [], installed: false },
+  {
+    id: 'pi',
+    name: 'Pi',
+    bin: 'pi',
+    args: [],
+    minimumVersion: '0.76.0',
+    mimToolConnection: 'extension',
+    extensionResource: 'pi/mim-extension.mjs',
+    installed: true,
+    binPath: '/opt/homebrew/bin/pi',
+    version: '0.80.6',
+    compatible: true,
+  },
 ]
 
 const record = {
@@ -96,11 +109,34 @@ describe('agent tools', () => {
 
     await tools.call('agent.launch', { agentId: 'claude-code', extraArgs: ['--dangerously-skip-permissions', '--verbose'] }, ctx)
 
-    const launchedAgent = sessions.launch.mock.calls[0][0]
-    expect(launchedAgent.args).toEqual(['--dangerously-skip-permissions', '--verbose'])
-    expect(launchedAgent.id).toBe('claude-code')
-    // Original catalog entry is not mutated.
-    expect(detected[0].args).toEqual([])
+    expect(sessions.launch).toHaveBeenCalledWith(
+      detected[0],
+      ['--dangerously-skip-permissions', '--verbose'],
+    )
+  })
+
+  it('agent.launch rejects Pi session flags reserved for deterministic lifecycle', async () => {
+    const { tools, sessions } = harness()
+
+    await expect(tools.call('agent.launch', {
+      agentId: 'pi',
+      extraArgs: ['--session-id', 'not-mim'],
+    }, ctx)).rejects.toThrow('Pi flag --session-id is managed by Mim')
+    expect(sessions.launch).not.toHaveBeenCalled()
+  })
+
+  it('agent.launch rejects installed agents that do not meet compatibility requirements', async () => {
+    const oldPi = {
+      ...detected[3],
+      version: '0.75.5',
+      compatible: false,
+      compatibilityMessage: 'Pi 0.75.5 found; version 0.76.0 or newer is required',
+    }
+    const { tools, sessions } = harness([...detected.slice(0, 3), oldPi])
+
+    await expect(tools.call('agent.launch', { agentId: 'pi' }, ctx))
+      .rejects.toThrow('Pi 0.75.5 found; version 0.76.0 or newer is required')
+    expect(sessions.launch).not.toHaveBeenCalled()
   })
 
   it('agent.launch rejects unknown and uninstalled agents', async () => {

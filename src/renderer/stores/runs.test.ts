@@ -103,6 +103,43 @@ describe('runs store', () => {
     ])
   })
 
+  it('maps durable child sessions to subagent runs with their persisted lifecycle', () => {
+    const sessions = useSessionStore()
+    const runs = useRunsStore()
+    sessions.sessions = [
+      session({
+        id: 'child-1',
+        label: 'Map repository',
+        subagent: {
+          rootSessionId: 'root',
+          parentSessionId: 'parent',
+          depth: 1,
+          status: 'waiting',
+          currentTurnId: 'turn-1',
+          inbox: [],
+          lastActivity: 'Waiting for subagents',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:05:00.000Z',
+        },
+      }),
+    ]
+
+    expect(runs.allRuns).toEqual([
+      expect.objectContaining({
+        id: 'subagent:child-1',
+        kind: 'subagent',
+        sourceId: 'child-1',
+        title: 'Map repository',
+        status: 'waiting',
+        parentSessionId: 'parent',
+        lastActivity: 'Waiting for subagents',
+      }),
+    ])
+
+    sessions.sessions[0].subagent!.status = 'interrupted'
+    expect(runs.allRuns[0].status).toBe('stopped')
+  })
+
   it('aggregates app jobs without becoming their persistence layer', () => {
     const runs = useRunsStore()
     runs.setPackageRuns([

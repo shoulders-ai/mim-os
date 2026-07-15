@@ -79,6 +79,13 @@ describe('AgentSessionView', () => {
       args: [],
       installed: true,
       binPath: '/usr/local/bin/gemini',
+    }, {
+      id: 'pi',
+      name: 'Pi',
+      bin: 'pi',
+      args: [],
+      installed: true,
+      binPath: '/usr/local/bin/pi',
     }]
   })
 
@@ -139,6 +146,14 @@ describe('AgentSessionView', () => {
 
     expect(surfaceEl()?.dataset.keybindingProfile).toBe('gemini-cli')
     expect(root.textContent).toContain('Gemini CLI')
+  })
+
+  it('passes the Pi keybinding profile to the live terminal', async () => {
+    useRunsStore().setAgentSessions([makeSession({ agentId: 'pi', title: 'Pi' })])
+    mountView({ agentId: 'pi' })
+    await flushUi()
+
+    expect(surfaceEl()?.dataset.keybindingProfile).toBe('pi')
   })
 
   it('archives a running session from the header', async () => {

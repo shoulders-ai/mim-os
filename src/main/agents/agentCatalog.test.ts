@@ -3,7 +3,9 @@ import {
   AGENT_CATALOG,
   detectAgents,
   resetAgentDetection,
+  launchArgs,
   resumeArgs,
+  assertAgentExtraArgs,
   cliSessionsDir,
   extractCodexSessionId,
   type DetectedAgent,
@@ -21,12 +23,43 @@ function execReturning(map: Record<string, { stdout: string; exitCode: number }>
 }
 
 describe('agent catalog', () => {
-  it('lists exactly claude-code, codex, and gemini-cli with their binaries', () => {
+  it('lists Claude Code, Codex, Gemini CLI, and Pi with their capabilities', () => {
     expect(AGENT_CATALOG).toEqual([
       { id: 'claude-code', name: 'Claude Code', bin: 'claude', args: [] },
       { id: 'codex', name: 'Codex', bin: 'codex', args: [] },
       { id: 'gemini-cli', name: 'Gemini CLI', bin: 'gemini', args: [] },
+      {
+        id: 'pi',
+        name: 'Pi',
+        bin: 'pi',
+        args: [],
+        minimumVersion: '0.76.0',
+        mimToolConnection: 'extension',
+        extensionResource: 'pi/mim-extension.mjs',
+      },
     ])
+  })
+})
+
+describe('launchArgs', () => {
+  it('pins Pi to the Mim session id while preserving custom flags', () => {
+    expect(launchArgs(
+      'pi',
+      'mim-session-123',
+      ['--model', 'anthropic/claude-sonnet-4'],
+      ['--extension', '/bundled/mim-extension.mjs'],
+    )).toEqual([
+      '--session-id',
+      'mim-session-123',
+      '--model',
+      'anthropic/claude-sonnet-4',
+      '--extension',
+      '/bundled/mim-extension.mjs',
+    ])
+  })
+
+  it('leaves other agent launch flags unchanged', () => {
+    expect(launchArgs('codex', 'mim-session-123', ['--full-auto'])).toEqual(['--full-auto'])
   })
 })
 
@@ -57,8 +90,38 @@ describe('resumeArgs', () => {
     expect(resumeArgs('gemini-cli')).toEqual(['--resume', 'latest'])
   })
 
+  it('resumes Pi by exact session id and restores its custom flags', () => {
+    expect(resumeArgs(
+      'pi',
+      'mim-session-123',
+      '/workspace',
+      ['--model', 'openai/gpt-5'],
+      ['--extension', '/bundled/mim-extension.mjs'],
+    )).toEqual([
+      '--session-id',
+      'mim-session-123',
+      '--model',
+      'openai/gpt-5',
+      '--extension',
+      '/bundled/mim-extension.mjs',
+    ])
+  })
+
   it('returns empty for unknown agents', () => {
     expect(resumeArgs('unknown')).toEqual([])
+  })
+})
+
+describe('assertAgentExtraArgs', () => {
+  it('reserves Pi session-control flags for Mim', () => {
+    for (const flag of ['--session-id', '--session', '--continue', '-c', '--resume', '-r', '--no-session', '--fork']) {
+      expect(() => assertAgentExtraArgs('pi', [flag])).toThrow(`Pi flag ${flag} is managed by Mim`)
+    }
+  })
+
+  it('allows ordinary Pi flags and does not constrain other agents', () => {
+    expect(() => assertAgentExtraArgs('pi', ['--model', 'openai/gpt-5'])).not.toThrow()
+    expect(() => assertAgentExtraArgs('codex', ['--resume', 'anything'])).not.toThrow()
   })
 })
 
@@ -209,6 +272,76 @@ describe('detectAgents', () => {
     const codex = agents.find(a => a.id === 'codex') as DetectedAgent
     expect(codex.installed).toBe(true)
     expect(codex.binPath).toBe('C:\\Users\\me\\AppData\\Roaming\\npm\\codex.cmd')
+  })
+
+  it('captures the installed Pi version and marks supported versions compatible', async () => {
+    const exec = vi.fn<ExecLoginShell>(async (file, args) => {
+      const command = args.at(-1) ?? ''
+      if (command.includes('command -v pi')) return { stdout: '/opt/homebrew/bin/pi\n', exitCode: 0 }
+      if (file === '/opt/homebrew/bin/pi' && command === '--version') {
+        return { stdout: 'pi 0.80.6\n', exitCode: 0 }
+      }
+      return { stdout: '', exitCode: 1 }
+    })
+
+    const agents = await detectAgents({ exec })
+    const pi = agents.find(agent => agent.id === 'pi') as DetectedAgent
+
+    expect(pi).toMatchObject({
+      installed: true,
+      binPath: '/opt/homebrew/bin/pi',
+      version: '0.80.6',
+      compatible: true,
+    })
+    expect(pi.compatibilityMessage).toBeUndefined()
+    expect(exec).toHaveBeenCalledWith('/opt/homebrew/bin/pi', ['--version'])
+  })
+
+  it('keeps old Pi installations visible but marks them unavailable', async () => {
+    const exec = vi.fn<ExecLoginShell>(async (file, args) => {
+      const command = args.at(-1) ?? ''
+      if (command.includes('command -v pi')) return { stdout: '/usr/local/bin/pi\n', exitCode: 0 }
+      if (file === '/usr/local/bin/pi' && command === '--version') {
+        return { stdout: '0.75.5\n', exitCode: 0 }
+      }
+      return { stdout: '', exitCode: 1 }
+    })
+
+    const agents = await detectAgents({ exec })
+    const pi = agents.find(agent => agent.id === 'pi') as DetectedAgent
+
+    expect(pi).toMatchObject({ installed: true, version: '0.75.5', compatible: false })
+    expect(pi.compatibilityMessage).toBe('Pi 0.75.5 found; version 0.76.0 or newer is required')
+  })
+
+  it('marks Pi unavailable when its installed version cannot be verified', async () => {
+    const exec = vi.fn<ExecLoginShell>(async (_file, args) => {
+      const command = args.at(-1) ?? ''
+      if (command.includes('command -v pi')) return { stdout: '/usr/local/bin/pi\n', exitCode: 0 }
+      return { stdout: 'unknown\n', exitCode: 0 }
+    })
+
+    const agents = await detectAgents({ exec })
+    const pi = agents.find(agent => agent.id === 'pi') as DetectedAgent
+
+    expect(pi).toMatchObject({ installed: true, compatible: false })
+    expect(pi.version).toBeUndefined()
+    expect(pi.compatibilityMessage).toBe('Could not verify Pi version; version 0.76.0 or newer is required')
+  })
+
+  it('checks a Windows Pi shim version through cmd.exe', async () => {
+    const piPath = 'C:\\Users\\me\\AppData\\Roaming\\npm\\pi.cmd'
+    const exec = vi.fn<ExecLoginShell>(async (file, args) => {
+      if (file === 'where.exe' && args[0] === 'pi') return { stdout: `${piPath}\r\n`, exitCode: 0 }
+      if (file === 'cmd.exe') return { stdout: 'pi 0.80.6\r\n', exitCode: 0 }
+      return { stdout: '', exitCode: 1 }
+    })
+
+    const agents = await detectAgents({ exec, platform: 'win32' })
+    const pi = agents.find(agent => agent.id === 'pi') as DetectedAgent
+
+    expect(pi).toMatchObject({ installed: true, version: '0.80.6', compatible: true })
+    expect(exec).toHaveBeenCalledWith('cmd.exe', ['/d', '/s', '/c', `"${piPath}" --version`])
   })
 
   it('caches detection: a second call does not re-invoke exec', async () => {

@@ -34,9 +34,11 @@ records, resume, Activity rows, and History are unaffected by toggling off.
 
 | File | Owns |
 |---|---|
-| `src/main/agents/agentCatalog.ts` | Static catalog (`claude-code`, `codex`, `gemini-cli`, `pi`) + installation and compatibility detection. Pi is available only at version 0.76.0 or newer; detection runs `pi --version`, keeps incompatible installs visible, and returns an explanatory `compatibilityMessage`. `launchArgs`/`resumeArgs` provide lifecycle flags: Claude Code uses `--resume <id>`, Codex `resume <uuid>`, Gemini CLI `--session-file <path>`, and Pi receives the exact Mim id through `--session-id <id>` on both launch and resume. `cliSessionsDir` and `extractCodexSessionId` support file-diff discovery for the other CLIs. Pi session-control flags are reserved from custom arguments so callers cannot break identity. No Electron imports. |
-| `src/main/agents/agentSessions.ts` | Session lifecycle service (`createAgentSessions`): launch/resume/stop/list/get/rename/archive/delete, persistence, scrollback capture, event emission, `reconcileStaleSessions`, `activeSessionCount`. Claude Code, Codex, and Gemini CLI snapshot the CLI session directory before spawn and detect the new session file on first PTY output. Pi instead sets `cliSessionId` to the Mim session id before spawn and retains its custom `userArgs`, making resume exact without filesystem discovery. System boundaries (pty spawn factory, MCP token/port providers, emit, clock, id generator) are injected. |
-| `src/main/agents/agentStatus.ts` | Pure runtime-status tracker over the pty output stream (see Status signals). Dependency-free, chunk-split-safe escape-sequence parser. Derives `idle` from a 5-second timeout after entering `needs-input`. |
+| `src/main/agents/agentCatalog.ts` | Static catalog (`claude-code`, `codex`, `gemini-cli`, `pi`) + installation and compatibility detection. Pi is available only at version 0.76.0 or newer; detection runs `pi --version`, keeps incompatible installs visible, and returns an explanatory `compatibilityMessage`. `launchArgs`/`resumeArgs` provide lifecycle flags: Claude Code uses `--resume <id>`, Codex `resume <uuid>`, Gemini CLI `--session-file <path>`, and Pi receives the exact Mim id through `--session-id <id>` on both launch and resume. The Pi catalog entry declares its bundled extension resource, which is appended as a managed `--extension` argument after user flags. `cliSessionsDir` and `extractCodexSessionId` support file-diff discovery for the other CLIs. Pi session-control flags are reserved from custom arguments so callers cannot break identity. No Electron imports. |
+| `src/main/agents/agentResources.ts` | Resolves external-agent assets from repository, built, and packaged roots. Packaged paths point to `app.asar.unpacked`, because Pi is a separate process and cannot read Electron's virtual archive. Missing optional resources return `null` so the underlying CLI can still launch. |
+| `src/main/agents/agentSessions.ts` | Session lifecycle service (`createAgentSessions`): launch/resume/stop/list/get/rename/archive/delete, persistence, scrollback capture, event emission, `reconcileStaleSessions`, `activeSessionCount`. Claude Code, Codex, and Gemini CLI snapshot the CLI session directory before spawn and detect the new session file on first PTY output. Pi instead sets `cliSessionId` to the Mim session id before spawn, retains its custom `userArgs`, and loads the resolved bundled extension on launch and resume, making resume exact without filesystem discovery. System boundaries (pty spawn factory, token/port providers, resource resolver, emit, clock, id generator) are injected. |
+| `src/main/agents/agentStatus.ts` | Pure runtime-status tracker over the pty output stream (see Status signals). Dependency-free, chunk-split-safe escape-sequence parser. Starts `idle`, ignores printable startup noise for 5 seconds, and derives settled `idle` after `done` or non-blocking `needs-input`. |
+| `resources/pi/mim-extension.mjs` | First-party Pi extension. It authenticates directly to the desktop WebSocket with the session token, identifies calls as `pi`, reads the curated enabled tool catalog, registers those schemas with Pi, forwards calls with abort/timeout handling, and emits connection plus title-spinner lifecycle signals. Connection failure is non-fatal; `/mim-reconnect` retries without requiring a restart. |
 | `src/main/tools/agents.ts` | Registers the `agent.*` tools over injected detect/sessions deps. |
 | `src/main/pty.ts` | Shared `spawnPtyProcess` helper used by both `terminal.spawn` and agent sessions: every pty lives in the same instances map and forwards on the same `pty:output:<id>` / `pty:exit:<id>` channels. Renderer keystrokes use a fast-path `pty:input` IPC channel (`writePty`) that bypasses the tool registry; the `terminal.write` registry tool remains for programmatic use (bridge commands, AI/app callers). `terminal.spawn` opts scratch zsh shells into `ptyShellIntegration.ts` for keymap bindings; agent sessions do not opt in. `terminal.resize/kill` and renderer xterm attachment work uniformly on both scratch and agent ptys. |
 | `src/main/closeGuard.ts` | `closeGuardDecision(dirtyTabCount, activeRunCount, activeAgentCount)` — third count produces "N running agent sessions" in the quit prompt. |
@@ -44,11 +46,13 @@ records, resume, Activity rows, and History are unaffected by toggling off.
 | `src/main/tools/archive.ts` | `archive.list` also returns `agentSessions` — archived records read straight from their files so the tool works without the live service (headless). |
 
 Launched agent ptys receive `MIM_PORT` and a per-session `MIM_TOKEN` in their
-environment. For agents with Mim tool connectivity, this lets their configured
-`mim mcp` server connect back to the running desktop with trace/audit attribution
-to the agent session. Pi does not expose Mim tools yet; its token environment is
-reserved for a future direct adapter. Tokens are revoked on normal exit, stop,
-or launch failure after token creation.
+environment. Claude Code, Codex, and Gemini CLI use those credentials through
+their configured `mim mcp` bridge. Pi's bundled extension connects directly to
+the same authenticated desktop tool surface, without an MCP subprocess or Pi
+configuration change. The desktop still enforces the curated catalog and
+Settings → Tools policy, and Pi calls carry `agent: "pi"` trace/audit
+attribution plus the agent session id. Tokens are revoked on normal exit, stop,
+or launch failure after token creation, which also closes the Pi adapter.
 
 ### Record and persistence
 
@@ -105,12 +109,13 @@ not re-title (the flag is pre-set if the title is already non-default).
 
 `AgentSessionRuntime` = record merged with live-only overlay fields for the
 renderer: `ptyId` (attach xterm to the running pty), `runtimeStatus`
-(`working` / `needs-input` / `idle`), and optionally `scrollback`. The overlay
+(`working` / `needs-input` / `done` / `idle`), and optionally `scrollback`. The overlay
 is never persisted.
 
 Status transitions:
 
-- launch → `running`.
+- launch → persisted `running` with live `runtimeStatus: 'idle'`; launch and
+  resume do not imply that the agent has begun a turn.
 - pty exit → `stopped` if a stop was requested (`stopRequested` flag set before
   `handle.kill()`, classifying the exit regardless of its non-zero exit code),
   else `done` (exit 0) or `error` (non-zero).
@@ -143,7 +148,8 @@ Three signal layers, highest priority wins within a single `feed()` call:
 - `4;3;` (indeterminate progress) → `working`.
 - `4;0;` (progress removed) → `done`.
 
-**Layer 2: Title spinner prefix** (Claude Code, Codex, Gemini CLI):
+**Layer 2: TUI title and spinner prefix** (Claude Code, Codex, Gemini CLI, Pi):
+- The first plain title establishes that startup is ready → `idle`.
 - Title gains a spinner prefix character → `working`.
 - Title loses a spinner prefix character → `needs-input`.
 - Spinner characters: Braille block (U+2800–U+28FF, animated frames) and
@@ -156,12 +162,14 @@ Three signal layers, highest priority wins within a single `feed()` call:
 
 **Fallback** (agents with none of the above):
 - BEL (`\x07`) in plain text → `needs-input`.
-- Printable output → `working`.
+- Printable output → `working` after the 5-second startup grace period. This
+  preserves fallback detection without classifying boot banners as agent work.
 
-Once any TUI signal (OSC 9, title spinner, or OSC 777) is seen,
+Once any TUI signal (OSC 9, any title, or OSC 777) is seen,
 `hasTuiSignals` is set and printable output no longer drives status.
 
 **Idle derivation** (time-based, not signal-based):
+- A new or resumed live session starts `idle` immediately.
 - `done` + 5 s silence → `idle`.
 - `needs-input` + 5 s silence → `idle`, **unless** `needsInputIsBlocking`
   (set by OSC 777 — the agent is genuinely waiting on user permission and
@@ -174,11 +182,13 @@ Once any TUI signal (OSC 9, title spinner, or OSC 777) is seen,
 | Claude Code | OSC 9;4;3; + Braille title | OSC 9;4;0; | Title ✳ (plan mode) / OSC 777 (permissions) |
 | Codex | Braille title prefix | Title loses Braille | — (degrades to idle) |
 | Gemini CLI | ✦ title prefix | ◇ title prefix | — (degrades to idle) |
-| Pi | Printable-output fallback | — | — |
+| Pi | Bundled extension sets a Braille title prefix on `agent_start` | Title loses Braille on `agent_end` | Title loses Braille (degrades to idle) |
 
-Pi currently exposes no stable progress/title signal to Mim. Printable output
-marks it working, while needs-input and done remain best-effort until process
-exit; the live terminal is the authoritative state.
+Pi's extension derives a compact title from `before_agent_start`, animates a
+Braille-prefixed terminal title while the agent loop runs, and restores the
+plain title when it settles. These use Pi's public lifecycle and `setTitle`
+APIs, so the generic status tracker needs no Pi-specific escape protocol.
+Printable output remains a fallback if the extension is absent or unavailable.
 
 ### Events
 
@@ -241,8 +251,10 @@ and the hard-deny branches in `src/main/security/gate.ts`; see
   agent has a collapsed "Flags" disclosure with a free-text input for custom
   CLI flags (e.g. `--dangerously-skip-permissions`, `--model o3`), persisted
   per workspace as `agentFlags: Record<string, string>` and appended to the
-  launch command as `extraArgs`. Pi's row says "Mim tools unavailable" instead
-  of offering MCP Connect/Disconnect; its session-control flags are managed by Mim.
+  launch command as `extraArgs`. Pi's row says "Mim tools built in" and does
+  not offer MCP Connect/Disconnect: the extension loads automatically only in
+  Mim-launched sessions. Its session-control flags and built-in extension
+  injection are managed by Mim; user-supplied Pi extensions remain allowed.
 - **App launcher rows**: one row per enabled available agent, agent icon,
   click = launch a new session and open its Work surface.
 - **Activity rows**: one row per non-archived session, status dot/tag
@@ -262,8 +274,11 @@ and the hard-deny branches in `src/main/security/gate.ts`; see
 ## Tests To Update With Agent-Session Changes
 
 - `src/main/agents/agentCatalog.test.ts`
+- `src/main/agents/agentResources.test.ts`
 - `src/main/agents/agentSessions.test.ts`
 - `src/main/agents/agentStatus.test.ts`
+- `src/main/agents/piExtension.test.ts`
+- `scripts/electron-builder-config.test.mjs`
 - `src/main/tools/agents.test.ts`
 - `src/main/closeGuard.test.ts`
 - `src/main/security/gate.test.ts` (agent policy + user-only denials)

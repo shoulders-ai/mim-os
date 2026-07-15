@@ -23,6 +23,7 @@ import {
   extractCodexSessionId,
 } from '@main/agents/agentCatalog.js'
 import type { DetectedAgent } from '@main/agents/agentCatalog.js'
+import { resolveBundledAgentResource } from '@main/agents/agentResources.js'
 import type { PtyHandle, PtySpawnOptions } from '@main/pty.js'
 
 // Scrollback cap: the .scrollback file grows by raw append until it exceeds
@@ -198,6 +199,7 @@ export interface AgentSessionsOptions {
   scrollbackKeepBytes?: number
   idleThresholdMs?: number
   generateTitle?: (scrollbackText: string) => Promise<string | null>
+  resolveAgentResource?: (resourcePath: string) => string | null
 }
 
 export interface AgentSessions {
@@ -239,6 +241,13 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
   const keepBytes = options.scrollbackKeepBytes ?? SCROLLBACK_KEEP_BYTES
   const idleThresholdMs = options.idleThresholdMs ?? 5000
   const active = new Map<string, LiveSession>()
+  const resolveAgentResource = options.resolveAgentResource ?? resolveBundledAgentResource
+
+  function managedArgs(agent: DetectedAgent): string[] {
+    if (agent.mimToolConnection !== 'extension' || !agent.extensionResource) return []
+    const extensionPath = resolveAgentResource(agent.extensionResource)
+    return extensionPath ? ['--extension', extensionPath] : []
+  }
 
   function requireWorkspace(): string {
     const workspacePath = options.getWorkspacePath()
@@ -486,7 +495,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     assertAgentExtraArgs(agent.id, userArgs)
     const cwd = requireWorkspace()
     const sessionId = generateId()
-    const args = catalogLaunchArgs(agent.id, sessionId, [...agent.args, ...userArgs])
+    const args = catalogLaunchArgs(agent.id, sessionId, [...agent.args, ...userArgs], managedArgs(agent))
     const mcpToken = options.createMcpToken(sessionId)
     const record: AgentSessionRecord = {
       sessionId,
@@ -545,7 +554,7 @@ export function createAgentSessions(options: AgentSessionsOptions): AgentSession
     if (record.status === 'running') throw new Error(`Agent session is already running: ${sessionId}`)
 
     const retainedArgs = record.agentId === 'pi' ? [...agent.args, ...(record.userArgs ?? [])] : []
-    const rArgs = catalogResumeArgs(record.agentId, record.cliSessionId, record.cwd, retainedArgs)
+    const rArgs = catalogResumeArgs(record.agentId, record.cliSessionId, record.cwd, retainedArgs, managedArgs(agent))
     const mcpToken = options.createMcpToken(sessionId)
 
     record.status = 'running'

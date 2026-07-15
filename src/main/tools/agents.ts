@@ -1,5 +1,10 @@
 import type { ToolRegistry } from '@main/tools/registry.js'
-import { detectAgents, type DetectedAgent } from '@main/agents/agentCatalog.js'
+import {
+  assertAgentExtraArgs,
+  assertDetectedAgentAvailable,
+  detectAgents,
+  type DetectedAgent,
+} from '@main/agents/agentCatalog.js'
 import type { AgentSessions } from '@main/agents/agentSessions.js'
 import { getAgentMcpSetup, checkMimMcpConfigured, addMimMcp, removeMimMcp } from '@main/agents/agentMcp.js'
 
@@ -23,7 +28,7 @@ export function registerAgentTools(tools: ToolRegistry, deps?: AgentToolsDeps): 
 
   tools.register({
     name: 'agent.list',
-    description: 'CLI coding agents (Claude Code, Codex, Gemini CLI) detected on this machine, with absolute binary paths resolved through the user\'s login shell.',
+    description: 'CLI coding agents (Claude Code, Codex, Gemini CLI, Pi) detected on this machine, including compatibility and absolute binary paths resolved through the user\'s login shell.',
     inputSchema: objectSchema({}),
     execute: async () => ({ agents: await detect() }),
   })
@@ -40,12 +45,12 @@ export function registerAgentTools(tools: ToolRegistry, deps?: AgentToolsDeps): 
       const agents = await detect()
       const agent = agents.find(a => a.id === agentId)
       if (!agent) throw new Error(`Unknown agent: ${agentId}`)
-      if (!agent.installed || !agent.binPath) throw new Error(`Agent not installed: ${agentId}`)
+      assertDetectedAgentAvailable(agent)
       const extra = Array.isArray(params.extraArgs) ? params.extraArgs as string[] : []
-      const launched = extra.length
-        ? { ...agent, args: [...agent.args, ...extra] }
-        : agent
-      const { record, ptyId } = sessions().launch(launched)
+      assertAgentExtraArgs(agent.id, extra)
+      const { record, ptyId } = extra.length
+        ? sessions().launch(agent, extra)
+        : sessions().launch(agent)
       return { session: record, ptyId }
     },
   })
@@ -61,7 +66,7 @@ export function registerAgentTools(tools: ToolRegistry, deps?: AgentToolsDeps): 
       const agents = await detect()
       const agent = agents.find(a => a.id === session.agentId)
       if (!agent) throw new Error(`Unknown agent: ${session.agentId}`)
-      if (!agent.installed || !agent.binPath) throw new Error(`Agent not installed: ${session.agentId}`)
+      assertDetectedAgentAvailable(agent)
       const { record, ptyId } = sessions().resume(sessionId, agent)
       return { session: record, ptyId }
     },
@@ -124,7 +129,7 @@ export function registerAgentTools(tools: ToolRegistry, deps?: AgentToolsDeps): 
       const agents = await detect()
       const statuses: Record<string, boolean> = {}
       await Promise.all(agents.map(async (agent) => {
-        if (!agent.installed || !agent.binPath) return
+        if (!agent.installed || !agent.binPath || agent.compatible === false) return
         const setup = getAgentMcpSetup(agent.id)
         if (!setup) return
         statuses[agent.id] = await checkMimMcpConfigured(agent.binPath, setup.listArgs)

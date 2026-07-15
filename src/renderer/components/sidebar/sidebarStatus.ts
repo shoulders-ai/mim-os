@@ -16,6 +16,7 @@ export function sessionStatusTag(kind: SessionStatusKind, justFinished: boolean)
 
 export function runStatusTag(status: RunStatus): string | null {
   if (status === 'working') return 'Working'
+  if (status === 'waiting') return 'Waiting'
   if (status === 'needs-approval') return 'Approve'
   if (status === 'needs-input') return 'Input'
   if (status === 'ready-to-review') return 'Review'

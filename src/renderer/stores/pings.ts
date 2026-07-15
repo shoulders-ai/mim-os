@@ -17,6 +17,7 @@ const MAX_ARMED = 200
 
 export function pingOutcome(prev: RunStatus | undefined, next: RunStatus): PingOutcome | null {
   if (prev !== 'working' || next === 'working') return null
+  if (next === 'waiting') return null
   if (next === 'error' || next === 'missing') return 'error'
   if (next === 'needs-input' || next === 'needs-approval' || next === 'paused') return 'input'
   return 'done'

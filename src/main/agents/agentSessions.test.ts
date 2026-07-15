@@ -43,7 +43,8 @@ const pi: DetectedAgent = {
   bin: 'pi',
   args: [],
   minimumVersion: '0.76.0',
-  mimToolConnection: 'none',
+  mimToolConnection: 'extension',
+  extensionResource: 'pi/mim-extension.mjs',
   installed: true,
   binPath: '/opt/homebrew/bin/pi',
   version: '0.80.6',
@@ -189,6 +190,7 @@ describe('agent sessions', () => {
     expect(record.command).toBe('/opt/homebrew/bin/claude --verbose')
     expect(record.cwd).toBe(dir)
     expect(record.status).toBe('running')
+    expect(record.runtimeStatus).toBe('idle')
     expect(record.startedAt).toBeTruthy()
     expect(record.ptyId).toBe(ptyId)
 
@@ -197,12 +199,18 @@ describe('agent sessions', () => {
     expect(onDisk.ptyId).toBeUndefined() // runtime state never persists
 
     expect(channels).toEqual(['agent:session-event'])
-    expect(events[0]).toMatchObject({ type: 'session.started', session: { sessionId: record.sessionId, status: 'running' } })
+    expect(events[0]).toMatchObject({
+      type: 'session.started',
+      session: { sessionId: record.sessionId, status: 'running', runtimeStatus: 'idle' },
+    })
     expect(sessions.activeSessionCount()).toBe(1)
   })
 
   it('launches Pi with the Mim session id and persists flags needed for exact resume', () => {
-    const { sessions, ptys } = makeHarness({ generateId: () => 'mim-pi-session' })
+    const { sessions, ptys } = makeHarness({
+      generateId: () => 'mim-pi-session',
+      resolveAgentResource: () => '/bundled/pi/mim-extension.mjs',
+    })
 
     const { record } = sessions.launch(pi, ['--model', 'openai/gpt-5'])
 
@@ -211,14 +219,27 @@ describe('agent sessions', () => {
       'mim-pi-session',
       '--model',
       'openai/gpt-5',
+      '--extension',
+      '/bundled/pi/mim-extension.mjs',
     ])
     expect(record.cliSessionId).toBe('mim-pi-session')
     expect(record.userArgs).toEqual(['--model', 'openai/gpt-5'])
-    expect(record.command).toBe('/opt/homebrew/bin/pi --session-id mim-pi-session --model openai/gpt-5')
+    expect(record.command).toBe('/opt/homebrew/bin/pi --session-id mim-pi-session --model openai/gpt-5 --extension /bundled/pi/mim-extension.mjs')
 
     const onDisk = JSON.parse(readFileSync(join(sessionsDir(), 'mim-pi-session.json'), 'utf-8'))
     expect(onDisk.cliSessionId).toBe('mim-pi-session')
     expect(onDisk.userArgs).toEqual(['--model', 'openai/gpt-5'])
+  })
+
+  it('still launches Pi when the optional bundled extension cannot be resolved', () => {
+    const { sessions, ptys } = makeHarness({
+      generateId: () => 'mim-pi-session',
+      resolveAgentResource: () => null,
+    })
+
+    sessions.launch(pi)
+
+    expect(ptys[0].opts.args).toEqual(['--session-id', 'mim-pi-session'])
   })
 
   it('counters duplicate default titles', () => {
@@ -384,7 +405,10 @@ describe('agent sessions', () => {
     sessions.launch(claude)
     events.length = 0
 
-    ptys[0].data('plain output') // initial status is already working → no event
+    ptys[0].data('plain output') // startup output stays idle during fallback grace
+    expect(events).toHaveLength(0)
+
+    ptys[0].data('more plain output') // no duplicate working event
     expect(events).toHaveLength(0)
 
     ptys[0].data('\x07') // BEL → needs-input
@@ -654,7 +678,10 @@ describe('agent sessions', () => {
 
   describe('resume', () => {
     it('resumes Pi with the same exact id and original custom flags', () => {
-      const { sessions, ptys } = makeHarness({ generateId: () => 'mim-pi-session' })
+      const { sessions, ptys } = makeHarness({
+        generateId: () => 'mim-pi-session',
+        resolveAgentResource: () => '/bundled/pi/mim-extension.mjs',
+      })
       const { record: original } = sessions.launch(pi, ['--model', 'openai/gpt-5'])
       ptys[0].exit(0)
 
@@ -665,8 +692,10 @@ describe('agent sessions', () => {
         'mim-pi-session',
         '--model',
         'openai/gpt-5',
+        '--extension',
+        '/bundled/pi/mim-extension.mjs',
       ])
-      expect(resumed.command).toBe('/opt/homebrew/bin/pi --session-id mim-pi-session --model openai/gpt-5')
+      expect(resumed.command).toBe('/opt/homebrew/bin/pi --session-id mim-pi-session --model openai/gpt-5 --extension /bundled/pi/mim-extension.mjs')
     })
 
     it('spawns Claude Code with --resume <cliSessionId> when detected', () => {
