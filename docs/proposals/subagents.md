@@ -1,158 +1,264 @@
 # Subagents
 
-Status: proposal. Nothing implemented.
+Status: implemented. Current-state behavior is documented in
+[../subagents.md](../subagents.md); this file retains the consolidated design
+and implementation rationale.
 
-A **Subagent** is a run the agent starts itself: a real, headless chat session
-spawned mid-turn to pursue a delegated task, with its own transcript, its own
-tool loop, and its own row in the Navigator. The parent agent can fire several
-in parallel, keep working while they run, await their results, and send
-follow-up messages into a child that keeps its context.
+A subagent is a durable Mim chat thread created by another agent. It has its
+own session, transcript, model loop, tools, approvals, trace, lifecycle, and
+Navigator row. The parent starts it asynchronously, continues its own work,
+and later collects the result or sends more work into the same thread.
 
-The bet: delegation is the next capability step after automation. Routines
-gave Mim standing prompts that fire without a human; subagents give the agent
-the same power the human has — "start a run, watch it, collect the result."
-Everything hard about this (headless turns, gated tools, session persistence,
-Navigator visibility, tracing, approval grants) was already built for
-routines. Subagents are a thin composition of those parts, not a new engine.
+The model is deliberately close to Codex's useful semantics: threads own
+context, work may run for hours, spawning is asynchronous, waits are
+event-driven, steering can arrive while a turn is running, completed threads
+can receive contextual follow-ups, and interruption stops the current turn
+without throwing the thread away.
 
-Design stance: **maximum capability, same accountability.** The child is a
-first-class agent — full tool surface, any model, no output truncation, no
-artificial turn budget, recursion allowed. What keeps this safe is not
-crippling the child but running it through the exact same permission gate,
-trace stream, and session persistence as every other run. A subagent is never
-a weaker agent; it is another agent, visible in the same places.
+There is no backwards-compatibility requirement for this feature. The API and
+session metadata below are the initial contract.
 
-## Context
+## Product contract
 
-- **The loop is already renderer-free.** `streamProfileResponse`
-  (`src/main/ai/aiRuntime.ts`) runs the full tool loop in the main process.
-  Routines prove it end-to-end: `startRoutineRun`
-  (`src/main/tools/routines.ts`) does `session.create` → prompt message →
-  `streamProfileResponse` → drain → status update, with trace spans and
-  Navigator rows. A subagent run is this exact code path with a different
-  parent.
-- **Profiles are mountable.** `AgentProfile` + `agentMounts.resolveProfile`
-  already let a run adopt an app-defined agent (instructions, tool
-  allowlist, pre-activated skills). A subagent can mount any of them.
-- **The gate already understands non-interactive runs.** Routine runs carry
-  `ctx.routine` with `approvalAllow` grants; ungranted calls surface in the
-  approvals queue attached to the run's session. The same mechanism serves
-  children.
-- **Sessions already carry run metadata.** `routineStatus`/`routineRunId` on
-  sessions drive Navigator run rows and ping-when-done. Children reuse the
-  same pattern with a `parentSessionId`.
+### Durable threads, not timed jobs
 
-## Tools
+- A child has one persistent Mim session for its lifetime.
+- A child may perform many turns. Finishing one turn does not close it.
+- There is no default wall-clock deadline. A repository survey or feature
+  implementation may run for minutes or hours.
+- A profile step cap still protects an individual model turn. Reaching it
+  leaves the thread available for `send`/`continue`; it does not delete the
+  thread.
+- Wait timeouts only bound the caller's long-poll. A timeout returns a
+  heartbeat/status response and never cancels the child.
+- A crash or shutdown marks an active turn interrupted. Its persisted
+  transcript remains available for a follow-up.
 
-Kernel namespace `subagent.*` (`agent.*` is taken by CLI agent sessions).
-AI keys `subagent_*`; exposed over MCP under the same names so CLI agents
-(Claude Code, Codex, Gemini — all equally) can farm work to Mim-native
-subagents.
+### Parent/child communication
+
+1. `spawn` creates the session, queues its first turn, and returns immediately.
+2. The child writes messages and tool activity into its own session.
+3. Completion publishes a durable state change and an event to the parent
+   session's mailbox. It cannot inject tokens into a model call that is already
+   in progress; the parent observes it through `wait`, `status`, `list`, or a
+   subsequent model step.
+4. `wait` returns the child's final assistant response and status. Large
+   results are page-readable rather than silently lost.
+5. `send` during an active turn is steering: the message is persisted and
+   delivered at the next safe model-step boundary. If it arrives after the
+   final boundary, Mim promotes it to a follow-up turn in the same thread.
+6. `send` after a turn has finished starts a new turn in the same session, so
+   the child retains its transcript and can answer a follow-up without being
+   re-briefed.
+7. `interrupt` aborts only the active turn. If it includes a message, Mim then
+   starts a new turn in the same session using that instruction.
+8. `stop` is terminal for automatic work but preserves the session. The user
+   may still inspect or archive it.
+
+The parent should delegate a bounded objective and ask for a crisp final
+report: outcome, material changes, verification, and remaining blockers.
+Subagents share the workspace, so parallel coding tasks should own disjoint
+files or use separate worktrees when edit collisions are plausible.
+
+## Lifecycle
+
+The persisted states are:
+
+```
+queued -> working -> done
+                  -> error
+                  -> interrupted
+                  -> stopped
+       <-> waiting
+       <-> needs-approval
+```
+
+`waiting` means the child has released an execution lease while it waits for
+other children or an external event. It is not a timeout. `needs-approval`
+identifies an otherwise-runnable turn paused at the normal permission gate.
+
+Only one turn runs in a child thread at a time. Steering messages can be
+queued concurrently and are consumed in order at safe step boundaries.
+
+## Tool API
+
+Kernel tool ids use `subagent.*`; AI/MCP names use underscores.
 
 ### `subagent.spawn`
 
 ```
 {
-  prompt: string            // the task, verbatim — the child's first user message
-  label?: string            // Navigator label; auto-generated from prompt if omitted
-  model?: string            // any catalog model id; default: parent's model
-  agent?: string            // mounted AgentProfile id; default: chat profile
-  skills?: string[]         // pre-activated skills
-  tools?: string[]          // optional allowlist to NARROW the surface; omit for full chat toolset
-  context?: string[]        // workspace paths whose contents are injected into the first message
-  schema?: object           // optional JSON Schema; forces the child's final answer through
-                            // structured output and returns the validated object
-  approvalAllow?: string[]  // routine-style grants for headless contexts
-  wait?: boolean            // default false: return immediately; true: block until done
+  prompt: string
+  label?: string
+  model?: string                 // defaults to the parent's effective model
+  agent?: string                 // defaults to the chat profile
+  skills?: string[]
+  tools?: string[]               // optional narrowing only
+  context?: string[]             // workspace text files attached to turn one
+  requestedGrants?: string[]     // request; never grants authority directly
 }
-→ { sessionId, status }     // plus { result, usage } when wait: true
+-> {
+  sessionId: string
+  turnId: string
+  status: "queued" | "working"
+}
 ```
+
+Spawning never waits for completion. Call `subagent.wait` when the parent has
+nothing useful to do until one or more results arrive.
 
 ### `subagent.wait`
 
-`{ sessionId | sessionIds[], timeoutMs? }` → per-child
-`{ sessionId, status, result, usage }`. `result` is the child's **full final
-assistant message** (or the schema-validated object) — exempt from
-`MAX_TOOL_OUTPUT_CHARS`. The final message is the product the parent asked
-for; truncating it defeats the tool. The parent controls verbosity through
-the prompt, and the full transcript stays one `session.get` away. Waiting on
-a child with a pending approval returns `status: 'blocked'` plus the pending
-request, so the parent can report instead of hanging.
+```
+{
+  sessionIds: string[]
+  until?: "any" | "all"         // default: any
+  timeoutMs?: number             // long-poll only; bounded below tool timeout
+}
+-> {
+  timedOut: boolean
+  agents: Array<{
+    sessionId: string
+    status: SubagentStatus
+    turnId?: string
+    result?: string
+    resultTruncated?: boolean
+    error?: string
+  }>
+}
+```
+
+The implementation is event-driven. A waiting subagent releases its scheduler
+lease before awaiting descendants and reacquires one before resuming, so a
+full worker pool cannot deadlock on children queued behind their parents.
 
 ### `subagent.send`
 
-`{ sessionId, message, wait? }` — append a user-role message to a finished
-child and run another turn **with its context intact**. This is what makes
-children durable workers instead of one-shot function calls: spawn a
-researcher, read its answer, ask the follow-up without re-explaining.
+```
+{ sessionId: string, message: string }
+-> { sessionId, turnId, status, delivery: "steer" | "follow-up" }
+```
 
-### `subagent.status` / `subagent.list` / `subagent.stop`
+### `subagent.interrupt`
 
-Poll one child, list this session's children with statuses, abort a run
-(child session keeps its partial transcript; nothing is deleted).
+```
+{ sessionId: string, message?: string }
+-> { sessionId, status: "interrupted" | "queued" }
+```
 
-## Capability decisions
+With a message this is an interrupt-and-redirect operation; without one it
+leaves the thread interrupted and idle.
 
-- **Full tool surface by default.** The child sees the same policy-filtered
-  chat toolset as the parent — files, shell, web, integrations, app tools.
-  `tools`/`agent` narrow it only when the caller chooses to. No special
-  reduced "subagent mode".
-- **No output caps, no turn caps beyond the profile's.** Chat profile
-  `stepCap: 100` applies as it does everywhere. No token ceiling, no
-  transcript truncation, no "3 turns max".
-- **Recursion allowed.** Children can spawn children. `ToolContext` grows
-  `subagent: { parentSessionId, rootSessionId, depth }`; a configurable
-  max depth (settings, default 4) exists purely as a runaway-loop guard, not
-  a capability statement. Concurrency runs through a small pool
-  (default `min(8, cores)`, configurable); excess spawns queue rather than
-  fail.
-- **Approvals: same gate, inherited grants.** Children run `actor: 'ai'`
-  through the unchanged permission gate. The parent session's per-session
-  grants propagate to children (the user already trusted this lineage with
-  those calls); `approvalAllow` adds routine-style standing grants. Anything
-  else surfaces in the approvals queue attached to the child's session — the
-  user approves there, the child resumes. The parent cannot grant its
-  children anything the user hasn't granted it.
-- **Any model, per child.** Fan out cheap models for sweeps, strong models
-  for judgment, mixed panels for review — model choice is the main lever
-  delegation exists for.
-- **Full observability.** The spawn passes the parent turn's trace context so
-  child spans nest under the parent turn — one delegation is one subtree in
-  the Activity feed. Child usage rolls up into the parent session's cost
-  tracking and is also visible on the child.
+### Inspection and control
 
-## What a child looks like in the product
+- `subagent.status` returns one child's metadata and latest result summary.
+- `subagent.list` returns children in the caller's task lineage, including
+  uncollected completions.
+- `subagent.result` reads a final response by character offset and limit.
+- `subagent.stop` terminates automatic work and retains the transcript.
 
-A normal session. `session.create` with `parentSessionId`, run-status
-metadata like routine runs, a Navigator run row (grouped or indented under
-the parent — v1 may show siblings), openable live in the chat surface while
-it streams, ping-when-done for free via the runs store. Stop/archive work
-like any run. Nothing about a subagent is hidden.
+## Authority and approvals
 
-## Boundaries
+Tool visibility and permission to execute are separate.
 
-- **Not routines.** A routine is a standing, workspace-versioned prompt fired
-  by triggers; a subagent is ephemeral and parent-owned. A routine's run may
-  itself spawn subagents.
-- **Not CLI agent sessions.** `agent.launch` starts an external CLI agent in
-  a pty; `subagent.spawn` starts a Mim-native run. Complementary; a future
-  option could let `subagent.spawn` target a CLI agent as executor.
-- **Not a DAG engine.** No dependency graphs, retry policies, or scheduling.
-  Orchestration logic lives in the parent's reasoning; the tool only spawns,
-  waits, continues, stops.
+The child's effective tool surface is the intersection of:
 
-## Implementation sketch
+```
+workspace tool policy
+∩ parent's effective profile allowlist
+∩ selected child profile allowlist
+∩ spawn.tools (when supplied)
+```
 
-- `src/main/tools/subagents.ts` (+ test, TDD) modeled directly on
-  `startRoutineRun`: session create → `streamProfileResponse` → drain →
-  status update, plus a wait/registry map for in-flight completions.
-- `src/main/sessions.ts`: `parentSessionId` + child run-status fields
-  (mirror the routine metadata shape).
-- `src/main/ai/aiRuntime.ts`: thread `subagent` context through
-  `StreamRequest`/`ToolContext`; exempt `subagent.wait` results from tool
-  output truncation.
-- `src/main/security/gate.ts`: classifications (`subagent.spawn` category
-  `general`, risk `medium`; reads `read`/`low`); grant inheritance.
-- `src/main/server/server.ts`: MCP specs for the `subagent_*` names.
-- Renderer: runs store picks children up from session metadata; parent link
-  in the session header.
+Omitting `tools` therefore preserves the parent's effective surface; it does
+not produce a new unrestricted identity. A constrained routine or mounted
+agent cannot delegate around its own constraints. Package actors may not use
+the subagent surface.
+
+Every child tool call still passes through the normal security gate. The gate
+receives durable lineage metadata (`rootSessionId`, `parentSessionId`, depth,
+origin, and effective allowlist):
+
+- One-shot approval applies only to the pending call.
+- A denied tool call returns to the child loop and may be recovered from; it
+  does not by itself make the whole thread terminal.
+- "Always allow for this task" is a lineage grant shared with descendants.
+- `requestedGrants` is an approval request, not model-authored authority. The
+  gate or user mints the internal lineage grant.
+- Routine children inherit only the routine's trusted `approvalAllow` grants.
+- Remote/MCP-originated delegation retains the remote principal and transport;
+  every child call must also satisfy that origin's remote grant.
+- Sensitive paths, workspace read-only rules, saved browser-domain rules, and
+  disabled tool settings remain hard floors and can still require a fresh
+  approval or deny the call.
+
+The approval UI attaches a request to the child session while retaining its
+root lineage, so the user can see both the immediate actor and the task that
+created it.
+
+## Scheduling and limits
+
+- Default concurrency is `min(8, available CPU cores)`; manager construction
+  may override it for alternate runtimes and tests. A user-facing scheduler
+  setting is not part of the initial implementation.
+- Excess turns queue; they do not fail merely because the pool is full.
+- Recursion is supported with configurable depth and descendant-count guards
+  (initial defaults: depth 4, 64 queued/live descendants per root).
+- A turn has no wall-clock limit. The existing AI/MCP call timeout only bounds
+  synchronous tool calls; `subagent.wait` caps each long-poll below that limit.
+- Cancellation uses abort signals at model/tool boundaries. Stopping a parent
+  does not silently destroy already-spawned children; explicit `stop` owns that
+  decision.
+
+## Persistence and visibility
+
+Each child session stores a `subagent` object containing its root and parent
+session ids, depth, status, current turn id, timestamps, last activity,
+effective profile/model, inbox, completion/result metadata, and error state.
+The transcript remains the source of truth for prompts and answers.
+
+Active turns are reconciled to `interrupted` during startup, matching other
+agent-running records. Status and progress events are main-process events;
+workspace sessions are then refreshed in the renderer.
+
+Navigator treats child sessions as runs. A child row shows queued, working,
+waiting, approval, done, interrupted, stopped, or error state and opens the
+normal chat transcript. Completion participates in the existing ping system.
+V1 shows live status and last tool/step activity while the final turn transcript
+is committed at completion; incremental token replay is a later refinement.
+
+## Observability
+
+The spawn records the parent trace and session lineage. Child turns create
+their own spans linked to that parent context, and every tool call keeps child
+agent/turn attribution. Audit events cover spawn, queue, start, steer,
+follow-up, approval pause/resume, completion, interruption, stop, and failure.
+Child token usage stays on the child session and can be rolled up by lineage.
+
+## Implementation sequence
+
+1. Add failing contracts for lifecycle, scheduler lease release, steering and
+   follow-up delivery, interruption, authority narrowing, grant inheritance,
+   remote-origin preservation, reconciliation, and result paging.
+2. Add the persisted session schema and the subagent manager: queue/semaphore,
+   durable inbox, event waiters, turn runner, result reader, and shutdown
+   reconciliation.
+3. Thread delegation context and safe-boundary inbox consumption through the
+   AI runtime. Compose this with the existing skill-driven `prepareStep`.
+4. Register kernel, AI, and curated MCP tools with explicit schemas and policy
+   metadata. Keep package actors denied.
+5. Add Navigator run mapping, statuses, event refresh, open/stop behavior, and
+   completion pings.
+6. Update current-state docs and verify focused tests, the full test suite,
+   build/type checks, and package compatibility.
+
+## Non-goals for the first implementation
+
+- No DAG/workflow language, dependency scheduler, automatic retries, or
+  consensus primitive. The parent orchestrates with spawn/send/wait.
+- No direct child-to-child authority transfer; communication routes through
+  normal tool calls and durable sessions.
+- No separate filesystem isolation layer. Shared-workspace conflicts are an
+  orchestration concern; worktree-backed children can be added independently.
+- No JSON-schema final-answer mode in V1. Durable textual results plus paging
+  are the primitive; structured synthesis can be layered on later.
