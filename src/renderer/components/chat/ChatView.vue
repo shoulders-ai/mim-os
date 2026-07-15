@@ -15,6 +15,7 @@ import { getCurrentDocument, getCurrentDocumentSummary, subscribeCurrentDocument
 import { documentContextAttachment, modelSupportsVision, projectFileContextAttachment } from './composerLogic.js'
 import ChatMessage from './ChatMessage.vue'
 import ChatCompactionDivider from './ChatCompactionDivider.vue'
+import ChatTurnStatus from './ChatTurnStatus.vue'
 import InlineApproval from './InlineApproval.vue'
 import ChatComposer from './ChatComposer.vue'
 import ChatComposerFooter from './ChatComposerFooter.vue'
@@ -23,7 +24,9 @@ import { useChatEngines } from './useChatEngines.js'
 import { withLastAssistantTurnElapsed } from './assistantTurn.js'
 import { requestSummary, lastUserMessageText, buildSeedMessage } from '../../services/ai/summary.js'
 import { aiApiBase, aiFetch } from '../../services/ai/aiApi.js'
-import { compactionDividerForMessages } from './compactionDivider.js'
+import { compactionDividerForMessages, latestCompactionRecord } from './compactionDivider.js'
+import { effectiveContextTokens } from './contextUsage.js'
+import { planContextPreparation } from './contextCompactionStatus.js'
 import { queuedRoutineSeedMessage } from './queuedRoutineRun.js'
 
 const sessionStore = useSessionStore()
@@ -53,6 +56,8 @@ const currentDocumentSummary = ref(null)
 let unsubscribeCurrentDocument = null
 // Track sessions that hit the 25-step cap so we can show a Continue button.
 const stepCapHitSessionIds = new Set()
+const contextPreparation = ref(null)
+let contextPreparationTimer = null
 
 // --- Chat instance management ---
 
@@ -80,6 +85,7 @@ async function runTurnAndRefreshSession(sessionId, run) {
   try {
     return await run()
   } finally {
+    clearContextPreparation(sessionId)
     try {
       await sessionStore.refresh(sessionId)
     } catch (err) {
@@ -196,7 +202,16 @@ const estimatedContextTokens = computed(() => {
   if (session.value?.lastContextTokens) return 0
   return estimateMessagesTokens(messages.value)
 })
-const contextTokens = computed(() => session.value?.lastContextTokens || estimatedContextTokens.value || 0)
+const latestCompaction = computed(() => latestCompactionRecord(session.value?.compactions))
+const contextTokens = computed(() => effectiveContextTokens({
+  persistedTokens: session.value?.lastContextTokens,
+  estimatedTokens: estimatedContextTokens.value,
+  latestCompaction: latestCompaction.value,
+  sessionUpdatedAt: session.value?.updatedAt,
+}))
+const contextCompacted = computed(() => Boolean(latestCompaction.value?.tokensAfter))
+const compactionTokensBefore = computed(() => latestCompaction.value?.tokensBefore || 0)
+const compactionTokensAfter = computed(() => latestCompaction.value?.tokensAfter || 0)
 
 const contextPercent = computed(() => {
   if (!contextWindow.value || !contextTokens.value) return 0
@@ -213,6 +228,60 @@ const showUsageIndicators = computed(() => messages.value.length > 0)
 const compactionDivider = computed(() =>
   compactionDividerForMessages(messages.value, session.value?.compactions)
 )
+const activeContextPreparation = computed(() => {
+  const state = contextPreparation.value
+  if (!state || state.sessionId !== activeSessionId.value || !isStreaming.value) return null
+  return state
+})
+
+function beginContextPreparation(sessionId, plan) {
+  clearContextPreparation()
+  if (!plan) return
+  contextPreparation.value = {
+    sessionId,
+    kind: plan.kind,
+    phase: 'checking',
+    tokenCount: plan.tokenCount,
+    contextWindow: plan.contextWindow,
+  }
+  contextPreparationTimer = setTimeout(() => {
+    const current = contextPreparation.value
+    if (!current || current.sessionId !== sessionId) return
+    contextPreparation.value = { ...current, phase: 'summarizing' }
+  }, plan.kind === 'compact' ? 700 : 1200)
+}
+
+function clearContextPreparation(sessionId = null) {
+  if (sessionId && contextPreparation.value?.sessionId !== sessionId) return
+  if (contextPreparationTimer) {
+    clearTimeout(contextPreparationTimer)
+    contextPreparationTimer = null
+  }
+  contextPreparation.value = null
+}
+
+function estimateRequestContextTokens(sendPayload) {
+  const pendingUserMessage = {
+    id: 'pending-user-message',
+    role: 'user',
+    parts: sendPayload.parts || [],
+  }
+  if (latestCompaction.value?.tokensAfter) {
+    return contextTokens.value + estimateMessagesTokens([pendingUserMessage])
+  }
+  return estimateMessagesTokens([...messages.value, pendingUserMessage])
+}
+
+function planCurrentContextPreparation() {
+  return planContextPreparation({
+    contextTokens: contextTokens.value,
+    estimatedRequestTokens: latestCompaction.value?.tokensAfter
+      ? contextTokens.value
+      : estimateMessagesTokens(messages.value),
+    contextWindow: contextWindow.value,
+    priorMessageCount: messages.value.length,
+  })
+}
 
 const queuedRoutineRunSessionIds = new Set()
 
@@ -231,6 +300,7 @@ async function maybeStartQueuedRoutineRun() {
       return
     }
     sessionStore.setSessionStatus(s.id, 'working')
+    beginContextPreparation(s.id, planCurrentContextPreparation())
     sessionStore.startTurnTimer(s.id)
     await runTurnAndRefreshSession(s.id, () => chat.regenerate({ messageId: seedMessage.id }))
   } catch (err) {
@@ -369,6 +439,7 @@ watch(isStreaming, (streaming) => {
   if (streaming) {
     lastPersistedToolCount = countCompletedToolResults(messages.value)
   } else {
+    clearContextPreparation(activeSessionId.value)
     if (midTurnPersistTimer) clearTimeout(midTurnPersistTimer)
     midTurnPersistTimer = null
   }
@@ -428,6 +499,7 @@ async function buildChatEngine(sessionId, initialMessages, sess) {
               body,
             })
           } else {
+            clearContextPreparation(sessionId)
             logChatAi('debug', 'request:stream-open', {
               sessionId,
               status: response.status,
@@ -579,16 +651,24 @@ async function handleSend({ text, attachments, contextChips }) {
   const selectedSkillIds = (contextChips || [])
     .filter(chip => chip.type === 'skill' && chip.id)
     .map(chip => chip.id)
+  const preparationPlan = planContextPreparation({
+    contextTokens: contextTokens.value,
+    estimatedRequestTokens: estimateRequestContextTokens(sendPayload),
+    contextWindow: contextWindow.value,
+    priorMessageCount: messages.value.length,
+  })
 
   // chat.messages/status are reactive Vue refs: streaming updates flow into the
   // messages computed (which drives auto-scroll), and completion is handled by
   // the Chat's onFinish/onError callbacks. No polling required.
   try {
+    beginContextPreparation(sessionId, preparationPlan)
     sessionStore.startTurnTimer(sessionId)
     await runTurnAndRefreshSession(sessionId, () =>
       chat.sendMessage(sendPayload, selectedSkillIds.length ? { body: { skills: selectedSkillIds } } : undefined)
     )
   } catch (err) {
+    clearContextPreparation(sessionId)
     sessionStore.clearTurnTimer(sessionId)
     logChatAi('error', 'send:failed', {
       sessionId,
@@ -742,6 +822,7 @@ async function handleStop() {
     } catch { /* stop may throw if not streaming */ }
     if (session.value) {
       const sid = session.value.id
+      clearContextPreparation(sid)
       // Cancel pending approval requests so they resolve as denied in the gate
       // and the inline approval cards disappear immediately.
       try { await window.kernel.cancelGateSession(sid) } catch { /* best effort */ }
@@ -855,10 +936,12 @@ async function handleRetry() {
   if (!chat || !sessionId) return
   try {
     sessionStore.setSessionStatus(sessionId, 'working')
+    beginContextPreparation(sessionId, planCurrentContextPreparation())
     sessionStore.startTurnTimer(sessionId)
     // Reactive: streaming flows through chat.messages; completion via onFinish.
     await runTurnAndRefreshSession(sessionId, () => chat.regenerate())
   } catch (err) {
+    clearContextPreparation(sessionId)
     sessionStore.clearTurnTimer(sessionId)
     error.value = err?.message || 'Retry failed'
   }
@@ -1086,6 +1169,7 @@ onDeactivated(() => {
 
 onUnmounted(() => {
   saveActiveDraft()
+  clearContextPreparation()
   document.removeEventListener('keydown', onKeydown)
   unsubscribeCurrentDocument?.()
   unsubscribeCurrentDocument = null
@@ -1124,6 +1208,9 @@ onUnmounted(() => {
           :context-percent="contextPercent"
           :context-tokens="contextTokens"
           :context-window="contextWindow"
+          :context-compacted="contextCompacted"
+          :compaction-tokens-before="compactionTokensBefore"
+          :compaction-tokens-after="compactionTokensAfter"
           :show-usage-indicators="showUsageIndicators"
           :supports-vision="supportsVision"
           :skills="composerSkills"
@@ -1133,7 +1220,6 @@ onUnmounted(() => {
           :document-name="currentDocumentSummary?.name || ''"
           @send="handleSend"
           @stop="handleStop"
-          @start-fresh="handleStartFresh"
           @update:model-id="onModelChange"
           @update:control-id="onControlChange"
         />
@@ -1169,6 +1255,11 @@ onUnmounted(() => {
               @open-file="onOpenFile"
             />
           </template>
+          <ChatTurnStatus
+            v-if="activeContextPreparation"
+            :kind="activeContextPreparation.kind"
+            :phase="activeContextPreparation.phase"
+          />
         </div>
       </div>
 
@@ -1240,6 +1331,9 @@ onUnmounted(() => {
       :context-percent="contextPercent"
       :context-tokens="contextTokens"
       :context-window="contextWindow"
+      :context-compacted="contextCompacted"
+      :compaction-tokens-before="compactionTokensBefore"
+      :compaction-tokens-after="compactionTokensAfter"
       :show-usage-indicators="showUsageIndicators"
       :supports-vision="supportsVision"
       :skills="composerSkills"
@@ -1249,7 +1343,6 @@ onUnmounted(() => {
       :document-name="currentDocumentSummary?.name || ''"
       @send="handleSend"
       @stop="handleStop"
-      @start-fresh="handleStartFresh"
       @update:model-id="onModelChange"
       @update:control-id="onControlChange"
     />

@@ -73,11 +73,20 @@ error, Mim appends one
 tail, and retries once. Non-context provider errors and second context-length
 failures surface normally. The model receives the latest historical summary
 plus the kept tail, while the session transcript remains unchanged.
+After a compaction record is appended, the session's effective context counters
+are updated to that record's `tokensAfter` estimate so the renderer and the next
+pre-turn check do not keep treating the old un-compacted provider usage as live
+context pressure.
 
 The renderer shows a compact divider at the latest compaction record's
 `firstKeptMessageId`, with `firstKeptMessageIndex` as a fallback. The divider
 does not hide earlier transcript messages. It can expand to show the
-historical summary text.
+historical summary text. The context donut remains informational; starting a
+new thread from a summary is not part of automatic compaction. When the latest
+compaction record has a lower `tokensAfter` estimate than stale provider usage,
+the donut reports that effective compacted context and labels the tooltip as
+compacted. Before a compaction exists, a high-context donut explains that Mim
+will compact automatically when needed.
 
 ## Motivation
 
@@ -247,7 +256,10 @@ Stage 2 writes compaction records; it still never rewrites `messages`.
   sessions and model switches are covered.
 - **Cut point** - walk back from the newest message keeping a target tail of
   roughly `min(20_000, modelWindow * 0.2)` estimated tokens. Prefer a user
-  message boundary. Always keep the last real user message in the tail. Mim's
+  message boundary. If the token target lands on an assistant message, move
+  forward to the next user boundary before falling back to an earlier user
+  boundary; this prevents an oversized early user paste from being pulled back
+  into the kept tail. Always keep the last real user message in the tail. Mim's
   current UI message shape keeps tool calls and results inside assistant
   message parts, so cutting at message boundaries preserves pair integrity.
 - **Record target** - store both `firstKeptMessageId` and
@@ -262,9 +274,11 @@ Stage 2 writes compaction records; it still never rewrites `messages`.
 - **Repeat compaction** - use an update template: previous summary plus newly
   summarized messages in, merged historical summary out.
 - **Guards** - after a successful compaction, estimates are untrusted until the
-  next provider usage arrives. If the previous compaction saved less than 10%,
-  do not compact again for the same model window; surface the provider error if
-  the session is genuinely at its floor.
+  next provider usage arrives. If the latest compaction already uses the same
+  cut point, do not append a duplicate record for that boundary. If the
+  previous compaction saved less than 10%, do not compact again for the same
+  model window; surface the provider error if the session is genuinely at its
+  floor.
 - **Failure behavior** - summary failure writes no record and does not mutate
   messages. The next pre-turn check can try again. Failed attempts are traced.
 
@@ -326,9 +340,24 @@ No renderer UI is required for Phase 1-4. The transcript remains the full
 history.
 
 The renderer shows a divider at `firstKeptMessageId`, driven by compaction
-records: "Context compacted - earlier messages summarized for the model." It
-is expandable to the summary text. The divider does not hide earlier messages
-and does not describe itself as memory. It marks where model input now begins.
+records. The divider is trigger-aware: pre-turn compaction says it happened
+before the reply, post-turn compaction says it prepares future turns, and
+overflow compaction says Mim summarized and retried after a model-window
+rejection. It can show the `tokensBefore -> tokensAfter` transition, expands
+to the summary text, and never hides earlier transcript messages.
+
+While a high-context turn is waiting for the server response, the renderer can
+show a transient, non-persisted status row. It starts as a context check and
+switches to summarizing if the pre-stream wait continues. Oversized first
+messages use separate copy because there is no earlier chat history to
+summarize yet. The status row disappears as soon as the response stream opens.
+
+The context donut reports effective context pressure only; it does not offer a
+start-fresh action because automatic compaction should continue the same chat.
+The donut prefers the latest compaction record's `tokensAfter` estimate over a
+higher stale `lastContextTokens` value, and its tooltip distinguishes high
+context checks from "using compacted context" while reminding users that the
+full chat stays visible.
 
 Interaction follows [design-system.md](../design-system.md): hover background
 as affordance, no pointer cursor, terse copy, Tailwind utilities only.
@@ -414,6 +443,9 @@ Implemented coverage includes:
 
 - divider placement at `firstKeptMessageId` / index fallback;
 - expandable summary text;
+- trigger-aware divider copy and compact token transition labels;
+- transient pre-stream status copy for checking, summarizing, and oversized
+  first-message states;
 - full transcript remains visible;
 - session-store merging of backend compaction metadata after turn persistence.
 
@@ -422,7 +454,11 @@ Implemented coverage includes:
 - Existing sessions with no `compactions` field load as `compactions: []`.
 - Existing sessions already containing compacted browser notices keep those
   notices; the removed content cannot be reconstructed.
-- `lastInputTokens` and `lastContextTokens` keep their current meaning.
+- `lastInputTokens` and `lastContextTokens` are provider-reported usage after
+  a normal model turn. Immediately after a compaction record append, both are
+  set to the record's `tokensAfter` estimate so UI/context-pressure checks
+  reflect the effective compacted model view until the next provider usage
+  replaces them.
 - Existing renderer/session update flows continue to work in Phase 1. The
   only immediate behavior change is that compaction/repair no longer mutates
   persisted messages.

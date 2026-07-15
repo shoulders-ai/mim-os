@@ -28,6 +28,7 @@ import {
   type ContextCompactionRecord,
 } from '@main/ai/compaction.js'
 import { appendSessionCompaction } from '@main/sessions.js'
+import type { SubagentSessionMetadata } from '@main/subagents/types.js'
 import { loadRoutineCatalog, type RoutineDefinition } from '@main/routines/routines.js'
 import type { SkillLoader } from '@main/skills.js'
 import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
@@ -96,6 +97,13 @@ export interface StreamRequest {
   routine?: ToolContext['routine']
   trace?: { traceId: string; spanId: string }
   abortSignal?: AbortSignal
+  // Trusted runtime context for a delegated thread. This is created by the
+  // subagent manager, never accepted directly from model-authored input.
+  subagent?: ToolContext['subagent']
+  // Durable steering messages are consumed between model steps. The runtime
+  // persists any messages it injects into the completed session transcript.
+  consumeSubagentInbox?: () => Promise<UIMessage[]>
+  onSubagentActivity?: (activity: string) => void | Promise<void>
 }
 
 export interface AgentProfile {
@@ -245,6 +253,10 @@ const packageCreateInputSchema = z.object({
 export function createAiRuntime({ tools, agentMounts }: AiRuntimeOptions) {
   return {
     streamChatResponse: async (request: StreamRequest) => {
+      const subagentRequest = await resolveSubagentChatRequest(tools, request, agentMounts)
+      if (subagentRequest) {
+        return streamProfileResponse({ profile: subagentRequest.profile, tools, request: subagentRequest.request })
+      }
       const routineRequest = await resolveActiveRoutineChatRequest(tools, request, agentMounts)
       if (routineRequest) {
         return streamProfileResponse({ profile: routineRequest.profile, tools, request: routineRequest.request })
@@ -264,6 +276,83 @@ export function createAiRuntime({ tools, agentMounts }: AiRuntimeOptions) {
       generateTaskLabel({ tools, request }),
     generateSummary: (request: SummaryRequest) =>
       generateSummary({ tools, request }),
+  }
+}
+
+async function resolveSubagentChatRequest(
+  tools: ToolRegistry,
+  request: StreamRequest,
+  agentMounts: AiRuntimeOptions['agentMounts'],
+): Promise<{ profile: AgentProfile; request: StreamRequest } | null> {
+  if (!request.id) return null
+  const session = await tools.call('session.get', { id: request.id }, { actor: 'system' }).catch(() => null) as {
+    agentId?: string
+    messages?: UIMessage[]
+    subagent?: SubagentSessionMetadata
+  } | null
+  const metadata = session?.subagent
+  if (!metadata) return null
+
+  const base = metadata.agentId
+    ? await requireAgentMountsForSubagent(agentMounts).resolveProfile(metadata.agentId)
+    : chatProfile
+  const profile: AgentProfile = {
+    ...base,
+    id: `subagent:${request.id}`,
+    defaultModelId: metadata.modelId ?? base.defaultModelId,
+    persistSession: true,
+    toolAllowlist: intersectToolAllowlists(base.toolAllowlist, metadata.effectiveToolAllowlist),
+  }
+  const storedMessages = Array.isArray(session?.messages) ? session.messages : []
+  return {
+    profile,
+    request: {
+      ...request,
+      messages: mergeDurableThreadMessages(storedMessages, request.messages),
+      modelId: metadata.modelId ?? profile.defaultModelId,
+      agentId: metadata.agentId,
+      subagent: subagentDelegationContext(metadata),
+    },
+  }
+}
+
+function requireAgentMountsForSubagent(agentMounts: AiRuntimeOptions['agentMounts']) {
+  if (!agentMounts) throw new Error('Subagent profile support is not available')
+  return agentMounts
+}
+
+function intersectToolAllowlists(
+  profileAllowlist: string[] | undefined,
+  delegatedAllowlist: string[] | undefined,
+): string[] | undefined {
+  if (!profileAllowlist) return delegatedAllowlist ? [...delegatedAllowlist] : undefined
+  if (!delegatedAllowlist) return [...profileAllowlist]
+  const profileTools = new Set(profileAllowlist)
+  return delegatedAllowlist.filter(toolName => profileTools.has(toolName))
+}
+
+function mergeDurableThreadMessages(stored: UIMessage[], requested: UIMessage[]): UIMessage[] {
+  if (!stored.length) return requested
+  if (!requested.length) return stored
+  const storedIds = new Set(stored.map(message => message.id))
+  return [...stored, ...requested.filter(message => !storedIds.has(message.id))]
+}
+
+function subagentDelegationContext(metadata: SubagentSessionMetadata): NonNullable<ToolContext['subagent']> {
+  return {
+    rootSessionId: metadata.rootSessionId,
+    parentSessionId: metadata.parentSessionId,
+    depth: metadata.depth,
+    modelId: metadata.modelId,
+    profileId: metadata.agentId ?? 'chat',
+    toolAllowlist: metadata.effectiveToolAllowlist,
+    approvalAllow: metadata.approvalAllow,
+    requestedGrants: metadata.requestedGrants,
+    originActor: metadata.originActor ?? 'ai',
+    principal: metadata.principal,
+    callerName: metadata.callerName,
+    transport: metadata.transport,
+    status: metadata.status,
   }
 }
 
@@ -348,6 +437,7 @@ export async function createAiSdkTools({
   packageTools = [],
   onSkillActivated,
   routine,
+  subagent,
   trace,
 }: {
   tools: ToolRegistry
@@ -356,6 +446,7 @@ export async function createAiSdkTools({
   packageTools?: PackageToolSummary[]
   onSkillActivated?: (skill: ActivatedSkill) => void
   routine?: ToolContext['routine']
+  subagent?: ToolContext['subagent']
   // Trace context of the chat turn, so every tool call this agent makes
   // nests under the turn span in the trace stream.
   trace?: { traceId: string; spanId: string }
@@ -366,6 +457,7 @@ export async function createAiSdkTools({
     actor: 'ai' as const,
     ...(sessionId ? { sessionId } : {}),
     ...(routine ? { routine } : {}),
+    ...(subagent ? { subagent } : {}),
     ...(trace ? { traceId: trace.traceId, spanId: trace.spanId } : {}),
   }
   const call = (name: string, params: Record<string, unknown> = {}) => {
@@ -518,6 +610,71 @@ export async function createAiSdkTools({
     ...googleTools,
     ...slackTools,
     ...skillTools,
+
+    subagent_spawn: tool({
+      description: 'Create a durable child agent thread for a bounded task. Returns immediately; use subagent_wait when you need its result. Children may run for minutes or hours.',
+      inputSchema: z.object({
+        prompt: z.string().min(1),
+        label: z.string().optional(),
+        model: z.string().optional(),
+        agent: z.string().optional(),
+        skills: z.array(z.string()).optional(),
+        tools: z.array(z.string()).optional().describe('Optional narrowing of the inherited tool surface'),
+        context: z.array(z.string()).optional().describe('Workspace text files to attach to the first turn'),
+        requestedGrants: z.array(z.string()).optional().describe('Tool grants to request from the permission gate; this never grants authority directly'),
+      }),
+      execute: async (params) => call('subagent.spawn', params),
+    }),
+
+    subagent_wait: tool({
+      description: 'Event-driven wait for one or more children. timeoutMs only bounds this long-poll and never stops a child.',
+      inputSchema: z.object({
+        sessionIds: z.array(z.string()).min(1),
+        until: z.enum(['any', 'all']).optional(),
+        timeoutMs: z.number().int().min(0).max(240_000).optional(),
+      }),
+      execute: async (params) => call('subagent.wait', params),
+    }),
+
+    subagent_send: tool({
+      description: 'Steer a running child at its next safe step boundary, or start a contextual follow-up turn after it finishes.',
+      inputSchema: z.object({ sessionId: z.string(), message: z.string().min(1) }),
+      execute: async (params) => call('subagent.send', params),
+    }),
+
+    subagent_interrupt: tool({
+      description: 'Interrupt a child current turn without deleting its thread. Include message to redirect it into a new turn.',
+      inputSchema: z.object({ sessionId: z.string(), message: z.string().min(1).optional() }),
+      execute: async (params) => call('subagent.interrupt', params),
+    }),
+
+    subagent_stop: tool({
+      description: 'Stop automatic child work while retaining the session transcript.',
+      inputSchema: z.object({ sessionId: z.string() }),
+      execute: async (params) => call('subagent.stop', params),
+    }),
+
+    subagent_status: tool({
+      description: 'Read one child status and its latest result summary.',
+      inputSchema: z.object({ sessionId: z.string() }),
+      execute: async (params) => call('subagent.status', params),
+    }),
+
+    subagent_list: tool({
+      description: 'List child threads in this task lineage, including uncollected completions.',
+      inputSchema: z.object({}),
+      execute: async () => call('subagent.list', {}),
+    }),
+
+    subagent_result: tool({
+      description: 'Read a completed child response by character offset when the wait/status summary was truncated.',
+      inputSchema: z.object({
+        sessionId: z.string(),
+        offset: z.number().int().nonnegative().optional(),
+        maxChars: z.number().int().positive().max(100_000).optional(),
+      }),
+      execute: async (params) => call('subagent.result', params),
+    }),
 
     trace_query: tool({
       description: 'Query recent trace digest events for debugging agent actions. Returns redacted summaries and payload refs only.',
@@ -969,7 +1126,7 @@ export async function createAiSdkTools({
     }),
 
     slack_bot_setup: tool({
-      description: 'Set up a Slack bot for this workspace in one step: optionally store bot/app tokens, create or update the channel routine, and enable it locally. Returns a readiness checklist.',
+      description: 'Set up a Slack bot for this workspace in one step: optionally store bot/app tokens, create or update the channel routine, choose capability groups, and enable it locally. Returns a readiness checklist.',
       inputSchema: z.object({
         file: z.string().optional(),
         bot_token: z.string().optional(),
@@ -980,6 +1137,16 @@ export async function createAiSdkTools({
         name: z.string().optional(),
         description: z.string().optional(),
         body: z.string().optional(),
+        capabilities: z.array(z.enum([
+          'workspace_read',
+          'sessions_read',
+          'issues_read',
+          'issues_write',
+          'files_write',
+          'slack_read',
+          'slack_send',
+          'terminal',
+        ])).optional(),
         tools: z.array(z.string()).optional(),
         approvalAllow: z.array(z.string()).optional(),
       }),
@@ -1192,7 +1359,7 @@ export function activateSelectedSkills(
 async function activateSelectedSkillsFromRegistry(
   tools: ToolRegistry,
   names: string[] | undefined,
-  ctx: { sessionId?: string; routine?: ToolContext['routine']; traceId?: string; spanId?: string } = {},
+  ctx: { sessionId?: string; routine?: ToolContext['routine']; subagent?: ToolContext['subagent']; traceId?: string; spanId?: string } = {},
 ): Promise<{ promptSection: string | null; toolNames: string[] }> {
   const requested = [...new Set(
     (names ?? []).map(name => typeof name === 'string' ? name.trim() : '').filter(Boolean),
@@ -1209,6 +1376,7 @@ async function activateSelectedSkillsFromRegistry(
         actor: 'ai',
         ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}),
         ...(ctx.routine ? { routine: ctx.routine } : {}),
+        ...(ctx.subagent ? { subagent: ctx.subagent } : {}),
         ...(ctx.traceId ? { traceId: ctx.traceId } : {}),
         ...(ctx.spanId ? { spanId: ctx.spanId } : {}),
       }) as { skill?: unknown }
@@ -1274,6 +1442,16 @@ export async function streamProfileResponse({
   const turnSpanId = newSpanId()
   const turnStartedAt = Date.now()
   const turnTrace = { traceId: turnTraceId, spanId: turnSpanId }
+  const delegation = request.subagent ?? (sessionId ? {
+    rootSessionId: sessionId,
+    parentSessionId: sessionId,
+    depth: 0,
+    modelId: effectiveModelId ?? modelConfig.id,
+    profileId: profile.id,
+    toolAllowlist: profile.toolAllowlist,
+    approvalAllow: request.routine?.approvalAllow,
+    originActor: 'ai' as const,
+  } : undefined)
   tools.trace.append({
     kind: 'chat.turn',
     actor: 'ai',
@@ -1302,6 +1480,7 @@ export async function streamProfileResponse({
       for (const name of skill.unlocks) activatedSkillTools.add(name)
     },
     routine: request.routine,
+    subagent: delegation,
     trace: { traceId: turnTraceId, spanId: turnSpanId },
   })
   // Allowlist filtering: when the profile declares a toolAllowlist, narrow the
@@ -1325,6 +1504,7 @@ export async function streamProfileResponse({
     ? await activateSelectedSkillsFromRegistry(tools, mergedSkills, {
         sessionId,
         routine: request.routine,
+        subagent: delegation,
         traceId: turnTraceId,
         spanId: turnSpanId,
       })
@@ -1336,6 +1516,25 @@ export async function streamProfileResponse({
     ? createSkillActiveToolPolicy(Object.keys(aiTools), activatedSkillTools, gatedToolNames)
     : null
   const normalizedMessages = normalizeFileUIParts(request.messages || [])
+  const injectedSubagentMessages: UIMessage[] = []
+  const prepareAgentStep = request.consumeSubagentInbox
+    ? async (step: { messages: unknown[] }) => {
+        const activeTools = activeToolPolicy?.prepareStep() ?? {}
+        const inbox = normalizeFileUIParts(await request.consumeSubagentInbox!())
+        if (!inbox.length) return activeTools
+        injectedSubagentMessages.push(...inbox)
+        const modelMessages = await convertToModelMessages(inbox, {
+          tools: aiTools,
+          ignoreIncompleteToolCalls: true,
+          convertDataPart: convertMimDataPart,
+        })
+        await request.onSubagentActivity?.(`Received ${inbox.length} steering message${inbox.length === 1 ? '' : 's'}`)
+        return {
+          ...activeTools,
+          messages: [...step.messages, ...modelMessages],
+        }
+      }
+    : activeToolPolicy?.prepareStep
   let sessionCompactions = profile.persistSession && sessionId
     ? await prepareSessionCompactionsBeforeTurn({
         tools,
@@ -1416,7 +1615,7 @@ export async function streamProfileResponse({
     instructions,
     tools: aiTools,
     activeTools: activeToolPolicy?.activeTools as any,
-    prepareStep: activeToolPolicy?.prepareStep as any,
+    prepareStep: prepareAgentStep as any,
     // Chat cap is a runaway backstop, not a task limit — the renderer shows a
     // Continue notice when it's hit (ChatView step-cap notice tracks this number).
     stopWhen: stepCountIs(profile.stepCap),
@@ -1424,6 +1623,12 @@ export async function streamProfileResponse({
     temperature: profile.temperature,
     providerOptions: buildProviderOptions(modelConfig, request.controlId),
     onStepFinish(event) {
+      const toolNames = Array.isArray(event.toolCalls)
+        ? event.toolCalls.flatMap(call => typeof call.toolName === 'string' ? [call.toolName] : [])
+        : []
+      void request.onSubagentActivity?.(toolNames.length
+        ? `Using ${toolNames.join(', ')}`
+        : 'Model step completed')
       if (event.usage) {
         const usage = normalizeSdkUsage(event.usage, modelConfig, { finishReason: event.finishReason })
         turnUsageSteps.push(usage)
@@ -1506,12 +1711,21 @@ export async function streamProfileResponse({
     originalMessages: normalizedMessages,
     sendReasoning: profile.sendReasoning,
     onFinish: async ({ messages }) => {
-      // Capture the turn's full message array (input + assistant output + tool
-      // calls/results) as a payload blob so the Activity Story can show what the
-      // AI said. Content already lives in the session DB; this makes it
-      // reachable by payloadRef. Off when content capture is disabled.
+      const completedMessages = mergeInjectedSubagentMessages(
+        normalizedMessages,
+        injectedSubagentMessages,
+        messages,
+      )
+      // Capture only this user turn and its response. The full conversation is
+      // canonical in session storage; re-blobbing it after every turn creates
+      // quadratic trace growth in long chats.
       const messagesRef = tools.shouldCaptureContent()
-        ? tools.trace.writePayload(turnTraceId, turnSpanId, 'messages', messages)
+        ? tools.trace.writePayload(
+            turnTraceId,
+            turnSpanId,
+            'messages',
+            completedTurnMessages(normalizedMessages, completedMessages),
+          )
         : null
       tools.trace.append({
         kind: 'chat.turn.done',
@@ -1531,12 +1745,12 @@ export async function streamProfileResponse({
       })
       if (!profile.persistSession || !sessionId) return
       const turnUsage = summarizeTurnUsage(turnUsageSteps, preparedPrompt.estimatedContextTokens)
-      await persistChatSession(tools, sessionId, messages, turnUsage.usage, turnUsage.contextTokens, turnTrace)
+      await persistChatSession(tools, sessionId, completedMessages, turnUsage.usage, turnUsage.contextTokens, turnTrace)
       if (request.routine) await markRoutineSessionDone(tools, sessionId, turnTrace)
       await maybeCompactSessionAfterTurn({
         tools,
         sessionId,
-        messages,
+        messages: completedMessages,
         modelConfig,
         contextTokens: turnUsage.contextTokens,
         trigger: 'post_turn',
@@ -1614,6 +1828,28 @@ function escapeXmlAttribute(value: string): string {
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
+}
+
+export function completedTurnMessages(originalMessages: UIMessage[], completedMessages: UIMessage[]): UIMessage[] {
+  let currentUserIndex = -1
+  for (let index = originalMessages.length - 1; index >= 0; index--) {
+    if (originalMessages[index]?.role === 'user') {
+      currentUserIndex = index
+      break
+    }
+  }
+  const start = currentUserIndex >= 0 ? currentUserIndex : Math.min(originalMessages.length, completedMessages.length)
+  return completedMessages.slice(start)
+}
+
+export function mergeInjectedSubagentMessages(
+  originalMessages: UIMessage[],
+  injectedMessages: UIMessage[],
+  completedMessages: UIMessage[],
+): UIMessage[] {
+  if (!injectedMessages.length) return completedMessages
+  const generated = completedMessages.slice(Math.min(originalMessages.length, completedMessages.length))
+  return [...originalMessages, ...injectedMessages, ...generated]
 }
 
 export function normalizeFileUIParts(messages: UIMessage[]): UIMessage[] {
@@ -1871,6 +2107,7 @@ export async function maybeCompactSessionAfterTurn({
 
   const existingCompactions = await loadSessionCompactions(tools, sessionId, trace)
   const latest = existingCompactions[existingCompactions.length - 1]
+  if (latestCompactionUsesSameCut(latest, cut)) return null
   if (latest?.modelId === modelConfig.id && typeof latest.savedRatio === 'number' && latest.savedRatio < MIN_COMPACTION_SAVED_RATIO) {
     return null
   }
@@ -2057,6 +2294,18 @@ function hasFreshCompactionForModel(state: SessionCompactionState, modelId: stri
   const updatedAtMs = timestampMs(state.updatedAt)
   const createdAtMs = timestampMs(latest.createdAt)
   return createdAtMs > 0 && updatedAtMs > 0 && createdAtMs >= updatedAtMs
+}
+
+function latestCompactionUsesSameCut(
+  latest: ContextCompactionRecord | undefined,
+  cut: { firstKeptMessageId?: string; firstKeptMessageIndex: number; summarizedMessageCount: number },
+): boolean {
+  if (!latest) return false
+  const sameId = Boolean(latest.firstKeptMessageId && cut.firstKeptMessageId && latest.firstKeptMessageId === cut.firstKeptMessageId)
+  const sameIndex = typeof latest.firstKeptMessageIndex === 'number' && latest.firstKeptMessageIndex === cut.firstKeptMessageIndex
+  if (!sameId && !sameIndex) return false
+  if (typeof latest.summarizedMessageCount === 'number' && latest.summarizedMessageCount !== cut.summarizedMessageCount) return false
+  return true
 }
 
 function timestampMs(value: unknown): number {

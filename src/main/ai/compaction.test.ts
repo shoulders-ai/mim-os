@@ -401,4 +401,23 @@ describe('selectCompactionCut', () => {
     expect(cut?.summarizedMessages.map(message => message.id)).toEqual(['u1', 'a1', 'u2', 'a2'])
     expect(cut?.keptMessages.map(message => message.id)).toEqual(['u3', 'a3'])
   })
+
+  it('moves forward to the next user boundary instead of pulling an oversized first user message back into the tail', () => {
+    const messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'large pasted document\n'.repeat(2_000) }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'I read the document.' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'What is the takeaway?' }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'The takeaway is concise.' }] },
+    ] as any
+
+    const cut = selectCompactionCut({ messages, modelWindow: 5_000, tailTargetTokens: 100 })
+
+    expect(cut).toMatchObject({
+      firstKeptMessageId: 'u2',
+      firstKeptMessageIndex: 2,
+      summarizedMessageCount: 2,
+    })
+    expect(cut?.summarizedMessages.map(message => message.id)).toEqual(['u1', 'a1'])
+    expect(cut?.keptMessages.map(message => message.id)).toEqual(['u2', 'a2'])
+  })
 })

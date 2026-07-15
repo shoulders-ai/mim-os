@@ -36,6 +36,7 @@ export interface Session {
   routineError?: string
   routineFiredAt?: string
   routineCompletedAt?: string
+  subagent?: SubagentSessionMetadata
   compactions?: SessionCompactionRecord[]
   messages: SessionMessage[]
   usage: { inputTokens: number; outputTokens: number; estimatedCost: number }
@@ -52,6 +53,29 @@ export interface Session {
 
 export type SessionStatusKind = 'working' | 'error' | 'done' | 'ready' | 'unread' | 'needs-approval'
 export type RoutineRunStatus = 'working' | 'needs-approval' | 'done' | 'error' | 'stopped'
+export type SubagentStatus = 'queued' | 'working' | 'waiting' | 'needs-approval' | 'done' | 'error' | 'interrupted' | 'stopped'
+
+export interface SubagentSessionMetadata {
+  rootSessionId: string
+  parentSessionId: string
+  depth: number
+  status: SubagentStatus
+  currentTurnId?: string
+  modelId?: string
+  agentId?: string
+  effectiveToolAllowlist?: string[]
+  approvalAllow?: string[]
+  requestedGrants?: string[]
+  inbox: Array<{ id: string; message: string; createdAt: string; deliveredAt?: string }>
+  result?: string
+  error?: string
+  lastActivity?: string
+  lastActivityAt?: string
+  createdAt: string
+  updatedAt: string
+  startedAt?: string
+  completedAt?: string
+}
 
 export const useSessionStore = defineStore('sessions', () => {
   const sessions = ref<Session[]>([])
@@ -148,6 +172,9 @@ export const useSessionStore = defineStore('sessions', () => {
     if (session.routineStatus === 'working') return 'working'
     if (session.routineStatus === 'needs-approval') return 'needs-approval'
     if (session.routineStatus === 'error') return 'error'
+    if (session.subagent?.status === 'queued' || session.subagent?.status === 'working' || session.subagent?.status === 'waiting') return 'working'
+    if (session.subagent?.status === 'needs-approval') return 'needs-approval'
+    if (session.subagent?.status === 'error') return 'error'
 
     // Check for unread: has messages, status is ready, and updatedAt > lastViewedAt
     if (session.messages?.length > 0 && session.lastViewedAt) {
@@ -157,6 +184,7 @@ export const useSessionStore = defineStore('sessions', () => {
     }
 
     if (session.routineStatus === 'done' || session.routineStatus === 'stopped') return 'done'
+    if (session.subagent && ['done', 'interrupted', 'stopped'].includes(session.subagent.status)) return 'done'
     if (ext === 'done' || session.messages?.length > 0) return 'done'
     return 'ready'
   }

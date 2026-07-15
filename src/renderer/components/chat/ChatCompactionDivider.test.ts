@@ -16,6 +16,9 @@ function mountDivider() {
     record: {
       id: 'cmp_1',
       summary: 'Goal: keep the session alive.\nOpen: verify the UI marker.',
+      tokensBefore: 30_000,
+      tokensAfter: 2_700,
+      trigger: 'pre_turn',
       createdAt: '2026-07-09T12:00:00.000Z',
     },
   })
@@ -36,9 +39,29 @@ describe('ChatCompactionDivider', () => {
     mounted = mountDivider()
 
     expect(mounted.root.textContent).toContain('Context compacted')
-    expect(mounted.root.textContent).toContain('Earlier messages were summarized for the model.')
+    expect(mounted.root.textContent).toContain('Earlier messages were summarized before this reply.')
+    expect(mounted.root.textContent).toContain('Full chat stays visible.')
+    expect(mounted.root.textContent).toContain('30k -> 3k')
     expect(mounted.root.textContent).not.toContain('keep the session alive')
     expect(mounted.root.querySelector('[data-testid="chat-compaction-summary"]')).toBeNull()
+  })
+
+  it('labels post-turn compaction as future-turn preparation', async () => {
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = createApp(ChatCompactionDivider, {
+      record: {
+        id: 'cmp_2',
+        summary: 'Earlier work was summarized.',
+        trigger: 'post_turn',
+        createdAt: '2026-07-09T12:00:00.000Z',
+      },
+    })
+    app.mount(root)
+    mounted = { app, root }
+    await flushUi()
+
+    expect(root.textContent).toContain('Earlier messages were summarized after the last reply for future turns.')
   })
 
   it('expands and collapses the historical summary', async () => {

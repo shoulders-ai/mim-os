@@ -25,14 +25,16 @@ import {
   inlineProfile,
   streamProfileResponse,
   maybeCompactSessionAfterTurn,
+  completedTurnMessages,
   type AgentProfile,
 } from '@main/ai/aiRuntime.js'
 import { generateObject } from 'ai'
+import type { UIMessage } from 'ai'
 import { loadRegistry } from '@main/ai/ai.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
 import { createToolRegistry } from '@main/tools/registry.js'
 import { createTraceLog } from '@main/trace/trace.js'
-import { registerSessionTools } from '@main/sessions.js'
+import { appendSessionCompaction, registerSessionTools } from '@main/sessions.js'
 
 vi.mock('ai', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ai')>()
@@ -55,6 +57,22 @@ vi.mock('@main/ai/ai.js', () => ({
   })),
   resolveKey: vi.fn(() => ({ key: 'sk-test', source: 'env' })),
 }))
+
+describe('completedTurnMessages', () => {
+  it('captures only the current user turn and newly completed response', () => {
+    const previous = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'old question' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old answer' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'new question' }] },
+    ] as UIMessage[]
+    const completed = [
+      ...previous,
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'new answer' }] },
+    ] as UIMessage[]
+
+    expect(completedTurnMessages(previous, completed).map(message => message.id)).toEqual(['u2', 'a2'])
+  })
+})
 
 function mockRegistry(
   workspacePath: string | null = null,
@@ -194,6 +212,38 @@ describe('central AI runtime tools', () => {
         routine: { id: 'support-bot', runId: 'routine_run_1', approvalAllow: ['fs.write'] },
       },
     }))
+  })
+
+  it('exposes subagent thread tools and preserves delegated authority on their calls', async () => {
+    const { tools, calls } = mockRegistry()
+    const delegation = {
+      rootSessionId: 'root',
+      parentSessionId: 'parent',
+      depth: 1,
+      modelId: 'test-model',
+      toolAllowlist: ['fs.read', 'subagent.spawn'],
+      originActor: 'remote' as const,
+      principal: 'token_1',
+      transport: 'mcp-http',
+    }
+    const aiTools = await createAiSdkTools({
+      tools,
+      profile: 'chat',
+      sessionId: 'child',
+      subagent: delegation,
+    })
+
+    expect(aiTools.subagent_spawn.inputSchema).toBeDefined()
+    expect(aiTools.subagent_wait.inputSchema).toBeDefined()
+    expect(aiTools.subagent_send.inputSchema).toBeDefined()
+
+    await aiTools.subagent_spawn.execute?.({ prompt: 'Review the code.' }, {})
+
+    expect(calls).toContainEqual({
+      name: 'subagent.spawn',
+      params: { prompt: 'Review the code.' },
+      ctx: { actor: 'ai', sessionId: 'child', subagent: delegation },
+    })
   })
 
   it('exposes inline comment review tools on the chat profile', async () => {
@@ -2033,6 +2083,109 @@ describe('AgentProfile', () => {
     })
   })
 
+  it('reopens a subagent session with its persisted model, profile, and delegated authority', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'body-model', model: 'body-model', provider: 'anthropic' },
+      { id: 'child-model', model: 'child-model', provider: 'anthropic' },
+    ]))
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+    const dir = mkdtempSync(join(tmpdir(), 'mim-subagent-chat-'))
+    const events: Array<Record<string, unknown>> = []
+    const toolContexts: Array<Record<string, unknown>> = []
+    const trace = createTraceLog({
+      devConsole: false,
+      sinks: [{ write: event => events.push(event as unknown as Record<string, unknown>) }],
+    })
+    const tools = createToolRegistry(trace)
+    tools.setWorkspacePath(dir)
+    registerSessionTools(tools)
+    tools.register({
+      name: 'fs.read',
+      description: 'read',
+      execute: async (_params, ctx) => {
+        toolContexts.push(ctx as unknown as Record<string, unknown>)
+        return { content: 'ok' }
+      },
+    })
+    tools.register({ name: 'fs.write', description: 'write', execute: async () => ({ ok: true }) })
+    const now = new Date().toISOString()
+    const session = await tools.call('session.create', {
+      label: 'Repository survey',
+      modelId: 'child-model',
+      agentId: 'package:review/researcher',
+      subagent: {
+        rootSessionId: 'root-session',
+        parentSessionId: 'parent-session',
+        depth: 1,
+        status: 'done',
+        modelId: 'child-model',
+        agentId: 'package:review/researcher',
+        effectiveToolAllowlist: ['fs.read'],
+        approvalAllow: ['fs.read'],
+        requestedGrants: ['fs.read'],
+        originActor: 'remote',
+        principal: 'token-1',
+        callerName: 'review-client',
+        transport: 'mcp-http',
+        inbox: [],
+        createdAt: now,
+        updatedAt: now,
+      },
+    }, { actor: 'system' }) as { id: string }
+    const messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'Map the repository.' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'Initial map complete.' }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'Now inspect the security boundary.' }] },
+    ] as UIMessage[]
+    await tools.call('session.update', { id: session.id, messages: messages.slice(0, 2) }, { actor: 'system' })
+    const childProfile: AgentProfile = {
+      ...chatProfile,
+      id: 'package:review/researcher',
+      persistSession: false,
+      toolAllowlist: ['fs.read', 'fs.write'],
+      buildInstructions: () => 'Child profile instructions',
+    }
+    const resolveProfile = vi.fn().mockResolvedValue(childProfile)
+    const runtime = createAiRuntime({ tools, agentMounts: { resolveProfile } })
+
+    try {
+      await runtime.streamChatResponse({
+        id: session.id,
+        modelId: 'body-model',
+        agentId: 'package:attacker/unrestricted',
+        messages,
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+
+    expect(resolveProfile).toHaveBeenCalledWith('package:review/researcher')
+    const constructorOptions = MockAgent.mock.calls[MockAgent.mock.calls.length - 1][0] as unknown as {
+      tools: Record<string, { execute?: (params: Record<string, unknown>, options: Record<string, unknown>) => Promise<unknown> }>
+    }
+    expect(Object.keys(constructorOptions.tools)).toEqual(['fs_read'])
+    await constructorOptions.tools.fs_read.execute?.({ path: 'README.md' }, {})
+    expect(toolContexts).toContainEqual(expect.objectContaining({
+      actor: 'ai',
+      sessionId: session.id,
+      subagent: expect.objectContaining({
+        rootSessionId: 'root-session',
+        parentSessionId: 'parent-session',
+        depth: 1,
+        toolAllowlist: ['fs.read'],
+        originActor: 'remote',
+        principal: 'token-1',
+      }),
+    }))
+    const turn = events.find(event => event.kind === 'chat.turn')
+    expect(turn).toMatchObject({
+      sessionId: session.id,
+      model: 'child-model',
+      data: { profile: `subagent:${session.id}` },
+    })
+  })
+
   it('rejects when buildInstructions rejects', async () => {
     const { tools } = mockRegistryWithTrace()
     const profile: AgentProfile = {
@@ -2433,6 +2586,64 @@ describe('AgentProfile', () => {
     }
   })
 
+  it('does not append duplicate compaction records when the latest record already uses the same cut point', async () => {
+    const mockedGenerateObject = vi.mocked(generateObject)
+    const generateObjectCallCount = mockedGenerateObject.mock.calls.length
+    const dir = mkdtempSync(join(tmpdir(), 'mim-compaction-duplicate-cut-'))
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    const tools = createToolRegistry(createTraceLog())
+    tools.setWorkspacePath(dir)
+    registerSessionTools(tools)
+    const created = await tools.call('session.create', { label: 'Long chat' }, { actor: 'user' }) as { id: string }
+    const messages = [
+      { id: 'u1', role: 'user', parts: [{ type: 'text', text: 'start' }] },
+      { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: 'old '.repeat(900) }] },
+      { id: 'u2', role: 'user', parts: [{ type: 'text', text: 'middle request' }] },
+      { id: 'a2', role: 'assistant', parts: [{ type: 'text', text: 'middle '.repeat(900) }] },
+      { id: 'u3', role: 'user', parts: [{ type: 'text', text: 'latest request' }] },
+      { id: 'a3', role: 'assistant', parts: [{ type: 'text', text: 'latest answer' }] },
+    ] as any
+    await tools.call('session.update', { id: created.id, messages }, { actor: 'user' })
+    appendSessionCompaction(dir, created.id, {
+      id: 'cmp_existing',
+      firstKeptMessageId: 'u3',
+      firstKeptMessageIndex: 4,
+      summarizedMessageCount: 4,
+      summary: 'Goal: continue from existing compacted context.',
+      tokensBefore: 900,
+      tokensAfter: 180,
+      savedRatio: 0.8,
+      modelId: 'test-model',
+      trigger: 'post_turn',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    })
+
+    try {
+      const result = await maybeCompactSessionAfterTurn({
+        tools,
+        sessionId: created.id,
+        messages,
+        modelConfig: {
+          id: 'test-model',
+          model: 'test-model',
+          provider: 'anthropic',
+          contextWindow: 1000,
+        },
+        contextTokens: 900,
+        trigger: 'pre_turn',
+      })
+
+      expect(result).toBeNull()
+      expect(mockedGenerateObject.mock.calls.length).toBe(generateObjectCallCount)
+      const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
+        compactions: Array<{ id: string }>
+      }
+      expect(got.compactions.map(record => record.id)).toEqual(['cmp_existing'])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
   it('classifies provider context-length errors without matching ordinary failures', () => {
     expect(isContextLengthError({
       statusCode: 400,
@@ -2745,6 +2956,36 @@ describe('AgentProfile', () => {
         expect(toolKeys).toContain(key)
       }
     }
+  })
+
+  it('consumes durable steering messages at a safe model-step boundary', async () => {
+    mockedLoadRegistry.mockReturnValueOnce(registryWithModels([
+      { id: 'test-model', model: 'test-model', provider: 'anthropic' },
+    ]))
+    const { tools } = mockRegistryWithTrace()
+    const { ToolLoopAgent } = await import('ai')
+    const MockAgent = vi.mocked(ToolLoopAgent)
+    const consumeSubagentInbox = vi.fn()
+      .mockResolvedValueOnce([{
+        id: 'steer_1',
+        role: 'user',
+        parts: [{ type: 'text', text: 'Also update the docs.' }],
+      }])
+      .mockResolvedValue([])
+
+    await streamProfileResponse({
+      profile: { ...chatProfile, persistSession: false },
+      tools,
+      request: { ...simpleRequest, consumeSubagentInbox },
+    })
+
+    const agentCall = MockAgent.mock.calls[MockAgent.mock.calls.length - 1]
+    const prepareStep = agentCall[0].prepareStep as (input: { messages: unknown[] }) => Promise<Record<string, unknown>>
+    const prepared = await prepareStep({ messages: [{ role: 'user', content: [{ type: 'text', text: 'hello' }] }] })
+
+    expect(consumeSubagentInbox).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(prepared.messages)).toContain('Also update the docs.')
+    expect(prepared.activeTools).toEqual(expect.arrayContaining(['subagent_spawn', 'subagent_wait']))
   })
 
   it('skill key retained only with preActivatedSkills', async () => {

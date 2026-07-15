@@ -7,11 +7,10 @@ const props = defineProps({
   tokenCount: { type: Number, default: 0 },
   contextWindow: { type: Number, default: 0 },
   costLabel: { type: String, default: '' },
+  compacted: { type: Boolean, default: false },
+  compactionTokensBefore: { type: Number, default: 0 },
+  compactionTokensAfter: { type: Number, default: 0 },
 })
-
-const emit = defineEmits(['start-fresh'])
-
-const showStartFresh = computed(() => clampedPercent.value >= 0.85)
 
 const radius = computed(() => Math.max(4, (props.size - 4) / 2))
 const center = computed(() => props.size / 2)
@@ -30,6 +29,16 @@ const tooltip = computed(() => {
   const tokens = formatTokens(props.tokenCount)
   const context = formatTokens(props.contextWindow)
   const parts = [`Context: ${tokens} / ${context} (${pct}%)`]
+  if (props.compacted) {
+    const before = formatTokens(props.compactionTokensBefore)
+    const after = formatTokens(props.compactionTokensAfter || props.tokenCount)
+    parts.push(before && before !== '0'
+      ? `Using compacted context: ${after} from ${before}`
+      : 'Using compacted context')
+    parts.push('Full chat stays visible.')
+  } else if (clampedPercent.value >= 0.85) {
+    parts.push('Checks each turn and summarizes older messages when needed.')
+  }
   if (props.costLabel) parts.push(`Cost: ${props.costLabel}`)
   return parts.join('\n')
 })
@@ -75,16 +84,9 @@ function formatTokens(value) {
       />
     </svg>
     <span
-      class="absolute bottom-[calc(100%+7px)] left-1/2 z-30 flex flex-col gap-px px-2 py-[5px] rounded-[5px] bg-ink text-surface font-mono text-[10px] leading-[1.35] whitespace-nowrap opacity-0 -translate-x-1/2 translate-y-0.5 transition-[opacity,transform] duration-[120ms] ease-out group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0"
-      :class="showStartFresh ? 'pointer-events-auto' : 'pointer-events-none'"
+      class="pointer-events-none absolute bottom-[calc(100%+7px)] left-1/2 z-30 flex flex-col gap-px px-2 py-[5px] rounded-[5px] bg-ink text-surface font-mono text-[10px] leading-[1.35] whitespace-nowrap opacity-0 -translate-x-1/2 translate-y-0.5 transition-[opacity,transform] duration-[120ms] ease-out group-hover:opacity-100 group-hover:translate-y-0 group-focus-within:opacity-100 group-focus-within:translate-y-0"
     >
       <span v-for="line in tooltipLines" :key="line">{{ line }}</span>
-      <button
-        v-if="showStartFresh"
-        class="mt-1 rounded-[3px] bg-surface/20 px-1.5 py-0.5 text-[10px] font-medium text-surface hover:bg-surface/30"
-        title="Start a fresh chat from summary"
-        @click.stop="emit('start-fresh')"
-      >Start fresh from summary</button>
     </span>
   </span>
 </template>

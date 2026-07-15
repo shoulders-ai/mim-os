@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createApp, nextTick } from 'vue'
 import ContextDonut from './ContextDonut.vue'
 
@@ -75,30 +75,35 @@ describe('ContextDonut', () => {
     expect(fill.classList.contains('text-rem')).toBe(true)
   })
 
-  it('shows Start fresh button when usage >= 85%', async () => {
+  it('keeps the high-context tooltip informational instead of opening a fresh thread', async () => {
     mounted = mountDonut({ percent: 0.87, size: 16, tokenCount: 174000, contextWindow: 200000 })
     await flushUi()
-    const button = mounted.root.querySelector('button')
-    expect(button).toBeTruthy()
-    expect(button?.textContent).toContain('Start fresh')
-    expect(button?.closest('[aria-hidden="true"]')).toBeNull()
+
+    expect(mounted.root.textContent).toContain('Context: 174k / 200k (87%)')
+    expect(mounted.root.textContent).toContain('Checks each turn and summarizes older messages when needed.')
+    expect(mounted.root.querySelector('button')).toBeNull()
+    expect(mounted.root.textContent).not.toContain('Start fresh')
   })
 
-  it('emits start-fresh when the Start fresh button is clicked', async () => {
-    const onStartFresh = vi.fn()
-    mounted = mountDonut(
-      { percent: 0.87, size: 16, tokenCount: 174000, contextWindow: 200000 },
-      { onStartFresh },
-    )
+  it('shows when the displayed context is compacted', async () => {
+    mounted = mountDonut({
+      percent: 0.54,
+      size: 16,
+      tokenCount: 2700,
+      contextWindow: 5000,
+      compacted: true,
+      compactionTokensBefore: 30000,
+      compactionTokensAfter: 2700,
+    })
     await flushUi()
 
-    mounted.root.querySelector<HTMLButtonElement>('button')?.click()
-    await flushUi()
-
-    expect(onStartFresh).toHaveBeenCalledTimes(1)
+    expect(mounted.root.textContent).toContain('Context: 3k / 5k (54%)')
+    expect(mounted.root.textContent).toContain('Using compacted context: 3k from 30k')
+    expect(mounted.root.textContent).toContain('Full chat stays visible.')
+    expect(mounted.root.querySelector('[aria-label]')?.getAttribute('aria-label')).toContain('Using compacted context')
   })
 
-  it('does not show Start fresh button below 85%', async () => {
+  it('does not render an action button below 85%', async () => {
     mounted = mountDonut({ percent: 0.5, size: 16, tokenCount: 100000, contextWindow: 200000 })
     await flushUi()
     const button = mounted.root.querySelector('button')

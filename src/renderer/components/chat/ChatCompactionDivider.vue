@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-vue'
-import type { ChatCompactionRecord } from './compactionDivider.js'
+import {
+  compactionRecordDetail,
+  compactionTokenTransition,
+  type ChatCompactionRecord,
+} from './compactionDivider.js'
 
 const props = defineProps<{
   record: ChatCompactionRecord
@@ -11,6 +15,8 @@ const expanded = ref(false)
 
 const title = computed(() => expanded.value ? 'Hide summary' : 'Show summary')
 const chevron = computed(() => expanded.value ? IconChevronDown : IconChevronRight)
+const detail = computed(() => compactionRecordDetail(props.record))
+const tokenTransition = computed(() => compactionTokenTransition(props.record))
 </script>
 
 <template>
@@ -26,7 +32,8 @@ const chevron = computed(() => expanded.value ? IconChevronDown : IconChevronRig
       >
         <component :is="chevron" :size="12" :stroke="2" class="shrink-0 text-ink-4" />
         <span class="shrink-0 font-medium text-ink-2">Context compacted</span>
-        <span class="min-w-0 truncate text-ink-4">Earlier messages were summarized for the model.</span>
+        <span v-if="tokenTransition" class="shrink-0 font-mono text-[10px] text-ink-4">{{ tokenTransition }}</span>
+        <span class="min-w-0 truncate text-ink-4">{{ detail }} Full chat stays visible.</span>
       </button>
       <div class="h-px min-w-4 flex-1 bg-rule-light" />
     </div>

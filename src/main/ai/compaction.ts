@@ -198,11 +198,20 @@ export function selectCompactionCut({
   }
 
   if (firstKeptMessageIndex > 0 && messages[firstKeptMessageIndex]?.role !== 'user') {
-    for (let index = firstKeptMessageIndex - 1; index >= 0; index -= 1) {
+    let userBoundary = -1
+    for (let index = firstKeptMessageIndex + 1; index < messages.length; index += 1) {
       if (messages[index].role !== 'user') continue
-      firstKeptMessageIndex = index
+      userBoundary = index
       break
     }
+    if (userBoundary < 0) {
+      for (let index = firstKeptMessageIndex - 1; index >= 0; index -= 1) {
+        if (messages[index].role !== 'user') continue
+        userBoundary = index
+        break
+      }
+    }
+    if (userBoundary >= 0) firstKeptMessageIndex = userBoundary
   }
 
   if (firstKeptMessageIndex <= 0 || firstKeptMessageIndex >= messages.length) return null

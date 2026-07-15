@@ -39,6 +39,9 @@ const props = defineProps({
     contextPercent: { type: Number, default: 0 },
     contextTokens: { type: Number, default: 0 },
     contextWindow: { type: Number, default: 0 },
+    contextCompacted: { type: Boolean, default: false },
+    compactionTokensBefore: { type: Number, default: 0 },
+    compactionTokensAfter: { type: Number, default: 0 },
     showUsageIndicators: { type: Boolean, default: false },
     supportsVision: { type: Boolean, default: false },
     skills: { type: Array, default: () => [] },
@@ -55,7 +58,6 @@ const emit = defineEmits([
     "stop",
     "update:modelId",
     "update:controlId",
-    "start-fresh",
 ]);
 
 const draft = ref("");
@@ -717,8 +719,10 @@ defineExpose({
                         :token-count="contextTokens"
                         :context-window="contextWindow"
                         :cost-label="costLabel"
+                        :compacted="contextCompacted"
+                        :compaction-tokens-before="compactionTokensBefore"
+                        :compaction-tokens-after="compactionTokensAfter"
                         :size="16"
-                        @start-fresh="emit('start-fresh')"
                     />
                     <span
                         v-else-if="showUsageIndicators && costLabel"

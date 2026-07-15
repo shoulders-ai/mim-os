@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { compactionDividerForMessages, latestCompactionRecord } from './compactionDivider.js'
+import {
+  compactionDividerForMessages,
+  compactionRecordDetail,
+  compactionTokenTransition,
+  latestCompactionRecord,
+} from './compactionDivider.js'
 
 describe('compactionDividerForMessages', () => {
   const messages = [
@@ -77,5 +82,41 @@ describe('compactionDividerForMessages', () => {
       firstKeptMessageIndex: 99,
       summary: 'Earlier work was summarized.',
     }])).toBeNull()
+  })
+
+  it('describes when compaction happened', () => {
+    expect(compactionRecordDetail({
+      id: 'cmp_pre',
+      summary: 'Earlier work was summarized.',
+      trigger: 'pre_turn',
+    })).toBe('Earlier messages were summarized before this reply.')
+
+    expect(compactionRecordDetail({
+      id: 'cmp_post',
+      summary: 'Earlier work was summarized.',
+      trigger: 'post_turn',
+    })).toBe('Earlier messages were summarized after the last reply for future turns.')
+
+    expect(compactionRecordDetail({
+      id: 'cmp_overflow',
+      summary: 'Earlier work was summarized.',
+      trigger: 'overflow',
+    })).toBe('The prompt exceeded the model window, so Mim summarized earlier messages and retried.')
+  })
+
+  it('formats compact token transitions', () => {
+    expect(compactionTokenTransition({
+      id: 'cmp_1',
+      summary: 'Earlier work was summarized.',
+      tokensBefore: 30_000,
+      tokensAfter: 2_700,
+    })).toBe('30k -> 3k')
+
+    expect(compactionTokenTransition({
+      id: 'cmp_1',
+      summary: 'Earlier work was summarized.',
+      tokensBefore: 0,
+      tokensAfter: 2_700,
+    })).toBe('')
   })
 })

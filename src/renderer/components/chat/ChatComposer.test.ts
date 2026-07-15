@@ -125,7 +125,7 @@ describe('ChatComposer', () => {
     expect(onSend).not.toHaveBeenCalled()
   })
 
-  it('emits start-fresh from the context donut action', async () => {
+  it('does not expose a fresh-thread action through the context donut', async () => {
     const onSend = vi.fn()
     const onStartFresh = vi.fn()
     mountComposer(onSend, {
@@ -139,10 +139,25 @@ describe('ChatComposer', () => {
 
     const button = [...root.querySelectorAll<HTMLButtonElement>('button')]
       .find(item => item.textContent?.includes('Start fresh'))
-    button?.click()
+
+    expect(button).toBeUndefined()
+    expect(onStartFresh).not.toHaveBeenCalled()
+    expect(onSend).not.toHaveBeenCalled()
+  })
+
+  it('passes compacted context metadata into the usage tooltip', async () => {
+    const onSend = vi.fn()
+    mountComposer(onSend, {
+      contextPercent: 0.54,
+      contextTokens: 2700,
+      contextWindow: 5000,
+      showUsageIndicators: true,
+      contextCompacted: true,
+      compactionTokensBefore: 30000,
+      compactionTokensAfter: 2700,
+    })
     await flushUi()
 
-    expect(onStartFresh).toHaveBeenCalledTimes(1)
-    expect(onSend).not.toHaveBeenCalled()
+    expect(root.textContent).toContain('Using compacted context: 3k from 30k')
   })
 })
