@@ -46,6 +46,50 @@ describe('AI tools', () => {
   })
 })
 
+describe('model catalog usage contract', () => {
+  function model(id: string) {
+    const match = loadRegistry().models.find(candidate => candidate.id === id)
+    expect(match, `missing model ${id}`).toBeDefined()
+    return match!
+  }
+
+  it('keeps Claude Fable 5 standard and five-minute cache pricing current', () => {
+    expect(model('claude-fable-5')).toMatchObject({
+      contextWindow: 1_000_000,
+      pricing: {
+        inputPerMillion: 10,
+        cacheReadInputPerMillion: 1,
+        cacheWriteInputPerMillion: 12.5,
+        outputPerMillion: 50,
+      },
+    })
+  })
+
+  it('uses provider-published context windows', () => {
+    expect(model('claude-haiku-4-5-20251001').contextWindow).toBe(200_000)
+    expect(model('gemini-3.1-pro-preview').contextWindow).toBe(1_048_576)
+    expect(model('gemini-3.5-flash').contextWindow).toBe(1_048_576)
+    expect(model('gemini-3.1-flash-lite').contextWindow).toBe(1_048_576)
+    expect(model('gpt-5.5').contextWindow).toBe(1_050_000)
+    expect(model('gpt-5.4').contextWindow).toBe(1_050_000)
+  })
+
+  it('records long-context price multipliers for models that have them', () => {
+    expect(model('gemini-3.1-pro-preview').pricing).toMatchObject({
+      longContextThresholdTokens: 200_000,
+      longContextInputMultiplier: 2,
+      longContextOutputMultiplier: 1.5,
+    })
+    for (const id of ['gpt-5.5', 'gpt-5.4']) {
+      expect(model(id).pricing).toMatchObject({
+        longContextThresholdTokens: 272_000,
+        longContextInputMultiplier: 2,
+        longContextOutputMultiplier: 1.5,
+      })
+    }
+  })
+})
+
 describe('resolveGenerationModel + config.yaml cascade', () => {
   let home: string
   const origHome = process.env.HOME

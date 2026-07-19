@@ -109,7 +109,7 @@
       "providerLabel": "Anthropic",
       "provider": "anthropic",
       "model": "claude-haiku-4-5-20251001",
-      "contextWindow": 200000,
+      "contextWindow": 5000,
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
       "pricing": { "inputPerMillion": 1.0, "cacheReadInputPerMillion": 0.1, "cacheWriteInputPerMillion": 1.25, "outputPerMillion": 5.0 },
       "control": {
@@ -132,10 +132,10 @@
       "providerLabel": "Google",
       "provider": "google",
       "model": "gemini-3.1-pro-preview",
-      "contextWindow": 1000000,
+      "contextWindow": 1048576,
 
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
-      "pricing": { "inputPerMillion": 2.0, "cacheReadInputPerMillion": 0.2, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 12.0 },
+      "pricing": { "inputPerMillion": 2.0, "cacheReadInputPerMillion": 0.2, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 12.0, "longContextThresholdTokens": 200000, "longContextInputMultiplier": 2.0, "longContextOutputMultiplier": 1.5 },
       "control": {
         "kind": "thinking",
         "label": "Thinking",
@@ -155,7 +155,7 @@
       "providerLabel": "Google",
       "provider": "google",
       "model": "gemini-3.5-flash",
-      "contextWindow": 1000000,
+      "contextWindow": 1048576,
 
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
       "pricing": { "inputPerMillion": 1.5, "cacheReadInputPerMillion": 0.15, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 9.0 },
@@ -179,7 +179,7 @@
       "providerLabel": "Google",
       "provider": "google",
       "model": "gemini-3.1-flash-lite",
-      "contextWindow": 1000000,
+      "contextWindow": 1048576,
 
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
       "pricing": { "inputPerMillion": 0.25, "cacheReadInputPerMillion": 0.025, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 1.5 },
@@ -202,10 +202,10 @@
       "providerLabel": "OpenAI",
       "provider": "openai",
       "model": "gpt-5.5",
-      "contextWindow": 1000000,
+      "contextWindow": 1050000,
 
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
-      "pricing": { "inputPerMillion": 5.0, "cacheReadInputPerMillion": 0.5, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 30.0 },
+      "pricing": { "inputPerMillion": 5.0, "cacheReadInputPerMillion": 0.5, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 30.0, "longContextThresholdTokens": 272000, "longContextInputMultiplier": 2.0, "longContextOutputMultiplier": 1.5 },
       "control": {
         "kind": "effort",
         "label": "Effort",
@@ -226,10 +226,10 @@
       "providerLabel": "OpenAI",
       "provider": "openai",
       "model": "gpt-5.4",
-      "contextWindow": 1000000,
+      "contextWindow": 1050000,
 
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
-      "pricing": { "inputPerMillion": 2.5, "cacheReadInputPerMillion": 0.25, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 15.0 },
+      "pricing": { "inputPerMillion": 2.5, "cacheReadInputPerMillion": 0.25, "cacheWriteInputPerMillion": 0.0, "outputPerMillion": 15.0, "longContextThresholdTokens": 272000, "longContextInputMultiplier": 2.0, "longContextOutputMultiplier": 1.5 },
       "control": {
         "kind": "effort",
         "label": "Effort",
