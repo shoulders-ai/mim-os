@@ -300,6 +300,11 @@ onMounted(() => {
     cursorStyle: 'bar',
     scrollback: 5000,
     allowProposedApi: true,
+    linkHandler: {
+      activate(_event: MouseEvent, uri: string) {
+        window.kernel.openExternal(uri)
+      },
+    },
   })
   fitAddon = new FitAddon()
   terminal.loadAddon(fitAddon)

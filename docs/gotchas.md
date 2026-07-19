@@ -280,6 +280,20 @@ native frame is required for normal close/minimize/maximize controls.
 
 Linux startup appends Electron's Ozone auto-detection flags in `configureLinuxCommandLine()` so Wayland desktops can choose the right backend. The release builds AppImage, deb, and tar.gz: AppImage may still need distro fuse support, while deb and tar.gz are the fuse-free alternatives.
 
+## macOS main-window close is not app quit
+
+The main window's red close button is a hide action on macOS. It must preserve
+the existing `BrowserWindow` so Dock activation can show and focus that same
+window without rebuilding renderer state or interrupting background work.
+Explicit Quit sets the main-process quitting state before windows close, so it
+still reaches the aggregate dirty-tab/run/agent guard and then closes pop-outs.
+Windows and Linux keep close-to-quit behavior.
+
+Quit cleanup belongs on Electron's `will-quit`, not `before-quit`: the quit
+guard can cancel `before-quit`, and stopping services there would leave a still
+running Mim process with its timers, watchers, telemetry, or search database
+already shut down.
+
 ## DOCX worker resources use electron-builder OS names
 
 The .NET DOCX worker build writes `resources/docx-worker/<os>-<arch>/` using electron-builder OS names (`mac`, `win`, `linux`), not Node's `process.platform` names (`darwin`, `win32`, `linux`). The runtime resolver still checks legacy local layouts, but packaged builds and CI verification use the electron-builder names. Keep `electron-builder.config.mjs`, `scripts/build-docx-worker.mjs`, `scripts/verify-docx-worker-resource.mjs`, and `src/main/docx/worker.ts` in sync.

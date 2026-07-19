@@ -64,7 +64,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Main Process — Core
 
-- **Electron shell.** App lifecycle, window creation, IPC, quit guard. `src/main/index.ts`, `closeGuard.ts`, `platform.ts`, `menu.ts`.
+- **Electron shell.** App lifecycle, window creation, IPC, quit guard, and macOS close-to-hide/Dock restore behavior. `src/main/index.ts`, `closeGuard.ts`, `platform.ts`, `menu.ts`, `windows/windowLifecycle.ts`.
 - **Tool registry.** Universal dispatch with actor context and trace logging. `src/main/tools/registry.ts`.
 - **Permission gate.** Approval policy for AI/app tool calls, keyed on effect (read/mutate/external), with serve-mode remote grant resolution. `src/main/security/gate.ts`, `gate-paths.ts`. Docs: [security.md](security.md).
 - **File tools.** read/write/edit/create/delete/list/rename/copy/trash, workspace-scoped, stale-write protection via content hashes. `src/main/tools/fs.ts`, `workspaceFileWatcher.ts`.
@@ -243,6 +243,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 - [proposals/slack-transport.md](proposals/slack-transport.md) — proposed clean break: Slack as a first-class transport to the workspace's default Mim agent, with one standing-consent decision per enabled channel, durable threaded conversations, full normal tool/subagent utility, and no Slack-specific permission system.
 - [proposals/context-compaction.md](proposals/context-compaction.md) — context compaction as a view over the immutable session log: `buildModelContext`, deterministic pre-pass, append-only LLM summary records, overflow recovery.
 - [proposals/subagents.md](proposals/subagents.md) — **implemented**. Consolidated design for durable agent-created threads: async spawn, event-driven wait, steering/follow-ups, interruption, inherited lineage authority, result paging, MCP, and Navigator visibility.
+- [proposals/trust-model-v1.md](proposals/trust-model-v1.md) — one Google connection shared by core and apps: written trust-model ruling, `ctx.google` runtime capability, `gmail.modify` capability, gate prefix-block removal, Mail app OAuth deletion, deferred broker/sandbox work with a revisit trigger.
 
 ## File Tree
 

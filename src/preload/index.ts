@@ -88,4 +88,6 @@ contextBridge.exposeInMainWorld('kernel', {
     ipcRenderer.invoke('popout:forward', command),
   popoutSetEdited: (state: Record<string, unknown>) =>
     ipcRenderer.invoke('popout:set-edited', state),
+
+  openExternal: (url: string) => ipcRenderer.invoke('kernel:open-external', url),
 })

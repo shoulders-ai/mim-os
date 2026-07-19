@@ -129,6 +129,13 @@ import {
   resolveMenuTarget,
   normalizeSetEditedPayload,
 } from '@main/windows/popoutWindows.js'
+import {
+  isAllowedExternalUrl,
+  mainWindowCloseAction,
+  restoreMainWindow,
+  shouldOpenExternal,
+  shouldQuitWhenAllWindowsClose,
+} from '@main/windows/windowLifecycle.js'
 
 const HOME_DIR = userHomeDir()
 const AUTO_HISTORY_BASELINE_DELAY_MS = 2_000
@@ -144,6 +151,8 @@ import { createPermissionGate, traceGateDecision } from '@main/security/gate.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
 
 let mainWindow: BrowserWindow | null = null
+let isQuitting = false
+let confirmAppQuit: (() => boolean) | null = null
 const popoutWindows = new Map<number, BrowserWindow>()
 let recentFiles: string[] = []
 let workspaceFileWatcher: ReturnType<typeof createWorkspaceFileWatcher> | null = null
@@ -1281,6 +1290,10 @@ async function boot(): Promise<void> {
     shell.showItemInFolder(resolveUserVisiblePath(tools.getWorkspacePath(), dirPath))
   })
 
+  ipcMain.handle('kernel:open-external', async (_event, url: string) => {
+    if (isAllowedExternalUrl(url)) shell.openExternal(url)
+  })
+
   // Universal tool dispatch — renderer calls kernel.call() via IPC.
   // The renderer is always 'user': only main-process internals (AI runtime,
   // package runtime) may set actor to 'ai' or 'package'. Accepting those
@@ -1358,7 +1371,7 @@ async function boot(): Promise<void> {
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    if (shouldOpenExternal(url)) shell.openExternal(url)
     return { action: 'deny' }
   })
 
@@ -1415,6 +1428,11 @@ async function boot(): Promise<void> {
     try {
       const popout = createPopoutWindow()
       const popoutId = popout.webContents.id
+
+      popout.webContents.setWindowOpenHandler(({ url }) => {
+        if (shouldOpenExternal(url)) shell.openExternal(url)
+        return { action: 'deny' }
+      })
 
       // Register in the window registry and track
       registerWindow(popoutId, 'popout')
@@ -1532,24 +1550,38 @@ async function boot(): Promise<void> {
     return { ok: false }
   })
 
-  // ── Main window close: aggregate guard + close popouts ──
+  // ── Main window close: macOS hide or real app quit ──
+
+  confirmAppQuit = () => {
+    const decision = closeGuardDecision(totalDirtyCount(), packageJobs.activeRunCount(), agentSessions.activeSessionCount())
+    if (!decision.shouldPrompt || !mainWindow || mainWindow.isDestroyed()) return true
+
+    const choice = dialog.showMessageBoxSync(mainWindow, {
+      type: 'warning',
+      buttons: ['Quit', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Unsaved changes',
+      message: decision.message,
+    })
+    return choice !== 1
+  }
 
   mainWindow.on('close', (e) => {
-    const decision = closeGuardDecision(totalDirtyCount(), packageJobs.activeRunCount(), agentSessions.activeSessionCount())
-    if (decision.shouldPrompt && mainWindow && !mainWindow.isDestroyed()) {
-      const choice = dialog.showMessageBoxSync(mainWindow, {
-        type: 'warning',
-        buttons: ['Quit', 'Cancel'],
-        defaultId: 1,
-        cancelId: 1,
-        title: 'Unsaved changes',
-        message: decision.message,
-      })
-      if (choice === 1) {
-        e.preventDefault()
-        return
-      }
+    if (mainWindowCloseAction(process.platform, isQuitting) === 'hide') {
+      e.preventDefault()
+      mainWindow?.hide()
+      return
     }
+
+    if (!isQuitting && confirmAppQuit && !confirmAppQuit()) {
+      e.preventDefault()
+      return
+    }
+
+    // Closing the main window is the quit path on Windows/Linux. Mark it now
+    // so window-all-closed -> app.quit() does not show the guard a second time.
+    isQuitting = true
     // Close all popouts when the main window closes
     closeAllPopouts()
   })
@@ -1595,6 +1627,10 @@ app.on('open-url', (event, url) => {
   enqueueSharedWorkspaceInvite(url)
 })
 
+app.on('activate', () => {
+  restoreMainWindow(mainWindow)
+})
+
 app.whenReady().then(() => {
   try {
     app.setAsDefaultProtocolClient('mim')
@@ -1610,7 +1646,16 @@ app.whenReady().then(() => {
   return boot()
 })
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
+  if (isQuitting) return
+  if (confirmAppQuit && !confirmAppQuit()) {
+    event.preventDefault()
+    return
+  }
+  isQuitting = true
+})
+
+app.on('will-quit', () => {
   clearAppUpdateTimers()
   if (routineTickerInterval != null) {
     clearInterval(routineTickerInterval)
@@ -1630,8 +1675,9 @@ app.on('before-quit', () => {
   workspaceFileWatcher = null
   deleteMcpDiscoveryFile(HOME_DIR)
   closeSearchDb()
+  confirmAppQuit = null
 })
 
 app.on('window-all-closed', () => {
-  app.quit()
+  if (shouldQuitWhenAllWindowsClose(process.platform)) app.quit()
 })

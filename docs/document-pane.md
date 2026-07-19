@@ -268,8 +268,9 @@ shows ConflictBar).
 Pop-out tabs are **not persisted** in `.mim/editor-tabs.json` (persistence
 is disabled when `windowRole === 'popout'`). On app restart, only
 main-window tabs restore. Pop-outs are workspace-scoped: workspace switch
-and main-window close trigger per-window dirty guards then close all
-pop-outs.
+and app quit trigger dirty guards and close all pop-outs. On macOS, closing
+the main window only hides it and leaves any pop-outs open; activating Mim
+from the Dock restores the same main window.
 
 Features that stay main-window-only: approval-sourced diffs (AI edit
 previews remain beside the chat that triggered them), the command palette,

@@ -85,6 +85,9 @@ The app-managed file wins so keys set, replaced, or removed in Settings always t
 - API keys live in `~/.mim/keys.env`.
 - Shared workspace client tokens also live in `~/.mim/keys.env`.
 - Integration tokens live in the OS keychain.
+- On macOS, the main window's red close button hides Mim without stopping the
+  app; clicking Mim in the Dock restores the same window. Use `Cmd+Q` or
+  **Mim > Quit Mim** to quit and stop background work.
 
 ## Apps
 
