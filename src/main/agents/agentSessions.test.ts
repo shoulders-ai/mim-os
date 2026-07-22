@@ -497,6 +497,36 @@ describe('agent sessions', () => {
     ptys[0].exit(0)
   })
 
+  it('keeps a Codex Action Required title at needs-input until activity resumes', () => {
+    vi.useFakeTimers()
+    try {
+      const { sessions, events, ptys } = makeHarness({ idleThresholdMs: 100 })
+      const { record } = sessions.launch(codex)
+      events.length = 0
+
+      ptys[0].data('\x1b]0;⣴ Working | mim-os\x07')
+      ptys[0].data('\x1b]0;[ ! ] Action Required | mim-os\x07')
+      expect(events.at(-1)).toMatchObject({
+        type: 'session.status',
+        session: { runtimeStatus: 'needs-input' },
+      })
+
+      vi.advanceTimersByTime(200)
+      expect(sessions.get(record.sessionId)!.runtimeStatus).toBe('needs-input')
+      expect(events.some(event => event.session.runtimeStatus === 'idle')).toBe(false)
+
+      ptys[0].data('\x1b]0;⢦ Working | mim-os\x07')
+      expect(events.at(-1)).toMatchObject({
+        type: 'session.status',
+        session: { runtimeStatus: 'working' },
+      })
+
+      ptys[0].exit(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('persists titleHint changes and surfaces them on the merged record', () => {
     const { sessions, events, ptys } = makeHarness()
     const { record } = sessions.launch(claude)

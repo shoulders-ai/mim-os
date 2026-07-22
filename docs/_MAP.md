@@ -96,7 +96,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Toolchain detection.** Catalog of R/Rscript/Quarto/pandoc/python3 with login-shell binary resolution, version capture, and promise cache. `src/main/toolchain/toolchain.ts`. Docs: [code-execution.md](code-execution.md).
 - **Code execution.** `shell.run` (AI key: `bash`) unified shell tool and `code.run` allowlisted interpreter tool: spawn, output tail caps, product scan, run records, plot-capture harness. `src/main/tools/code.ts`, `resources/r/mim-run.R`. Docs: [code-execution.md](code-execution.md).
 - **Terminal (PTY).** node-pty spawning, shell integration, keybinding profiles, program tabs (toolchain-validated). `src/main/pty.ts`, `ptyCommand.ts`, `ptyShellIntegration.ts`.
-- **Agent sessions.** CLI coding agents (Claude Code, Codex, Gemini CLI, Pi 0.76+) as first-class runs with compatibility detection, deterministic resume, idle-before-first-prompt status tracking, and stop/archive lifecycle. Pi sessions automatically load an unpacked first-party extension that exposes the curated Mim tool catalog and lifecycle title signals over the per-session authenticated desktop socket. `src/main/agents/`, `resources/pi/`. Docs: [agent-sessions.md](agent-sessions.md).
+- **Agent sessions.** CLI coding agents (Claude Code, Codex, Gemini CLI, Pi 0.76+) as first-class runs with compatibility detection, deterministic resume, idle-before-first-prompt status tracking, explicit blocking-input signals (including Codex Action Required titles), and stop/archive lifecycle. Pi sessions automatically load an unpacked first-party extension that exposes the curated Mim tool catalog and lifecycle title signals over the per-session authenticated desktop socket. `src/main/agents/`, `resources/pi/`. Docs: [agent-sessions.md](agent-sessions.md).
 
 ### Main Process — Web & Content
 
@@ -274,7 +274,7 @@ src/
       agentCatalog.ts           # CLI agent detection
       agentResources.ts         # Spawn-safe bundled resource resolution
       agentSessions.ts          # Session lifecycle + persistence
-      agentStatus.ts            # Idle-first PTY lifecycle signal tracker
+      agentStatus.ts            # Idle-first PTY lifecycle + blocking-input tracker
     ai/
       ai.ts                     # Model registry, key resolver
       aiRuntime.ts              # Central AI runtime + tools

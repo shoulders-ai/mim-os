@@ -377,6 +377,65 @@ describe('createAgentStatusTracker', () => {
     expect(tracker.status()).toBe('idle')
   })
 
+  it.each([
+    '[ ! ] Action Required | mim-os',
+    '[ . ] Action Required | mim-os',
+    '[ ! ] Action Required',
+  ])('treats the Codex %s title as blocking input', (title) => {
+    let t = 0
+    const tracker = createAgentStatusTracker({ now: () => t, idleThresholdMs: 100 })
+
+    tracker.feed(`\x1b]0;${title}\x07`)
+    expect(tracker.status()).toBe('needs-input')
+    expect(tracker.titleHint()).toBe(title)
+
+    t += 1_000
+    expect(tracker.status()).toBe('needs-input')
+  })
+
+  it.each([
+    'Action Required | mim-os',
+    '[ ! ] Action Requiredness | mim-os',
+    'Refactor Action Required handling',
+  ])('does not treat the ordinary %s title as blocking input', (title) => {
+    const tracker = createAgentStatusTracker()
+    tracker.feed(`\x1b]0;${title}\x07`)
+    expect(tracker.status()).toBe('idle')
+  })
+
+  it('models a Codex permission flow: work → action required → resume', () => {
+    let t = 0
+    const tracker = createAgentStatusTracker({ now: () => t, idleThresholdMs: 100 })
+    tracker.feed('\x1b]0;mim-os\x07')
+    tracker.feed('\x1b]0;⣴ Working | mim-os\x07')
+    expect(tracker.status()).toBe('working')
+
+    tracker.feed('\x1b]0;[ ! ] Action Required | mim-os\x07')
+    expect(tracker.status()).toBe('needs-input')
+    t += 1_000
+    expect(tracker.status()).toBe('needs-input')
+
+    // Codex blinks the marker while the approval overlay remains open.
+    tracker.feed('\x1b]0;[ . ] Action Required | mim-os\x07')
+    expect(tracker.status()).toBe('needs-input')
+
+    tracker.feed('\x1b]0;⢦ Working | mim-os\x07')
+    expect(tracker.status()).toBe('working')
+  })
+
+  it('clears blocking input when Codex returns to a settled title', () => {
+    let t = 0
+    const tracker = createAgentStatusTracker({ now: () => t, idleThresholdMs: 100 })
+    tracker.feed('\x1b]0;⣴ Working | mim-os\x07')
+    tracker.feed('\x1b]0;[ ! ] Action Required | mim-os\x07')
+    expect(tracker.status()).toBe('needs-input')
+
+    tracker.feed('\x1b]0;mim-os\x07')
+    expect(tracker.status()).toBe('needs-input')
+    t += 101
+    expect(tracker.status()).toBe('idle')
+  })
+
   it('models a Gemini CLI lifecycle: ready → work → ready → idle', () => {
     let t = 0
     const tracker = createAgentStatusTracker({ now: () => t, idleThresholdMs: 5000 })

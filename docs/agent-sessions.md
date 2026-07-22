@@ -37,7 +37,7 @@ records, resume, Activity rows, and History are unaffected by toggling off.
 | `src/main/agents/agentCatalog.ts` | Static catalog (`claude-code`, `codex`, `gemini-cli`, `pi`) + installation and compatibility detection. Pi is available only at version 0.76.0 or newer; detection runs `pi --version`, keeps incompatible installs visible, and returns an explanatory `compatibilityMessage`. `launchArgs`/`resumeArgs` provide lifecycle flags: Claude Code uses `--resume <id>`, Codex `resume <uuid>`, Gemini CLI `--session-file <path>`, and Pi receives the exact Mim id through `--session-id <id>` on both launch and resume. The Pi catalog entry declares its bundled extension resource, which is appended as a managed `--extension` argument after user flags. `cliSessionsDir` and `extractCodexSessionId` support file-diff discovery for the other CLIs. Pi session-control flags are reserved from custom arguments so callers cannot break identity. No Electron imports. |
 | `src/main/agents/agentResources.ts` | Resolves external-agent assets from repository, built, and packaged roots. Packaged paths point to `app.asar.unpacked`, because Pi is a separate process and cannot read Electron's virtual archive. Missing optional resources return `null` so the underlying CLI can still launch. |
 | `src/main/agents/agentSessions.ts` | Session lifecycle service (`createAgentSessions`): launch/resume/stop/list/get/rename/archive/delete, persistence, scrollback capture, event emission, `reconcileStaleSessions`, `activeSessionCount`. Claude Code, Codex, and Gemini CLI snapshot the CLI session directory before spawn and detect the new session file on first PTY output. Pi instead sets `cliSessionId` to the Mim session id before spawn, retains its custom `userArgs`, and loads the resolved bundled extension on launch and resume, making resume exact without filesystem discovery. System boundaries (pty spawn factory, token/port providers, resource resolver, emit, clock, id generator) are injected. |
-| `src/main/agents/agentStatus.ts` | Pure runtime-status tracker over the pty output stream (see Status signals). Dependency-free, chunk-split-safe escape-sequence parser. Starts `idle`, ignores printable startup noise for 5 seconds, and derives settled `idle` after `done` or non-blocking `needs-input`. |
+| `src/main/agents/agentStatus.ts` | Pure runtime-status tracker over the pty output stream (see Status signals). Dependency-free, chunk-split-safe escape-sequence parser. Starts `idle`, ignores printable startup noise for 5 seconds, recognizes Codex's explicit Action Required title, and derives settled `idle` after `done` or non-blocking `needs-input`. |
 | `resources/pi/mim-extension.mjs` | First-party Pi extension. It authenticates directly to the desktop WebSocket with the session token, identifies calls as `pi`, reads the curated enabled tool catalog, registers those schemas with Pi, forwards calls with abort/timeout handling, and emits connection plus title-spinner lifecycle signals. Connection failure is non-fatal; `/mim-reconnect` retries without requiring a restart. |
 | `src/main/tools/agents.ts` | Registers the `agent.*` tools over injected detect/sessions deps. |
 | `src/main/pty.ts` | Shared `spawnPtyProcess` helper used by both `terminal.spawn` and agent sessions: every pty lives in the same instances map and forwards on the same `pty:output:<id>` / `pty:exit:<id>` channels. Renderer keystrokes use a fast-path `pty:input` IPC channel (`writePty`) that bypasses the tool registry; the `terminal.write` registry tool remains for programmatic use (bridge commands, AI/app callers). `terminal.spawn` opts scratch zsh shells into `ptyShellIntegration.ts` for keymap bindings; agent sessions do not opt in. `terminal.resize/kill` and renderer xterm attachment work uniformly on both scratch and agent ptys. |
@@ -152,6 +152,11 @@ Three signal layers, highest priority wins within a single `feed()` call:
 - The first plain title establishes that startup is ready → `idle`.
 - Title gains a spinner prefix character → `working`.
 - Title loses a spinner prefix character → `needs-input`.
+- A complete Codex `[ ! ] Action Required` or blinking
+  `[ . ] Action Required` status segment → blocking `needs-input`. It remains
+  blocking past the idle threshold. A following spinner resumes `working`; a
+  following ordinary title releases the blocking flag and settles through the
+  existing transient `needs-input` path.
 - Spinner characters: Braille block (U+2800–U+28FF, animated frames) and
   ✦ U+2726 (Gemini CLI static working indicator). Detected by
   `isSpinnerPrefix()`.
@@ -172,15 +177,15 @@ Once any TUI signal (OSC 9, any title, or OSC 777) is seen,
 - A new or resumed live session starts `idle` immediately.
 - `done` + 5 s silence → `idle`.
 - `needs-input` + 5 s silence → `idle`, **unless** `needsInputIsBlocking`
-  (set by OSC 777 — the agent is genuinely waiting on user permission and
-  should stay visible as "Input").
+  (set by OSC 777 or Codex's Action Required title — the agent is genuinely
+  waiting on the user and should stay visible as "Input").
 
 **Per-agent signal summary:**
 
 | Agent | Working signal | Done signal | Needs-input signal |
 |---|---|---|---|
 | Claude Code | OSC 9;4;3; + Braille title | OSC 9;4;0; | Title ✳ (plan mode) / OSC 777 (permissions) |
-| Codex | Braille title prefix | Title loses Braille | — (degrades to idle) |
+| Codex | Braille title prefix | Title loses Braille | `[ ! ]` / `[ . ] Action Required` title (blocking); ambiguous spinner loss still degrades to idle |
 | Gemini CLI | ✦ title prefix | ◇ title prefix | — (degrades to idle) |
 | Pi | Bundled extension sets a Braille title prefix on `agent_start` | Title loses Braille on `agent_end` | Title loses Braille (degrades to idle) |
 

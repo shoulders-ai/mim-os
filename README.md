@@ -11,7 +11,7 @@ The app ships three integrated surfaces:
 
 - **Chat** — streaming AI agent with tool use, approval gate, model/effort picker, cost tracking.
 - **Document pane** — unified text/PDF/file-card tabs; text uses CodeMirror 6 with formatting, live preview, comments, citations, export, and ghost suggestions.
-- **Terminal** — multi-tab shell (xterm.js + node-pty); detected CLI coding agents (Claude Code, Codex, Gemini CLI, Pi) launch as first-class agent sessions with status, persisted scrollback, history, and access to Mim tools. Pi's tool bridge is built into Mim-launched sessions.
+- **Terminal** — multi-tab shell (xterm.js + node-pty); detected CLI coding agents (Claude Code, Codex, Gemini CLI, Pi) launch as first-class agent sessions with working, completion, and input-required status, persisted scrollback, history, and access to Mim tools. Pi's tool bridge is built into Mim-launched sessions.
 
 Apps extend the shell with custom UI mounted in sandboxed iframes, backed by a WebSocket SDK that gives them access to the full tool registry.
 

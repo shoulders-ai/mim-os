@@ -338,6 +338,13 @@ not a signal, and parser state carries across pty chunk boundaries so a
 sequence split mid-chunk still parses. Keep any new output-signal logic
 inside that state machine, not as a substring scan.
 
+Codex permission overlays are signalled in those parsed titles, not by a bare
+bell: `[ ! ] Action Required` alternates with `[ . ] Action Required`. Match
+the complete leading status segment, keep `needs-input` blocking across both
+frames, and release it only when Codex publishes a working or ordinary title.
+Treating every spinner stop as blocking would make normal task completion look
+permanently stuck on Input.
+
 ## Nested dialogs must use :open, not v-if
 
 Headless UI v1's Dialog stack counter does not properly decrement when a nested Dialog is unmounted via `v-if`. After the child unmounts, the parent dialog's Escape and click-outside-to-close permanently break. Always keep nested MimDialog/PermissionConfirmDialog instances mounted and control visibility via the `:open` prop. Guard prop accesses with optional chaining when the backing data is null.
