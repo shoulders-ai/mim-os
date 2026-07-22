@@ -109,7 +109,7 @@
       "providerLabel": "Anthropic",
       "provider": "anthropic",
       "model": "claude-haiku-4-5-20251001",
-      "contextWindow": 5000,
+      "contextWindow": 200000,
       "capabilities": { "text": true, "json": true, "streaming": true, "reasoning": true, "tools": true, "promptCaching": true, "vision": true },
       "pricing": { "inputPerMillion": 1.0, "cacheReadInputPerMillion": 0.1, "cacheWriteInputPerMillion": 1.25, "outputPerMillion": 5.0 },
       "control": {
