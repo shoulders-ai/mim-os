@@ -31,7 +31,8 @@ import {
 import { generateObject } from 'ai'
 import type { UIMessage } from 'ai'
 import { loadRegistry } from '@main/ai/ai.js'
-import type { ToolRegistry } from '@main/tools/registry.js'
+import { createPermissionGate } from '@main/security/gate.js'
+import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
 import { createToolRegistry } from '@main/tools/registry.js'
 import { createTraceLog } from '@main/trace/trace.js'
 import { appendSessionCompaction, registerSessionTools } from '@main/sessions.js'
@@ -108,6 +109,9 @@ function mockRegistry(
       }
       return { ok: true, name, params }
     }),
+    // No names are registered in this mock registry: dynamic package tools
+    // resolve nothing here and take the package.tools.execute fallback path.
+    get: vi.fn(() => undefined),
     getWorkspacePath: () => workspacePath,
   } as unknown as ToolRegistry
 
@@ -903,56 +907,156 @@ describe('central AI runtime tools', () => {
     expect(activateSelectedSkills(loader, undefined)).toEqual({ promptSection: null, toolNames: [] })
   })
 
-	  it('routes issue package tools through package.tools.execute', async () => {
-	    const { tools, calls } = mockRegistry()
-	    const aiTools = await createAiSdkTools({
-	      tools,
-	      profile: 'chat',
-	      sessionId: 's1',
-	      packageTools: [
-	        {
-	          name: 'issues.get',
-	          description: 'Get an issue',
-	          packageId: 'board',
-	          packageName: 'Board',
-	          inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
-	        },
-	        {
-	          name: 'issues.update',
-	          description: 'Update an issue',
-	          packageId: 'board',
-	          packageName: 'Board',
-	          inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
-	        },
-	      ],
-	    })
+  it('routes package tools with no ToolRegistry registration through package.tools.execute', async () => {
+    const { tools, calls } = mockRegistry()
+    const aiTools = await createAiSdkTools({
+      tools,
+      profile: 'chat',
+      sessionId: 's1',
+      packageTools: [
+        {
+          name: 'issues.get',
+          description: 'Get an issue',
+          packageId: 'board',
+          packageName: 'Board',
+          inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
+        },
+        {
+          name: 'issues.update',
+          description: 'Update an issue',
+          packageId: 'board',
+          packageName: 'Board',
+          inputSchema: { type: 'object', properties: { id: { type: 'string' } } },
+        },
+      ],
+    })
 
-	    await aiTools.issues_get.execute?.({ id: 'issue-1' }, {})
-	    await aiTools.issues_update.execute?.({
-	      id: 'issue-1',
-	      status: 'in-progress',
-	      body: 'Plan updated',
+    await aiTools.issues_get.execute?.({ id: 'issue-1' }, {})
+    await aiTools.issues_update.execute?.({
+      id: 'issue-1',
+      status: 'in-progress',
+      body: 'Plan updated',
     }, {})
 
     expect(calls).toEqual([
-	      {
-	        name: 'package.tools.execute',
-	        params: { name: 'issues.get', input: { id: 'issue-1' } },
-	        ctx: { actor: 'ai', sessionId: 's1' },
-	      },
-	      {
-	        name: 'package.tools.execute',
-	        params: {
-	          name: 'issues.update',
-	          input: {
-	            id: 'issue-1',
-	            status: 'in-progress',
-	            body: 'Plan updated',
-	          },
-	        },
-	        ctx: { actor: 'ai', sessionId: 's1' },
-	      },
+      {
+        name: 'package.tools.execute',
+        params: { name: 'issues.get', input: { id: 'issue-1' } },
+        ctx: { actor: 'ai', sessionId: 's1' },
+      },
+      {
+        name: 'package.tools.execute',
+        params: {
+          name: 'issues.update',
+          input: {
+            id: 'issue-1',
+            status: 'in-progress',
+            body: 'Plan updated',
+          },
+        },
+        ctx: { actor: 'ai', sessionId: 's1' },
+      },
     ])
+  })
+
+  // Scoped package agents (agentMounts) put named package tool ids in
+  // profile.toolAllowlist; streamProfileResponse turns that into the subagent
+  // delegation the gate enforces. Dispatch must therefore hit the registry
+  // under the real tool name — routing through package.tools.execute would be
+  // denied as outside the delegated surface.
+  // Mirrors the kernel wiring: gate.getDynamicToolPolicy resolves named
+  // package tool policies from the named-tool sync (namedPackageTools).
+  function registryWithGate() {
+    const gate = createPermissionGate({
+      getApprovalMode: () => 'normal',
+      getWorkspacePath: () => null,
+      getDynamicToolPolicy: name => name.startsWith('mail.')
+        ? { category: 'read', risk: 'low', label: `Mail: ${name}`, ownerPackageId: 'mail' }
+        : undefined,
+      sendApprovalRequest: () => false,
+    })
+    return createToolRegistry(createTraceLog({ devConsole: false }), gate)
+  }
+
+  function mailAgentDelegation() {
+    // Mirrors the delegation streamProfileResponse builds for a profile with a
+    // toolAllowlist (rootSessionId = parentSessionId = chat session, depth 0).
+    return {
+      rootSessionId: 'chat-1',
+      parentSessionId: 'chat-1',
+      depth: 0,
+      profileId: 'package:mail/mail',
+      toolAllowlist: ['mail.search'],
+      originActor: 'ai' as const,
+    }
+  }
+
+  it('dispatches registry-registered package tools by name so delegated allowlists apply', async () => {
+    const tools = registryWithGate()
+    const executed: Array<{ params: Record<string, unknown>; ctx: ToolContext }> = []
+    tools.register({
+      name: 'mail.search',
+      description: 'Search mail threads',
+      inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+      execute: async (params, ctx) => {
+        executed.push({ params, ctx })
+        return { threads: [] }
+      },
+    })
+    const delegation = mailAgentDelegation()
+    const aiTools = await createAiSdkTools({
+      tools,
+      profile: 'chat',
+      sessionId: 'chat-1',
+      subagent: delegation,
+      packageTools: [
+        {
+          name: 'mail.search',
+          description: 'Search mail threads',
+          packageId: 'mail',
+          packageName: 'Mail',
+          inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+        },
+      ],
+    })
+
+    await expect(aiTools.mail_search.execute?.({ query: 'invoice' }, {})).resolves.toEqual({ threads: [] })
+    expect(executed).toHaveLength(1)
+    expect(executed[0].params).toEqual({ query: 'invoice' })
+    expect(executed[0].ctx).toMatchObject({ actor: 'ai', sessionId: 'chat-1', subagent: delegation })
+  })
+
+  it('still denies registry-registered package tools outside the delegated tool surface', async () => {
+    const tools = registryWithGate()
+    const executed: Array<Record<string, unknown>> = []
+    tools.register({
+      name: 'mail.send',
+      description: 'Send a mail draft',
+      inputSchema: { type: 'object', properties: { draftId: { type: 'string' } } },
+      execute: async (params) => {
+        executed.push(params)
+        return { ok: true }
+      },
+    })
+    const aiTools = await createAiSdkTools({
+      tools,
+      profile: 'chat',
+      sessionId: 'chat-1',
+      subagent: mailAgentDelegation(),
+      packageTools: [
+        {
+          name: 'mail.send',
+          description: 'Send a mail draft',
+          packageId: 'mail',
+          packageName: 'Mail',
+          inputSchema: { type: 'object', properties: { draftId: { type: 'string' } } },
+        },
+      ],
+    })
+
+    await expect(aiTools.mail_send.execute?.({ draftId: 'd1' }, {}))
+      .rejects.toThrow('mail.send is outside the delegated tool surface')
+    expect(executed).toHaveLength(0)
   })
 
   it('routes chat file mutations to real filesystem tools', async () => {

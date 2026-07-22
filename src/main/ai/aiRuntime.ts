@@ -578,10 +578,19 @@ export async function createAiSdkTools({
     dynamicPackageTools[key] = tool({
       description: `${packageTool.description || packageTool.label || packageTool.name} Provided by ${packageTool.packageName || packageTool.packageId || 'package'}.`,
       inputSchema: jsonSchema(packageTool.inputSchema || { type: 'object', properties: {} }),
-      execute: async (input) => call('package.tools.execute', {
-        name: originalName,
-        input,
-      }),
+      // Named granted tools are registered in the ToolRegistry under their
+      // public name (namedPackageTools sync) with their own per-tool gate
+      // policy, and scoped package agents list those names in the delegated
+      // toolAllowlist. Dispatching by the real name lets the gate check the
+      // name the profile actually granted; routing through
+      // package.tools.execute would be denied as outside the delegated
+      // surface and would flatten every tool to the blanket general/low
+      // policy. Un-named chat-audience tools have no individual registration,
+      // so they keep the package.tools.execute path (checked per call: the
+      // named-tool sync re-registers on package reload).
+      execute: async (input) => tools.get(originalName)
+        ? call(originalName, (input ?? {}) as Record<string, unknown>)
+        : call('package.tools.execute', { name: originalName, input }),
     })
   }
 

@@ -100,9 +100,16 @@ Both tools are read-only kernel calls and inherit the active chat session trace 
 
 ## Package Tools
 
-Enabled package AI tools are passed into `createAiSdkTools({ packageTools })`.
-They are exposed under the runtime-generated public name and execute through `package.tools.execute`.
-Package tools cannot shadow core AI tool names.
+Enabled package AI tools are passed into `createAiSdkTools({ packageTools })`
+and exposed under the runtime-generated public name. Dispatch is conditional:
+a tool registered in the ToolRegistry under its public name (named granted
+tools, registered by the named-tool sync with their own per-tool gate policy)
+is called directly by that name, so the gate sees the real tool id — this is
+what lets a scoped package agent's delegated `toolAllowlist` (which lists
+those ids) pass the gate's surface check, and applies the per-tool policy
+instead of the blanket `package.tools.execute` one. Un-named chat-audience
+tools have no individual registration and execute through
+`package.tools.execute`. Package tools cannot shadow core AI tool names.
 
 Package authoring tools are also exposed to chat, but the built-in `build-app`
 skill gates the dev-loop surface until it activates. The AI-facing wrappers are:
