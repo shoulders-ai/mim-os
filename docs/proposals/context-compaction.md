@@ -78,15 +78,17 @@ are updated to that record's `tokensAfter` estimate so the renderer and the next
 pre-turn check do not keep treating the old un-compacted provider usage as live
 context pressure.
 
-The renderer shows a compact divider at the latest compaction record's
-`firstKeptMessageId`, with `firstKeptMessageIndex` as a fallback. The divider
-does not hide earlier transcript messages. It can expand to show the
-historical summary text. The context donut remains informational; starting a
-new thread from a summary is not part of automatic compaction. When the latest
-compaction record has a lower `tokensAfter` estimate than stale provider usage,
-the donut reports that effective compacted context and labels the tooltip as
-compacted. Before a compaction exists, a high-context donut explains that Mim
-will compact automatically when needed.
+The renderer shows a compact divider at the latest compaction record's event
+anchor, not at the model cut point. Pre-turn and overflow compactions anchor
+after the triggering user message; post-turn compactions anchor after the
+completed assistant reply. The divider does not hide earlier transcript
+messages. It can expand to show the historical summary text. The context donut
+remains informational; starting a new thread from a summary is not part of
+automatic compaction. When the latest compaction record has a lower
+`tokensAfter` estimate than stale provider usage, the donut reports that
+effective compacted context and labels the tooltip as compacted. Before a
+compaction exists, a high-context donut explains that Mim will compact
+automatically when needed.
 
 ## Motivation
 
@@ -262,8 +264,10 @@ Stage 2 writes compaction records; it still never rewrites `messages`.
   into the kept tail. Always keep the last real user message in the tail. Mim's
   current UI message shape keeps tool calls and results inside assistant
   message parts, so cutting at message boundaries preserves pair integrity.
-- **Record target** - store both `firstKeptMessageId` and
-  `firstKeptMessageIndex`. The id is primary; the index is a fallback for old
+- **Record target** - store both a display event anchor and a model cut point.
+  `eventMessageId` / `eventMessageIndex` mark where compaction happened in the
+  visible transcript. `firstKeptMessageId` / `firstKeptMessageIndex` mark where
+  the model-visible tail starts. Ids are primary; indexes are fallbacks for old
   or malformed messages.
 - **Summary model** - use the same model selected for the session turn, not the
   existing cheap renderer summary endpoint. This is a main-process helper
@@ -294,6 +298,8 @@ for backward compatibility.
 ```ts
 interface ContextCompactionRecord {
   id: string
+  eventMessageId?: string
+  eventMessageIndex?: number
   firstKeptMessageId: string
   firstKeptMessageIndex: number
   summarizedMessageCount: number
@@ -339,12 +345,14 @@ tests. Add details to `docs/gotchas.md` only when the patterns prove quirky.
 No renderer UI is required for Phase 1-4. The transcript remains the full
 history.
 
-The renderer shows a divider at `firstKeptMessageId`, driven by compaction
-records. The divider is trigger-aware: pre-turn compaction says it happened
-before the reply, post-turn compaction says it prepares future turns, and
-overflow compaction says Mim summarized and retried after a model-window
-rejection. It can show the `tokensBefore -> tokensAfter` transition, expands
-to the summary text, and never hides earlier transcript messages.
+The renderer shows a divider after `eventMessageId`, driven by compaction
+records. For legacy records without an event anchor, it falls back to
+`firstKeptMessageId` / `firstKeptMessageIndex`. The divider is trigger-aware:
+pre-turn compaction says it happened before the reply, post-turn compaction
+says it prepares future turns, and overflow compaction says Mim summarized and
+retried after a model-window rejection. It can show the
+`tokensBefore -> tokensAfter` transition, expands to the summary text, and
+never hides earlier transcript messages.
 
 While a high-context turn is waiting for the server response, the renderer can
 show a transient, non-persisted status row. It starts as a context check and
@@ -441,7 +449,8 @@ Add the transcript divider driven by `session.compactions`.
 
 Implemented coverage includes:
 
-- divider placement at `firstKeptMessageId` / index fallback;
+- divider placement after `eventMessageId` / index fallback, with
+  `firstKeptMessageId` / index fallback for legacy records;
 - expandable summary text;
 - trigger-aware divider copy and compact token transition labels;
 - transient pre-stream status copy for checking, summarizing, and oversized

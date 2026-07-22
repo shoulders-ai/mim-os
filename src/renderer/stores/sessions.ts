@@ -12,6 +12,8 @@ export interface SessionMessage {
 
 export interface SessionCompactionRecord {
   id: string
+  eventMessageId?: string
+  eventMessageIndex?: number
   firstKeptMessageId?: string
   firstKeptMessageIndex?: number
   summarizedMessageCount?: number

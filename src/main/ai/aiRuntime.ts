@@ -2080,6 +2080,7 @@ export async function maybeCompactSessionAfterTurn({
   tools,
   sessionId,
   messages,
+  eventMessages,
   modelConfig,
   contextTokens,
   trigger,
@@ -2090,6 +2091,7 @@ export async function maybeCompactSessionAfterTurn({
   tools: ToolRegistry
   sessionId: string
   messages: UIMessage[]
+  eventMessages?: UIMessage[]
   modelConfig: ModelConfig
   contextTokens: number
   trigger: 'post_turn' | 'pre_turn' | 'overflow'
@@ -2122,6 +2124,7 @@ export async function maybeCompactSessionAfterTurn({
   if (!summary.trim()) return null
 
   const createdAt = now.toISOString()
+  const eventAnchor = compactionEventAnchor(eventMessages?.length ? eventMessages : messages, trigger)
   const estimatedTokensBefore = estimateMessagesTokens(messages)
   const tokensBefore = force
     ? Math.max(Math.max(0, Math.floor(contextTokens)), estimatedTokensBefore)
@@ -2130,6 +2133,8 @@ export async function maybeCompactSessionAfterTurn({
       : estimatedTokensBefore
   const draftRecord: ContextCompactionRecord = {
     id: `cmp_${createdAt.replace(/\D/g, '').slice(0, 14)}_${randomUUID().slice(0, 8)}`,
+    ...(eventAnchor?.eventMessageId ? { eventMessageId: eventAnchor.eventMessageId } : {}),
+    ...(eventAnchor ? { eventMessageIndex: eventAnchor.eventMessageIndex } : {}),
     firstKeptMessageId: cut.firstKeptMessageId,
     firstKeptMessageIndex: cut.firstKeptMessageIndex,
     summarizedMessageCount: cut.summarizedMessageCount,
@@ -2170,6 +2175,8 @@ export async function maybeCompactSessionAfterTurn({
     data: {
       trigger,
       compactionId: record.id,
+      eventMessageId: record.eventMessageId,
+      eventMessageIndex: record.eventMessageIndex,
       firstKeptMessageId: record.firstKeptMessageId,
       firstKeptMessageIndex: record.firstKeptMessageIndex,
       summarizedMessageCount: record.summarizedMessageCount,
@@ -2205,10 +2212,12 @@ async function prepareSessionCompactionsBeforeTurn({
   }
 
   try {
+    const compactionMessages = preferredCompactionMessages(state.messages, requestMessages)
     const result = await maybeCompactSessionAfterTurn({
       tools,
       sessionId,
-      messages: state.messages.length ? state.messages : requestMessages,
+      messages: compactionMessages,
+      eventMessages: requestMessages.length ? requestMessages : compactionMessages,
       modelConfig,
       contextTokens,
       trigger: 'pre_turn',
@@ -2294,6 +2303,34 @@ function hasFreshCompactionForModel(state: SessionCompactionState, modelId: stri
   const updatedAtMs = timestampMs(state.updatedAt)
   const createdAtMs = timestampMs(latest.createdAt)
   return createdAtMs > 0 && updatedAtMs > 0 && createdAtMs >= updatedAtMs
+}
+
+function preferredCompactionMessages(storedMessages: UIMessage[], requestMessages: UIMessage[]): UIMessage[] {
+  if (!storedMessages.length) return requestMessages
+  if (requestMessages.length >= storedMessages.length) return requestMessages
+  return storedMessages
+}
+
+function compactionEventAnchor(
+  messages: UIMessage[],
+  trigger: ContextCompactionRecord['trigger'],
+): { eventMessageId?: string; eventMessageIndex: number } | null {
+  if (!messages.length) return null
+  const preferredRole = trigger === 'post_turn' ? 'assistant' : 'user'
+  const roleIndex = lastRoleIndex(messages, preferredRole)
+  const eventMessageIndex = roleIndex >= 0 ? roleIndex : messages.length - 1
+  const message = messages[eventMessageIndex]
+  return {
+    ...(typeof message?.id === 'string' && message.id ? { eventMessageId: message.id } : {}),
+    eventMessageIndex,
+  }
+}
+
+function lastRoleIndex(messages: UIMessage[], role: UIMessage['role']): number {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index]?.role === role) return index
+  }
+  return -1
 }
 
 function latestCompactionUsesSameCut(

@@ -1255,6 +1255,10 @@ onUnmounted(() => {
               @open-file="onOpenFile"
             />
           </template>
+          <ChatCompactionDivider
+            v-if="compactionDivider && compactionDivider.messageIndex === messages.length"
+            :record="compactionDivider.record"
+          />
           <ChatTurnStatus
             v-if="activeContextPreparation"
             :kind="activeContextPreparation.kind"

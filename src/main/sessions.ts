@@ -338,6 +338,8 @@ function normalizeCompactionRecord(value: ContextCompactionRecord): ContextCompa
 
   return {
     id,
+    ...(typeof record.eventMessageId === 'string' ? { eventMessageId: record.eventMessageId } : {}),
+    ...(typeof record.eventMessageIndex === 'number' ? { eventMessageIndex: Math.floor(record.eventMessageIndex) } : {}),
     ...(typeof record.firstKeptMessageId === 'string' ? { firstKeptMessageId: record.firstKeptMessageId } : {}),
     ...(typeof record.firstKeptMessageIndex === 'number' ? { firstKeptMessageIndex: Math.floor(record.firstKeptMessageIndex) } : {}),
     ...(typeof record.summarizedMessageCount === 'number' ? { summarizedMessageCount: Math.floor(record.summarizedMessageCount) } : {}),

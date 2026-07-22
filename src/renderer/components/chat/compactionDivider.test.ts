@@ -14,7 +14,34 @@ describe('compactionDividerForMessages', () => {
     { id: 'a2' },
   ]
 
-  it('places the divider at firstKeptMessageId', () => {
+  it('places the divider after eventMessageId', () => {
+    const placement = compactionDividerForMessages(messages, [{
+      id: 'cmp_1',
+      eventMessageId: 'a2',
+      eventMessageIndex: 3,
+      firstKeptMessageId: 'u2',
+      firstKeptMessageIndex: 2,
+      summary: 'Earlier work was summarized.',
+    }])
+
+    expect(placement?.messageIndex).toBe(4)
+    expect(placement?.record.id).toBe('cmp_1')
+  })
+
+  it('falls back to eventMessageIndex when the event id is missing', () => {
+    const placement = compactionDividerForMessages(messages, [{
+      id: 'cmp_1',
+      eventMessageId: 'missing',
+      eventMessageIndex: 1,
+      firstKeptMessageId: 'u2',
+      firstKeptMessageIndex: 2,
+      summary: 'Earlier work was summarized.',
+    }])
+
+    expect(placement?.messageIndex).toBe(2)
+  })
+
+  it('falls back to firstKeptMessageId for legacy records', () => {
     const placement = compactionDividerForMessages(messages, [{
       id: 'cmp_1',
       firstKeptMessageId: 'u2',
@@ -23,10 +50,9 @@ describe('compactionDividerForMessages', () => {
     }])
 
     expect(placement?.messageIndex).toBe(2)
-    expect(placement?.record.id).toBe('cmp_1')
   })
 
-  it('falls back to firstKeptMessageIndex when the id is missing', () => {
+  it('falls back to firstKeptMessageIndex for legacy records when the id is missing', () => {
     const placement = compactionDividerForMessages(messages, [{
       id: 'cmp_1',
       firstKeptMessageId: 'missing',
@@ -51,10 +77,10 @@ describe('compactionDividerForMessages', () => {
       },
       {
         id: 'cmp_new',
-        firstKeptMessageIndex: 2,
-        summary: 'New summary.',
-      },
-    ])
+      firstKeptMessageIndex: 2,
+      summary: 'New summary.',
+    },
+  ])
 
     expect(latest?.id).toBe('cmp_new')
   })

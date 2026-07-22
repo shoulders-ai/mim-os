@@ -8,6 +8,8 @@ export { estimateMessagesTokens } from '@main/ai/messageCompaction.js'
 
 export interface ContextCompactionRecord {
   id: string
+  eventMessageId?: string
+  eventMessageIndex?: number
   firstKeptMessageId?: string
   firstKeptMessageIndex?: number
   summarizedMessageCount?: number

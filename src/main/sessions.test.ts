@@ -132,6 +132,8 @@ describe('Session tools', () => {
 
     appendSessionCompaction(dir, created.id, {
       id: 'cmp_1',
+      eventMessageId: 'm1',
+      eventMessageIndex: 0,
       firstKeptMessageId: 'm1',
       firstKeptMessageIndex: 0,
       summarizedMessageCount: 0,
@@ -146,7 +148,7 @@ describe('Session tools', () => {
 
     const got = await tools.call('session.get', { id: created.id }, ctx) as {
       messages: typeof messages
-      compactions: Array<{ id: string; summary: string }>
+      compactions: Array<{ id: string; eventMessageId?: string; eventMessageIndex?: number; summary: string }>
       lastContextTokens: number
       lastInputTokens: number
     }
@@ -154,7 +156,12 @@ describe('Session tools', () => {
     expect(got.lastContextTokens).toBe(800)
     expect(got.lastInputTokens).toBe(800)
     expect(got.compactions).toEqual([
-      expect.objectContaining({ id: 'cmp_1', summary: 'Earlier context summary.' }),
+      expect.objectContaining({
+        id: 'cmp_1',
+        eventMessageId: 'm1',
+        eventMessageIndex: 0,
+        summary: 'Earlier context summary.',
+      }),
     ])
 
     const listed = await tools.call('session.list', {}, ctx) as { sessions: Array<Record<string, unknown>> }

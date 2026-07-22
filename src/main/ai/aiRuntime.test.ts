@@ -2427,13 +2427,15 @@ describe('AgentProfile', () => {
 
       const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
         messages: typeof messages
-        compactions: Array<{ summary: string; trigger: string }>
+        compactions: Array<{ summary: string; trigger: string; eventMessageId?: string; eventMessageIndex?: number }>
       }
       expect(got.messages).toEqual(messages)
       expect(got.compactions).toHaveLength(1)
       expect(got.compactions[0]).toMatchObject({
         summary: 'Goal: keep the long session alive.\nDone: old research was summarized.',
         trigger: 'pre_turn',
+        eventMessageId: 'u3',
+        eventMessageIndex: 4,
       })
 
       const agent = MockAgent.mock.results[MockAgent.mock.results.length - 1].value as {
@@ -2502,13 +2504,21 @@ describe('AgentProfile', () => {
 
       const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
         messages: typeof messages
-        compactions: Array<{ summary: string; trigger: string; firstKeptMessageId?: string }>
+        compactions: Array<{
+          summary: string
+          trigger: string
+          eventMessageId?: string
+          eventMessageIndex?: number
+          firstKeptMessageId?: string
+        }>
       }
       expect(got.messages).toEqual(messages)
       expect(got.compactions).toHaveLength(1)
       expect(got.compactions[0]).toMatchObject({
         summary: 'Goal: avoid provider overflow.\nDone: old prompt content was summarized.',
         trigger: 'pre_turn',
+        eventMessageId: 'u3',
+        eventMessageIndex: 4,
         firstKeptMessageId: 'u3',
       })
 
@@ -2563,6 +2573,8 @@ describe('AgentProfile', () => {
       })
 
       expect(result?.record).toMatchObject({
+        eventMessageId: 'a3',
+        eventMessageIndex: 5,
         firstKeptMessageId: 'u3',
         firstKeptMessageIndex: 4,
         summarizedMessageCount: 4,
@@ -2575,10 +2587,11 @@ describe('AgentProfile', () => {
 
       const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
         messages: typeof messages
-        compactions: Array<{ id: string; summary: string; savedRatio: number }>
+        compactions: Array<{ id: string; eventMessageId?: string; eventMessageIndex?: number; summary: string; savedRatio: number }>
       }
       expect(got.messages).toEqual(messages)
       expect(got.compactions).toHaveLength(1)
+      expect(got.compactions[0]).toMatchObject({ eventMessageId: 'a3', eventMessageIndex: 5 })
       expect(got.compactions[0].summary).toBe('Goal: finish the plan.\nDone: older work was reviewed.')
       expect(got.compactions[0].savedRatio).toBeGreaterThan(0)
     } finally {
@@ -2732,13 +2745,15 @@ describe('AgentProfile', () => {
 
       const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
         messages: typeof messages
-        compactions: Array<{ summary: string; trigger: string }>
+        compactions: Array<{ summary: string; trigger: string; eventMessageId?: string; eventMessageIndex?: number }>
       }
       expect(got.messages).toEqual(messages)
       expect(got.compactions).toHaveLength(1)
       expect(got.compactions[0]).toMatchObject({
         summary: 'Goal: recover from context overflow.\nDone: old transcript was summarized.',
         trigger: 'overflow',
+        eventMessageId: 'u3',
+        eventMessageIndex: 4,
       })
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -2837,11 +2852,11 @@ describe('AgentProfile', () => {
       expect(streamMock).toHaveBeenCalledTimes(2)
       const got = await tools.call('session.get', { id: created.id }, { actor: 'user' }) as {
         messages: typeof messages
-        compactions: Array<{ trigger: string }>
+        compactions: Array<{ trigger: string; eventMessageId?: string; eventMessageIndex?: number }>
       }
       expect(got.messages).toEqual(messages)
       expect(got.compactions).toHaveLength(1)
-      expect(got.compactions[0]).toMatchObject({ trigger: 'overflow' })
+      expect(got.compactions[0]).toMatchObject({ trigger: 'overflow', eventMessageId: 'u3', eventMessageIndex: 4 })
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

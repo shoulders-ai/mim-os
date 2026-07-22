@@ -1,5 +1,7 @@
 export interface ChatCompactionRecord {
   id: string
+  eventMessageId?: string
+  eventMessageIndex?: number
   firstKeptMessageId?: string
   firstKeptMessageIndex?: number
   summary: string
@@ -27,7 +29,7 @@ export function compactionDividerForMessages(
   const record = latestCompactionRecord(compactions)
   if (!record) return null
 
-  const index = firstKeptMessageIndex(messages, record)
+  const index = eventInsertionIndex(messages, record)
   if (index < 0) return null
 
   return { record, messageIndex: index }
@@ -67,7 +69,27 @@ function trimDecimal(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
 
-function firstKeptMessageIndex(messages: ChatMessageLike[], record: ChatCompactionRecord): number {
+function eventInsertionIndex(messages: ChatMessageLike[], record: ChatCompactionRecord): number {
+  const eventIndex = eventMessageIndex(messages, record)
+  if (eventIndex >= 0) return eventIndex + 1
+  return legacyFirstKeptMessageIndex(messages, record)
+}
+
+function eventMessageIndex(messages: ChatMessageLike[], record: ChatCompactionRecord): number {
+  if (record.eventMessageId) {
+    const byId = messages.findIndex(message => message.id === record.eventMessageId)
+    if (byId >= 0) return byId
+  }
+
+  if (typeof record.eventMessageIndex === 'number' && Number.isFinite(record.eventMessageIndex)) {
+    const index = Math.floor(record.eventMessageIndex)
+    if (index >= 0 && index < messages.length) return index
+  }
+
+  return -1
+}
+
+function legacyFirstKeptMessageIndex(messages: ChatMessageLike[], record: ChatCompactionRecord): number {
   if (record.firstKeptMessageId) {
     const byId = messages.findIndex(message => message.id === record.firstKeptMessageId)
     if (byId >= 0) return byId
