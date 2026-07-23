@@ -31,6 +31,7 @@ Electron App
     ├─ search/        SQLite FTS, file content search, text matching
     ├─ security/      permission gate and path classifier
     ├─ subagents/     durable delegated-thread scheduler and persisted types
+    ├─ team/          one writable Git-backed Team connection and contract
     ├─ server/        Express + WebSocket for apps/AI/MCP
     ├─ workspace/     boot, mim.yaml contract, file watcher
     ├─ tools/         registry + all tool modules
@@ -73,7 +74,8 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Routines.** Workspace-local definitions under `routines/`; revision-aware create/edit/duplicate/Trash lifecycle; machine-local four-state activation and run state under `.mim/routines/`; manual chat-turn runs; desktop schedule/file/webhook/Slack automation; source-file live refresh; authority review; routine session metadata; and the dense Routines work surface. `src/main/routines/`, `tools/routines.ts`, `server/server.ts`, `sessions.ts`, `src/renderer/components/routines/`, `src/renderer/stores/routines.ts`. Docs: [routines.md](routines.md), [design-system.md](design-system.md#617-routines-work-surface).
 - **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
 - **Git tools.** Status/diff/log/commit/pull/push and opt-in managed sync. `src/main/git.ts`, `tools/git.ts`, `tools/sync.ts`.
-- **Personal config.** `~/.mim/config.yaml` (identity, appearance/editor/layout preferences, model defaults, skill activation, and currently legacy source configuration). Never holds keys or tokens. `src/main/userConfig.ts`.
+- **Team source.** One Personal connection, deterministic `~/.mim/team/` checkout, fixed contribution contract, and writable system-Git sync. `src/main/team/teamSource.ts`, `tools/team.ts`. Docs: [team.md](team.md), [git.md](git.md).
+- **Personal config.** `~/.mim/config.yaml` (identity, appearance/editor/layout preferences, model defaults, skill activation, one credential-free Team repository, and currently legacy source configuration). Never holds keys or tokens. `src/main/userConfig.ts`.
 - **Settings tools.** Route Personal preferences to `~/.mim/config.yaml` and current-Project runtime/tool state to `.mim/settings.json`; agent tool availability policy remains Project-local for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
 - **Editor state tool.** `editor.state` (MCP: `editor_state`): open tabs + active document snapshot, pushed by the renderer and cached in main. `src/main/tools/editorState.ts`.
@@ -201,6 +203,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [html-markdown.md](html-markdown.md) | HTML-to-Markdown parser |
 | [history.md](history.md) | Local file recovery |
 | [git.md](git.md) | Git tools and managed sync |
+| [team.md](team.md) | One Team repository contract, connection, checkout, and writable Git sync |
 | [export.md](export.md) | PDF/DOCX export pipeline |
 | [document-pane.md](document-pane.md) | Editor surface architecture |
 | [comments.md](comments.md) | Inline review comments (markdown + code) |
@@ -226,7 +229,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 ### Proposals
 
-- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phases 1–3 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
+- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phases 1–4 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
 - [proposals/r-first-class.md](proposals/r-first-class.md) — **implemented** (phases 1-5; phase 6 deferred). First-class R/Rmd/Quarto: `code.run` execution primitive, plot/artifact viewing, Cmd+Enter send-to-terminal, render loop, R modelling skill.
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/popout-editor-window.md](proposals/popout-editor-window.md) — **implemented** (phases 0-3; phase 4 deferred). Pop-out editor windows: move any editor tab into its own OS window and back, with full tab-state transfer, per-window close guards, focused-window menu routing, and macOS native touches.
@@ -297,6 +300,7 @@ src/
       stdio.ts                  # MCP stdio bridge
       discovery.ts              # ~/.mim/server.json helpers
     resources/resourceModel.ts  # Shared resource collections
+    team/teamSource.ts          # One Team connection, checkout contract + Git sync
     search/
       search.ts                 # SQLite FTS5 session search
       fileSearch.ts             # Workspace file content search
@@ -339,6 +343,7 @@ src/
       history.ts                # File history tools
       git.ts                    # Git tools
       sync.ts                   # Managed sync tools
+      team.ts                   # Team connection/status/open/sync tools
       workspace.ts              # Workspace tools
       bridge.ts                 # Cross-surface messaging
       editorState.ts            # editor.state open-tab snapshot

@@ -1,7 +1,7 @@
 # Mim Restructure: Project, You, and Team
 
 Status: product direction, scope model, UX, and implementation programme
-accepted; implementation is in progress, with phases 1 through 3 complete.
+accepted; implementation is in progress, with phases 1 through 4 complete.
 
 Mim is a local, file-native workbench where humans and agents work together on
 real project files. Collaboration is local-first: every human and agent works
@@ -396,10 +396,13 @@ paths removed rather than left beside the replacement.
    tool policy, and other per-checkout runtime remain under gitignored `.mim/`.
    Superseded Personal keys in Project settings are ignored without migration
    or compatibility readers.
-4. **Introduce the Team contract.** Add one Team connection and validate
-   `team.yaml`, `instructions.md`, `files/`, `skills/`, `apps/`, and
-   `routines/`. Implement clone/open/status/sync through one resolver and one
-   credential path. A missing optional directory is simply empty.
+4. **Introduce the Team contract — complete.** One Personal, credential-free
+   repository connection resolves to the deterministic writable
+   `~/.mim/team/` checkout. The shared resolver validates required
+   `team.yaml`, optional `instructions.md`, and optional `files/`, `skills/`,
+   `apps/`, and `routines/` directories. Status, clone/connect, open, and
+   commit/rebase/push sync use system Git as the sole credential path; invalid
+   clones never become connected state.
 5. **Replace Resources with Team Files.** Repoint the existing mount, watcher,
    index, search, `@` mention, editor, and native-open flows to the Team
    `files/` root. Make the root writable and remove collections, path bindings,

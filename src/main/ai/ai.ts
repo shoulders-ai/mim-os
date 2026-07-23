@@ -185,7 +185,7 @@ export function registerAiTools(tools: ToolRegistry, emit: (channel: string) => 
 
   tools.register({
     name: 'config.get',
-    description: 'Get Personal config (~/.mim/config.yaml): identity, preferences, model defaults, and skill activation. Never returns API keys.',
+    description: 'Get Personal identity, preferences, model defaults, skill activation, and Team repository. No secrets.',
     inputSchema: objectSchema({}, []),
     execute: async () => loadUserConfig()
   })

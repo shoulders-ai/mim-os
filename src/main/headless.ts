@@ -38,6 +38,8 @@ import { registerLogbookTools } from '@main/tools/logbook.js'
 import { registerSearchTools } from '@main/tools/search.js'
 import { registerGitTools } from '@main/tools/git.js'
 import { registerSyncTools } from '@main/tools/sync.js'
+import { registerTeamTools } from '@main/tools/team.js'
+import { createTeamSource } from '@main/team/teamSource.js'
 import { registerTraceTools } from '@main/tools/trace.js'
 import { createHistoryStore } from '@main/history/history.js'
 import { registerHistoryTools } from '@main/tools/history.js'
@@ -186,6 +188,9 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   registerSearchTools(tools)
   registerGitTools(tools)
   registerSyncTools(tools)
+  registerTeamTools(tools, {
+    source: createTeamSource({ homeDir: HOME }),
+  })
   registerTraceTools(tools)
   registerHistoryTools(tools, history)
   registerDocumentTools(tools)

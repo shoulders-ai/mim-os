@@ -1332,6 +1332,39 @@ describe('resources tool policies', () => {
   })
 })
 
+describe('Team tool policies', () => {
+  it('classifies Team discovery separately from connection and network sync', () => {
+    expect(getToolPolicy('team.status')).toMatchObject({ category: 'read', risk: 'low' })
+    expect(getToolPolicy('team.open')).toMatchObject({ category: 'read', risk: 'low' })
+    expect(getToolPolicy('team.connect')).toMatchObject({
+      category: 'network',
+      risk: 'medium',
+      targetParam: 'repository',
+    })
+    expect(getToolPolicy('team.sync')).toMatchObject({ category: 'network', risk: 'medium' })
+  })
+
+  it('keeps the Team connection and checkout unavailable to apps', async () => {
+    const permissions: PackagePermissions = { workspace: { read: true, write: true } }
+    const { gate } = makeGate({ packagePermissions: permissions })
+    for (const name of ['team.status', 'team.open', 'team.connect', 'team.sync']) {
+      await expect(
+        gate.check(tool(name), {}, { actor: 'package', package_id: 'p1' }),
+      ).rejects.toThrow(PermissionDeniedError)
+    }
+  })
+
+  it('keeps the Personal config behind a read policy and unavailable to apps', async () => {
+    expect(getToolPolicy('config.get')).toMatchObject({ category: 'read', risk: 'low' })
+    const { gate } = makeGate({
+      packagePermissions: { workspace: { read: true, write: true } },
+    })
+    await expect(
+      gate.check(tool('config.get'), {}, { actor: 'package', package_id: 'p1' }),
+    ).rejects.toThrow(PermissionDeniedError)
+  })
+})
+
 describe('sensitive-path floor beats session always-allow (Fix 1)', () => {
   it('still prompts for a sensitive path even with session always-allow active', async () => {
     const { gate, requests, decisions } = makeGate()

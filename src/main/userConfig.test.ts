@@ -12,6 +12,7 @@ import {
   writeSkillSource,
   removeSkillSource,
   setPersonalSetting,
+  setTeamConnection,
 } from '@main/userConfig.js'
 
 function writeConfig(home: string, text: string): void {
@@ -49,6 +50,8 @@ describe('userConfig — loadUserConfig', () => {
       '  theme: sage',
       '  editorFontSize: 18',
       '  automationApprovalMode: strict',
+      'team:',
+      '  repository: git@github.com:shoulders-ai/team.git',
       '',
     ].join('\n'))
 
@@ -64,6 +67,7 @@ describe('userConfig — loadUserConfig', () => {
     expect(config.preferences.theme).toBe('sage')
     expect(config.preferences.editorFontSize).toBe(18)
     expect(config.preferences.automationApprovalMode).toBe('strict')
+    expect(config.team).toEqual({ repository: 'git@github.com:shoulders-ai/team.git' })
   })
 
   it('writes Personal settings without disturbing identity, skill toggles, or model defaults', () => {
@@ -90,6 +94,23 @@ describe('userConfig — loadUserConfig', () => {
     expect(config.preferences.theme).toBe('nord')
     expect(config.preferences.editorLivePreview).toBe(false)
     expect(config.skills.disabled).toEqual(['email-voice'])
+  })
+
+  it('writes the one Team connection without disturbing other Personal config', () => {
+    writeConfig(home, [
+      'user:',
+      '  name: Paul',
+      'preferences:',
+      '  theme: nord',
+      '',
+    ].join('\n'))
+
+    setTeamConnection({ repository: 'git@github.com:shoulders-ai/team.git' }, home)
+
+    const config = loadUserConfig(home)
+    expect(config.team).toEqual({ repository: 'git@github.com:shoulders-ai/team.git' })
+    expect(config.user.name).toBe('Paul')
+    expect(config.preferences.theme).toBe('nord')
   })
 
   it('missing file → safe empty defaults, no throw', () => {
@@ -129,6 +150,18 @@ describe('userConfig — loadUserConfig', () => {
     expect(serialized).not.toContain('sk-should-not-leak')
     expect(serialized).not.toContain('sk-also-leaks')
     expect((config.defaults as Record<string, unknown>).apiKey).toBeUndefined()
+  })
+
+  it('never surfaces credentials embedded in a manually edited Team repository URL', () => {
+    writeConfig(home, [
+      'team:',
+      '  repository: https://person:secret-token@example.com/team.git',
+      '',
+    ].join('\n'))
+
+    const config = loadUserConfig(home)
+    expect(config.team).toBeUndefined()
+    expect(JSON.stringify(config)).not.toContain('secret-token')
   })
 
   it('parses connector policy from config.yaml', () => {

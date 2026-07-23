@@ -329,6 +329,7 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'telemetry.track': { category: 'ui', risk: 'low' },
   'telemetry.status': { category: 'read', risk: 'low' },
   'telemetry.setEnabled': { category: 'settings', risk: 'medium' },
+  'config.get': { category: 'read', risk: 'low' },
   'system.prompt': { category: 'read', risk: 'low' },
   'skill.list': { category: 'read', risk: 'low' },
   'skill.get': { category: 'read', risk: 'low', targetParam: 'name' },
@@ -362,6 +363,10 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'resources.sync': { category: 'network', risk: 'medium', targetParam: 'id' },
   // Same write category as add: flipping readonly -> direct widens write reach.
   'resources.setPolicy': { category: 'write', risk: 'medium', targetParam: 'id' },
+  'team.status': { category: 'read', risk: 'low' },
+  'team.open': { category: 'read', risk: 'low' },
+  'team.connect': { category: 'network', risk: 'medium', targetParam: 'repository' },
+  'team.sync': { category: 'network', risk: 'medium' },
   'app.status': { category: 'read', risk: 'low' },
   'app.add': { category: 'network', risk: 'medium', targetParam: 'id' },
   'app.share': { category: 'network', risk: 'medium', targetParam: 'id' },
@@ -979,6 +984,10 @@ function packagePermissionViolation(
     return `App ${ctx.package_id} cannot access workspace git or sync tools`
   }
 
+  if (toolName.startsWith('team.')) {
+    return `App ${ctx.package_id} cannot access the Personal Team connection or checkout`
+  }
+
   // Apps may discover and read collections (via fs.* under the mount
   // paths) but never manage them: registration changes mim.yaml / bindings.
   if (toolName === 'resources.add' || toolName === 'resources.remove' || toolName === 'resources.sync' || toolName === 'resources.setPolicy') {
@@ -994,6 +1003,10 @@ function packagePermissionViolation(
 
   if (toolName.startsWith('settings.')) {
     return `App ${ctx.package_id} cannot access workspace settings`
+  }
+
+  if (toolName === 'config.get') {
+    return `App ${ctx.package_id} cannot access Personal config`
   }
 
   if (toolName.startsWith('account.')) {

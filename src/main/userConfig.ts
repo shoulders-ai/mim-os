@@ -1,5 +1,6 @@
 // Personal config: ~/.mim/config.yaml. Identity, preferences, model defaults,
-// and global skill activation only; never keys or tokens.
+// global skill activation, and one credential-free Team repository; never keys
+// or tokens.
 // No Electron imports — unit-testable.
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
@@ -17,6 +18,7 @@ export interface SkillSourceConfig {
 
 export interface UserConfig {
   user: { name?: string; email?: string; timezone?: string }
+  team?: { repository: string }
   defaults: {
     google?: string
     slack?: string
@@ -49,7 +51,7 @@ export const DEFAULT_REGISTRY_INDEX_URL = 'https://raw.githubusercontent.com/sho
 export const USER_SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 export const USER_SKILL_SOURCE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 
-let cache: UserConfig | null = null
+let cache: { home: string; config: UserConfig } | null = null
 
 export type PersonalSettingKey =
   | 'theme'
@@ -108,11 +110,11 @@ function bool(value: unknown): boolean | undefined {
 }
 
 export function loadUserConfig(home?: string): UserConfig {
-  if (cache) return cache
+  const base = home ?? userHomeDir()
+  if (cache?.home === base) return cache.config
 
   const config = emptyConfig()
   try {
-    const base = home ?? userHomeDir()
     const path = join(base, '.mim', 'config.yaml')
     if (existsSync(path)) {
       const raw = parseYaml(readFileSync(path, 'utf-8'))
@@ -122,6 +124,10 @@ export function loadUserConfig(home?: string): UserConfig {
         config.user.name = str(user.name)
         config.user.email = str(user.email)
         config.user.timezone = str(user.timezone)
+
+        const team = objectValue(r.team)
+        const teamRepository = safeTeamRepository(team.repository)
+        if (teamRepository) config.team = { repository: teamRepository }
 
         const defaults = (r.defaults && typeof r.defaults === 'object') ? r.defaults as Record<string, unknown> : {}
         config.defaults.google = str(defaults.google)
@@ -187,8 +193,9 @@ export function loadUserConfig(home?: string): UserConfig {
 
   config.skills.disabled = [...new Set(config.skills.disabled.filter(name => USER_SKILL_NAME_PATTERN.test(name)))].sort()
 
-  cache = Object.freeze({
+  const frozen = Object.freeze({
     user: Object.freeze(config.user),
+    ...(config.team ? { team: Object.freeze({ ...config.team }) } : {}),
     defaults: Object.freeze({
       ...config.defaults,
       models: Object.freeze(config.defaults.models),
@@ -206,7 +213,8 @@ export function loadUserConfig(home?: string): UserConfig {
       disabled: Object.freeze([...config.skills.disabled]),
     }),
   }) as UserConfig
-  return cache
+  cache = { home: base, config: frozen }
+  return frozen
 }
 
 export function reset(): void {
@@ -251,6 +259,14 @@ export function setPersonalSetting(key: PersonalSettingKey, value: unknown, home
   const preferences = objectValue(raw.preferences)
   preferences[key] = value
   raw.preferences = preferences
+  writeRawConfig(raw, home)
+}
+
+export function setTeamConnection(team: { repository: string }, home?: string): void {
+  const repository = safeTeamRepository(team.repository)
+  if (!repository) throw new Error('Team repository must be credential-free and non-empty')
+  const raw = readRawConfig(home)
+  raw.team = { repository }
   writeRawConfig(raw, home)
 }
 
@@ -335,6 +351,21 @@ function objectValue(value: unknown): Record<string, unknown> {
 
 function finiteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function safeTeamRepository(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const repository = value.trim()
+  if (!repository || /[\r\n\0]/.test(repository)) return undefined
+  if (/^(https?|ssh):\/\//i.test(repository)) {
+    try {
+      const parsed = new URL(repository)
+      if (parsed.password || (/^https?:$/i.test(parsed.protocol) && parsed.username)) return undefined
+    } catch {
+      return undefined
+    }
+  }
+  return repository
 }
 
 function parseDisabledSkillNames(rawSkills: unknown): string[] {

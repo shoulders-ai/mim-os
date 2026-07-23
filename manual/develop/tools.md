@@ -73,7 +73,7 @@ approval.
 
 | tool | description | effect | approval |
 |---|---|---|---|
-| `config.get` | Get the user-global config (~/.mim/config.yaml): identity and model defaults. Never returns API keys. | **mutate** | ask |
+| `config.get` | Get Personal identity, preferences, model defaults, skill activation, and Team repository. No secrets. | read | auto |
 
 ## core
 
@@ -320,6 +320,15 @@ approval.
 | `sync.status` | Plain-language backup/sync status for the current workspace. | read | auto |
 | `sync.configure` | Set the explicit workspace sync mode in mim.yaml. Managed mode may also set an origin remote. | **mutate** | ask |
 | `sync.now` | Run the managed sync workflow. Refuses Manual mode. | external | ask |
+
+## team
+
+| tool | description | effect | approval |
+|---|---|---|---|
+| `team.status` | Read the one Personal Team connection, checkout contract, contribution summary, and Git sync state. | read | auto |
+| `team.connect` | Connect the one Team Git repository using system Git credentials, clone it, and validate its fixed contract. | external | ask |
+| `team.open` | Resolve the connected Team checkout and its fixed contribution paths. | read | auto |
+| `team.sync` | Commit, rebase, and push writable Team changes using the connected repository and system Git credentials. | external | ask |
 
 ## telemetry
 

@@ -1,10 +1,11 @@
 # Git
 
-Mim uses git in three separate places:
+Mim uses git in four separate places:
 
 - `src/main/git.ts` for project clone and resource mirror helpers;
 - `src/main/tools/git.ts` for user/agent-facing workspace git tools;
-- `src/main/tools/sync.ts` for the managed-sync workflow.
+- `src/main/tools/sync.ts` for the managed-sync workflow;
+- `src/main/team/teamSource.ts` for the one writable Team checkout.
 
 ## Clone Helpers
 
@@ -18,6 +19,24 @@ pointing the user to the HTTPS URL.
 
 The Clone Repository flow in `AddProjectDialog.vue` uses this path. Shared
 resource git mirrors also use the helper layer.
+
+## Team Git
+
+The Personal Team connection is a credential-free repository location in
+`~/.mim/config.yaml`; its checkout is `~/.mim/team/`. Team clone, status, open,
+and sync all route through the resolver described in [team.md](team.md).
+
+Unlike the legacy pull-only resource mirrors, Team Git requires the system
+`git` binary. SSH keys and the normal system credential helper are the only
+credential path. Mim never accepts or stores a separate Team token.
+
+Git LFS is checked only when a Team repository's `.gitattributes` files request
+`filter=lfs`. Cloning defers LFS smudging, reports a platform-specific install
+action if the capability is missing, and runs `git lfs pull` when available.
+
+Team sync stages writable source changes, commits them as `Mim Team sync`,
+pulls with rebase, validates the fixed Team contract, and pushes. A conflict
+stops the workflow for explicit resolution.
 
 ## Workspace Git Tools
 
