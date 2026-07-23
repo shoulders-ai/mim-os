@@ -1,6 +1,8 @@
 # Web Shell
 
-Status: proposal.
+Status: superseded by [Mim Restructure](team-source.md). The browser team-space,
+remote editing, and remote terminal tracks below are no longer the product
+roadmap.
 
 Open a team space in a browser tab. No install, no local files, no setup — an
 invite link becomes a live Mim: team chat with approvals, the team Board and

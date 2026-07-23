@@ -197,8 +197,8 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [security.md](security.md) | Permission gate, trust model, actor modes |
 | [design-system.md](design-system.md) | Visual language, tokens, interaction rules |
 | [cli.md](cli.md) | Headless CLI commands |
-| [serve.md](serve.md) | Headless shared-workspace serving over MCP HTTP |
-| [mim-server-status.md](mim-server-status.md) | Timestamped status snapshot for `mim serve` implementation and open gaps |
+| [serve.md](serve.md) | Currently implemented headless shared-workspace serving over MCP HTTP; product direction superseded by Mim Restructure |
+| [mim-server-status.md](mim-server-status.md) | Timestamped inventory of the superseded `mim serve` implementation |
 | [mcp.md](mcp.md) | MCP stdio bridge and serve-mode HTTP MCP |
 | [integrations.md](integrations.md) | Slack/Google tools, keychain, policy |
 | [web-reading.md](web-reading.md) | Web/PDF reading, website access, evaluation harness |
@@ -211,7 +211,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [observability.md](observability.md) | Trace stream, audit, outcomes |
 | [telemetry.md](telemetry.md) | Anonymous usage telemetry |
 | [logbook.md](logbook.md) | Human-readable activity log |
-| [resources.md](resources.md) | Shared resource collections |
+| [resources.md](resources.md) | Currently implemented shared resource collections; target simplification is the single Team source |
 | [routines.md](routines.md) | Routine definition lifecycle, activation, automation triggers, runs, and permissions |
 | [subagents.md](subagents.md) | Durable delegated threads, communication, scheduling, authority, persistence, and Navigator behavior |
 | [skills.md](skills.md) | Filesystem skill system |
@@ -230,14 +230,15 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 ### Proposals
 
+- [proposals/team-source.md](proposals/team-source.md) — **core direction accepted; UX plan under review**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, and implementation programme.
 - [proposals/r-first-class.md](proposals/r-first-class.md) — **implemented** (phases 1-5; phase 6 deferred). First-class R/Rmd/Quarto: `code.run` execution primitive, plot/artifact viewing, Cmd+Enter send-to-terminal, render loop, R modelling skill.
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/popout-editor-window.md](proposals/popout-editor-window.md) — **implemented** (phases 0-3; phase 4 deferred). Pop-out editor windows: move any editor tab into its own OS window and back, with full tab-state transfer, per-window close guards, focused-window menu routing, and macOS native touches.
 - [proposals/tools-settings-tab.md](proposals/tools-settings-tab.md) — Settings > Tools plan for unified AI/MCP tool availability policy.
 - [proposals/agents-as-apps.md](proposals/agents-as-apps.md) — **implemented** (phases 0-4; phase 5 deferred). Agents as an app contribution type: `AgentProfile` primitive extracted from the chat runtime, `export const agents` mounting, agent sessions in the native chat surface, starter template and authoring docs.
 - [proposals/user-manual.md](proposals/user-manual.md) — user manual + developer docs for mim-web: positioning, IA, content pipeline, subagent authoring process, design guide.
-- [proposals/mim-serve.md](proposals/mim-serve.md) — `mim serve`: team-space/shared-workspace host proposal with current implementation status, product-model reset separating local folders, team-space connections, folder links, import, and file sync, installed-app onboarding gap, invite-led connection, Phase 2/2.5 UX acceptance gates, MCP streamable HTTP, route/auth matrix, issued caller tokens, `remote` actor, declarative approval policy, executable-workspace deny floor, SSRF defense, structured-state migration, backups, grant UX, service-with-shells north star, and strategic-direction track sketches.
-- [proposals/web-shell.md](proposals/web-shell.md) — Web Shell: team space in a browser tab. Charter for mim-serve tracks A-D and the renderer migration: authenticated Shell API for human members (vs MCP for agents), KernelClient seam, read-mostly browser shell first, thin file editing with presence, remote chat with approvals, staged-change review queue, gated remote terminal.
+- [proposals/mim-serve.md](proposals/mim-serve.md) — **superseded** shared-workspace host proposal; retained as an inventory for the deliberate removal pass.
+- [proposals/web-shell.md](proposals/web-shell.md) — **superseded** browser team-space and remote-shell proposal.
 - [proposals/routines.md](proposals/routines.md) — Routines: workspace-owned standing prompts that create runs; desktop starts stream through the normal chat transcript, headless scheduler runner, visible tools plus approval grants, scheduler ownership.
 - [proposals/slack-listener.md](proposals/slack-listener.md) — Slack-triggered routines over Socket Mode: implemented trigger/ledger/dispatcher/listener runtime, responder bound as a routine with a `slack` trigger, durable per-thread Mim sessions, capability-based setup, bot thread replies, and deferred replay/parking.
 - [proposals/slack-transport.md](proposals/slack-transport.md) — proposed clean break: Slack as a first-class transport to the workspace's default Mim agent, with one standing-consent decision per enabled channel, durable threaded conversations, full normal tool/subagent utility, and no Slack-specific permission system.

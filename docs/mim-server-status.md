@@ -2,6 +2,12 @@
 
 Generated: 2026-07-14 17:39:58 CEST
 
+Direction update, 2026-07-23: the shared-workspace product model described by
+this snapshot has been superseded by the local-first
+[Mim Restructure proposal](proposals/team-source.md). This document remains an
+inventory of code that exists and will need a deliberate removal pass; its open
+hardening items are not active roadmap commitments.
+
 Source plan: [docs/proposals/mim-serve.md](proposals/mim-serve.md).
 
 This document is a timestamped reconciliation of the current `mim serve`

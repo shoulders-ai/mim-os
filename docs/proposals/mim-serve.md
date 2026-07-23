@@ -1,6 +1,8 @@
 # Mim Serve
 
-Status: proposal.
+Status: superseded by [Mim Restructure](team-source.md). The implementation remains
+in the repository pending a deliberate removal pass; the unfinished hardening
+and product tracks below are no longer the product roadmap.
 
 `mim serve` runs a headless Mim on a machine that stays awake - team infra, a
 tailnet node, or a small cloud box - hosting team services continuously and
