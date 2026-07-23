@@ -1,7 +1,7 @@
 ---
 id: history-recovery
 title: history & recovery
-order: 10
+order: 11
 sources:
   - docs/history.md
   - docs/git.md

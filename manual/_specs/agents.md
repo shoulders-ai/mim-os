@@ -1,4 +1,4 @@
-# Spec: agents (order 8)
+# Spec: agents (order 9)
 
 Purpose: everything about working with agents: Mim's built-in agent in depth, plus
 CLI coding agents as first-class citizens. The book's center of gravity.

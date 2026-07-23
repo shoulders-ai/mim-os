@@ -27,8 +27,10 @@ The Personal Team connection is a credential-free repository location in
 and sync all route through the resolver described in [team.md](team.md).
 
 Unlike the legacy pull-only resource mirrors, Team Git requires the system
-`git` binary. SSH keys and the normal system credential helper are the only
-credential path. Mim never accepts or stores a separate Team token.
+`git` binary. Credential-free HTTPS, SSH, and local repository locations are
+accepted. HTTPS uses the normal system credential helper; SSH uses normal
+system keys and configuration. Mim never accepts credentials in a repository
+URL or stores a separate Team token.
 
 Git LFS is checked only when a Team repository's `.gitattributes` files request
 `filter=lfs`. Cloning defers LFS smudging, reports a platform-specific install

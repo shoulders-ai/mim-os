@@ -1,4 +1,4 @@
-# Spec: shortcuts (order 11)
+# Spec: shortcuts (order 12)
 
 Purpose: the book's appendix — every keyboard shortcut, generated, never
 hand-maintained.

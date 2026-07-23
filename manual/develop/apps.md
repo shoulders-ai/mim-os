@@ -170,7 +170,7 @@ Generates slide decks as paginated HTML and exports a print-exact PDF.
 **views:**
 - Slides (work)
 
-Importable Mim package for drafting slide decks as paginated HTML and exporting PDF.
+Mim app for drafting slide decks as paginated HTML and exporting print-exact PDF.
 
 ## word count
 

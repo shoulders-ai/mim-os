@@ -1,4 +1,4 @@
-# Spec: writing (order 4)
+# Spec: writing (order 5)
 
 Purpose: the editor as a writing instrument for research documents. The longest
 chapter; it earns it.

@@ -1,4 +1,4 @@
-# Spec: web research (order 7)
+# Spec: web research (order 8)
 
 Purpose: how the agent reaches the web — search, reading, and the live browser —
 and how you control it.

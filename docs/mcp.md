@@ -44,7 +44,7 @@ The file is auth material. It is written atomically with owner-only permissions
 where the filesystem supports chmod. On app quit, Mim deletes it best-effort.
 That discovery token is valid for the desktop process lifetime.
 
-Agent sessions launched from Settings > Apps receive per-session `MIM_PORT`
+Agent sessions launched from Settings > Apps & agents receive per-session `MIM_PORT`
 and `MIM_TOKEN` environment variables. Running `mim mcp` outside Mim falls back
 to `~/.mim/server.json`. Pi's bundled extension consumes the per-session values
 directly. Per-agent tokens are revoked when the live agent session exits, is
@@ -211,7 +211,7 @@ silently excluded from the MCP catalog.
 
 ## Client Config
 
-Settings > Apps shows a **Connect** button next to each installed CLI agent
+Settings > Apps & agents shows a **Connect** button next to each installed CLI agent
 that supports Mim's MCP bridge. Clicking it runs the agent's native `mcp add`
 command behind the scenes:
 

@@ -1,4 +1,4 @@
-# Spec: privacy & security (order 12)
+# Spec: privacy & security (order 13)
 
 Purpose: the trust anchor. What leaves your machine, what asks first, what is
 recorded, what can be undone. User voice throughout; the human author does the

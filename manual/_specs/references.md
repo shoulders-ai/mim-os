@@ -1,4 +1,4 @@
-# Spec: references (order 6)
+# Spec: references (order 7)
 
 Purpose: citations and bibliography — from a BibTeX file to a cited, exported
 document.

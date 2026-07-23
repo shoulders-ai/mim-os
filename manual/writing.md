@@ -1,7 +1,7 @@
 ---
 id: writing
 title: writing
-order: 4
+order: 5
 sources:
   - docs/document-pane.md
   - docs/comments.md

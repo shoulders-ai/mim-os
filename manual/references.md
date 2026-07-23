@@ -1,7 +1,7 @@
 ---
 id: references
 title: references
-order: 6
+order: 7
 sources:
   - src/main/tools/references.ts
   - src/main/export/citations.ts

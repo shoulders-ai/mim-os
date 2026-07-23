@@ -161,7 +161,7 @@ Keep new layout state in the store, not in new standalone `App.vue` refs.
   new agent session and opens its Work surface; they are never "active".
   Rows are manually reorderable per workspace (`navigatorAppOrder`, plain
   package/agent ids — the catalogs cannot collide). The Apps header gear
-  opens Settings > Apps.
+  opens Settings > Apps & agents.
 - Activity: flat mixed list of active chats, package jobs, and agent
   sessions with status, sorted most-recently-updated first by default. The header carries two right-aligned icon actions:
   History (opens `work:archive`) and New chat (opens the draft composer).
@@ -204,7 +204,7 @@ does not exist on the collapsed rail.
 Work contains processes, overviews, launchers, search, and run state. Current
 Work hosts include chat, terminal, files, package views, package runs, agent
 sessions (`AgentSessionView.vue`), and History. Package management is in
-Settings > Apps, not a Work host.
+Settings > Apps & agents, not a Work host.
 
 Package launch screens are Work. A launched package job becomes a persisted run
 and opens as `PackageRunView.vue` Work. Do not send package runs back to a

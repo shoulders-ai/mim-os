@@ -1,4 +1,4 @@
-# Spec: running code (order 5)
+# Spec: running code (order 6)
 
 Purpose: Mim as a place where analysis actually runs — terminal, agent-run code,
 and the R/Quarto loop.

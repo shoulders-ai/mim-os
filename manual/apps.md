@@ -1,7 +1,7 @@
 ---
 id: apps
 title: apps
-order: 9
+order: 10
 sources:
   - README.md
   - docs/custom-apps.md
@@ -39,6 +39,9 @@ review before first use.
 
 Team apps update when the Team source syncs. Project apps update with Project
 sync. Mim apps update with Mim itself.
+
+If your Team apps are not visible yet, start with [team](team). Connecting a
+Team makes its apps available; it does not enable them automatically.
 
 ## CLI agents
 

@@ -31,6 +31,13 @@ Project checkout. The choice lives only in:
 That file is gitignored. An activation toggle never edits `mim.yaml`,
 `team.yaml`, or another person's state.
 
+Connecting or syncing a Team refreshes the live app catalog. It does not
+silently enable new apps: open Settings -> Apps & agents, review a Team app's
+declared permissions, and enable it for the current Project. Only enabled apps
+with a view receive Navigator launchers. App source and app data are separate;
+for example, a Team-provided Board still reads the current Project's `issues/`
+directory.
+
 ## Creating an app
 
 Settings -> Apps & agents -> New app asks for:
@@ -85,4 +92,5 @@ rescans after file changes. No per-app registry download lifecycle exists.
 - [App system API](app-system-api.md)
 - [Package runtime](package-runtime.md)
 - [Skills](skills.md)
-- [Team source](proposals/team-source.md)
+- [Team source and setup](team.md)
+- [Accepted Team-source design](proposals/team-source.md)

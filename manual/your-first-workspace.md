@@ -87,6 +87,9 @@ A search field at the top searches by file name and content. To import files fro
 
 Opening a file from the files surface places it in the editor. The files surface is for navigation; editing, formatting, and export are covered in [writing](writing).
 
+When you connect a [team](team), its shared `files/` folder appears here under
+the Team's name. Your Project files stay in place.
+
 ::: under-the-hood
 The `mim.yaml` file is a YAML document. Its schema supports the Project name
 and optional managed-sync settings. A minimal file contains only `name`:

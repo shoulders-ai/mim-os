@@ -72,8 +72,8 @@ The app-managed file wins so keys set, replaced, or removed in Settings always t
 `~/.mim/config.yaml` holds Personal identity, appearance/editor preferences,
 model defaults, global skill activation, one credential-free Team repository,
 and integration account labels. The writable Team checkout lives at
-`~/.mim/team/` and uses system Git credentials. Personal config never holds API
-keys or integration tokens. Project runtime state such as
+`~/.mim/team/` and uses system Git credentials over HTTPS or SSH. Personal
+config never holds API keys or integration tokens. Project runtime state such as
 transcripts, app enablement, routine activation, recovery, and traces remains
 under the checkout's gitignored `.mim/`.
 
@@ -91,6 +91,18 @@ under the checkout's gitignored `.mim/`.
 - On macOS, the main window's red close button hides Mim without stopping the
   app; clicking Mim in the Dock restores the same window. Use `Cmd+Q` or
   **Mim > Quit Mim** to quit and stop background work.
+
+## Teams
+
+A Team is one writable Git repository that contributes shared files,
+instructions, skills, apps, and routines to every Project. Connect it once from
+Settings > Team with a credential-free HTTPS or SSH repository location.
+Connecting makes Team apps available but does not enable them or grant their
+permissions; each person reviews and enables apps independently for each local
+Project checkout. Team sync never moves or deletes Project data.
+
+For the repository layout, first-time setup, authentication, activation, and
+troubleshooting, see [docs/team.md](docs/team.md).
 
 ## Apps
 

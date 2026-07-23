@@ -393,7 +393,7 @@ chrome like every other row, grouped by proximity and ended by one
 full-bleed `--rule-light` hairline where the scroll list begins (it darkens
 to `--rule` while the list is scrolled) — then
 collapsible **Apps** and **Activity** sections. Apps contains enabled app
-launchers; the Apps header gear opens Settings > Apps. Activity contains
+launchers; the Apps header gear opens Settings > Apps & agents. Activity contains
 active chats, agent runs, and package jobs; its header carries right-aligned
 History and create icon actions. The create `+` opens New chat directly when
 chat is the only target; when enabled CLI agents or active package Activity
@@ -418,7 +418,7 @@ keeps the same marker/list rhythm.
 Do not use left status bars. Express row severity through icon, text, badge, or
 selected-row background states instead.
 
-Settings > Apps is configuration, not the Package Manager Work surface. It
+Settings > Apps & agents is configuration, not the Package Manager Work surface. It
 prioritizes visibility toggles, permissions, diagnostics, and capability
 summaries; package-run history and job launch controls stay out of Settings.
 
@@ -636,7 +636,7 @@ Props: `open`, `x`, `y`, `width`, `height`, `clamp`, `panelClass`,
 `MimToggle` (`src/renderer/components/ui/MimToggle.vue`) is the only switch.
 36×20px pill, `bg-accent` on / `bg-ink-4` off, `bg-surface` knob,
 `role="switch"` + `aria-checked` built in. Used by Settings (Editor section),
-Settings > Apps rows, and the Package Manager core-app rows — do not hand-roll
+Settings > Apps & agents rows, and the Package Manager core-app rows — do not hand-roll
 new switch markup; the app previously carried three divergent copies.
 Props: `modelValue`, `disabled`, `ariaLabel`. Extra attrs (testids, `title`)
 fall through to the button.

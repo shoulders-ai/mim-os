@@ -248,7 +248,7 @@ pre-loaded content and `readOnly: true` on the `TabState`. Read-only tabs:
   history preview overlay).
 
 The primary consumer is the package documentation door: clicking the `?` icon
-on the Work header (or the Documentation link in Settings > Apps) calls
+on the Work header (or the Documentation link in Settings > Apps & agents) calls
 `package.readme` and opens the result as a read-only tab in the Artifact pane.
 
 ## Pop-Out Editor Windows

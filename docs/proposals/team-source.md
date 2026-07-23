@@ -462,6 +462,9 @@ paths removed rather than left beside the replacement.
 
 - A person connects **Shoulders** once and its files, instructions, skills,
   apps, and routines appear in their natural surfaces.
+- Connecting while a Project is already open refreshes the live app, named-tool,
+  skill, file, and routine catalogs without requiring a restart. Apps become
+  available but remain disabled until that person reviews and enables them.
 - A Team file or skill can be edited in Mim and synchronised like an ordinary
   file; offline edits remain possible.
 - Two people can enable different Team apps in the same Project without either

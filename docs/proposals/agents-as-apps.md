@@ -68,7 +68,7 @@ export const agents = {
 - `tools` entries must be canonical registry tool ids (core dotted names or
   the app's own granted named tools). Unknown ids are load-time diagnostics,
   not silent no-ops; an allowlisted tool that is missing at runtime (e.g. a
-  disabled dependency app) is a diagnostic and omitted. Settings > Apps
+  disabled dependency app) is a diagnostic and omitted. Settings > Apps & agents
   shows the scope honestly: "Full chat tools" vs "Scoped: N tools" — a
   specialised agent must never silently behave like general chat.
 - Trust: agents are backend exports, and backends already require the
@@ -133,7 +133,7 @@ runtime; its identity is just hardcoded to `'chat' | 'inline'`.
   `importCapabilities` beside jobs/tools/agentContext; validation
   diagnostics for bad descriptors; expose in `PackageCapabilities` and
   `package.capabilities.list` ("Provides an agent" beside "Teaches the
-  agent" in Settings > Apps).
+  agent" in Settings > Apps & agents).
 - New `src/main/ai/agentMounts.ts`: resolve enabled apps' agent descriptors
   into `AgentProfile`s (id `package:<pkg>/<key>`); build the app ctx for
   `instructions`; template-var resolution; tool-allowlist intersection;

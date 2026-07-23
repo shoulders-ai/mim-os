@@ -1,7 +1,7 @@
 ---
 id: web-research
 title: web research
-order: 7
+order: 8
 sources:
   - docs/web-reading.md
   - src/main/tools/web.ts

@@ -1,7 +1,7 @@
 ---
 id: running-code
 title: running code
-order: 5
+order: 6
 sources:
   - docs/code-execution.md
   - src/main/tools/code.ts

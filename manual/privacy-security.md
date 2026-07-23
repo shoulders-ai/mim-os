@@ -1,7 +1,7 @@
 ---
 id: privacy-security
 title: privacy & security
-order: 12
+order: 13
 sources:
   - docs/security.md
   - docs/routines.md

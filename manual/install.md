@@ -67,3 +67,5 @@ The global `~/.mim/` directory holds your user-level state:
 
 Integration tokens for connected services live in the OS keychain, not in any file under `~/.mim/`.
 :::
+
+To connect a shared repository after installation, continue with [team](team).

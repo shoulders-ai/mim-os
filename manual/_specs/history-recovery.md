@@ -1,4 +1,4 @@
-# Spec: history & recovery (order 10)
+# Spec: history & recovery (order 11)
 
 Purpose: nothing in Mim is lost by accident. File recovery, past runs, and managed
 git sync.

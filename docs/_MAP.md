@@ -73,7 +73,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Routines.** Team and Project definitions resolved into one catalog with Project overrides; revision-aware create/edit/duplicate/Trash lifecycle; machine-local four-state activation, visible machine ownership, and run state under `.mim/routines/`; manual chat-turn runs; desktop and always-on schedule/file/webhook/Slack automation; isolated scheduled-run retry; source-file live refresh; authority review; routine session metadata; and the dense Routines work surface. `src/main/routines/`, `tools/routines.ts`, `server/server.ts`, `headless.ts`, `sessions.ts`, `src/renderer/components/routines/`, `src/renderer/stores/routines.ts`. Docs: [routines.md](routines.md), [design-system.md](design-system.md#617-routines-work-surface).
 - **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
 - **Git tools.** Status/diff/log/commit/pull/push plus managed Project sync with Git/LFS preflight, open/save/quit lifecycle automation, offline retry, and conflict-copy preservation. `src/main/git.ts`, `src/main/sync/`, `tools/git.ts`, `tools/sync.ts`.
-- **Team source.** One Personal connection, deterministic `~/.mim/team/` checkout, fixed contribution contract, writable system-Git background sync, conflict-copy preservation, and safe Project mount at `.mim/team`. `src/main/team/teamSource.ts`, `src/main/team/teamFiles.ts`, `tools/team.ts`. Docs: [team.md](team.md), [git.md](git.md).
+- **Team source.** One Personal connection, deterministic `~/.mim/team/` checkout, fixed contribution contract, writable system-Git background sync, conflict-copy preservation, safe Project mount at `.mim/team`, and live refresh of apps/tools/routines after connection. `src/main/team/teamSource.ts`, `src/main/team/teamFiles.ts`, `src/main/team/liveTeamRefresh.ts`, `tools/team.ts`. Docs and simple setup: [team.md](team.md); Git behavior: [git.md](git.md).
 - **Personal config.** `~/.mim/config.yaml` (identity, appearance/editor/layout preferences, integration account defaults, model defaults, skill activation, and one credential-free Team repository). Never holds keys or tokens. `src/main/userConfig.ts`.
 - **Settings tools.** Route Personal preferences to `~/.mim/config.yaml` and current-Project runtime/tool state to `.mim/settings.json`; agent tool availability policy remains Project-local for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
@@ -203,7 +203,7 @@ exercises the current loader/runtime contract.
 | [html-markdown.md](html-markdown.md) | HTML-to-Markdown parser |
 | [history.md](history.md) | Local file recovery |
 | [git.md](git.md) | Git tools and managed sync |
-| [team.md](team.md) | One Team repository contract, connection, checkout, and writable Git sync |
+| [team.md](team.md) | Simple Team setup, fixed repository contract, activation model, checkout, sync, safety, and troubleshooting |
 | [export.md](export.md) | PDF/DOCX export pipeline |
 | [document-pane.md](document-pane.md) | Editor surface architecture |
 | [comments.md](comments.md) | Inline review comments (markdown + code) |
@@ -227,7 +227,7 @@ exercises the current loader/runtime contract.
 
 ### Proposals
 
-- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phases 1–9 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
+- [proposals/team-source.md](proposals/team-source.md) — **implemented (all thirteen phases complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and completed implementation programme.
 - [proposals/r-first-class.md](proposals/r-first-class.md) — **implemented** (phases 1-5; phase 6 deferred). First-class R/Rmd/Quarto: `code.run` execution primitive, plot/artifact viewing, Cmd+Enter send-to-terminal, render loop, R modelling skill.
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/popout-editor-window.md](proposals/popout-editor-window.md) — **implemented** (phases 0-3; phase 4 deferred). Pop-out editor windows: move any editor tab into its own OS window and back, with full tab-state transfer, per-window close guards, focused-window menu routing, and macOS native touches.
@@ -298,6 +298,7 @@ src/
     team/
       teamSource.ts             # One Team connection, checkout contract + Git sync
       teamFiles.ts              # Safe Project checkout mount + Team Files root
+      liveTeamRefresh.ts        # Refresh apps/tools/routines after Team changes
     sync/
       backgroundSync.ts         # Open/save/quit sync lifecycle and offline retry
       conflicts.ts              # Rebase conflict-copy preservation + stop state

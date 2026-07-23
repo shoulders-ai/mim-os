@@ -1,7 +1,7 @@
 ---
 id: agents
 title: agents
-order: 8
+order: 9
 sources:
   - docs/agent-sessions.md
   - docs/routines.md

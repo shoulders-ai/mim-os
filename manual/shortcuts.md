@@ -1,7 +1,7 @@
 ---
 id: shortcuts
 title: shortcuts
-order: 11
+order: 12
 sources:
   - src/renderer/components/ShortcutsDialog.vue
   - src/renderer/services/shortcutLabels.ts
