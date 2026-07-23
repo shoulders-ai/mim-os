@@ -71,7 +71,7 @@ skills:
 
 ## App-bundled skills
 
-An enabled app can ship skills at `{package}/skills/<name>/SKILL.md`, same format as authored skills. The activation id is `package:<packageId>/<skillName>`. App skills are in a separate namespace from authored skills -- they do not shadow or get shadowed by authored skills with the same folder name. They appear in Settings > Apps under "Teaches the agent", not in Settings > Skills.
+An enabled app can ship skills at `{package}/skills/<name>/SKILL.md`, same format as authored skills. The activation id is `package:<packageId>/<skillName>`. App skills are in a separate namespace from authored skills -- they do not shadow or get shadowed by authored skills with the same folder name. They appear in Settings > Apps & agents under "Teaches the agent", not in Settings > Skills.
 
 The `unlocks` frontmatter list names AI tools that stay hidden from the model until the skill activates. Dotted app tool names are matched in their chat form (e.g. `unlocks: [issues_list]` or `unlocks: [issues.list]` both gate the `issues.list` named tool).
 

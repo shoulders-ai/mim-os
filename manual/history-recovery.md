@@ -19,7 +19,7 @@ Edits by you or the agent can be undone. Mim keeps bounded local file history, p
 
 Mim keeps file history under `.mim/` by default. It takes small, bounded baselines of authored text so a closed file's pre-change state survives an overwrite by an external editor. Bulk data, PDFs, Office files, images, and machine JSON streams are not baselined. Mim still records eligible data and binary files immediately before it overwrites, renames, deletes, or restores them. New downloads and imports do not get a redundant one-version history. Files in generated directories like `node_modules` or `dist` are excluded.
 
-Settings > Workspace has a File recovery toggle. Turning it off asks for confirmation and stops new recovery points, but keeps existing versions available to preview or restore. Open Advanced to clear those versions explicitly or change storage limits.
+Settings > Project has a File recovery toggle. Turning it off asks for confirmation and stops new recovery points, but keeps existing versions available to preview or restore. Open Advanced to clear those versions explicitly or change storage limits.
 
 File history is independent of git. Mim never reads or writes your `.git` directory on its own.
 
@@ -43,7 +43,7 @@ Opening an archived chat restores the full conversation. App runs keep their eve
 
 By default, Mim does not run git commands against your workspace. The agent has access to tools like `git.status`, `git.diff`, and `git.commit` in chat, but each call goes through the approval gate. Existing git repositories are not silently moved into managed mode.
 
-For workspaces that want an automated save-and-sync loop, Mim offers managed sync. In Settings > Workspace, the Sync section shows two modes:
+For Projects that want an automated save-and-sync loop, Mim offers managed sync. In Settings > Project, the Sync section shows two modes:
 
 ::: rows
 - Manual — Mim reports sync state but does not run git automatically.
@@ -69,7 +69,7 @@ File history captures a version before any deletion, so the content is recoverab
 ::: under-the-hood
 Local history lives in `.mim/history/`. `index.json` holds version metadata; `blobs/<prefix>/<sha256>` holds content-addressed file bytes. The default per-file size cap is 5 MB. Files in generated or dependency directories (`.git`, `node_modules`, `dist`, and similar) are excluded, and `.gitignore` and `.mim/historyignore` patterns are honored.
 
-Settings > Workspace keeps File recovery as the normal control. Advanced shows the total size and version count. History keeps every point for 3 days, then one per day through day 30, then one per week. Delete, rename, and restore boundaries receive 30 days of protection. The 512 MB default soft budget can be changed there; recent recovery points may temporarily exceed it. Optimize history applies the policy immediately and garbage-collects unreferenced content. Clear local history removes all recovery data without touching workspace files.
+Settings > Project keeps File recovery as the normal control. Advanced shows the total size and version count. History keeps every point for 3 days, then one per day through day 30, then one per week. Delete, rename, and restore boundaries receive 30 days of protection. The 512 MB default soft budget can be changed there; recent recovery points may temporarily exceed it. Optimize history applies the policy immediately and garbage-collects unreferenced content. Clear local history removes all recovery data without touching workspace files.
 
 Managed sync internals and the full tool catalog are documented in [sync tools](/develop/tools).
 :::

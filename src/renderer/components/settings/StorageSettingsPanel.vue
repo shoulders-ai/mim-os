@@ -499,21 +499,6 @@ function numberOrZero(value: unknown): number {
       </SettingRow>
     </SettingsGroup>
 
-    <SettingsGroup title="Analytics">
-      <SettingRow
-        label="Usage data"
-        :desc="settings.telemetryLocked ? 'Disabled by environment' : 'Anonymous counts only. No files, prompts, or paths.'"
-      >
-        <MimToggle
-          :model-value="settings.telemetryEnabled"
-          :disabled="settings.telemetryLocked"
-          aria-label="Share anonymous usage data"
-          title="Share anonymous usage data"
-          @update:model-value="settings.setTelemetryEnabled"
-        />
-      </SettingRow>
-    </SettingsGroup>
-
     <p v-if="error" class="m-0 text-[11px] text-rem">{{ error }}</p>
   </section>
 </template>

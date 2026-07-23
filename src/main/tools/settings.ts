@@ -5,6 +5,7 @@ import { atomicWriteJson } from '@main/atomicJson.js'
 import {
   loadUserConfig,
   setPersonalSetting,
+  setUserIdentity,
   type PersonalSettingKey,
 } from '@main/userConfig.js'
 import { userHomeDir } from '@main/platform.js'
@@ -248,6 +249,28 @@ export function registerSettingsTools(
   options?: { onChange?: () => void; homeDir?: string },
 ): void {
   const home = options?.homeDir ?? userHomeDir()
+
+  tools.register({
+    name: 'config.setUser',
+    description: 'Update Personal name, email, and timezone.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        email: { type: 'string' },
+        timezone: { type: 'string' },
+      },
+    },
+    execute: async (params) => {
+      setUserIdentity({
+        name: typeof params.name === 'string' ? params.name : undefined,
+        email: typeof params.email === 'string' ? params.email : undefined,
+        timezone: typeof params.timezone === 'string' ? params.timezone : undefined,
+      }, home)
+      options?.onChange?.()
+      return { user: loadUserConfig(home).user }
+    },
+  })
 
   tools.register({
     name: 'settings.get',

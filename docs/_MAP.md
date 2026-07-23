@@ -118,7 +118,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **App authoring.** Starter templates, create/validate/reload authoring loop. `src/main/tools/packages.ts`, `templates/appTemplates.ts`.
 - **App server.** Express + WebSocket for desktop app/AI/MCP routes, SDK file serving, and app/MCP tool dispatch. `src/main/server/server.ts`.
 - **App SDK.** WebSocket client for iframes. `sdk/mim.js`, `sdk/tokens.css`.
-- **Skills and instructions.** One authored catalog with Project > Personal > Team > Mim precedence, per-user toggles, You/Project/Team creation, managed normal-editor paths, app-bundled skills, progressive tool gating, and Mim → Team → Personal → Project instruction composition. `src/main/skills.ts`, `ai/instructions.ts`, `ai/systemPrompt.ts`, `tools/skills.ts`. UI: `SkillsSettingsPanel.vue`, `InstructionsSettingsPanel.vue`, Chat skill chips. Docs: [skills.md](skills.md), [custom-apps.md](custom-apps.md).
+- **Skills and instructions.** One authored catalog with Project > Personal > Team > Mim precedence, per-user toggles, You/Project/Team creation, managed normal-editor paths, app-bundled skills, progressive tool gating, and Mim → Team → Personal → Project instruction composition. Personal and Project instruction links live with their owning Settings sections. `src/main/skills.ts`, `ai/instructions.ts`, `ai/systemPrompt.ts`, `tools/skills.ts`. UI: `SkillsSettingsPanel.vue`, `GeneralSettingsPanel.vue`, `ProjectSettingsPanel.vue`, Chat skill chips. Docs: [skills.md](skills.md), [custom-apps.md](custom-apps.md).
 
 ### Main Process — Integrations
 
@@ -159,7 +159,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Renderer — Settings
 
-- **Settings dialog.** Section-routed dialog; Skills is a flat origin-labelled catalog and Instructions links into the normal editor. `src/renderer/components/settings/`. Section ids in `sections.ts` are a stable protocol for deep links pending the accepted Settings navigation restructure.
+- **Settings dialog.** Dense fixed-size dialog organized by ownership: YOU (General, AI & Models, Connections), WORK (Team, Project, Apps & agents, Skills), and ADVANCED (Tools). Personal and Project instructions open in the normal editor from their owner sections; the footer owns Mim version and updater state. `src/renderer/components/settings/`.
 
 ### Renderer — Shared UI
 
@@ -225,7 +225,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 ### Proposals
 
-- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phases 1–6 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
+- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phases 1–9 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
 - [proposals/r-first-class.md](proposals/r-first-class.md) — **implemented** (phases 1-5; phase 6 deferred). First-class R/Rmd/Quarto: `code.run` execution primitive, plot/artifact viewing, Cmd+Enter send-to-terminal, render loop, R modelling skill.
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/popout-editor-window.md](proposals/popout-editor-window.md) — **implemented** (phases 0-3; phase 4 deferred). Pop-out editor windows: move any editor tab into its own OS window and back, with full tab-state transfer, per-window close guards, focused-window menu routing, and macOS native touches.

@@ -44,7 +44,7 @@ Type `@` in the composer to mention a skill, a workspace file, or an app tool by
 
 ## Instructions
 
-`AGENTS.md` is the standing contract for any agent working in your workspace. Everything in it -- conventions, restrictions, navigation pointers -- shapes how the agent behaves on every turn. Edit it directly as a file, or open Settings > Instructions to edit it in place.
+`AGENTS.md` is the standing contract for any agent working in your workspace. Everything in it -- conventions, restrictions, navigation pointers -- shapes how the agent behaves on every turn. Edit it directly as a file, or open Settings > Project to edit it in place.
 
 The instructions panel lists template variables the agent resolves at runtime: `{{DATE_TODAY}}`, `{{TOOL_SET}}`, `{{SKILL_CATALOG}}`, `{{AGENT_CONTEXT}}`, `{{PROJECT_LOG}}`, and `{{WORKSPACE_TREE}}`. You can use these in your own `AGENTS.md` and the agent will see the resolved values.
 
@@ -52,7 +52,9 @@ The instructions panel lists template variables the agent resolves at runtime: `
 
 A skill is a written workflow the agent loads on demand. Each skill lives in a folder containing a `SKILL.md` file with a name, a description, and optionally a list of tools it unlocks. The agent sees the skill catalog -- names, descriptions, and declared tools -- on every turn. When your request matches a skill's description, the agent activates it, loading the full instructions and making any gated tools available for the rest of the run. You can also activate a skill explicitly by adding it as a context chip in the composer.
 
-Skills come from four sources, in increasing precedence: built-in skills that ship with Mim, added sources (local folders or git repositories), personal skills in `~/.mim/skills/`, and workspace skills in your workspace's `skills/` folder. A skill at a higher level with the same name shadows the one below it. Apps can also bundle skills; those appear under their app in Settings > Apps.
+Skills come from Mim, Team, Personal, and Project origins. A skill at a more
+specific level with the same name shadows the one below it. Apps can also
+bundle skills; those appear under their app in Settings > Apps & agents.
 
 Manage your skill library in Settings > Skills. You can toggle skills on or off, add a source, import a skill from a folder, or create a new personal skill from a template. Building your own skills is covered in [skills](/develop/skills).
 
@@ -72,7 +74,7 @@ Routines carry their own tool and approval grants. A routine can proceed unatten
 
 Claude Code, Codex, Gemini CLI, and Pi are detected automatically when their binaries are installed on your machine. Detection checks the login shell's PATH, so binaries installed via Homebrew, npm, or similar tools are found without extra configuration. Pi 0.76.0 or newer is required; Settings shows the detected version and explains when an installed copy is too old or cannot be verified.
 
-Detection alone does not surface a launcher. You enable each agent under the Coding agents heading in Settings > Apps. Enabling one adds a launcher row to the Navigator's Apps section; each click starts a new agent session.
+Detection alone does not surface a launcher. You enable each agent under the Coding agents heading in Settings > Apps & agents. Enabling one adds a launcher row to the Navigator's Apps section; each click starts a new agent session.
 
 An agent session is a first-class run. It gets its own Activity row with a live status indicator -- working, needs input, idle, done, stopped, or error -- and a title that updates automatically once the agent begins a task. Scrollback is captured in the main process and persists across restarts: even if you quit and reopen Mim, the session's output is still there. When an ended session is reopened, you can resume it -- Mim passes the agent's native resume identity so it picks up where it left off. Pi uses the same Mim session id at launch and resume, making that identity deterministic. Sessions also appear in History alongside chats and app runs, and can be renamed, archived, or deleted.
 
@@ -80,7 +82,7 @@ The Customise disclosure in each agent's row lets you set CLI flags per workspac
 
 ## The MCP bridge
 
-All four CLI agents can reach Mim itself. Claude Code, Codex, and Gemini CLI use a local MCP connection; a Connect button in Settings > Apps registers it with the agent's native configuration, and Disconnect lives in Customise. Pi needs no setup: Mim loads a built-in extension whenever it launches or resumes Pi, so its row says **Mim tools built in** and has no connection controls. Mim-specific tools -- reading files, the editor, comments, file history, search, skills, web, and connected integrations -- become available under the same tool policy and approval rules. File writing, shell commands, and git remain the CLI agent's own capabilities. If Pi's connection is interrupted, the Pi command `/mim-reconnect` retries it without restarting the session.
+All four CLI agents can reach Mim itself. Claude Code, Codex, and Gemini CLI use a local MCP connection; a Connect button in Settings > Apps & agents registers it with the agent's native configuration, and Disconnect lives in Customise. Pi needs no setup: Mim loads a built-in extension whenever it launches or resumes Pi, so its row says **Mim tools built in** and has no connection controls. Mim-specific tools -- reading files, the editor, comments, file history, search, skills, web, and connected integrations -- become available under the same tool policy and approval rules. File writing, shell commands, and git remain the CLI agent's own capabilities. If Pi's connection is interrupted, the Pi command `/mim-reconnect` retries it without restarting the session.
 
 ::: under-the-hood
 The system prompt is assembled from `AGENTS.md` (or a default template) with template variables resolved at each turn: the tool catalog, the skill catalog, the workspace tree, the project log tail, and a volatile workspace-context digest. The full resolution logic is in `src/main/ai/systemPrompt.ts`.

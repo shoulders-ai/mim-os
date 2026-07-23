@@ -81,11 +81,12 @@ describe('autoUpdater', () => {
   })
 
   it('broadcasts update-downloaded', () => {
-    initAutoUpdater({ send, broadcast })
+    const updater = initAutoUpdater({ send, broadcast })
     const handler = registeredHandler('update-downloaded')!
     handler({ version: '1.2.0' })
     expect(send).toHaveBeenCalledWith('app:update-downloaded', { version: '1.2.0' })
     expect(broadcast).toHaveBeenCalledWith('app:update-downloaded', { version: '1.2.0' })
+    expect(updater.status()).toEqual({ state: 'ready', version: '1.2.0' })
   })
 
   it('forwards updater errors to renderer and server without throwing', () => {

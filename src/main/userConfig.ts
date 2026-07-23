@@ -238,6 +238,21 @@ export function setPersonalSetting(key: PersonalSettingKey, value: unknown, home
   writeRawConfig(raw, home)
 }
 
+export function setUserIdentity(
+  user: { name?: string; email?: string; timezone?: string },
+  home?: string,
+): void {
+  const raw = readRawConfig(home)
+  const next: Record<string, string> = {}
+  for (const key of ['name', 'email', 'timezone'] as const) {
+    const value = user[key]
+    if (typeof value === 'string' && value.trim()) next[key] = value.trim()
+  }
+  if (Object.keys(next).length) raw.user = next
+  else delete raw.user
+  writeRawConfig(raw, home)
+}
+
 export function setTeamConnection(team: { repository: string }, home?: string): void {
   const repository = safeTeamRepository(team.repository)
   if (!repository) throw new Error('Team repository must be credential-free and non-empty')

@@ -45,7 +45,7 @@ Mim is extensible. Apps add capabilities — custom UI, new tools, specialized w
 A workspace is a folder that holds one body of work. Inside it, a `.mim/` directory stores file history, chat transcripts, and workspace-level settings. Nothing is stored in a remote database — your files stay on your disk, and your workspace is a plain folder that makes sense without Mim.
 
 ::: under-the-hood
-Mim is an Electron application built on Vue 3 and the Vercel AI SDK. At its center is a single tool registry: every actor — you clicking a button in the UI, the agent calling a tool, an app making an SDK request — goes through the same registry. Every tool call passes a permission gate and emits a trace event. By default those events form the workspace's local audit trail; you can turn local audit storage off in Settings > Workspace. The registry is the shared authority for what can happen in a workspace, and the trace is the audit trail of what did happen.
+Mim is an Electron application built on Vue 3 and the Vercel AI SDK. At its center is a single tool registry: every actor — you clicking a button in the UI, the agent calling a tool, an app making an SDK request — goes through the same registry. Every tool call passes a permission gate and emits a trace event. By default those events form the Project's local audit trail; you can turn local audit storage off in Settings > Project. The registry is the shared authority for what can happen in a Project, and the trace is the audit trail of what did happen.
 
 More in [tool catalog](/develop/tools).
 :::

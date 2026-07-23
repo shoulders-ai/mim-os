@@ -4,13 +4,13 @@ import { IconX } from '@tabler/icons-vue'
 import MimDialog from '../ui/MimDialog.vue'
 import AiSettingsPanel from './AiSettingsPanel.vue'
 import AppsSettingsPanel from './AppsSettingsPanel.vue'
-import AppearanceSettingsPanel from './AppearanceSettingsPanel.vue'
 import ConnectionsSettingsPanel from './ConnectionsSettingsPanel.vue'
 import ToolsSettingsPanel from './ToolsSettingsPanel.vue'
 import SkillsSettingsPanel from './SkillsSettingsPanel.vue'
-import InstructionsSettingsPanel from './InstructionsSettingsPanel.vue'
-import WorkspaceSettingsPanel from './WorkspaceSettingsPanel.vue'
-import AboutSettingsPanel from './AboutSettingsPanel.vue'
+import GeneralSettingsPanel from './GeneralSettingsPanel.vue'
+import TeamSettingsPanel from './TeamSettingsPanel.vue'
+import ProjectSettingsPanel from './ProjectSettingsPanel.vue'
+import SettingsUpdateFooter from './SettingsUpdateFooter.vue'
 import {
   SETTINGS_NAV_GROUPS,
   SETTINGS_NAV_ITEMS,
@@ -76,13 +76,12 @@ function onNavKeydown(e: KeyboardEvent) {
         aria-label="Settings sections"
         @keydown="onNavKeydown"
       >
-        <div class="mb-1.5 px-2.5 pt-1 font-sans text-[9px] font-semibold uppercase tracking-[1.8px] text-ink-3">
-          Settings
-        </div>
-        <template v-for="(group, groupIndex) in SETTINGS_NAV_GROUPS" :key="groupIndex">
-          <div v-if="groupIndex > 0" class="mx-2.5 my-1.5 border-t border-rule-light" role="presentation" />
+        <template v-for="group in SETTINGS_NAV_GROUPS" :key="group.label">
+          <div class="mb-1 mt-2 px-2.5 font-sans text-[9px] font-semibold uppercase tracking-[1.6px] text-ink-4 first:mt-0">
+            {{ group.label }}
+          </div>
           <button
-            v-for="item in group"
+            v-for="item in group.items"
             :key="item.id"
             type="button"
             class="flex items-center rounded-[6px] px-2.5 py-2 text-left font-sans text-[12px] outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
@@ -116,12 +115,13 @@ function onNavKeydown(e: KeyboardEvent) {
 
         <div
           class="flex-1"
-          :class="activeSection === 'apps' ? 'overflow-hidden' : activeSection === 'instructions' ? 'flex flex-col px-8 py-6' : 'overflow-y-auto px-8 py-6'"
+          :class="activeSection === 'apps' ? 'overflow-hidden' : 'overflow-y-auto px-8 py-6'"
         >
-          <AppearanceSettingsPanel v-if="activeSection === 'appearance'" />
+          <GeneralSettingsPanel v-if="activeSection === 'general'" />
           <AiSettingsPanel v-else-if="activeSection === 'ai'" />
-          <InstructionsSettingsPanel v-else-if="activeSection === 'instructions'" />
           <ConnectionsSettingsPanel v-else-if="activeSection === 'connections'" />
+          <TeamSettingsPanel v-else-if="activeSection === 'team'" />
+          <ProjectSettingsPanel v-else-if="activeSection === 'project'" />
           <ToolsSettingsPanel v-else-if="activeSection === 'tools'" />
           <AppsSettingsPanel
             v-else-if="activeSection === 'apps'"
@@ -129,9 +129,8 @@ function onNavKeydown(e: KeyboardEvent) {
             @open-package-docs="emit('openPackageDocs', $event)"
           />
           <SkillsSettingsPanel v-else-if="activeSection === 'skills'" />
-          <WorkspaceSettingsPanel v-else-if="activeSection === 'workspace'" />
-          <AboutSettingsPanel v-else-if="activeSection === 'about'" />
         </div>
+        <SettingsUpdateFooter />
       </div>
     </div>
   </MimDialog>

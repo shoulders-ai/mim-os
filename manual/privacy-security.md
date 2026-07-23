@@ -37,11 +37,9 @@ Eight categories of data can leave your machine. Most require your action or a k
 
 **App updates.** Mim checks GitHub Releases for new versions on startup and every four hours. The check sends the app version and platform — nothing from your workspace.
 
-**App registry.** Browsing or installing apps fetches registry indexes and app packages from their sources, and an account token you add is validated against its registry.
-
 **Anonymous telemetry.** Mim sends anonymous usage counts to a first-party endpoint. Telemetry contains only counts and coarse categories -- event types, app version, and platform. It never transmits file contents, file names or paths, prompts, model outputs, chat text, comments, snippets, search queries, terminal commands, logbook text, keys, tokens, account labels, user identity, workspace identity, trace ids, span ids, trace summaries, trace subjects, trace payload references, or raw error messages. Three ways to turn it off:
 
-- Toggle Usage data off in Settings > Workspace.
+- Toggle Usage data off in Settings > General.
 - Set the environment variable `MIM_TELEMETRY_DISABLED=1`.
 - Edit `~/.mim/telemetry.json` and set `enabled` to `false`.
 
@@ -73,7 +71,7 @@ API keys are stored in `~/.mim/keys.env`, a file written with permissions restri
 
 By default, every tool call by every actor -- you, the agent, apps -- is recorded in the local trace stream under `.mim/traces/`. Each compact audit entry captures who made the call, what tool ran, when, and the outcome. The audit digest redacts keys, tokens, and content fields. Read-only tool results are not retained as content. Completed model turns and consequential tool results may be kept as compressed, deduplicated local payloads, with secret-bearing tools excluded. File-write details are retained for revert detection while the local audit trail is on.
 
-Settings > Workspace has a Local audit trail toggle. Turning it off asks for confirmation, deletes the existing local audit events and retained content for that workspace, and stops future local trace writes. This does not change anonymous Usage data, which has its own toggle and kill switches. Open Advanced to change retention and budgets, disable optional content capture, inspect storage use, or clean immediately.
+Settings > Project has a Local audit trail toggle. Turning it off asks for confirmation, deletes the existing local audit events and retained content for that Project, and stops future local trace writes. This does not change anonymous Usage data, which has its own toggle and kill switches. Open Advanced to change retention and budgets, disable optional content capture, inspect storage use, or clean immediately.
 
 Open Monitor in the Navigator to review what Mim, the agent, and apps have done in your workspace. The Monitor tab shows review items -- errors, denials, reverted outputs -- and a narrated list of runs. The Audit tab shows consequential events, with a full-log toggle for the raw stream.
 

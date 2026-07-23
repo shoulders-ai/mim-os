@@ -118,6 +118,16 @@ describe('docs-lint', () => {
       expect(errors).toHaveLength(0)
       teardown()
     })
+
+    it('accepts mixed-case words after an ampersand', () => {
+      setup()
+      const file = resolve(SCRATCH, 'test-settings-ampersand.md')
+      writeFileSync(file, 'Go to Settings > Apps & agents to enable one.')
+      const labels = new Map([['Apps & agents', 'apps']])
+      const { errors } = lintFile(file, new Set(), new Set(), labels, new Set())
+      expect(errors).toHaveLength(0)
+      teardown()
+    })
   })
 
   describe('lintFile — link target validation', () => {
@@ -195,9 +205,11 @@ describe('docs-lint', () => {
   describe('loadSettingsSections (integration)', () => {
     it('loads real settings sections', () => {
       const labels = loadSettingsSections()
-      expect(labels.has('Appearance')).toBe(true)
+      expect(labels.has('General')).toBe(true)
       expect(labels.has('AI & Models')).toBe(true)
-      expect(labels.has('Apps')).toBe(true)
+      expect(labels.has('Apps & agents')).toBe(true)
+      expect(labels.has('Team')).toBe(true)
+      expect(labels.has('Project')).toBe(true)
     })
   })
 

@@ -99,7 +99,7 @@ describe('SettingsDialog model defaults', () => {
       value: { call, on: vi.fn(), off: vi.fn(), getWorkspace: vi.fn(async () => '') },
     })
     // Model assertions target the AI section explicitly; the dialog's bare
-    // default is Appearance (covered by its own test below).
+    // default is General (covered by its own test below).
     app = createApp(SettingsDialog, { initialSection: 'ai' })
   })
 
@@ -162,12 +162,12 @@ describe('SettingsDialog model defaults', () => {
     expect(main?.parentElement).toBe(layout)
   })
 
-  it('opens Appearance by default and never resizes between sections', async () => {
+  it('opens General by default and never resizes between sections', async () => {
     app = createApp(SettingsDialog)
     app.mount(root)
     await flushUi()
 
-    expect(document.body.querySelector('[aria-label="Appearance settings"]')).toBeTruthy()
+    expect(document.body.querySelector('[aria-label="General settings"]')).toBeTruthy()
 
     const panel = document.body.querySelector<HTMLElement>('.mim-dialog-panel')
     expect(panel).toBeTruthy()
@@ -176,11 +176,11 @@ describe('SettingsDialog model defaults', () => {
       .sort()
     const sizeBefore = sizeClasses()
     expect(sizeBefore.length).toBe(2)
-    const workspaceBtn = document.body.querySelector<HTMLButtonElement>('.sd-nav [data-section="workspace"]')
-    expect(workspaceBtn).toBeTruthy()
-    workspaceBtn!.click()
+    const projectBtn = document.body.querySelector<HTMLButtonElement>('.sd-nav [data-section="project"]')
+    expect(projectBtn).toBeTruthy()
+    projectBtn!.click()
     await flushUi()
-    expect(document.body.querySelector('[aria-label="Workspace settings"]')).toBeTruthy()
+    expect(document.body.querySelector('[aria-label="Project settings"]')).toBeTruthy()
     expect(sizeClasses()).toEqual(sizeBefore)
   })
 

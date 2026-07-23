@@ -51,11 +51,11 @@ async function load() {
     const [catalog, project, team] = await Promise.all([
       window.kernel.call('skill.list', { detailed: true }) as Promise<{ skills?: SkillItem[] }>,
       window.kernel.call('workspace.info', {}) as Promise<{ name?: string }>,
-      window.kernel.call('team.status', {}) as Promise<{ connected?: boolean; team?: { name?: string } }>,
+      window.kernel.call('team.status', {}) as Promise<{ team?: { name?: string } | null }>,
     ])
     skills.value = catalog.skills ?? []
     projectName.value = project.name?.trim() || 'Project'
-    teamName.value = team.connected ? team.team?.name?.trim() || '' : ''
+    teamName.value = team.team?.name?.trim() || ''
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {

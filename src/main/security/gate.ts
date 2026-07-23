@@ -323,6 +323,7 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'telemetry.status': { category: 'read', risk: 'low' },
   'telemetry.setEnabled': { category: 'settings', risk: 'medium' },
   'config.get': { category: 'read', risk: 'low' },
+  'config.setUser': { category: 'settings', risk: 'medium' },
   'system.prompt': { category: 'read', risk: 'low' },
   'skill.list': { category: 'read', risk: 'low' },
   'skill.get': { category: 'read', risk: 'low', targetParam: 'name' },

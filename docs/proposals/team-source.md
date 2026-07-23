@@ -421,7 +421,7 @@ paths removed rather than left beside the replacement.
    surface, retain machine-local activation and schedule ownership, and make
    the chosen owner visible. Verify that two clients can make different
    activation choices without writing shared state.
-9. **Restructure Settings and updater UX.** Implement the accepted YOU / WORK /
+9. **Restructure Settings and updater UX — complete.** Implement the accepted YOU / WORK /
    ADVANCED navigation, move every retained control to its new owner, delete
    Workspace/Instructions/About remnants, and add the version/update footer.
    Settings remains a dense fixed-size dialog using existing UI primitives.

@@ -89,8 +89,10 @@ least to most specific:
 4. Project `AGENTS.md`.
 
 Settings shows document links instead of an embedded instructions textarea.
-Personal and Mim instructions use `.mim/origins/you/instructions.md` and
-`.mim/origins/mim/instructions.md`; Team and Project use their natural paths.
+Personal instructions live under General and Project instructions under
+Project. Personal and Mim instructions use
+`.mim/origins/you/instructions.md` and `.mim/origins/mim/instructions.md`;
+Team and Project use their natural paths.
 
 ## Implementation map
 
@@ -100,7 +102,7 @@ Personal and Mim instructions use `.mim/origins/you/instructions.md` and
 - `src/main/ai/systemPrompt.ts` — prompt assembly and compact skill catalog.
 - `src/main/tools/skills.ts` — skill/instruction tools and destinations.
 - `src/renderer/components/settings/SkillsSettingsPanel.vue` — flat catalog.
-- `src/renderer/components/settings/InstructionsSettingsPanel.vue` — editor
-  links.
+- `src/renderer/components/settings/GeneralSettingsPanel.vue` and
+  `ProjectSettingsPanel.vue` — editor links owned by their natural scopes.
 - `src/renderer/components/chat/ChatMessage.vue` and `ChatComposer.vue` — skill
   provenance and editor handoff.

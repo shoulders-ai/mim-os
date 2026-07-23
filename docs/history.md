@@ -184,7 +184,7 @@ This is not the Navigator conversation History surface, and it is not a git UI.
 
 ## Manage Surface
 
-Settings > Workspace keeps the normal recovery surface to one **File recovery**
+Settings > Project keeps the normal recovery surface to one **File recovery**
 toggle. The technical controls are closed by default under **Advanced**:
 
 - storage bytes and version counts from `history.stats`;

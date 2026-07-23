@@ -13,7 +13,7 @@ import {
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { reset as resetUserConfig } from '@main/userConfig.js'
+import { loadUserConfig, reset as resetUserConfig } from '@main/userConfig.js'
 
 describe('main settings tools', () => {
   let dir: string
@@ -101,6 +101,22 @@ describe('main settings tools', () => {
 
     expect(result.value).toBe('developer')
     expect(readPersonalApprovalMode(home)).toBe('developer')
+    expect(existsSync(join(dir, '.mim', 'settings.json'))).toBe(false)
+  })
+
+  it('updates Personal identity without writing Project settings', async () => {
+    await tools.call('config.setUser', {
+      name: 'Waqr',
+      email: 'waqr@example.com',
+      timezone: 'Europe/Berlin',
+    }, ctx)
+
+    const config = loadUserConfig(home)
+    expect(config.user).toEqual({
+      name: 'Waqr',
+      email: 'waqr@example.com',
+      timezone: 'Europe/Berlin',
+    })
     expect(existsSync(join(dir, '.mim', 'settings.json'))).toBe(false)
   })
 

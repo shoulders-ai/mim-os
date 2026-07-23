@@ -618,13 +618,14 @@ async function boot(): Promise<void> {
   // handle; the headless server never has these versions to report.
   tools.register({
     name: 'app.info',
-    description: 'App version and runtime info for the About panel and diagnostics',
+    description: 'App version, updater state, and runtime info for Settings and diagnostics',
     execute: async () => ({
       version: app.getVersion(),
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       node: process.versions.node,
       platform: process.platform,
+      update: appUpdater?.status() ?? { state: 'unavailable' },
     }),
   })
   registerSessionTools(tools)
@@ -1213,6 +1214,10 @@ async function boot(): Promise<void> {
   ipcMain.handle('kernel:download-update', async () => {
     if (!appUpdater) throw new Error('App updates are unavailable in this build')
     await appUpdater.downloadUpdate()
+  })
+  ipcMain.handle('kernel:check-for-updates', async () => {
+    if (!appUpdater) throw new Error('App updates are unavailable in this build')
+    await appUpdater.checkForUpdates()
   })
   ipcMain.handle('kernel:quit-and-install', async () => {
     if (!appUpdater) throw new Error('App updates are unavailable in this build')

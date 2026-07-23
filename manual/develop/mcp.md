@@ -34,7 +34,7 @@ Mim Desktop
 
 On desktop start, Mim writes `~/.mim/server.json` with a port and bearer token. The file is written atomically with owner-only permissions. On quit, Mim deletes it best-effort.
 
-Agent sessions launched from Settings > Apps receive per-session `MIM_PORT` and `MIM_TOKEN` environment variables. Running `mim mcp` outside Mim falls back to `~/.mim/server.json`. Per-agent tokens are revoked when the live session exits.
+Agent sessions launched from Settings > Apps & agents receive per-session `MIM_PORT` and `MIM_TOKEN` environment variables. Running `mim mcp` outside Mim falls back to `~/.mim/server.json`. Per-agent tokens are revoked when the live session exits.
 
 ## Security boundary
 
@@ -97,7 +97,7 @@ Named tools from enabled apps are exposed alongside the core set. The server que
 
 ## Client setup
 
-Settings > Apps shows a Connect button next to each installed CLI agent that supports Mim's MCP bridge. It runs the agent's native `mcp add` command:
+Settings > Apps & agents shows a Connect button next to each installed CLI agent that supports Mim's MCP bridge. It runs the agent's native `mcp add` command:
 
 | Agent | Command |
 |---|---|

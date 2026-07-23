@@ -197,7 +197,7 @@ export function lintFile(filePath, toolNames, kbdCombos, settingsLabels, pageIds
     // (c) "Settings > X" references
     // Match "Settings > Label" where label is 1-3 capitalized words possibly
     // joined by & (e.g. "AI & Models"). Stop at lowercase words.
-    const settingsRegex = /Settings\s*>\s*([A-Z][a-zA-Z]*(?:\s*&\s*[A-Z][a-zA-Z]*)*)/g
+    const settingsRegex = /Settings\s*>\s*([A-Z][a-zA-Z]*(?:\s*&\s*[a-zA-Z]+)*)/g
     let sm
     while ((sm = settingsRegex.exec(line)) !== null) {
       const section = sm[1].trim()
