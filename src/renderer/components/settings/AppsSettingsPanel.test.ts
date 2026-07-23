@@ -79,4 +79,15 @@ describe('Apps & agents direct sources', () => {
     expect(call.mock.calls.some(([tool]) => String(tool).startsWith('registry.'))).toBe(false)
     expect(call.mock.calls.some(([tool]) => String(tool).startsWith('account.'))).toBe(false)
   })
+
+  it('rescans app folders when Refresh apps is selected', async () => {
+    await settle()
+    call.mockClear()
+
+    root.querySelector<HTMLButtonElement>('button[aria-label="Refresh apps"]')?.click()
+    await settle()
+
+    expect(call.mock.calls[0]?.[0]).toBe('package.reload')
+    expect(call.mock.calls.some(([tool]) => tool === 'package.list')).toBe(true)
+  })
 })

@@ -117,8 +117,9 @@ not silently choose one version.
 ::: rows
 - No app launcher — open Settings > Apps & agents and enable the app for this
   Project. Availability alone does not add a launcher.
-- No apps in Settings — select Sync now and reload the app catalog. Check that
-  each app is directly under `apps/<id>/` and has a valid `package.json`.
+- No apps in Settings — select Sync now, then select **Refresh apps** in
+  Settings > Apps & agents. Check that each app is directly under
+  `apps/<id>/` and has a valid `package.json`.
 - Private repository cannot clone — make `git ls-remote <repository>` work in a
   terminal first. Never put a token into the repository URL.
 - Board or Knowledge is empty — confirm that the intended Project is open.

@@ -175,8 +175,9 @@ until you review their permissions and enable them for this Project. Headless
 apps with no view never receive a Navigator launcher.
 
 **No Team apps appear in Settings.** Select **Sync now**, then reload the app
-catalog. Inspect Developer details for manifest diagnostics. Apps must be
-direct children of `apps/`, and each child needs a valid `package.json`.
+catalog with **Refresh apps** in Settings > Apps & agents. Inspect Developer
+details for manifest diagnostics. Apps must be direct children of `apps/`, and
+each child needs a valid `package.json`.
 
 **A private repository cannot clone.** Run `git ls-remote <repository>` in a
 terminal. Fix the system Git credential helper or SSH key until that succeeds;

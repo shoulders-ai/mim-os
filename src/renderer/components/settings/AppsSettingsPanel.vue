@@ -238,6 +238,19 @@ async function refresh(): Promise<void> {
   }
 }
 
+async function reload(): Promise<void> {
+  loading.value = true
+  error.value = ''
+  try {
+    await window.kernel.call('package.reload', {})
+    await refresh()
+  } catch (cause) {
+    error.value = (cause as Error).message
+  } finally {
+    loading.value = false
+  }
+}
+
 function onChanged(): void {
   void refresh()
 }
@@ -284,7 +297,7 @@ onBeforeUnmount(() => {
         class="flex h-[22px] w-[22px] items-center justify-center rounded-[5px] text-ink-3 hover:bg-chrome-mid hover:text-ink disabled:opacity-50"
         :disabled="loading"
         aria-label="Refresh apps"
-        @click="refresh"
+        @click="reload"
       >
         <IconRefresh :size="13" />
       </button>
