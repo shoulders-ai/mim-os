@@ -78,9 +78,7 @@ approval grants, and original remote identity.
 - `requestedGrants` causes a real approval request; model input never mints a
   grant directly.
 - Routine children inherit only the routine's trusted grants.
-- Serve-mode children must pass the originating remote token grant on every
-  call as well as the normal local gate.
-- Sensitive/outside-workspace path floors, readonly resources, saved-browser
+- Sensitive/outside-Project path floors, Team mount protection, saved-browser
   domain rules, and disabled tool settings continue to win.
 - App/package actors are hard-denied from all `subagent.*` tools.
 
@@ -106,7 +104,7 @@ Trace events cover spawn, start, steering, follow-up, completion, interruption,
 and stop. Child tool spans carry root/parent/depth attribution and nest under
 the parent trace when the parent turn supplies one.
 
-## Shared workspace
+## Project filesystem
 
 Children use the same workspace filesystem as their parent. Parallel research
 is naturally safe; parallel edits should be partitioned by file ownership or

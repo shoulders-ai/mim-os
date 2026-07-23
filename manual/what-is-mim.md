@@ -19,7 +19,7 @@ Mim is a desktop application for AI-native research work. It brings together an 
 Mim is one window divided into three panes.
 
 ::: rows
-- Navigator — the left column. It shows what work exists, where it is, and what state it is in. A fixed cluster at the top gives direct access to Chat, Routines, Files, Terminal, and Monitor. Below that, an Apps section lists installed app launchers and detected CLI agents, and an Activity section lists your chats, routine runs, and agent sessions. Settings lives at the bottom.
+- Navigator — the left column. It shows what work exists, where it is, and what state it is in. A fixed cluster at the top gives direct access to Chat, Routines, Files, Terminal, and Monitor. Below that, an Apps section lists enabled app launchers and detected CLI agents, and an Activity section lists your chats, routine runs, and agent sessions. Settings lives at the bottom.
 - Work — the center pane. This is where you act: chat transcripts, terminals, file browsers, search, app views, and configuration all appear here.
 - Artifact — the right pane. It holds durable things you are working on or reviewing: documents, PDFs, images, diffs, and reports.
 :::

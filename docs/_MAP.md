@@ -74,7 +74,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
 - **Git tools.** Status/diff/log/commit/pull/push plus managed Project sync with Git/LFS preflight, open/save/quit lifecycle automation, offline retry, and conflict-copy preservation. `src/main/git.ts`, `src/main/sync/`, `tools/git.ts`, `tools/sync.ts`.
 - **Team source.** One Personal connection, deterministic `~/.mim/team/` checkout, fixed contribution contract, writable system-Git background sync, conflict-copy preservation, and safe Project mount at `.mim/team`. `src/main/team/teamSource.ts`, `src/main/team/teamFiles.ts`, `tools/team.ts`. Docs: [team.md](team.md), [git.md](git.md).
-- **Personal config.** `~/.mim/config.yaml` (identity, appearance/editor/layout preferences, model defaults, skill activation, one credential-free Team repository, and currently legacy source configuration). Never holds keys or tokens. `src/main/userConfig.ts`.
+- **Personal config.** `~/.mim/config.yaml` (identity, appearance/editor/layout preferences, integration account defaults, model defaults, skill activation, and one credential-free Team repository). Never holds keys or tokens. `src/main/userConfig.ts`.
 - **Settings tools.** Route Personal preferences to `~/.mim/config.yaml` and current-Project runtime/tool state to `.mim/settings.json`; agent tool availability policy remains Project-local for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
 - **Editor state tool.** `editor.state` (MCP: `editor_state`): open tabs + active document snapshot, pushed by the renderer and cached in main. `src/main/tools/editorState.ts`.
@@ -111,10 +111,9 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 ### Main Process — App System
 
-- **App loader.** Workspace > global precedence, version pins, manifest validation. `src/main/packages/packages.ts`, `packageManifest.ts`, `packageEnablement.ts`.
 - **App runtime.** Backend jobs, app data, JSON Schema tool input validation, per-package app-tool serialization, agent descriptor parsing, `ctx.http` (host allowlist), `ctx.secrets` (keychain), named tools. `src/main/packages/packageRuntime.ts`, `packageJobs.ts`, `packageData.ts`, `packageHttp.ts`, `packageSecrets.ts`, `namedPackageTools.ts`. Docs: [app-system-api.md](app-system-api.md).
 - **App discovery and activation.** Direct Mim, Team, and Project roots with Project > Team > Mim precedence, local per-Project activation, permission review, and live rescans. `src/main/packages/packages.ts`, `packageEnablement.ts`, `tools/coreApps.ts`, `tools/packages.ts`. Docs: [app-system-api.md](app-system-api.md), [custom-apps.md](custom-apps.md).
-- **Core-app tools.** `app.status/enable/disable/remove/trust` for personal enablement. `src/main/tools/coreApps.ts`.
+- **Core-app tools.** `app.status/enable/disable/trust` for local activation and permission review. `src/main/tools/coreApps.ts`.
 - **App authoring.** Starter templates, create/validate/reload authoring loop. `src/main/tools/packages.ts`, `templates/appTemplates.ts`.
 - **App server.** Express + WebSocket for desktop app/AI/MCP routes, SDK file serving, and app/MCP tool dispatch. `src/main/server/server.ts`.
 - **App SDK.** WebSocket client for iframes. `sdk/mim.js`, `sdk/tokens.css`.
@@ -167,9 +166,12 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Themes.** Light (white/parchment/glacier/sage) + dark (slate/monokai/nord/dracula) via `data-theme`. `src/renderer/styles.css`.
 - **Toast store.** Global error/info notifications. `src/renderer/stores/toasts.ts`, `components/ToastHost.vue`.
 
-### External Apps (shoulders-ai/mim-apps)
+### External App Compatibility Catalog (shoulders-ai/mim-apps)
 
-All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulders-ai/mim-apps), one per `packages/<id>/`. Core has no built-in apps.
+The reference catalog lives in
+[shoulders-ai/mim-apps](https://github.com/shoulders-ai/mim-apps), one app per
+`packages/<id>/`. The compatibility suite stages these as Mim-origin apps and
+exercises the current loader/runtime contract.
 
 - **Board** — issues model, `issues.*` named tools.
 - **Knowledge** — knowledge model, `knowledge.*` named tools.
@@ -211,7 +213,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [routines.md](routines.md) | Routine definition lifecycle, activation, automation triggers, runs, and permissions |
 | [subagents.md](subagents.md) | Durable delegated threads, communication, scheduling, authority, persistence, and Navigator behavior |
 | [skills.md](skills.md) | Filesystem skill system |
-| [custom-apps.md](custom-apps.md) | Building workspace apps/skills |
+| [custom-apps.md](custom-apps.md) | Building Project and Team apps/skills |
 | [granola-private-app.md](granola-private-app.md) | Private Granola app rationale, implementation, and operations |
 | [app-system-api.md](app-system-api.md) | App system contract and author API |
 | [package-runtime.md](package-runtime.md) | App runtime architecture |
@@ -348,7 +350,6 @@ src/
       editorState.ts            # editor.state open-tab snapshot
       packages.ts               # App authoring tools
       coreApps.ts               # App enablement tools
-      install.ts                # App install/add/share
       documents.ts              # DOCX/PDF/import tools
       export.ts                 # PDF/DOCX export tools
       render.ts                 # HTML→PDF render tool
@@ -480,7 +481,6 @@ src/
       CommandPalette.vue        # Cmd/Ctrl+P palette
       AddProjectDialog.vue      # Open/New/Clone workspace
       InitWorkspaceBanner.vue   # Workspace init offer
-      MissingAppsBanner.vue     # Missing shared apps
 
 sdk/
   mim.js                        # WebSocket app SDK
@@ -517,7 +517,7 @@ docs/                           # Implementation docs (see Docs Index above)
 ## Branding
 
 - Product name: **Mim**. Internal package: `mim`.
-- Workspace contract: `mim.yaml` + `AGENTS.md` + `CLAUDE.md`. Runtime (gitignored): `.mim/`.
+- Project contract: `mim.yaml` + `AGENTS.md` + `CLAUDE.md`. Runtime (gitignored): `.mim/`.
 - Personal: `~/.mim/config.yaml` (identity, preferences, model defaults, skill activation — no secrets). Keys: `~/.mim/keys.env`. Integration tokens: OS keychain.
 
 ## Maintenance

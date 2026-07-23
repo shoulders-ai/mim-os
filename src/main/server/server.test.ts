@@ -38,7 +38,7 @@ describe('app server', () => {
         permissions: {},
       },
       dir: pkgDir,
-      source: 'workspace',
+      source: 'project',
       hasReadme: false,
     }
   }
@@ -116,10 +116,10 @@ describe('app server', () => {
     expect(await response.text()).toContain('Package UI')
   })
 
-  it('serves app UI even when the install path contains a dot-directory', async () => {
-    // Apps install under ~/.mim/packages/<id>/<version>/; the `.mim`
-    // dot-segment makes sendFile's default dotfiles:'ignore' policy 404 the
-    // whole path unless we serve relative to the ui/ root.
+  it('serves app UI even when its origin path contains a dot-directory', async () => {
+    // A dot-segment in any direct origin makes sendFile's default
+    // dotfiles:'ignore' policy 404 the whole path unless we serve relative to
+    // the ui/ root.
     const pkgDir = join(dir, '.mim', 'packages', 'dotpkg', '0.1.0')
     mkdirSync(join(pkgDir, 'ui'), { recursive: true })
     writeFileSync(join(pkgDir, 'ui', 'index.html'), '<h1>Dot UI</h1>')
@@ -133,7 +133,7 @@ describe('app server', () => {
         permissions: {},
       },
       dir: pkgDir,
-      source: 'global',
+      source: 'mim',
       hasReadme: false,
     }
     server = await createServer(makeTools(), makePackages([pkg]))

@@ -231,9 +231,9 @@ V1 destinations:
 - issue, only when the Board package is installed
 - copy/export proposal
 
-Not V1: "accept into app prompt" for registry-installed packages. Installed
-packages are pinned under `~/.mim/packages/<id>/<version>/`; app-prompt edits
-need a separate override layer or a workspace-dev package mode.
+Not V1: "accept into app prompt." Mim and Team apps are owned by their source,
+and Project app edits require a deliberate authored change rather than hidden
+prompt mutation from an activity review.
 
 Counts discipline:
 

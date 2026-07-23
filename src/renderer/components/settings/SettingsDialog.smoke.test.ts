@@ -43,9 +43,9 @@ describe('SettingsDialog model defaults', () => {
       if (tool === 'app.status') {
         return {
           apps: [
-            { id: 'board', enabled: false, layer: 'default', installed: true, installedVersions: ['0.1.0'], source: 'global', shadowed: false, needsTrust: false, needsInstall: false, folderPresent: false },
-            { id: 'knowledge', enabled: false, layer: 'default', installed: true, installedVersions: ['0.1.0'], source: 'global', shadowed: false, needsTrust: false, needsInstall: false, folderPresent: false },
-            { id: 'runtime-demo', enabled: true, layer: 'default', installed: true, installedVersions: ['0.1.0'], source: 'workspace', shadowed: false, needsTrust: false, needsInstall: false, folderPresent: false },
+            { id: 'board', enabled: false, layer: 'default', source: 'mim', shadowed: false, needsTrust: false, folderPresent: false },
+            { id: 'knowledge', enabled: false, layer: 'default', source: 'mim', shadowed: false, needsTrust: false, folderPresent: false },
+            { id: 'runtime-demo', enabled: true, layer: 'default', source: 'project', shadowed: false, needsTrust: false, folderPresent: false },
           ],
         }
       }
@@ -58,7 +58,7 @@ describe('SettingsDialog model defaults', () => {
             description: 'Package runtime demo',
             views: [{ id: 'main', label: 'Runtime', src: './ui/index.html', role: 'work' }],
             enabled: true,
-            source: 'workspace',
+            source: 'project',
           }],
           diagnostics: [],
         }
@@ -182,6 +182,34 @@ describe('SettingsDialog model defaults', () => {
     await flushUi()
     expect(document.body.querySelector('[aria-label="Project settings"]')).toBeTruthy()
     expect(sizeClasses()).toEqual(sizeBefore)
+  })
+
+  it('walks every accepted ownership section without leaving the fixed dialog', async () => {
+    app = createApp(SettingsDialog)
+    app.mount(root)
+    await flushUi()
+
+    const sections: Array<[string, string]> = [
+      ['general', '[aria-label="General settings"]'],
+      ['ai', '[aria-label="AI settings"]'],
+      ['connections', '[aria-label="Connections settings"]'],
+      ['team', '[aria-label="Team settings"]'],
+      ['project', '[aria-label="Project settings"]'],
+      ['apps', '[aria-label="Apps settings"]'],
+      ['skills', '[aria-label="Skills settings"]'],
+      ['tools', '[aria-label="Tools settings"]'],
+    ]
+
+    for (const [id, contentSelector] of sections) {
+      const button = document.body.querySelector<HTMLButtonElement>(`.sd-nav [data-section="${id}"]`)
+      expect(button, `${id} navigation button`).toBeTruthy()
+      button!.click()
+      await flushUi()
+      await flushUi()
+      expect(button!.getAttribute('aria-current'), `${id} active state`).toBe('true')
+      expect(document.body.querySelector(contentSelector), `${id} content`).toBeTruthy()
+      expect(document.body.querySelector('[data-testid="settings-dialog-layout"]')).toBeTruthy()
+    }
   })
 
   it('renders the Apps panel inline when the apps section is active', async () => {

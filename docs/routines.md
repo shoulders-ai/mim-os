@@ -189,7 +189,7 @@ requires approval. Consequential tools require either an exact `approval.allow`
 grant or a live approval. Global developer mode and per-session "always allow"
 do not bypass missing routine grants.
 
-Sensitive paths, outside-workspace paths, readonly resource writes, and saved
+Sensitive paths, paths outside the Project, Team mount mutation, and saved
 browser session grants still require approval even when a tool is in
 `approval.allow`.
 

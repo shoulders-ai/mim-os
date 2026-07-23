@@ -9,13 +9,10 @@ export interface AppStatus {
   id: string
   enabled: boolean
   layer: 'local' | 'default'
-  installed: true
-  installedVersions: string[]
   source: LoadedPackage['source']
   version: string
   shadowed: boolean
   needsTrust: boolean
-  needsInstall: false
   folderPresent: boolean
 }
 
@@ -48,13 +45,10 @@ function status(path: string, pkg: LoadedPackage, deps: CoreAppToolsDeps): AppSt
     id: pkg.manifest.id,
     enabled: deps.enablement.isEnabled(pkg),
     layer: deps.enablement.localOverride(pkg.manifest.id) === null ? 'default' : 'local',
-    installed: true,
-    installedVersions: [pkg.manifest.version],
     source: pkg.source,
     version: pkg.manifest.version,
     shadowed: (pkg.shadowedSources?.length ?? 0) > 0,
     needsTrust: deps.enablement.needsTrust(pkg),
-    needsInstall: false,
     folderPresent: folder !== undefined && existsSync(join(path, folder)),
   }
 }

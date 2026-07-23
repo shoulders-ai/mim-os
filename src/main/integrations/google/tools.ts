@@ -7,7 +7,6 @@ import { fetchHttpClient, type HttpClient } from '@main/integrations/http.js'
 import { createKeytarSecretStore, type SecretStore } from '@main/integrations/secrets.js'
 import { PermissionDeniedError } from '@main/security/gate.js'
 import { loadUserConfig } from '@main/userConfig.js'
-import { parseMimYaml } from '@main/workspace/workspaceContract.js'
 import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
 import {
   GOOGLE_SCOPE,
@@ -662,7 +661,7 @@ async function requireGoogleAiAccess(
   if (ctx.actor !== 'ai') return
   const policy = readGooglePolicy(tools.getWorkspacePath())
   if (!policy.aiEnabled) {
-    throw new PermissionDeniedError('Google AI access is disabled. Enable it in Settings > Connections.')
+    throw new PermissionDeniedError('Google AI access is disabled. Enable it in Settings > Tools.')
   }
   for (const [key, message] of opts.flags ?? []) {
     if (!policy[key]) throw new PermissionDeniedError(message)
@@ -675,20 +674,8 @@ async function requireGoogleAiAccess(
   }
 }
 
-function resolveGoogleAccount(tools: ToolRegistry, explicit?: string): string {
+function resolveGoogleAccount(_tools: ToolRegistry, explicit?: string): string {
   if (explicit) return explicit
-  const workspace = tools.getWorkspacePath()
-  if (workspace) {
-    const mimYamlPath = join(workspace, 'mim.yaml')
-    if (existsSync(mimYamlPath)) {
-      try {
-        const config = parseMimYaml(readFileSync(mimYamlPath, 'utf-8'))
-        if (config.google) return config.google
-      } catch {
-        // Fall back to user-global default below.
-      }
-    }
-  }
   return loadUserConfig().defaults.google ?? 'default'
 }
 

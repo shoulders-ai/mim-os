@@ -58,7 +58,7 @@ type ActivityRow =
   | { key: string; kind: 'run'; run: NavigatorRun }
 
 // Core platform surfaces: a fixed cluster above the Apps section. Not
-// draggable, no section header — these are fixtures, not installed apps.
+// draggable, no section header — these are fixtures, not app contributions.
 interface SurfaceRow {
   key: 'chat' | 'routines' | 'files' | 'trust' | 'terminal'
   label: string
@@ -67,7 +67,7 @@ interface SurfaceRow {
 
 // Package rows are destinations (their package view lights up as active);
 // agent rows are pure launchers — every click spawns a new session.
-// package-agent rows are app-mounted agents from installed packages.
+// package-agent rows are app-mounted agents from enabled apps.
 type AppRow =
   | { key: string; kind: 'package'; pkg: LoadedPackage }
   | { key: string; kind: 'agent'; agent: DetectedAgent }
@@ -937,7 +937,7 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <!-- Apps: installed package launchers. Expanded margin compensates the
+      <!-- Apps: enabled app launchers. Expanded margin compensates the
            header cluster's pb-2 + 1px rule so the Apps marker holds y on
            toggle (rail keeps mt-5 above its divider). -->
       <section :class="collapsed ? 'mt-5' : 'mt-[calc(0.75rem-1px)]'">

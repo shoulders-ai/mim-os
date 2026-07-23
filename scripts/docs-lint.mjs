@@ -20,8 +20,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
  * Load all registered tool names from the headless kernel plus
- * workspace-only tools from gate.ts policies (e.g. app.share,
- * package.install, which are only registered after workspace open).
+ * workspace-only tools from gate.ts policies, which are registered only after
+ * a Project opens.
  */
 export function loadToolNames() {
   const names = new Set()

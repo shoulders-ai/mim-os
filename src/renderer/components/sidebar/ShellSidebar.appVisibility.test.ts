@@ -17,36 +17,33 @@ const PACKAGES = [
   {
     manifest: { id: 'board', name: 'Board', icon: 'B', views: [{ id: 'main', label: 'Board', src: './ui/index.html', role: 'work' }] },
     dir: '/home/test/.mim/packages/board/0.1.0',
-    source: 'global',
+    source: 'mim',
   },
   {
     manifest: { id: 'knowledge', name: 'Knowledge', icon: 'K', views: [{ id: 'main', label: 'Knowledge', src: './ui/index.html', role: 'work' }] },
     dir: '/home/test/.mim/packages/knowledge/0.1.0',
-    source: 'global',
+    source: 'mim',
   },
   {
     manifest: { id: 'docx-review', name: 'DOCX Review', icon: 'D', views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }] },
     dir: '/home/test/.mim/packages/docx-review/0.1.0',
-    source: 'global',
+    source: 'mim',
   },
   {
     manifest: { id: 'runtime-demo', name: 'Runtime Demo', icon: 'R', views: [{ id: 'main', label: 'Runtime', src: './ui/index.html', role: 'work' }] },
     dir: '/home/test/.mim/packages/runtime-demo/0.1.0',
-    source: 'global',
+    source: 'mim',
   },
 ]
 
-function stubKernel(apps: Array<{ id: string; enabled: boolean; layer?: string; installed?: boolean; installedVersions?: string[]; source?: string; shadowed?: boolean; needsTrust?: boolean; needsInstall?: boolean; folderPresent?: boolean }>) {
+function stubKernel(apps: Array<{ id: string; enabled: boolean; layer?: string; source?: string; shadowed?: boolean; needsTrust?: boolean; folderPresent?: boolean }>) {
   const fullApps = apps.map(a => ({
     id: a.id,
     enabled: a.enabled,
     layer: a.layer ?? 'default',
-    installed: a.installed ?? true,
-    installedVersions: a.installedVersions ?? ['1.0.0'],
-    source: a.source ?? 'global',
+    source: a.source ?? 'mim',
     shadowed: a.shadowed ?? false,
     needsTrust: a.needsTrust ?? false,
-    needsInstall: a.needsInstall ?? false,
     folderPresent: a.folderPresent ?? false,
   }))
   const call = vi.fn(async (tool: string) => {

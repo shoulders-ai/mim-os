@@ -7,31 +7,25 @@ export interface ResolvedApp {
   id: string
   enabled: boolean
   layer: AppLayer
-  installed: true
   source?: 'mim' | 'team' | 'project'
   version?: string
   shadowed: boolean
   needsTrust: boolean
-  needsInstall: false
   visible: boolean
   folderPresent: boolean
 }
 
-interface AppStatusEntry extends Omit<ResolvedApp, 'visible'> {
-  installedVersions: string[]
-}
+type AppStatusEntry = Omit<ResolvedApp, 'visible'>
 
 function resolve(entry: AppStatusEntry): ResolvedApp {
   return {
     id: entry.id,
     enabled: entry.enabled,
     layer: entry.layer,
-    installed: true,
     source: entry.source,
     version: entry.version,
     shadowed: entry.shadowed,
     needsTrust: entry.needsTrust,
-    needsInstall: false,
     visible: entry.enabled && !entry.needsTrust,
     folderPresent: entry.folderPresent,
   }

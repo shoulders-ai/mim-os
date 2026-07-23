@@ -10,15 +10,6 @@ Every tool registered in the Mim tool registry. Effect determines the approval
 behavior: read tools are auto-approved, mutate and external tools require your
 approval.
 
-## account
-
-| tool | description | effect | approval |
-|---|---|---|---|
-| `account.setToken` | Save an account token to ~/.mim/keys.env | **mutate** | ask |
-| `account.clearToken` | Remove the account token from ~/.mim/keys.env | **mutate** | ask |
-| `account.status` | Check whether an account token is configured | read | auto |
-| `account.validate` | Validate the stored account token against the server | external | ask |
-
 ## ai
 
 | tool | description | effect | approval |
@@ -29,16 +20,21 @@ approval.
 | `ai.clearKey` | Remove a provider API key from ~/.mim/keys.env | **mutate** | ask |
 | `ai.generateObject` | Generate a structured JSON object with a configured AI model. Intended for package backend jobs. | read | auto |
 
+## always-on
+
+| tool | description | effect | approval |
+|---|---|---|---|
+| `always-on.status` | Read this headless client runtime state. | read | auto |
+
 ## app
 
 | tool | description | effect | approval |
 |---|---|---|---|
-| `app.status` | Resolved app state for every known app: personal enablement, workspace sharing layer, install and trust state, and folde | read | auto |
-| `app.enable` | Add an installed app to the current user sidebar/capability set. Enablement is personal/local; layer "workspace" is reje | **mutate** | ask |
-| `app.disable` | Remove an app from the current user sidebar/capability set. Never touches data folders, install dirs, or workspace shari | **mutate** | ask |
-| `app.trust` | Acknowledge trust for a vendored workspace app on this machine. User-only. | **mutate** | ask |
-| `app.remove` | Remove an app from workspace sharing by deleting the committed mim.yaml pin. Keeps install dirs, data folders, and perso | **mutate** | ask |
-| `app.agents.list` | List mounted agent profiles from enabled apps. | **mutate** | ask |
+| `app.status` | List available Mim, Team, and Project apps with this person’s local activation state. | read | auto |
+| `app.enable` | Enable an available app for this person in the current local Project checkout. | **mutate** | ask |
+| `app.disable` | Disable an app for this person in the current local Project checkout. | **mutate** | ask |
+| `app.trust` | Approve the declared access of a Team or Project app on this machine. | **mutate** | ask |
+| `app.agents.list` | List agent profiles supplied by enabled apps. | **mutate** | ask |
 
 ## archive
 
@@ -46,6 +42,12 @@ approval.
 |---|---|---|---|
 | `archive.list` | List archived sessions, package runs, and agent sessions with a content preview | **mutate** | ask |
 | `archive.search` | Full-text search within archived sessions | **mutate** | ask |
+
+## awareness
+
+| tool | description | effect | approval |
+|---|---|---|---|
+| `awareness.recent` | Show fetched Project and Team file changes with authors. | read | auto |
 
 ## calendar
 
@@ -73,6 +75,7 @@ approval.
 
 | tool | description | effect | approval |
 |---|---|---|---|
+| `config.setUser` | Update Personal name, email, and timezone. | **mutate** | ask |
 | `config.get` | Get Personal identity, preferences, model defaults, skill activation, and Team repository. No secrets. | read | auto |
 
 ## core
@@ -180,6 +183,13 @@ approval.
 | `history.prune` | Thin local recovery storage to the currently visible version-density policy. | **mutate** | ask |
 | `history.baseline` | Create initial local recovery points for eligible workspace files that do not have history yet. | read | auto |
 
+## instruction
+
+| tool | description | effect | approval |
+|---|---|---|---|
+| `instruction.list` | List composed instruction origins and their editor paths. | read | auto |
+| `instruction.open` | Ensure and return the normal editor path for one instruction origin. | **mutate** | ask |
+
 ## log
 
 | tool | description | effect | approval |
@@ -193,15 +203,15 @@ approval.
 |---|---|---|---|
 | `references.readBib` | Read the workspace BibTeX library and return citation rows for the editor. | read | auto |
 | `references.resolveBibliography` | Resolve the active bibliography for a markdown document using the quiet priority order shared by editor and export. | **mutate** | ask |
-| `references.setBibliographyPath` | Set the active workspace bibliography path after validating it is a workspace or mounted-resource .bib file. | **mutate** | ask |
+| `references.setBibliographyPath` | Set the active bibliography after validating it is a Project or Team .bib file. | **mutate** | ask |
 
 ## routine
 
 | tool | description | effect | approval |
 |---|---|---|---|
-| `routine.list` | List workspace routines and validation diagnostics | read | auto |
+| `routine.list` | List Team and Project routines with validation diagnostics | read | auto |
 | `routine.get` | Get a workspace routine definition | read | auto |
-| `routine.create` | Create a workspace routine definition; automatic runs require local review | **mutate** | ask |
+| `routine.create` | Create a Team or Project routine definition; automatic runs require local review | **mutate** | ask |
 | `routine.update` | Update a workspace routine definition if it has not changed since it was opened | **mutate** | ask |
 | `routine.duplicate` | Duplicate a workspace routine; automatic runs require local review | **mutate** | ask |
 | `routine.enable` | Enable automatic runs on this machine after reviewing the routine authority | **mutate** | ask |
@@ -260,22 +270,12 @@ approval.
 | `skill.list` | List available AI skills as metadata only. Body text is returned by skill.get. Pass detailed=true for Settings metadata  | read | auto |
 | `skill.get` | Activate a skill by name or package-qualified id and return its SKILL.md body plus declared tools. | read | auto |
 | `skill.setDisabled` | Enable or disable an authored skill globally by writing skills.disabled in ~/.mim/config.yaml. | **mutate** | ask |
-| `skill.create` | Create a new Personal skill at ~/.mim/skills/<name>/SKILL.md. | **mutate** | ask |
-| `skill.templateList` | List built-in starter templates for creating Personal skills. | read | auto |
+| `skill.create` | Create a new skill for You, the current Project, or the connected Team. | **mutate** | ask |
+| `skill.templateList` | List built-in starter templates for creating authored skills. | read | auto |
 | `skill.templateContent` | Render a built-in starter skill template without writing files. | read | auto |
-| `skill.inspectImport` | Inspect a SKILL.md folder before importing it into Personal skills. | read | auto |
-| `skill.import` | Import an inspected skill folder into Personal skills. Requires confirmed=true. | **mutate** | ask |
-| `skill.delete` | Delete a Personal skill by name. | **mutate** | ask |
-
-## skillSource
-
-| tool | description | effect | approval |
-|---|---|---|---|
-| `skillSource.list` | List trusted user-added skill sources and their current scan status. | read | auto |
-| `skillSource.inspect` | Inspect a local path or Git repository before adding it as a trusted skill source. | external | ask |
-| `skillSource.add` | Add an inspected local path or Git repository as a trusted skill source. Requires confirmed=true. | **mutate** | ask |
-| `skillSource.remove` | Remove a user-added skill source from ~/.mim/config.yaml. Git mirrors are deleted; local path contents are untouched. | **mutate** | ask |
-| `skillSource.refresh` | Refresh a user-added skill source. Git sources fetch latest default branch; local paths are re-scanned on demand. | external | ask |
+| `skill.inspectImport` | Inspect a SKILL.md folder before importing it into You, Project, or Team. | read | auto |
+| `skill.import` | Import an inspected skill folder into You, Project, or Team. Requires confirmed=true. | **mutate** | ask |
+| `skill.delete` | Delete a writable skill from You, Project, or Team. | **mutate** | ask |
 
 ## slack
 

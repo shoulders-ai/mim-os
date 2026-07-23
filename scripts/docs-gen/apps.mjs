@@ -1,8 +1,7 @@
 // Apps page generator.
 // Reads mim-apps manifests and README files and emits manual/develop/apps.md.
-// Sources: MIM_APPS_PATH env override, then well-known local locations, then
-// ~/.mim/packages/ install cache as fallback. If no source is found, warns
-// and exits 0 — does not fail the whole generation.
+// Sources: MIM_APPS_PATH env override, then well-known local checkouts. If no
+// source is found, warns and exits 0 — does not fail the whole generation.
 
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
@@ -38,10 +37,6 @@ export function findMimAppsPath() {
   for (const p of candidates) {
     if (existsSync(p) && hasPackageDirs(p)) return p
   }
-
-  // 3. Global install cache
-  const globalDir = join(home, '.mim/packages')
-  if (existsSync(globalDir) && hasPackageDirs(globalDir)) return globalDir
 
   return null
 }
@@ -106,7 +101,7 @@ export function generateAppsMarkdown(apps) {
     '',
     '# apps',
     '',
-    'Apps available in the Mim app registry.',
+    'Apps maintained in the Mim app catalog.',
     '',
     '| app | description | version |',
     '|---|---|---|',

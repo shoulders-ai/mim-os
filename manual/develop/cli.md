@@ -42,6 +42,7 @@ mim log --read [--workspace path] [--json]
 mim list-tools [--json]
 mim tool <name> [json|--stdin] [--workspace path] [--json] [--yes]
 mim go [--workspace path] [-- command ...]
+mim always-on [--workspace path] [--host address] [--port number]
 mim mcp
 ```
 
@@ -66,20 +67,28 @@ Tool calls run as the `ai` actor. Approval-required calls are denied by default 
 
 `mim go` refreshes agent context, then runs an external command in the workspace. With no command after `--`, it runs `claude`.
 
+`mim always-on` keeps the headless kernel alive to synchronize Project and
+Team changes, run scheduled/file/webhook/Slack routines, and expose signed
+webhooks. It remains an ordinary local client with machine-local credentials,
+activation, and scheduler state.
+
 `mim mcp` starts the MCP stdio bridge to the running desktop app. It does not boot a headless workspace. See [MCP bridge](mcp).
 
-## Registry and install
+## Apps and local activation
 
-The headless kernel registers the same package loader, enablement store, and registry/install tools as the desktop. All are available through `mim tool`:
+The headless kernel discovers the same direct Mim, Team, and Project app
+origins as the desktop:
 
 ```bash
-mim tool registry.list '{}' --json
-mim tool package.install '{"id":"github-monitor"}' --yes
-mim tool app.enable '{"id":"github-monitor"}' --yes
+mim tool package.list '{}' --json
 mim tool app.status '{}' --json
+mim tool app.enable '{"id":"github-monitor"}' --yes
+mim tool app.disable '{"id":"github-monitor"}' --yes
 ```
 
-`app.trust` and `registry.trust` are user-only and hard-denied to the `ai` actor. They are not available through `mim tool`, which runs as `ai`. Trust acknowledgement is interactive-only.
+Activation is private to this person and local Project checkout. Team and
+Project apps that declare effective access require permission review in the
+desktop; `app.trust` is user-only and unavailable through `mim tool`.
 
 ## Trace tools
 

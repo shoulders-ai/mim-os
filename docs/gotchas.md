@@ -227,29 +227,13 @@ Normal Project traversal skips `.mim`, so the Files surface, file index, and
 content search explicitly traverse only `.mim/team/files`. Do not add another
 external-root exception or expose the rest of the Team checkout as Files rows.
 
-## Symlinks refused in installed package trees
-
-The install tools (`tools/install.ts`) refuse symlinks in package checkouts before copying. A symlink escaping the package directory would be imported or served from inside the package while actually pointing somewhere else, so installs fail loudly instead of preserving it. The check skips `.git`.
-
-## Flat global package dirs skipped with diagnostic, no migration
-
-The global packages directory uses a two-level layout: `~/.mim/packages/<id>/<version>/package.json`. If a `package.json` exists directly under `~/.mim/packages/<id>/` (the old flat layout), the loader emits a diagnostic and skips the entire id directory. There is no migration path — manually restructure the directory or reinstall through `package.install`.
-
-## Legacy apps map key `issues` breaks loudly
-
-The `mim.yaml` `apps:` map is keyed by package id (`board`, `knowledge`), not by app name. The legacy `issues` key is skipped by the parser (`workspaceContract.ts` `LEGACY_APP_KEYS`) and the loader surfaces a diagnostic naming the replacement (`mim.yaml apps: legacy key "issues" is ignored — use "board"`). There is no shim or migration — a workspace that still has `apps: { issues: true }` will not share or pin the board package; change it to `apps: { board: true }`.
-
-## Committed app pins do not activate code
-
-A committed `mim.yaml` app entry means "this workspace uses this app" and may pin `source`, `path`, and `version` for collaborators. It never adds the app to anyone's sidebar or activates backend/tools by itself. Personal activation lives in gitignored `.mim/packages/enabled.json`, and vendored workspace apps with backend code or effective permissions still require a local trust ack before they run.
-
 ## Enabled headless apps do not get sidebar launchers
 
-`enabled` means the app can contribute its backend jobs/tools/skills for this user. The Navigator only renders launchers for enabled, installed apps that expose a view. A package with `mim.views: []` can be correctly enabled and still have no sidebar entry; adding a view in a later installed version makes the launcher appear once the loader selects that version.
-
-## Multiple installed app versions are normal
-
-Global installs are side-by-side under `~/.mim/packages/<id>/<version>/`. Updating an app does not delete older versions. The loader chooses the workspace-pinned version when `mim.yaml` pins one, otherwise the highest installed semver. Settings > Apps Browse collapses multiple registry entries with the same app id to one row for the newest registry version.
+`enabled` means the app can contribute its backend jobs/tools/skills for this
+user. The Navigator only renders launchers for enabled available apps that
+expose a view. A package with `mim.views: []` can be correctly enabled and
+still have no sidebar entry; adding a view to its Mim, Team, or Project source
+makes the launcher appear after the loader rescans that origin.
 
 ## Package UI iframes can only load files under ui/
 

@@ -1,10 +1,11 @@
 # App Runtime And Job SDK
 
-Status: core subsystem implemented, including `ctx.http` and `ctx.secrets`;
-sandboxed execution and app-tool settings remain follow-up work.
+Status: core subsystem implemented, including direct-origin discovery,
+`ctx.http`, `ctx.secrets`, app skills, tools, agents, and jobs. Backend process
+sandboxing and individual app-tool settings remain follow-up work.
 
-This document defines the target architecture and TDD plan for the app
-runtime. The app system is the reason this repo exists: Mim should be
+This document defines the current app runtime architecture. The app system is
+the reason this repo exists: Mim should be
 a local-first desktop runtime for bespoke workflow software, not a fixed app
 with a plugin drawer.
 
@@ -12,7 +13,8 @@ with a plugin drawer.
 
 The runtime must make apps feel first-class, safe, and pleasant to build.
 
-- Apps are installable capability bundles. UI is optional.
+- Apps are file-native capability bundles discovered from Mim, Team, or
+  Project origins. UI is optional.
 - An app may contribute views, jobs, AI tools, filesystem skills
   (`skills/<name>/SKILL.md`, see [skills.md](skills.md)), templates, data
   collections, or any combination of those.
@@ -50,12 +52,12 @@ App state is intentionally split into separate concepts:
 
 | State | Meaning |
 |---|---|
-| Installed | The app exists on disk and has a readable manifest. |
-| Enabled | The workspace or user has allowed the app to contribute capabilities. |
+| Available | The app exists in a direct origin and has a readable manifest. |
+| Enabled | This person has activated the app for the local Project checkout. |
 | Loaded | The backend module has been imported and descriptors are available. |
 | Active | A view, job, or tool call from the app is currently in use. |
 
-Installed does not imply enabled. Enabled does not imply UI is open. Headless
+Available does not imply enabled. Enabled does not imply UI is open. Headless
 tool and skill apps are expected.
 
 ## Manifest V1
@@ -183,7 +185,7 @@ errors. They should remain zero-magic helpers, not a framework requirement.
 PackageLoader
   reads package.json mim blocks
   validates static manifest
-  reports installed apps and diagnostics
+  reports available apps, origins, overrides, and diagnostics
 
 EnabledPackageStore
   records which apps are enabled for this workspace
@@ -367,7 +369,7 @@ chat tool builder asks CapabilityRegistry for enabled chat tools
 
 UX requirements:
 
-- Installed app tools are not silently available. The app must be
+- Available app tools are not silently active. The app must be
   enabled.
 - Tool calls show provider: "Check dataset, provided by Stats Checker."
 - Permission prompts name the app: "Stats Checker wants to read data.csv."
@@ -378,7 +380,7 @@ UX requirements:
 
 App skills are filesystem skills: `{package}/skills/<name>/SKILL.md` in the
 format described in [skills.md](skills.md), available only while the app is
-enabled (loading not yet wired). Backend `export const skills` is ignored.
+enabled. Backend `export const skills` is ignored.
 Skills may reference app tools, which still execute under app identity
 and permissions.
 

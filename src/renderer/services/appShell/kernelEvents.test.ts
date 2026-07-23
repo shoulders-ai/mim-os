@@ -106,7 +106,7 @@ describe('app shell kernel events', () => {
     const { deps, kernel, emit } = makeHarness()
     registerAppKernelEvents(kernel, deps)
 
-    const packages = [{ manifest: { id: 'slides', name: 'Slides' }, dir: '/pkg', source: 'registry' }]
+    const packages = [{ manifest: { id: 'slides', name: 'Slides' }, dir: '/pkg', source: 'mim' }]
     emit('packages:changed', packages)
     emit('apps:changed')
 

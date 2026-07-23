@@ -31,7 +31,7 @@ Eight categories of data can leave your machine. Most require your action or a k
 
 **Integrations.** When you connect Slack or Google, data flows between Mim and those services -- messages, calendar events, Drive files. Each integration must be connected and its tools individually enabled in Settings > Tools before anything is sent. Every integration call prompts for approval in Normal and Strict modes.
 
-**Apps.** An installed app may contact the hosts declared in its manifest — and only those. Requests to any other host are refused.
+**Apps.** An enabled app may contact the hosts declared in its manifest — and only those. Requests to any other host are refused.
 
 **Git and sync.** When you push commits or use managed sync, your workspace content travels to your git remote.
 

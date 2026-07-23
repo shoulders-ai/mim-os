@@ -412,7 +412,7 @@ describe('App tools', () => {
     ).rejects.toThrow('No workspace')
   })
 
-  it('package.create refuses when id resolves to a global app', async () => {
+  it('package.create refuses when id resolves to a Mim app', async () => {
     loader._addWithSource({ id: 'github-monitor', name: 'GitHub Monitor' }, '/fake/github-monitor', 'global')
     await expect(
       tools.call('package.create', { id: 'github-monitor', name: 'GM Local', html: '<p></p>' }, ctx)

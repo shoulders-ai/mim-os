@@ -506,7 +506,7 @@ both light and dark themes look right.
 **Goal.** Users see detected interpreters and control the allowlist.
 
 **Files.** Modify `src/renderer/components/settings/ToolsSettingsPanel.vue`
-(+ registry test pattern used by `AppsSettingsPanel.registry.test.ts` if
+(+ app catalog test pattern used by `AppsSettingsPanel.test.ts` if
 applicable): the new `code` domain group (from R2.2) renders the `code.run` policy
 row; beneath it, an interpreter list built from `toolchain.status` — each catalog
 entry with name, version or "not found" (`text-ink-3`), and a `MimToggle` bound to

@@ -98,73 +98,44 @@ node bin/mim.mjs tool trace.query '{"days":1,"status":"error","limit":20}' --jso
 node bin/mim.mjs orient --json
 ```
 
-## Registry, Install, and Enablement
+## Apps and Local Activation
 
-On workspace open, the headless kernel registers the same package loader,
-enablement store, app tools, registry tools, and install tools as the Electron
-app. All of these are available through `mim tool`:
+On Project open, the headless kernel discovers the same direct Mim, Team, and
+Project app origins as Electron and registers the same local activation and app
+runtime tools:
 
 ```bash
-# List all registry sources and their entries (returns { registries: [...], entries: [...] })
-mim tool registry.list '{}' --json
+# List available apps and their Mim, Team, or Project origin
+mim tool package.list '{}' --json
 
-# Acknowledge trust for a workspace-declared registry
-mim tool registry.trust '{"id":"acme"}' --yes
-
-# Install a package globally from the registry
-mim tool package.install '{"id":"github-monitor"}' --yes
-
-# Install a specific version
-mim tool package.install '{"id":"github-monitor","version":"1.2.0"}' --yes
-
-# Install from a direct repo URL (optional "path" selects a subdirectory in a multi-package repo)
-mim tool package.install '{"repo":"https://github.com/shoulders-ai/mim-apps","path":"packages/github-monitor","ref":"v1.2.0"}' --yes
-
-# Update to the latest registry version (repoints workspace pin if one exists)
-mim tool package.update '{"id":"github-monitor"}' --yes
-
-# Uninstall a version
-mim tool package.uninstall '{"id":"github-monitor","version":"1.0.0"}' --yes
-
-# View resolved enablement state for all packages
+# View local activation and permission-review state
 mim tool app.status '{}' --json
 
-# Add an installed package to my sidebar/capability set
+# Activate an available app for this local Project checkout
 mim tool app.enable '{"id":"github-monitor"}' --yes
 
-# Share a registry app with collaborators by writing a committed mim.yaml pin
-mim tool app.share '{"id":"github-monitor"}' --yes
-
-# Remove from my sidebar/capability set
+# Deactivate it locally
 mim tool app.disable '{"id":"some-addon"}' --yes
 ```
 
-Registry and install tools (`registry.list`, `package.install`,
-`package.update`, `app.share`) are `network`-category (external effect), so they require
-`--yes` or TTY confirmation. `package.uninstall`, `app.enable`/`app.disable`
-are `settings`-category (mutate effect), same rule.
+`app.enable` and `app.disable` are settings mutations, so they require `--yes`
+or TTY confirmation. `app.trust` is user-only and hard-denied to the `ai`
+actor, including `mim tool`; review a Team or Project app's declared access in
+the desktop UI before enabling it.
 
-`app.trust` and `registry.trust` are user-only and hard-denied to the `ai`
-actor. They are not available through `mim tool` (which runs as `ai`). Trust
-acknowledgement for vendored workspace packages and workspace-declared
-registries is an interactive-only action.
+### Availability and activation
 
-### Sharing and enablement
+Apps have separate availability and local activation:
 
-Apps have separate sharing and personal-enable states:
+- **available** — an app directory in packaged Mim resources, the connected
+  Team's `apps/`, or the current Project's `packages/`.
+- **enabled** — a gitignored `.mim/packages/enabled.json` entry for this local
+  Project checkout. It controls this person's views and capability set.
 
-- **shared** — the committed `mim.yaml` `apps:` entry, keyed by package id.
-  It travels through git and tells collaborators which app/source/version the
-  workspace uses. It does not enable the app for anyone.
-- **enabled** — the gitignored `.mim/packages/enabled.json` entry for this
-  workspace. It controls the current user's sidebar/capability set.
-
-`app.enable` and `app.disable` are always personal/local. Explicit
-`layer:"workspace"` is rejected; use `app.share` for workspace sharing and
-`app.remove` to remove a workspace share.
-
-Activation order: local enabled entry plus the vendored-app trust gate, else
-disabled. A committed `mim.yaml` app pin never activates app code by itself.
+Project overrides Team and Team overrides Mim for duplicate ids. Activation is
+always local. Project apps update with Project Git sync, Team apps with Team
+sync, and Mim apps with application updates; there is no per-app download or
+install lifecycle.
 
 ## Source
 

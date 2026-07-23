@@ -1,5 +1,5 @@
 // App-mounted agents store — the renderer's source of truth for agents
-// contributed by installed packages. Each agent is a headless chat profile
+// contributed by enabled apps. Each agent is a headless chat profile
 // defined in a package manifest. Refreshed on boot and on packages:changed.
 //
 // These are distinct from CLI agents (stores/agents.ts) — CLI agents are

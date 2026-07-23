@@ -314,7 +314,7 @@ describe('ShellSidebar smoke', () => {
       packages: [{
         manifest: { id: 'docx-review', name: 'DOCX Review', icon: 'D', views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }] },
         dir: '/packages/docx-review',
-        source: 'global',
+        source: 'mim',
       }],
       activeWorkId: '',
       workspaceName: 'Project',
@@ -369,7 +369,7 @@ describe('ShellSidebar smoke', () => {
             views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }],
           },
           dir: '/home/test/.mim/packages/docx-review/0.1.0',
-          source: 'global',
+          source: 'mim',
         },
         {
           manifest: {
@@ -379,7 +379,7 @@ describe('ShellSidebar smoke', () => {
             views: [{ id: 'main', label: 'Runtime', src: './ui/index.html', role: 'work' }],
           },
           dir: '/home/test/.mim/packages/runtime-demo/0.1.0',
-          source: 'global',
+          source: 'mim',
         },
       ],
       activeWorkId: 'work:files',
@@ -437,17 +437,17 @@ describe('ShellSidebar smoke', () => {
         {
           manifest: { id: 'docx-review', name: 'DOCX Review', icon: 'D', views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }] },
           dir: '/home/test/.mim/packages/docx-review/0.1.0',
-          source: 'global',
+          source: 'mim',
         },
         {
           manifest: { id: 'slack-digest', name: 'Slack Digest', icon: 'S', views: [{ id: 'main', label: 'Slack Digest', src: './ui/index.html', role: 'work' }] },
           dir: '/workspace/packages/slack-digest',
-          source: 'workspace',
+          source: 'project',
         },
         {
           manifest: { id: 'runtime-demo', name: 'Runtime Demo', icon: 'R', views: [{ id: 'main', label: 'Runtime', src: './ui/index.html', role: 'work' }] },
           dir: '/home/test/.mim/packages/runtime-demo/0.1.0',
-          source: 'global',
+          source: 'mim',
         },
       ],
       activeWorkId: '',
@@ -621,7 +621,7 @@ describe('ShellSidebar smoke', () => {
       packages: [{
         manifest: { id: 'doc-review', name: 'DOCX Review', icon: 'D', views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }] },
         dir: '/packages/doc-review',
-        source: 'global',
+        source: 'mim',
       }],
       activeWorkId: 'work:package-run:doc-review:run-review-1',
       workspaceName: 'Workspace',
@@ -664,7 +664,7 @@ describe('ShellSidebar smoke', () => {
       packages: [{
         manifest: { id: 'doc-review', name: 'DOCX Review', icon: 'D', views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }] },
         dir: '/packages/doc-review',
-        source: 'global',
+        source: 'mim',
       }],
       activeWorkId: 'work:package-run:doc-review:run-review-1',
       workspaceName: 'Workspace',
@@ -903,7 +903,7 @@ describe('ShellSidebar smoke', () => {
       packages: [{
         manifest: { id: 'docx-review', name: 'DOCX Review', icon: 'D', views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }] },
         dir: '/packages/docx-review',
-        source: 'global',
+        source: 'mim',
       }],
       activeWorkId: '',
       workspaceName: 'Workspace',
@@ -1004,7 +1004,7 @@ describe('ShellSidebar smoke', () => {
       packages: [{
         manifest: { id: 'docx-review', name: 'DOCX Review', icon: 'D', views: [{ id: 'main', label: 'DOCX Review', src: './ui/index.html', role: 'work' }] },
         dir: '/packages/docx-review',
-        source: 'global',
+        source: 'mim',
       }],
       activeWorkId: '',
       workspaceName: 'Workspace',
@@ -1193,12 +1193,12 @@ describe('ShellSidebar smoke', () => {
         {
           manifest: { id: 'github-monitor', name: 'GitHub Monitor', icon: './ui/icon.svg', views: [{ id: 'main', label: 'GitHub', src: './ui/index.html', role: 'work' }] },
           dir: '/packages/github-monitor',
-          source: 'global',
+          source: 'mim',
         },
         {
           manifest: { id: 'board', name: 'Board', icon: 'B', views: [{ id: 'main', label: 'Board', src: './ui/index.html', role: 'work' }] },
           dir: '/packages/board',
-          source: 'global',
+          source: 'mim',
         },
       ],
       activeWorkId: '',

@@ -160,7 +160,7 @@ describe('userConfig — loadUserConfig', () => {
     expect(JSON.stringify(config)).not.toContain('secret-token')
   })
 
-  it('parses connector policy from config.yaml', () => {
+  it('ignores retired connector policy fields', () => {
     writeConfig(home, [
       'connectors:',
       '  slack:',
@@ -178,27 +178,7 @@ describe('userConfig — loadUserConfig', () => {
       '    sheetsWriteEnabled: false',
     ].join('\n'))
     const config = loadUserConfig(home)
-    expect(config.connectors.slack).toEqual({
-      aiEnabled: true,
-      sendEnabled: false,
-      privateChannels: false,
-      directMessages: true,
-    })
-    expect(config.connectors.google).toEqual({
-      aiEnabled: true,
-      gmailEnabled: true,
-      gmailSendEnabled: false,
-      calendarEnabled: true,
-      calendarWriteEnabled: false,
-      driveEnabled: true,
-      sheetsWriteEnabled: false,
-    })
-  })
-
-  it('returns empty connectors when none configured', () => {
-    writeConfig(home, 'user:\n  name: Paul\n')
-    const config = loadUserConfig(home)
-    expect(config.connectors).toEqual({})
+    expect(config).not.toHaveProperty('connectors')
   })
 })
 

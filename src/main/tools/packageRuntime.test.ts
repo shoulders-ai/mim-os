@@ -29,7 +29,7 @@ describe('app runtime tools', () => {
       get: vi.fn(() => ({
         manifest: { id: 'self', name: 'Self', version: '0.1.0', views: [], permissions: { secrets: ['api_token'] } },
         dir: packageDir,
-        source: 'workspace',
+        source: 'project',
       })),
       list: vi.fn(() => []),
       diagnostics: vi.fn(() => []),

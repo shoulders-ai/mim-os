@@ -105,8 +105,9 @@ The desktop live browser has one narrow exception: when `browser_open` itself
 targets a supported loopback host, that session may load loopback HTTP(S) and
 WebSocket resources for the local app. A session opened on a public page cannot
 reach loopback resources, and loopback sessions still cannot reach private LAN,
-link-local, cloud-metadata, or unique-local addresses. Headless/serve mode has no
-Electron live-browser driver, so the exception is not available to remote MCP.
+link-local, cloud-metadata, or unique-local addresses. Headless and always-on
+clients have no Electron live-browser driver, so the loopback exception is not
+available there.
 
 Website Access reads add a second request boundary: sign-in, consent, and
 cookies may only be used on domains covered by the approved domain patterns for

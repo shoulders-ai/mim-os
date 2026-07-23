@@ -62,7 +62,8 @@ The global `~/.mim/` directory holds your user-level state:
 
 - `keys.env` — API keys, managed by Settings and `ai.setKey`.
 - `config.yaml` — identity and model defaults. Never holds API keys or integration tokens.
-- `packages/` — installed apps, cached by id and version.
+- `instructions.md` and `skills/` — your reusable Personal instructions and skills.
+- `team/` — the connected Team checkout, when configured.
 
 Integration tokens for connected services live in the OS keychain, not in any file under `~/.mim/`.
 :::

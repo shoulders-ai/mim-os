@@ -121,11 +121,11 @@ describe('Google tools', () => {
     expect(secrets.dump()[`${MIM_KEYCHAIN_SERVICE}:${googleTokenAccount('default')}`]).toBeUndefined()
   })
 
-  it('uses mim.yaml google account by default', async () => {
+  it('ignores the retired mim.yaml google account and uses the Personal default', async () => {
     writeFileSync(join(dir, 'mim.yaml'), 'name: demo\ngoogle: work@example.com\n')
     const calls: Array<Record<string, unknown>> = []
     const secrets = createMemorySecretStore({
-      [`${MIM_KEYCHAIN_SERVICE}:${googleTokenAccount('work@example.com')}`]: JSON.stringify({ access_token: 'access', expires_at: 999999 }),
+      [`${MIM_KEYCHAIN_SERVICE}:${googleTokenAccount('default')}`]: JSON.stringify({ access_token: 'access', expires_at: 999999 }),
     })
     registerGoogleTools(tools, {
       secrets,
@@ -466,9 +466,16 @@ describe('Google connector policy enforcement', () => {
   }
 
   function writePolicy(policy: Record<string, unknown>) {
+    const enabled: string[] = []
+    if (policy.aiEnabled && policy.gmailEnabled) enabled.push('gmail.search', 'gmail.read')
+    if (policy.aiEnabled && policy.gmailSendEnabled) enabled.push('gmail.send')
+    if (policy.aiEnabled && policy.calendarEnabled) enabled.push('calendar.events')
+    if (policy.aiEnabled && policy.calendarWriteEnabled) enabled.push('calendar.create')
+    if (policy.aiEnabled && policy.driveEnabled) enabled.push('drive.search', 'drive.meta', 'docs.read', 'sheets.meta', 'sheets.read')
+    if (policy.aiEnabled && policy.sheetsWriteEnabled) enabled.push('sheets.write', 'sheets.append')
     mkdirSync(join(dir, '.mim'), { recursive: true })
     writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
-      connectors: { google: policy },
+      tools: { enabled, disabled: [] },
     }))
   }
 

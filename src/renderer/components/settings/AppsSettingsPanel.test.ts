@@ -34,12 +34,9 @@ describe('Apps & agents direct sources', () => {
           id,
           enabled: false,
           layer: 'default',
-          installed: true,
-          installedVersions: ['1.0.0'],
           source: id === 'built-in' ? 'mim' : id === 'shared' ? 'team' : 'project',
           shadowed: false,
           needsTrust: false,
-          needsInstall: false,
           folderPresent: false,
         })),
       }
@@ -77,7 +74,7 @@ describe('Apps & agents direct sources', () => {
     expect(root.querySelector('[data-testid="app-origin-local"]')?.textContent).toBe('Acme Proposal')
   })
 
-  it('does not call registry or account tools', async () => {
+  it('uses only direct-source app tools', async () => {
     await settle()
     expect(call.mock.calls.some(([tool]) => String(tool).startsWith('registry.'))).toBe(false)
     expect(call.mock.calls.some(([tool]) => String(tool).startsWith('account.'))).toBe(false)

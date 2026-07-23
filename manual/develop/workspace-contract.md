@@ -15,7 +15,7 @@ Every Mim workspace is a directory with three contract files and a runtime direc
 ## Contract files
 
 ::: rows
-- `mim.yaml` -- Project configuration: name, app pins, skills, registries, sync mode.
+- `mim.yaml` -- Project configuration: name and optional sync mode/remote.
 - `AGENTS.md` -- the durable system prompt for any agent working in this workspace. Contains `{{TOOL_SET}}`, `{{SKILL_CATALOG}}`, `{{WORKSPACE_TREE}}`, `{{PROJECT_LOG}}`, `{{AGENT_CONTEXT}}`, and `{{DATE_TODAY}}` template variables resolved at runtime.
 - `CLAUDE.md` -- contract pointer. The default content is `@AGENTS.md`, which causes CLI agents (Claude Code) to read the same instructions.
 :::
@@ -24,39 +24,15 @@ Every Mim workspace is a directory with three contract files and a runtime direc
 
 ## mim.yaml schema
 
-The parser (`parseMimYaml`) accepts these top-level keys:
+The parser (`parseMimYaml`) accepts two top-level keys:
 
 `name` (string, required) -- workspace display name.
 
-`google` (string, optional) -- Google integration account label.
-
-`slack` (string, optional) -- Slack integration account label.
-
-`apps` (map, optional) -- shared app declarations keyed by app id. Values are `boolean` or an object with optional `source`, `path`, `version`, and `enabled` fields. The legacy key `issues` is dropped by the parser. App ids must match `^[a-z0-9][a-z0-9_-]{0,59}$`.
-
-```yaml
-apps:
-  board: true
-  github-monitor:
-    source: https://github.com/shoulders-ai/mim-apps
-    path: packages/github-monitor
-    version: 1.2.0
-```
-
-`skills` (object, optional) -- `disabled` is an array of skill names to disable globally. Skill names must match `^[a-z0-9][a-z0-9-]{0,63}$`.
-
-`registries` (map, optional) -- committed registry sources keyed by kebab-case slug id. Reserved ids `default` and `user` are rejected. Exactly one of `git` (HTTPS, credential-free), `path` (workspace-relative directory containing `index.json`), or `url` (direct HTTPS URL to an `index.json` file) must be present. Each entry accepts an optional `name`.
-
-```yaml
-registries:
-  acme:
-    name: Acme internal
-    git: https://github.com/acme/mim-registry.git
-```
-
 `sync` (object, optional) -- explicit workspace sync mode. `mode` is `manual` or `managed`. `remote` is an optional remote name.
 
-Unknown top-level keys are ignored by the parser. Invalid entries within maps (bad ids, credential-bearing URLs, traversal paths) are dropped without failing the file.
+Unknown top-level keys are ignored. App availability comes from direct Mim,
+Team, and Project directories; skill activation and integration account
+defaults are Personal state rather than Project configuration.
 
 ## .mim/ layout
 

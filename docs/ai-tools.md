@@ -69,7 +69,9 @@ Chat exposes selected personal integration tools through `src/main/ai/aiRuntime.
 
 Slack send is a kernel/CLI tool only, not a chat tool. Google outbound/write chat tools are `external` main-process tool calls and require approval in normal and strict modes (their `high` risk only drives the approval card's caution styling).
 
-Slack tools are included only when `connectors.slack.aiEnabled` allows them. Google tools are included only when Google is connected, `connectors.google.aiEnabled` allows them, the relevant service toggle is enabled, and the stored token grants the required OAuth scopes.
+Slack and Google tools are included only when their Settings > Tools rows are
+enabled. Google also requires a connected account whose stored token grants
+the relevant OAuth scopes.
 
 Integration secrets stay in the OS keychain via `src/main/integrations/secrets.ts`. Packages cannot call personal Slack or Google tools in runtime v1.
 

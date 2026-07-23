@@ -182,23 +182,6 @@ function formatLocalPackageDiagnostic(message: string): string {
   return firstLine.slice(0, LOCAL_PACKAGE_DIAGNOSTIC_MAX) + '...'
 }
 
-function resolveAppsFromCommitted(workspacePath: string): AgentContextApp[] {
-  const mimYamlPath = join(workspacePath, 'mim.yaml')
-  if (!existsSync(mimYamlPath)) return []
-  try {
-    const config = parseMimYaml(readFileSync(mimYamlPath, 'utf-8'))
-    if (!config.apps) return []
-    return Object.keys(config.apps)
-      .map((id) => ({
-        id,
-        enabled: false,
-      }))
-      .sort((a, b) => a.id.localeCompare(b.id))
-  } catch {
-    return []
-  }
-}
-
 function defaultReadRecentChanges(cwd: string, limit: number): string[] {
   try {
     const result = spawnSync(
@@ -235,7 +218,7 @@ export function gatherAgentContext(workspacePath: string, deps: AgentContextDeps
   const resolveApps = deps.resolveApps ?? defaultResolveApps
   const apps = resolveApps
     ? resolveApps(workspacePath)
-    : resolveAppsFromCommitted(workspacePath)
+    : []
 
   const data: AgentContextData = {
     workspace: {

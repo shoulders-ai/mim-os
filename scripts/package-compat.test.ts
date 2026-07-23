@@ -79,17 +79,17 @@ describeCompat('mim-apps compatibility', () => {
 
     const root = mkdtempSync(join(tmpdir(), 'mim-package-compat-'))
     const workspace = join(root, 'workspace')
-    const globalDir = join(root, 'global-packages')
+    const mimDir = join(root, 'mim-apps')
     mkdirSync(workspace, { recursive: true })
-    mkdirSync(globalDir, { recursive: true })
+    mkdirSync(mimDir, { recursive: true })
     writeFileSync(join(workspace, 'mim.yaml'), 'name: package-compat\n')
 
     const packageJsonById = new Map<string, PackageJson>()
     for (const id of selectedIds) {
       const srcDir = join(packagesRoot, 'packages', id)
       const packageJson = readPackageJson(srcDir)
-      const version = requireString(packageJson.version, `${id} package version`)
-      const destDir = join(globalDir, id, version)
+      requireString(packageJson.version, `${id} package version`)
+      const destDir = join(mimDir, id)
       copyPackageDir(srcDir, destDir)
       packageJsonById.set(id, packageJson)
     }
@@ -101,7 +101,7 @@ describeCompat('mim-apps compatibility', () => {
     registerDocumentTools(tools)
     registerReferencesTools(tools)
 
-    const packages = await createPackageLoader(tools, { globalDir })
+    const packages = await createPackageLoader(tools, { mimDir })
     const enablement = createPackageEnablementStore({ getWorkspacePath: () => workspace })
     const secrets = createMemorySecretStore()
     for (const [id, packageJson] of packageJsonById) {
@@ -179,14 +179,13 @@ describeCompat('mim-apps compatibility', () => {
   it('enables every selected app through app.enable', async () => {
     const h = requireHarness()
     const result = await h.tools.call('app.status', {}, { actor: 'user' }) as {
-      apps: Array<{ id: string; enabled: boolean; installed: boolean; folderPresent: boolean }>
+      apps: Array<{ id: string; enabled: boolean; folderPresent: boolean }>
     }
     const statusById = new Map(result.apps.map(app => [app.id, app]))
 
     for (const id of h.selectedIds) {
       const status = statusById.get(id)
       expect(status, `${id} should be listed by app.status`).toBeDefined()
-      expect(status?.installed, `${id} should be installed`).toBe(true)
       expect(status?.enabled, `${id} should be enabled`).toBe(true)
 
       const pkg = h.packages.get(id)

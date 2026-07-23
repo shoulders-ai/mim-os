@@ -147,7 +147,7 @@ Agent id format: `package:<packageId>/<key>`.
 
 ## Trust Boundary
 
-Workspace apps with a backend or permissions require user trust before they
+Project and Team apps with a backend or permissions require user trust before they
 can run. `app.trust` is user-only and cannot be called by the agent. If
 `app_status` says `needsTrust: true` or `app_enable` says trust is needed, stop
 the execution loop and ask the user to review and trust the app in Settings

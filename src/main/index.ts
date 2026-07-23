@@ -104,7 +104,7 @@ import { registerGoogleTools } from '@main/integrations/google/tools.js'
 import { SLACK_MCP_TOOL_SPECS, GOOGLE_MCP_TOOL_SPECS } from '@main/server/server.js'
 import { registerTelemetryTools } from '@main/tools/telemetry.js'
 import { createKeytarSecretStore } from '@main/integrations/secrets.js'
-import { parseMimYaml, readCommittedApp, classifyWorkspace, scaffoldWorkspace } from '@main/workspace/workspaceContract.js'
+import { classifyWorkspace, scaffoldWorkspace } from '@main/workspace/workspaceContract.js'
 import { setAgentContextTeamReader, setAgentContextAppsResolver, setAgentContextContributionsProvider, setAgentContextLocalPackagesProvider, type AgentContextApp } from '@main/ai/agentContext.js'
 import { resolveBootWorkspace, recordLastWorkspace, isDefaultWorkspace } from '@main/workspace/workspaceBoot.js'
 import { deleteMcpDiscoveryFile, writeMcpDiscoveryFile } from '@main/mcp/discovery.js'
@@ -971,26 +971,15 @@ async function boot(): Promise<void> {
     agentMounts,
   })
 
-  setAgentContextAppsResolver((ws): AgentContextApp[] => {
-    const apps = new Map<string, AgentContextApp>()
+  setAgentContextAppsResolver((): AgentContextApp[] => {
+    const apps: AgentContextApp[] = []
     for (const pkg of packages.list()) {
-      apps.set(pkg.manifest.id, {
+      apps.push({
         id: pkg.manifest.id,
         enabled: packageEnablement.isEnabled(pkg),
       })
     }
-    const mimYamlPath = join(ws, 'mim.yaml')
-    if (existsSync(mimYamlPath)) {
-      try {
-        const config = parseMimYaml(readFileSync(mimYamlPath, 'utf-8'))
-        for (const id of Object.keys(config.apps ?? {})) {
-          if (apps.has(id)) continue
-          const committed = readCommittedApp(ws, id)
-          if (committed) apps.set(id, { id, enabled: false })
-        }
-      } catch { /* best-effort */ }
-    }
-    return [...apps.values()].sort((a, b) => a.id.localeCompare(b.id))
+    return apps.sort((a, b) => a.id.localeCompare(b.id))
   })
 
   registerPackageRuntimeTools(tools, packages, packageRuntime, packageJobs, {

@@ -39,7 +39,7 @@ function fakePackage(id: string, name: string, grants: MimPackageManifest['provi
   return {
     manifest: fakeManifest(id, name, grants),
     dir: `/tmp/packages/${id}`,
-    source: 'workspace',
+    source: 'project',
     hasReadme: false,
   }
 }

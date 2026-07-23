@@ -5,7 +5,7 @@ import type { LoadedPackage, PackageLoader } from '@main/packages/packages.js'
 
 function fakePkg(id: string, name?: string): LoadedPackage {
   return {
-    source: 'global',
+    source: 'mim',
     dir: `/tmp/${id}`,
     hasReadme: false,
     manifest: {

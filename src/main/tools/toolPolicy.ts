@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { atomicWriteJson } from '@main/atomicJson.js'
-import { loadUserConfig } from '@main/userConfig.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
 
 export type ToolPolicyDomain =
@@ -327,12 +326,10 @@ export function readToolsPolicy(
   const knownIds = knownPolicyIds(options.knownToolIds)
   const enabled = normalizeIdArray(rawTools?.enabled, knownIds, { rejectUnknown: false })
   const disabled = normalizeIdArray(rawTools?.disabled, knownIds, { rejectUnknown: false })
-  const legacyEnabled = explicit ? new Set<string>() : legacyEnabledIds(rawSettings)
 
   const isEnabled = (toolId: string): boolean => {
     if (disabled.includes(toolId)) return false
     if (enabled.includes(toolId)) return true
-    if (legacyEnabled.has(toolId)) return true
     return DEFAULTS_BY_TOOL_ID.get(toolId) ?? true
   }
 
@@ -607,58 +604,6 @@ function knownPolicyIds(extra: string[] = []): Set<string> {
     for (const id of row.toolIds) ids.add(id)
   }
   return ids
-}
-
-function legacyEnabledIds(settings: Record<string, unknown>): Set<string> {
-  const ids = new Set<string>()
-  const connectors = objectOrNull(settings.connectors)
-  const userConnectors = loadUserConfig().connectors
-  const slack = resolveLegacyPolicy(objectOrNull(connectors?.slack), objectOrNull(userConnectors.slack))
-  const google = resolveLegacyPolicy(objectOrNull(connectors?.google), objectOrNull(userConnectors.google))
-
-  if (slack.aiEnabled) {
-    for (const id of SLACK_PUBLIC_TOOLS) ids.add(id)
-  }
-  if (slack.sendEnabled) ids.add('slack.send')
-  if (slack.privateChannels) ids.add('slack.privateChannels')
-  if (slack.directMessages) {
-    ids.add('slack.dms')
-    ids.add('slack.directMessages')
-  }
-
-  if (google.aiEnabled && google.gmailEnabled) {
-    for (const id of GOOGLE_GMAIL_READ_TOOLS) ids.add(id)
-  }
-  if (google.aiEnabled && google.gmailSendEnabled) ids.add('gmail.send')
-  if (google.aiEnabled && google.calendarEnabled) ids.add('calendar.events')
-  if (google.aiEnabled && google.calendarWriteEnabled) ids.add('calendar.create')
-  if (google.aiEnabled && google.driveEnabled) {
-    for (const id of GOOGLE_DRIVE_READ_TOOLS) ids.add(id)
-  }
-  if (google.aiEnabled && google.sheetsWriteEnabled) {
-    ids.add('sheets.write')
-    ids.add('sheets.append')
-  }
-
-  return ids
-}
-
-function resolveLegacyPolicy(
-  workspace: Record<string, unknown> | null,
-  userGlobal: Record<string, unknown> | null,
-): Record<string, boolean> {
-  const out: Record<string, boolean> = {}
-  const keys = new Set([
-    ...Object.keys(userGlobal ?? {}),
-    ...Object.keys(workspace ?? {}),
-  ])
-  for (const key of keys) {
-    const workspaceValue = workspace?.[key]
-    const globalValue = userGlobal?.[key]
-    if (typeof workspaceValue === 'boolean') out[key] = workspaceValue
-    else if (typeof globalValue === 'boolean') out[key] = globalValue
-  }
-  return out
 }
 
 function objectOrNull(value: unknown): Record<string, unknown> | null {

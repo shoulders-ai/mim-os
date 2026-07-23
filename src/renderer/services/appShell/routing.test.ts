@@ -14,7 +14,7 @@ const packages: LoadedPackage[] = [
       views: [{ id: 'main', label: 'Library', src: 'index.html', role: 'work' }],
     },
     dir: '/pkg/references',
-    source: 'registry',
+    source: 'mim',
   },
   {
     manifest: {
@@ -23,7 +23,7 @@ const packages: LoadedPackage[] = [
       views: [{ id: 'config', label: 'Config', src: 'index.html', role: 'artifact' }],
     },
     dir: '/pkg/settings-only',
-    source: 'registry',
+    source: 'mim',
   },
 ]
 

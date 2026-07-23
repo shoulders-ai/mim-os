@@ -10,11 +10,11 @@ verified: bf1358ebd68b1348a9fd85c6576c5b71e5f11880
 
 # app system and API
 
-An app is an installable capability bundle. It can contribute views (iframe UI), backend jobs, AI tools, skills, and scoped data storage. UI is optional; headless apps are first-class.
+An app is a file-native capability bundle. It can contribute views (iframe UI), backend jobs, AI tools, skills, and scoped data storage. UI is optional; headless apps are first-class.
 
 ## Manifest
 
-Apps use a standard `package.json` with a `mim` block. Required fields: `manifestVersion` (must be `1`), `id` (lowercase, hyphens, underscores, max 60 chars), and `name`. Optional fields include `description`, `icon` (text token or image asset path under `ui/`), `views` (array with `id`, `label`, `src`, and `role` of `work`, `artifact`, or `either`), `backend` (relative path to ESM module), `permissions`, `provides.tools` (named-tool grants), `dataFolder` (workspace-relative folder name), and `engines.mim` (current value: `runtime-v1`). Unknown keys inside `mim` fail validation unless prefixed with `x-`. A root `README.md` is auto-discovered and surfaced as documentation.
+Apps use a standard `package.json` with a `mim` block. Required fields: `manifestVersion` (must be `1`), `id` (lowercase, hyphens, underscores, max 60 chars), and `name`. Optional fields include `description`, `icon` (text token or image asset path under `ui/`), `views` (array with `id`, `label`, `src`, and `role` of `work`, `artifact`, or `either`), `backend` (relative path to ESM module), `permissions`, `provides.tools` (named-tool grants), `dataFolder` (workspace-relative folder name), and `engines.mim` (current value: `runtime-v1`). Unknown keys inside `mim` are reported as warnings unless prefixed with `x-`. A root `README.md` is auto-discovered and surfaced as documentation.
 
 ## Permissions
 
@@ -27,7 +27,7 @@ Permissions are declared in the manifest and checked at call time:
 
 Enabling the app is the user's consent. There is no per-call approval prompt for apps. Every HTTP request is audited as method, host, path, and status; headers, bodies, and query strings are never logged.
 
-Apps cannot call registry tools, install tools, trust tools, terminal tools, account tools, or session storage tools. All app tool calls still pass through the normal approval gate.
+Apps cannot call app-management tools, trust tools, terminal tools, account tools, or session storage tools. All app tool calls still pass through the normal approval gate.
 
 ## Backend module
 
@@ -84,8 +84,15 @@ A backend may export an `agentContext` function. When the app is enabled, its re
 
 ## App locations
 
-The loader scans workspace (`{workspace}/packages/<id>/`, flat) then global (`~/.mim/packages/<id>/<version>/`, two-level). Workspace wins on id collision. Global version selection uses the workspace `mim.yaml` pin when declared, otherwise highest semver.
+The loader scans three flat roots: packaged Mim `resources/apps/<id>/`, the
+connected Team's `apps/<id>/`, and the current Project's
+`packages/<id>/`. Project overrides Team, and Team overrides Mim, for the same
+id. Activation and permission acknowledgement remain local under
+`.mim/packages/enabled.json`.
 
 ## Full contract
 
-The complete backend API, SDK reference, enablement model, trust boundary, publishing workflow, and diagnostics are documented in `docs/app-system-api.md` and `docs/package-runtime.md` in the repository, and in the [mim-apps README](https://github.com/shoulders-ai/mim-apps).
+The complete backend API, SDK reference, activation model, trust boundary,
+origin workflow, and diagnostics are documented in `docs/app-system-api.md`
+and `docs/package-runtime.md` in the repository, and in the
+[mim-apps README](https://github.com/shoulders-ai/mim-apps).

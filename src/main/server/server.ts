@@ -363,12 +363,11 @@ export async function createServer(
       return res.status(404).send('File not found')
     }
 
-    // Serve relative to the app's ui/ root. Apps install under
-    // ~/.mim/packages/<id>/<version>/, and that `.mim` segment is a dotfile;
-    // sendFile with an absolute path applies send's default dotfiles:'ignore'
-    // to the WHOLE path and 404s on the prefix. The `root` option scopes the
-    // dotfile check to the requested file only (traversal is already blocked
-    // by resolvePackageUiPath).
+    // Serve relative to the app's ui/ root. An app origin may itself sit below
+    // a dot-directory; sendFile with an absolute path applies its default
+    // dotfiles:'ignore' policy to the whole path and can 404 on that prefix.
+    // The `root` option scopes the check to the requested UI path only
+    // (traversal is already blocked by resolvePackageUiPath).
     const uiRoot = resolve(pkg.dir, 'ui')
     res.sendFile(relative(uiRoot, fullPath), { root: uiRoot })
   })

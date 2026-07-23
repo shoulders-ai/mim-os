@@ -25,7 +25,7 @@ nothing.
   pass → allowed silently, fail → throw. Apps never get an interactive prompt.
 
 App-mounted agents (`export const agents` in a backend) execute as actor `ai`
-through the same gate. Agents are backend exports, so the workspace trust ack
+through the same gate. Agents are backend exports, so the local app permission acknowledgement
 already applies — no separate exemption.
 
 Consequence: the gate defends against the agent's autonomous actions and app
@@ -147,7 +147,7 @@ itself is hard-denied.
 
 ## Code Execution Gate
 
-Two registry tools provide command execution:
+Two registered tools provide command execution:
 
 **`shell.run`** (AI key: `bash`) — full shell access with captured output. Gated
 with `{ category: 'system', risk: 'high', targetParam: 'command' }`. The approval

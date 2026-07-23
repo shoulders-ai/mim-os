@@ -18,9 +18,7 @@ describe('electron-builder updater configuration', () => {
   })
 
   it('builds Linux installers for x64 and arm64', () => {
-    expect(config.linux.target).toContainEqual({ target: 'AppImage', arch: ['x64', 'arm64'] })
-    expect(config.linux.target).toContainEqual({ target: 'deb', arch: ['x64', 'arm64'] })
-    expect(config.linux.target).toContainEqual({ target: 'tar.gz', arch: ['x64', 'arm64'] })
+    expect(config.linux.target).toEqual(['AppImage', 'deb', 'tar.gz'])
   })
 
   it('packages app iframe SDK assets', () => {
@@ -40,6 +38,7 @@ describe('electron-builder updater configuration', () => {
     expect(workflow).toContain('node scripts/build-docx-worker.mjs osx-arm64')
     expect(workflow).toContain('node scripts/build-docx-worker.mjs osx-x64')
     expect(workflow).toContain('os: ubuntu-24.04-arm')
+    expect(workflow).toContain("build_args: '--x64'")
     expect(workflow).toContain("build_args: '--arm64'")
     expect(workflow).toContain('label: Linux ARM64')
     expect(workflow).toContain('label: macOS')

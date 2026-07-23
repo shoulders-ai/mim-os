@@ -14,7 +14,7 @@ Mim is a desktop runtime for bespoke agentic applications. You extend it by writ
 
 ## Apps
 
-An app is an installable capability bundle: backend jobs, AI tools, data storage, and optional iframe UI, declared in a `package.json` manifest with a `mim` block. Apps run under a scoped runtime context that enforces identity, permissions, audit, and cancellation. Headless apps (no UI) are first-class. The full manifest, backend API, SDK, and runtime context are documented in [app system and API](app-system-api). The generated [app catalog](/develop/apps) lists published apps from the mim-apps repository.
+An app is a file-native capability bundle: backend jobs, AI tools, data storage, and optional iframe UI, declared in a `package.json` manifest with a `mim` block. Apps run under a scoped runtime context that enforces identity, permissions, audit, and cancellation. Headless apps (no UI) are first-class. The full manifest, backend API, SDK, and runtime context are documented in [app system and API](app-system-api). The generated [app catalog](/develop/apps) lists apps maintained in the external mim-apps repository.
 
 ## Skills
 
@@ -26,11 +26,11 @@ Mim exposes its tool registry to Claude Code, Codex, and Gemini CLI through a lo
 
 ## Headless CLI
 
-The `mim` binary boots a headless tool registry without Electron. It runs workspace commands, generic tool calls, trace queries, and registry operations from any shell. `mim go` refreshes agent context and launches an external command (defaulting to `claude`) in the workspace. See [command line](cli) for the full command set.
+The `mim` binary boots a headless tool registry without Electron. It runs Project commands, generic tool calls, trace queries, app runtime operations, and always-on routines from any shell. `mim go` refreshes agent context and launches an external command (defaulting to `claude`) in the Project. See [command line](cli) for the full command set.
 
 ## Workspace contract
 
-Every Mim Project has a `mim.yaml` config, an `AGENTS.md` system prompt, and a `.mim/` runtime directory. The config declares app pins, registries, and sync mode. A connected Team contributes shared files at `.mim/team/files`. See [workspace contract](workspace-contract) for the schema and layout.
+Every Mim Project has a `mim.yaml` config, an `AGENTS.md` system prompt, and a `.mim/` runtime directory. The config declares the Project name and optional sync mode. A connected Team contributes shared files at `.mim/team/files`. See [workspace contract](workspace-contract) for the schema and layout.
 
 ## Models
 

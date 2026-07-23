@@ -56,6 +56,8 @@ describe('apps', () => {
 
     it('includes the summary table', () => {
       const md = generateAppsMarkdown(apps)
+      expect(md).toContain('Apps maintained in the Mim app catalog.')
+      expect(md).not.toContain('app registry')
       expect(md).toContain('| Board | Kanban issue board | 0.1.5 |')
     })
 

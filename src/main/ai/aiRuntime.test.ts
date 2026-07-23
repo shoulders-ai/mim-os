@@ -118,24 +118,6 @@ function mockRegistry(
   return { tools, calls }
 }
 
-function withSlackPolicy(policy: Record<string, unknown>): string {
-  const dir = mkdtempSync(join(tmpdir(), 'mim-ai-test-'))
-  mkdirSync(join(dir, '.mim'), { recursive: true })
-  writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
-    connectors: { slack: policy },
-  }))
-  return dir
-}
-
-function withGooglePolicy(policy: Record<string, unknown>): string {
-  const dir = mkdtempSync(join(tmpdir(), 'mim-ai-test-'))
-  mkdirSync(join(dir, '.mim'), { recursive: true })
-  writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
-    connectors: { google: policy },
-  }))
-  return dir
-}
-
 function withToolsPolicy(policy: Record<string, unknown>): string {
   const dir = mkdtempSync(join(tmpdir(), 'mim-ai-test-'))
   mkdirSync(join(dir, '.mim'), { recursive: true })
@@ -1117,7 +1099,10 @@ describe('central AI runtime tools', () => {
   })
 
   it('exposes Slack read tools when aiEnabled is true', async () => {
-    const dir = withSlackPolicy({ aiEnabled: true })
+    const dir = withToolsPolicy({
+      enabled: ['slack.search', 'slack.history', 'slack.channels', 'slack.replies', 'slack.users'],
+      disabled: [],
+    })
     try {
       const { tools, calls } = mockRegistry(dir)
       const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
@@ -1155,7 +1140,10 @@ describe('central AI runtime tools', () => {
   })
 
   it('exposes slack_send only when sendEnabled is true', async () => {
-    const dir = withSlackPolicy({ aiEnabled: true, sendEnabled: true })
+    const dir = withToolsPolicy({
+      enabled: ['slack.search', 'slack.history', 'slack.channels', 'slack.replies', 'slack.users', 'slack.send'],
+      disabled: [],
+    })
     try {
       const { tools } = mockRegistry(dir)
       const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
@@ -1166,7 +1154,10 @@ describe('central AI runtime tools', () => {
   })
 
   it('exposes Gmail and Calendar read tools to chat', async () => {
-    const dir = withGooglePolicy({ aiEnabled: true, gmailEnabled: true, calendarEnabled: true })
+    const dir = withToolsPolicy({
+      enabled: ['gmail.search', 'gmail.read', 'calendar.events'],
+      disabled: [],
+    })
     try {
       const { tools, calls } = mockRegistry(dir)
       const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
@@ -1204,12 +1195,9 @@ describe('central AI runtime tools', () => {
   })
 
   it('exposes Gmail send and Calendar create tools to chat through the gate', async () => {
-    const dir = withGooglePolicy({
-      aiEnabled: true,
-      gmailEnabled: true,
-      gmailSendEnabled: true,
-      calendarEnabled: true,
-      calendarWriteEnabled: true,
+    const dir = withToolsPolicy({
+      enabled: ['gmail.search', 'gmail.read', 'gmail.send', 'calendar.events', 'calendar.create'],
+      disabled: [],
     })
     try {
       const { tools, calls } = mockRegistry(dir)
@@ -1251,7 +1239,10 @@ describe('central AI runtime tools', () => {
   })
 
   it('exposes Drive, Docs, and Sheets read tools to chat', async () => {
-    const dir = withGooglePolicy({ aiEnabled: true, driveEnabled: true })
+    const dir = withToolsPolicy({
+      enabled: ['drive.search', 'drive.meta', 'docs.read', 'sheets.meta', 'sheets.read'],
+      disabled: [],
+    })
     try {
       const { tools, calls } = mockRegistry(dir)
       const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })

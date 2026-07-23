@@ -4,7 +4,6 @@ import { stringify as stringifyYaml } from 'yaml'
 import { createKeytarSecretStore, type SecretStore } from '@main/integrations/secrets.js'
 import { fetchHttpClient, type HttpClient } from '@main/integrations/http.js'
 import { loadUserConfig } from '@main/userConfig.js'
-import { parseMimYaml } from '@main/workspace/workspaceContract.js'
 import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
 import type { IntegrationMcpState } from '@main/integrations/mcpState.js'
 import { enableRoutine, loadRoutineCatalog, routineSlackTrigger, type RoutineDefinition, type RoutineSlackTriggerMode } from '@main/routines/routines.js'
@@ -28,7 +27,7 @@ function objectSchema(properties: Record<string, unknown>, required: string[] = 
 function requireSlackAiAccess(tools: ToolRegistry, ctx: ToolContext): void {
   if (ctx.actor !== 'ai') return
   const policy = readSlackPolicy(tools.getWorkspacePath())
-  if (!policy.aiEnabled) throw new Error('Slack AI access is disabled. Enable it in Settings > Integrations.')
+  if (!policy.aiEnabled) throw new Error('Slack AI access is disabled. Enable it in Settings > Tools.')
 }
 
 function requireSlackSendAccess(tools: ToolRegistry, ctx: ToolContext): void {
@@ -487,20 +486,8 @@ export function registerSlackTools(tools: ToolRegistry, deps: SlackToolDeps = {}
   return mcpState
 }
 
-function resolveSlackAccount(tools: ToolRegistry, explicit?: string): string {
+function resolveSlackAccount(_tools: ToolRegistry, explicit?: string): string {
   if (explicit) return explicit
-  const workspace = tools.getWorkspacePath()
-  if (workspace) {
-    const mimYamlPath = join(workspace, 'mim.yaml')
-    if (existsSync(mimYamlPath)) {
-      try {
-        const config = parseMimYaml(readFileSync(mimYamlPath, 'utf-8'))
-        if (config.slack) return config.slack
-      } catch {
-        // Fall back to user-global default below.
-      }
-    }
-  }
   return loadUserConfig().defaults.slack ?? 'default'
 }
 

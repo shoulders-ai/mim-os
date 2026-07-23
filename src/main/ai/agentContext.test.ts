@@ -129,7 +129,7 @@ describe('renderAgentContext', () => {
     expect(out).toContain('- my-reader: manifest error: Backend file does not exist')
   })
 
-  it('omits local app development health when there are no workspace apps', () => {
+  it('omits local app development health when there are no Project apps', () => {
     const out = renderAgentContext(baseData({ localPackages: [] }))
     expect(out).not.toContain('## Local apps')
   })
@@ -262,11 +262,10 @@ describe('gatherAgentContext', () => {
     expect(data.workspace.initialized).toBe(false)
   })
 
-  it('records shared board and knowledge entries without treating them as enabled or scraping app-owned data folders', () => {
+  it('does not infer apps from the retired mim.yaml apps key or scrape app-owned data folders', () => {
     writeFileSync(join(dir, 'mim.yaml'), 'name: X\napps:\n  board: true\n  knowledge: false\n')
     const data = gatherAgentContext(dir, { now: () => NOW_MS, readRecentChanges: () => [] })
-    expect(data.apps.find(a => a.id === 'board')?.enabled).toBe(false)
-    expect(data.apps.find(a => a.id === 'knowledge')?.enabled).toBe(false)
+    expect(data.apps).toEqual([])
     expect('issues' in data).toBe(false)
     expect('knowledge' in data).toBe(false)
   })
@@ -370,12 +369,6 @@ describe('gatherAgentContext', () => {
     expect('knowledge' in data).toBe(false)
   })
 
-  it('falls back to committed mim.yaml apps as shared but not enabled when resolveApps is not injected', () => {
-    writeFileSync(join(dir, 'mim.yaml'), 'name: X\napps:\n  board: true\n  knowledge: false\n')
-    const data = gatherAgentContext(dir, { now: () => NOW_MS, readRecentChanges: () => [] })
-    expect(data.apps.find(a => a.id === 'board')?.enabled).toBe(false)
-    expect(data.apps.find(a => a.id === 'knowledge')?.enabled).toBe(false)
-  })
 })
 
 describe('writeAgentContext local app provider', () => {

@@ -29,7 +29,7 @@ function makePackage(id: string, dir: string): LoadedPackage {
       backend: 'backend.js',
     },
     dir,
-    source: 'workspace',
+    source: 'project',
     hasReadme: false,
   } as LoadedPackage
 }

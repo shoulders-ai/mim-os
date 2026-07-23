@@ -1,11 +1,11 @@
 # Granola Private App
 
-Status: private personal app installed outside this repository.
+Status: private Team app maintained outside this repository.
 
 This document records the rationale, implementation shape, operational behavior,
 and verification for the private Granola app built for Mim. It is not an
-official Granola integration design. It describes the current installed app and
-the reasons it belongs in the private app layer rather than core Mim.
+official Granola integration design. It describes the current Team app and the
+reasons it belongs in the private app layer rather than core Mim.
 
 ## Motivation
 
@@ -44,11 +44,9 @@ context on demand.
 
 Core Mim is intentionally a runtime, not a place for user-specific integrations.
 Granola is a private app whose source lives in `mim-web/packages/granola/`.
-It is delivered through the authenticated account registry at
-`mim.shoulde.rs/api/v1/registry` and installed to `~/.mim/packages/granola/`
-when an entitled client runs `package.install` or `app.add`.
-
-See [private-registry.md](private-registry.md) for the registry workflow.
+The Team source maintainer places it at `apps/granola/`, where Mim discovers it
+through the normal Team app origin. Each person reviews its permissions and
+activates it independently for a local Project checkout.
 
 ## Why Not Core
 
@@ -77,8 +75,8 @@ backend/index.test.mjs
 skills/granola/SKILL.md
 ```
 
-The package is plain ESM and has no build step. After install, files land at
-`~/.mim/packages/granola/<version>/`.
+The package is plain ESM and has no build step. In the connected checkout its
+runtime source is `~/.mim/team/apps/granola/`.
 
 ## Runtime Data
 
@@ -204,7 +202,7 @@ meta(key, value)
 ```
 
 The backend uses Node's built-in `node:sqlite`, matching the dependency-light
-pattern already used by installed apps such as Knowledge.
+pattern already used by Mim apps such as Knowledge.
 
 ## Verification
 
@@ -218,7 +216,7 @@ The tests cover ProseMirror-to-Markdown conversion, home-path redaction, text
 compaction, multi-term query filter construction with LIKE-wildcard escaping,
 date-bound normalization, attendee-list splitting, and token normalization.
 
-To smoke-test the installed app end to end, run the Operations commands below:
+To smoke-test the Team app end to end, run the Operations commands below:
 `granola.status` (token + cache visibility), `granola.sync` (network sync and
 token refresh), `granola.search`/`granola.get` (cache reads), and
 `granola.transcript` on a cached and a non-cached note (read path and sync

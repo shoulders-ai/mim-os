@@ -3,8 +3,9 @@
 Status: implemented as an external package plus main-process DOCX
 infrastructure. The package lives in the
 [shoulders-ai/mim-apps](https://github.com/shoulders-ai/mim-apps)
-monorepo at `packages/docx-review/` (with its own tests) and is installed via
-the registry (`app.add` / `package.install`); it is not bundled in this repo.
+monorepo at `packages/docx-review/` (with its own tests). A source maintainer
+places it in a Team `apps/` directory, a Project `packages/` directory, or the
+Mim build's `resources/apps/` directory; it is not bundled in this repo.
 
 The package owns the review orchestration and UI. The Electron main process owns
 workspace-safe file access, model key resolution, and Word/Open XML operations.

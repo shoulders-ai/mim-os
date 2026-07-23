@@ -106,7 +106,7 @@ describe('skill tools', () => {
     })
   })
 
-  it('disables skills through mim.yaml and omits them from the active list', async () => {
+  it('disables skills through Personal config and omits them from the active list', async () => {
     await tools.call('skill.setDisabled', { name: 'issue-work', disabled: true }, ctx)
 
     const active = await tools.call('skill.list', {}, ctx) as { skills: Array<Record<string, unknown>> }

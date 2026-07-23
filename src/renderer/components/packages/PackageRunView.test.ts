@@ -88,7 +88,7 @@ describe('AppRunView', () => {
         packages: [{
           manifest: { id: 'docx-review', name: 'Document Review', icon: 'D' },
           dir: '/packages/docx-review',
-          source: 'global',
+          source: 'mim',
         }],
       }),
     })
@@ -172,7 +172,7 @@ describe('AppRunView', () => {
         packages: [{
           manifest: { id: 'slides', name: 'Slides', icon: 'S' },
           dir: '/workspace/packages/slides',
-          source: 'workspace',
+          source: 'project',
         }],
       }),
     })
@@ -232,7 +232,7 @@ describe('AppRunView', () => {
         packages: [{
           manifest: { id: 'import-md', name: 'Import to Markdown', icon: 'MD' },
           dir: '/home/test/.mim/packages/import-md/0.1.1',
-          source: 'global',
+          source: 'mim',
         }],
       }),
     })
@@ -261,7 +261,7 @@ describe('AppRunView', () => {
         packages: [{
           manifest: { id: 'docx-review', name: 'Document Review', icon: 'D' },
           dir: '/packages/docx-review',
-          source: 'global',
+          source: 'mim',
         }],
       }),
     })
@@ -284,7 +284,7 @@ describe('AppRunView', () => {
         packages: [{
           manifest: { id: 'docx-review', name: 'Document Review', icon: 'D' },
           dir: '/packages/docx-review',
-          source: 'global',
+          source: 'mim',
         }],
       }),
     })

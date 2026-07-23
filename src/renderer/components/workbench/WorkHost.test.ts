@@ -247,7 +247,7 @@ describe('WorkHost', () => {
     return [{
       manifest: { id: 'demo', name: 'Demo', icon: '*', views: [{ id: 'main', label: 'Main', src: './index.html', role: 'work' }] },
       dir: '/packages/demo',
-      source: 'global',
+      source: 'mim',
     }]
   }
 

@@ -30,10 +30,6 @@ export interface UserConfig {
     terminalHeight?: number
     automationApprovalMode?: 'normal' | 'strict' | 'developer'
   }
-  connectors: {
-    google?: Record<string, unknown>
-    slack?: Record<string, unknown>
-  }
   skills: { disabled: string[] }
 }
 
@@ -82,7 +78,6 @@ function emptyConfig(): UserConfig {
     user: {},
     defaults: { models: {} },
     preferences: {},
-    connectors: {},
     skills: { disabled: [] },
   }
 }
@@ -142,16 +137,6 @@ export function loadUserConfig(home?: string): UserConfig {
           config.preferences.automationApprovalMode = preferences.automationApprovalMode
         }
 
-        const connectors = (r.connectors && typeof r.connectors === 'object' && !Array.isArray(r.connectors))
-          ? r.connectors as Record<string, unknown>
-          : {}
-        if (connectors.slack && typeof connectors.slack === 'object' && !Array.isArray(connectors.slack)) {
-          config.connectors.slack = connectors.slack as Record<string, unknown>
-        }
-        if (connectors.google && typeof connectors.google === 'object' && !Array.isArray(connectors.google)) {
-          config.connectors.google = connectors.google as Record<string, unknown>
-        }
-
         config.skills.disabled = parseDisabledSkillNames(r.skills)
       }
     }
@@ -181,10 +166,6 @@ export function loadUserConfig(home?: string): UserConfig {
       models: Object.freeze(config.defaults.models),
     }),
     preferences: Object.freeze(config.preferences),
-    connectors: Object.freeze({
-      ...(config.connectors.google ? { google: Object.freeze({ ...config.connectors.google }) } : {}),
-      ...(config.connectors.slack ? { slack: Object.freeze({ ...config.connectors.slack }) } : {}),
-    }),
     skills: Object.freeze({
       disabled: Object.freeze([...config.skills.disabled]),
     }),

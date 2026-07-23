@@ -43,25 +43,18 @@ Activation unions `tools` and `unlocks` for backward compatibility. New skills s
 
 ::: rows
 - Built-in -- `<dist>/../../skills/`. Read-only.
-- Added source -- local folder or git mirror from `~/.mim/config.yaml`.
+- Team -- `~/.mim/team/skills/`.
 - Personal -- `~/.mim/skills/`.
-- Workspace -- `{workspace}/skills/`.
+- Project -- `{project}/skills/`.
 :::
 
 A higher-precedence skill with the same name shadows the lower copy. Diagnostics retain the shadow chain.
 
-Git skill sources are cloned under `~/.mim/skill-sources/<sourceId>/`. Local path sources are read in place. Sources must be inspected and confirmed before they are written to config.
-
-## Global config
+## Personal activation
 
 Skill library state lives in `~/.mim/config.yaml`:
 
 ```yaml
-skillSources:
-  team:
-    name: Team skills
-    git: https://github.com/acme/mim-skills.git
-    trusted: true
 skills:
   disabled:
     - issue-work
@@ -97,7 +90,6 @@ The skill system loads content in tiers. Tier 0 (every chat turn): id, name, des
 - `skill.delete` -- deletes a Personal skill.
 - `skill.setDisabled` -- writes global `skills.disabled`.
 - `skill.templateList` / `skill.templateContent` -- built-in Personal skill starters.
-- `skill.inspectImport` / `skill.import` -- inspect and import a skill folder into Personal.
-- `skillSource.list` / `skillSource.inspect` / `skillSource.add` / `skillSource.refresh` / `skillSource.remove` -- manage trusted user-added sources.
+- `skill.inspectImport` / `skill.import` -- inspect and import a skill folder into Personal, Project, or Team.
 
-All `skill.*` and `skillSource.*` tools are denied to app actors.
+All `skill.*` tools are denied to app actors.

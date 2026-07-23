@@ -80,11 +80,11 @@ describe('Slack tools', () => {
     })
   })
 
-  it('uses the workspace mim.yaml slack account by default', async () => {
+  it('ignores the retired mim.yaml Slack account and uses the Personal default', async () => {
     writeFileSync(join(dir, 'mim.yaml'), 'name: demo\nslack: dark-peak\n')
     const calls: Array<Record<string, unknown>> = []
     const secrets = createMemorySecretStore({
-      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('dark-peak')}`]: 'xoxb-secret',
+      [`${MIM_KEYCHAIN_SERVICE}:${slackSecretAccount('default')}`]: 'xoxb-secret',
     })
     registerSlackTools(tools, { secrets, http: fakeHttp({ ok: true, messages: { matches: [] } }, calls) })
 
@@ -596,9 +596,14 @@ describe('Slack connector policy enforcement', () => {
   }
 
   function writePolicy(policy: Record<string, unknown>) {
+    const enabled: string[] = []
+    if (policy.aiEnabled) enabled.push('slack.search', 'slack.history', 'slack.channels', 'slack.replies', 'slack.users')
+    if (policy.aiEnabled && policy.sendEnabled) enabled.push('slack.send')
+    if (policy.aiEnabled && policy.privateChannels) enabled.push('slack.privateChannels')
+    if (policy.aiEnabled && policy.directMessages) enabled.push('slack.dms', 'slack.directMessages')
     mkdirSync(join(dir, '.mim'), { recursive: true })
     writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
-      connectors: { slack: policy },
+      tools: { enabled, disabled: [] },
     }))
   }
 

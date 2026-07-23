@@ -85,11 +85,11 @@ export default {
   linux: {
     icon: 'resources/icon.png',
     category: 'Development',
-    target: [
-      { target: 'AppImage', arch: ['x64', 'arm64'] },
-      { target: 'deb', arch: ['x64', 'arm64'] },
-      { target: 'tar.gz', arch: ['x64', 'arm64'] },
-    ],
+    // Architecture comes from the native release runner (`--x64` or
+    // `--arm64`). Keeping both architectures here makes electron-builder
+    // attempt a node-gyp cross-build before the runner-specific CLI flag can
+    // narrow the matrix.
+    target: ['AppImage', 'deb', 'tar.gz'],
     executableArgs: ['--class=mim'],
   },
   deb: {

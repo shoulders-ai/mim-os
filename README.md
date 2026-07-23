@@ -17,8 +17,8 @@ Apps extend the shell with custom UI mounted in sandboxed iframes, backed by a W
 
 Core also provides local audit and recovery infrastructure: permissioned tool
 execution, trace logging, and per-file local history under `.mim/` so important
-workspace artifacts can be restored without Mim touching the user's `.git`
-repository. Workspaces can also opt into managed git sync when a user wants Mim
+Project artifacts can be restored without Mim touching the user's `.git`
+repository. Projects can also opt into managed git sync when a user wants Mim
 to handle the ordinary save, pull, and push loop.
 
 Agents can delegate long-running work to durable **subagents**. Each child has
@@ -85,7 +85,7 @@ under the checkout's gitignored `.mim/`.
   not launcher/config panels.
 - Internal package name is `mim`.
 - `localStorage` keys use `mim:` prefix.
-- Workspace data lives in `~/mim-workspace/.mim/`.
+- Project runtime data lives in `<project>/.mim/`.
 - API keys live in `~/.mim/keys.env`.
 - Integration tokens live in the OS keychain.
 - On macOS, the main window's red close button hides Mim without stopping the
@@ -94,6 +94,15 @@ under the checkout's gitignored `.mim/`.
 
 ## Apps
 
-User-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulders-ai/mim-apps), one per `packages/<id>/`. This repo is the core runtime — no built-in apps. Add apps to your sidebar with `app.add` in Settings > Apps; use `app.share` to commit a workspace app pin for collaborators. `package.install` is the lower-level cache/install tool, and installs land in `~/.mim/packages/<id>/<version>/`. Settings > Apps can also create workspace starter apps from templates, validating them before reload, then revealing the created folder. To develop, clone mim-apps and open it as a Mim workspace — edits show on reload. See the [mim-apps README](https://github.com/shoulders-ai/mim-apps) for publishing. App-root `README.md` files are auto-discovered as read-only documentation tabs.
+Apps come directly from three owned locations: Mim build resources, the
+connected Team's `apps/` directory, and the current Project's `packages/`
+directory. Project apps override Team apps, and Team apps override Mim apps
+with the same id. Settings > Apps & agents shows the winning origin and keeps
+activation private to this person and local Project checkout. It can create
+Project or Team starter apps, validate them, reload the catalog, and open their
+folders. App-root `README.md` files are auto-discovered as read-only
+documentation tabs. The external
+[shoulders-ai/mim-apps](https://github.com/shoulders-ai/mim-apps) repository is
+the maintained compatibility catalog for app authors.
 
 For building workspace-specific capabilities, see [docs/custom-apps.md](docs/custom-apps.md).

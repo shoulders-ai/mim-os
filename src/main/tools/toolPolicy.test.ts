@@ -56,7 +56,7 @@ describe('tool availability policy', () => {
     expect(policy.isEnabled('terminal.run')).toBe(false)
   })
 
-  it('derives Slack and Google rows from legacy connector settings until tools policy exists', () => {
+  it('ignores retired connector settings when no tools policy exists', () => {
     writeSettings({
       connectors: {
         slack: { aiEnabled: true, sendEnabled: true, directMessages: false },
@@ -66,12 +66,12 @@ describe('tool availability policy', () => {
 
     const policy = readToolsPolicy(dir)
 
-    expect(policy.isEnabled('slack.search')).toBe(true)
-    expect(policy.isEnabled('slack.send')).toBe(true)
+    expect(policy.isEnabled('slack.search')).toBe(false)
+    expect(policy.isEnabled('slack.send')).toBe(false)
     expect(policy.isEnabled('slack.dms')).toBe(false)
-    expect(policy.isEnabled('gmail.search')).toBe(true)
+    expect(policy.isEnabled('gmail.search')).toBe(false)
     expect(policy.isEnabled('gmail.send')).toBe(false)
-    expect(policy.isEnabled('drive.search')).toBe(true)
+    expect(policy.isEnabled('drive.search')).toBe(false)
   })
 
   it('maps registry ids to AI SDK tool keys', () => {
@@ -159,7 +159,7 @@ describe('tool availability policy', () => {
     expect(policy.isEnabled('slack.send')).toBe(false)
   })
 
-  it('materializes legacy connector state on first explicit write', async () => {
+  it('does not materialize retired connector state on first explicit write', async () => {
     writeSettings({
       connectors: {
         slack: { aiEnabled: true, sendEnabled: true },
@@ -170,14 +170,14 @@ describe('tool availability policy', () => {
     registerToolPolicyTools(tools)
 
     const before = readToolsPolicy(dir)
-    expect(before.isEnabled('slack.search')).toBe(true)
-    expect(before.isEnabled('slack.send')).toBe(true)
+    expect(before.isEnabled('slack.search')).toBe(false)
+    expect(before.isEnabled('slack.send')).toBe(false)
 
     await tools.call('toolPolicy.set', { rowId: 'git.push', enabled: false }, { actor: 'user' })
 
     const after = readToolsPolicy(dir)
-    expect(after.isEnabled('slack.search')).toBe(true)
-    expect(after.isEnabled('slack.send')).toBe(true)
+    expect(after.isEnabled('slack.search')).toBe(false)
+    expect(after.isEnabled('slack.send')).toBe(false)
     expect(after.isEnabled('git.push')).toBe(false)
   })
 

@@ -259,7 +259,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col px-5 pt-4 font-sans">
+  <div aria-label="Apps settings" class="flex h-full min-h-0 flex-col px-5 pt-4 font-sans">
     <div class="flex items-center gap-2 pb-3">
       <label class="flex h-6 items-center rounded-[6px] border border-rule-light bg-chrome-mid px-2 focus-within:border-accent">
         <input

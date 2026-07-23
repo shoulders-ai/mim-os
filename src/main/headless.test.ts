@@ -240,7 +240,7 @@ describe('headless app.enable', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('enables a workspace app personally and persists the enablement via app.status', async () => {
+  it('enables a Project app personally and persists the enablement via app.status', async () => {
     writeWorkspacePackage(root, 'board')
     const kernel = createHeadlessKernel()
     await kernel.openWorkspace(root)
@@ -292,7 +292,7 @@ describe('headless direct app tool registration', () => {
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'mim-headless-reg-'))
-    writeFileSync(join(root, 'mim.yaml'), 'name: headless-registry-test\n')
+    writeFileSync(join(root, 'mim.yaml'), 'name: headless-direct-app-test\n')
   })
 
   afterEach(() => {

@@ -953,7 +953,7 @@ export async function createAiSdkTools({
     }),
 
     package_list: tool({
-      description: 'List installed packages',
+      description: 'List available Mim, Team, and Project apps',
       inputSchema: z.object({}),
       execute: async () => call('package.list', {}),
     }),
@@ -973,7 +973,7 @@ export async function createAiSdkTools({
     }),
 
     package_readme: tool({
-      description: 'Read the README.md documentation for an installed package by package id.',
+      description: 'Read the README.md documentation for an available app by id.',
       inputSchema: z.object({ id: z.string() }),
       execute: async ({ id }) => call('package.readme', { id }),
     }),

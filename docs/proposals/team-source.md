@@ -1,7 +1,7 @@
 # Mim Restructure: Project, You, and Team
 
-Status: product direction, scope model, UX, and implementation programme
-accepted; implementation is in progress, with phases 1 through 7 complete.
+Status: implemented. All thirteen phases of the accepted restructure are
+complete.
 
 Mim is a local, file-native workbench where humans and agents work together on
 real project files. Collaboration is local-first: every human and agent works
@@ -446,10 +446,17 @@ paths removed rather than left beside the replacement.
     retry without blocking unrelated routines. Graceful shutdown flushes sync.
     Activation, authority review, scheduler state, Slack ledgers, and keychain
     credentials remain local to the machine.
-13. **Close the restructure.** Remove dead dependencies and vocabulary, update
-    current-state docs and `_MAP.md`, run the full repository and external app
-    compatibility suites, build every supported target, and perform a visual
-    walkthrough of each accepted Settings and Files flow.
+13. **Close the restructure — complete.** Removed the final `mim.yaml`,
+    connector-policy, app-install-state, registry, and skill-source readers;
+    current-state docs, generated manual pages, and `_MAP.md` now describe only
+    the direct Mim/Team/Project model. The full repository suite, external app
+    compatibility suite, production build, documentation generation/lint, and
+    DOM-driven Settings and Files walkthrough pass. macOS arm64/x64, Windows
+    x64, and all Linux x64 formats package with their DOCX sidecars. Linux
+    architecture selection now belongs to the native x64 or arm64 release
+    runner, preventing `node-gyp` cross-builds; the arm64 packaging smoke
+    therefore runs on the repository's `ubuntu-24.04-arm` release job rather
+    than on a macOS host.
 
 ## Acceptance checks
 

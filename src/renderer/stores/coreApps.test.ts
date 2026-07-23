@@ -10,11 +10,9 @@ function makeApp(overrides: Partial<ResolvedApp> = {}): ResolvedApp {
     id: 'test-pkg',
     enabled: false,
     layer: 'default',
-    installed: true,
-    source: 'global',
+    source: 'mim',
     shadowed: false,
     needsTrust: false,
-    needsInstall: false,
     visible: false,
     folderPresent: false,
     ...overrides,
@@ -49,9 +47,9 @@ describe('apps store (resolved state)', () => {
 
   it('refreshes from app.status and populates per-id resolved state', async () => {
     const call = stubKernel([
-      makeApp({ id: 'board', enabled: true, layer: 'workspace', source: 'global', visible: true, folderPresent: true }),
-      makeApp({ id: 'knowledge', enabled: false, layer: 'default', source: 'global' }),
-      makeApp({ id: 'hello', enabled: true, layer: 'default', source: 'global', visible: true }),
+      makeApp({ id: 'board', enabled: true, layer: 'local', source: 'mim', visible: true, folderPresent: true }),
+      makeApp({ id: 'knowledge', enabled: false, layer: 'default', source: 'mim' }),
+      makeApp({ id: 'hello', enabled: true, layer: 'default', source: 'mim', visible: true }),
     ])
     const store = useAppsStore()
     await store.refresh()
@@ -60,9 +58,9 @@ describe('apps store (resolved state)', () => {
     expect(store.isEnabled('board')).toBe(true)
     expect(store.isEnabled('knowledge')).toBe(false)
     expect(store.isEnabled('hello')).toBe(true)
-    expect(store.apps['board']?.layer).toBe('workspace')
+    expect(store.apps['board']?.layer).toBe('local')
     expect(store.apps['board']?.folderPresent).toBe(true)
-    expect(store.apps['board']?.source).toBe('global')
+    expect(store.apps['board']?.source).toBe('mim')
   })
 
   it('isVisible returns the resolved visible flag', async () => {
@@ -79,16 +77,14 @@ describe('apps store (resolved state)', () => {
     expect(store.isVisible('unknown')).toBe(false)
   })
 
-  it('exposes permission review and has no missing-install registry state', async () => {
+  it('exposes permission review state', async () => {
     stubKernel([
-      makeApp({ id: 'vendor-pkg', needsTrust: true, installed: true }),
-      makeApp({ id: 'missing-pkg', needsInstall: true, installed: false }),
+      makeApp({ id: 'team-app', needsTrust: true, source: 'team' }),
     ])
     const store = useAppsStore()
     await store.refresh()
 
-    expect(store.apps['vendor-pkg']?.needsTrust).toBe(true)
-    expect(store.apps['missing-pkg']?.needsInstall).toBe(false)
+    expect(store.apps['team-app']?.needsTrust).toBe(true)
   })
 
   it('exposes shadowed flag from resolved state', async () => {

@@ -29,7 +29,7 @@ export function registerPackageTools(
 ): void {
   tools.register({
     name: 'app.templateList',
-    description: 'List built-in starter templates for workspace apps.',
+    description: 'List built-in starter templates for Project or Team apps.',
     inputSchema: objectSchema({}),
     execute: async () => listAppTemplates(),
   })
@@ -231,7 +231,7 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.readme',
-    description: 'Read the app-root README.md for an installed app',
+    description: 'Read the app-root README.md for an available app',
     inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
     execute: async (params) => {
       const id = requireString(params, 'id')
@@ -259,7 +259,7 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.validate',
-    description: 'Validate a workspace app before or after reload',
+    description: 'Validate a Project or Team app before or after reload',
     inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
     execute: async (params) => {
       requireWorkspace(tools)
@@ -297,7 +297,7 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.list',
-    description: 'List all installed apps',
+    description: 'List available Mim, Team, and Project apps',
     execute: async () => {
       return {
         packages: packageListPayload(packages, enablement),

@@ -48,7 +48,7 @@ describe('direct-source app tools', () => {
 
   it('reports the natural origin and local activation', async () => {
     expect(await tools.call('app.status', {}, { actor: 'user' })).toMatchObject({
-      apps: [{ id: 'notes', source: 'team', enabled: false, needsInstall: false }],
+      apps: [{ id: 'notes', source: 'team', enabled: false }],
     })
   })
 

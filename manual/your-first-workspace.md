@@ -32,7 +32,8 @@ When you open an empty folder or create a new one, Mim recognizes it has no work
 When a workspace is initialized, Mim creates four things in the folder:
 
 ::: rows
-- `mim.yaml` -- the workspace contract. It holds the workspace name and, over time, any apps, skills, or integrations you enable. You can edit it by hand or let Mim manage it.
+- `mim.yaml` -- the Project contract. It holds the Project name and optional
+  managed-sync configuration. You can edit it by hand or let Mim manage it.
 - `AGENTS.md` -- standing instructions the agent follows in every chat. Yours to edit. The default template describes the workspace layout, available tools, and basic conventions. Add your own project context, domain rules, or constraints and the agent will respect them.
 - `CLAUDE.md` -- a pointer file that references `AGENTS.md`. CLI agents that read `CLAUDE.md` get the same instructions Mim's agent does.
 - `.mim/` -- Mim's own runtime data: chat history, file history, and workspace state. This directory is added to `.gitignore` automatically and never committed.
@@ -87,11 +88,12 @@ A search field at the top searches by file name and content. To import files fro
 Opening a file from the files surface places it in the editor. The files surface is for navigation; editing, formatting, and export are covered in [writing](writing).
 
 ::: under-the-hood
-The `mim.yaml` file is a YAML document. Its schema supports fields for the Project name, app pins, skill configuration, registry sources, integration accounts, and sync settings. A minimal file contains only `name`:
+The `mim.yaml` file is a YAML document. Its schema supports the Project name
+and optional managed-sync settings. A minimal file contains only `name`:
 
 ```yaml
 name: my-research-paper
 ```
 
-Everything else is added as you enable features. The full schema is documented in [workspace contract](/develop/workspace-contract).
+The full schema is documented in [workspace contract](/develop/workspace-contract).
 :::

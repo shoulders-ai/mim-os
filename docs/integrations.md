@@ -23,19 +23,10 @@ Never store Slack or Google tokens in `mim.yaml`, `.mim/settings.json`, `~/.mim/
 Integration tools resolve account labels in this order:
 
 1. explicit `account` parameter
-2. workspace `mim.yaml` key, `slack` or `google`
-3. user-global `~/.mim/config.yaml` key, `defaults.slack` or `defaults.google`
-4. `default`
+2. Personal `~/.mim/config.yaml` key, `defaults.slack` or `defaults.google`
+3. `default`
 
-Example workspace config:
-
-```yaml
-name: Acme Research
-slack: acme
-google: user@acme.example
-```
-
-Example user-global config:
+Example Personal config:
 
 ```yaml
 defaults:
@@ -96,27 +87,25 @@ workspace runtime files.
 ### Tool Policy
 
 Slack agent access is governed by Settings > Tools. The canonical workspace
-setting is `.mim/settings.json` under `tools.enabled` / `tools.disabled`.
-Legacy `connectors.slack` fields are still read when a workspace has no explicit
-`tools` policy:
+setting is `.mim/settings.json` under `tools.enabled` / `tools.disabled`:
 
-- `aiEnabled` — expose Slack tools to AI chat (default: false)
-- `sendEnabled` — expose `slack_send` to AI chat (default: false)
-- `privateChannels` — allow AI to read private channels (default: false)
-- `directMessages` — allow AI to read DMs (default: false)
+- `slack.public` — search and read public Slack content
+- `slack.private` — include private channels
+- `slack.dms` — read direct messages
+- `slack.send` — send Slack messages
 
 Settings > Connections only manages connection lifecycle and account status.
 Settings > Tools owns capability toggles.
 
 ### AI Tool Exposure
 
-Chat tools are conditionally included based on policy and connection state:
+Chat tools are conditionally included based on the matching row and connection
+state. Enabling send, private-channel, or DM access also enables the public
+read baseline; disabling public read disables those dependent rows.
 
-- `slack_search`, `slack_history`, `slack_channels`, `slack_replies` — visible when `aiEnabled` is true
-- `slack_send` — visible when `sendEnabled` is true
-- Setting `aiEnabled` to false acts as a master kill switch: it disables ALL Slack tools including send, DMs, and private channels
-
-When `privateChannels` is false, `slack.channels` excludes `private_channel` from the types parameter for AI calls. When `directMessages` is false, `slack.dms` is blocked for AI.
+When `slack.private` is off, `slack.channels` excludes `private_channel` from
+the types parameter for AI calls. When `slack.dms` is off, direct-message
+access is blocked for AI.
 
 Backend policy enforcement runs in the tool execution layer for the `ai` actor
 as defense in depth. MCP exposure and MCP execution are filtered by the same
@@ -212,17 +201,13 @@ Drive, Docs, and Sheets tools:
 ### Tool Policy
 
 Google agent access is governed by Settings > Tools. The canonical workspace
-setting is `.mim/settings.json` under `tools.enabled` / `tools.disabled`.
-Legacy `connectors.google` fields are still read when a workspace has no
-explicit `tools` policy:
+setting is `.mim/settings.json` under `tools.enabled` / `tools.disabled`:
 
-- `aiEnabled` — expose Google tools to AI chat (default: false)
-- `gmailEnabled` — expose `gmail_search` and `gmail_read` (default: false)
-- `gmailSendEnabled` — expose `gmail_send` (default: false)
-- `calendarEnabled` — expose `calendar_events` (default: false)
-- `calendarWriteEnabled` — expose `calendar_create` (default: false)
-- `driveEnabled` — expose Drive, Docs, and Sheets read tools (default: false)
-- `sheetsWriteEnabled` — expose `sheets_write` and `sheets_append` (default: false)
+- `google.gmail.read` / `google.gmail.send`
+- `google.calendar.read` / `google.calendar.write`
+- `google.drive.read` / `google.sheets.write`
+
+Write rows automatically enable their corresponding read baseline.
 
 Settings > Connections provides connection status, a browser-based Google sign-in
 button, an advanced manual token form for development/recovery, granted scope
