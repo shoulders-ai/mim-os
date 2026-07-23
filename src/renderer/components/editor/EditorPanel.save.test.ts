@@ -398,6 +398,20 @@ describe('EditorPanel save behavior', () => {
     expect(mounted.panelRef.value.getCurrentDocument()).toBeNull()
   })
 
+  it('opens Mim origin documents read-only through the normal file path', async () => {
+    mounted = mountPanel()
+    await flushUi()
+
+    await mounted.panelRef.value.openFile('.mim/origins/mim/skills/build-app/SKILL.md')
+    await flushMicrotasks()
+
+    expect(mounted.panelRef.value.getCurrentDocument()).toMatchObject({
+      path: '.mim/origins/mim/skills/build-app/SKILL.md',
+      dirty: false,
+    })
+    expect(await mounted.panelRef.value.saveActiveFile()).toBe(false)
+  })
+
   it('save as writes an existing file to a new path and updates the active tab', async () => {
     const onArtifactActivated = vi.fn()
     saveFileDialog.mockResolvedValueOnce('docs/copy.md')

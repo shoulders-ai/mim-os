@@ -89,7 +89,6 @@ describe('SettingsDialog model defaults', () => {
       }
       if (tool === 'settings.get') return { value: null }
       if (tool === 'skill.list') return { skills: [], diagnostics: [] }
-      if (tool === 'skillSource.list') return { sources: [] }
       if (tool === 'skill.templateList') return { templates: [] }
       if (tool === 'history.stats') return { bytes: 0, blobBytes: 0, fileCount: 0, versionCount: 0 }
       if (tool === 'sync.status') return { mode: 'manual', state: 'manual', git: false, remote: null, dirty: false, ahead: false, behind: false, conflicts: [], message: 'Manual' }

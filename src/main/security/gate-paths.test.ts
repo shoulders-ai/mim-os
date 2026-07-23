@@ -85,6 +85,21 @@ describe('permission path classification — Team source', () => {
     })
   })
 
+  it('classifies managed Personal and Mim editor documents by origin', () => {
+    expect(classifyPermissionPath('.mim/origins/you/instructions.md', workspacePath)).toMatchObject({
+      kind: 'personal',
+    })
+    expect(classifyPermissionPath('.mim/origins/you/skills/email/SKILL.md', workspacePath)).toMatchObject({
+      kind: 'personal',
+    })
+    expect(classifyPermissionPath('.mim/origins/mim/instructions.md', workspacePath)).toMatchObject({
+      kind: 'mim',
+    })
+    expect(classifyPermissionPath('.mim/origins/mim/skills/build-app/SKILL.md', workspacePath)).toMatchObject({
+      kind: 'mim',
+    })
+  })
+
   it('marks only the checkout mount itself as the protected Team root', () => {
     expect(classifyPermissionPath('.mim/team', workspacePath)).toMatchObject({
       kind: 'team',

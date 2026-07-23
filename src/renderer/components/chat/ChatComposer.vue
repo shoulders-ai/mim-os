@@ -58,6 +58,7 @@ const emit = defineEmits([
     "stop",
     "update:modelId",
     "update:controlId",
+    "open-file",
 ]);
 
 const draft = ref("");
@@ -474,7 +475,16 @@ defineExpose({
                         :size="11"
                         :stroke-width="chip.type === 'skill' ? 2.5 : 2"
                     />
+                    <button
+                        v-if="chip.type === 'skill' && chip.editorPath"
+                        type="button"
+                        class="max-w-[180px] overflow-hidden text-ellipsis whitespace-nowrap rounded-[3px] px-0.5 hover:bg-chrome-mid"
+                        @click="emit('open-file', chip.editorPath)"
+                    >
+                        {{ chip.label }}<span v-if="chip.packageName" class="ml-1 text-[9px] text-ink-3">· {{ chip.packageName }}</span>
+                    </button>
                     <span
+                        v-else
                         class="max-w-[140px] overflow-hidden text-ellipsis whitespace-nowrap"
                         >{{ chip.label }}</span
                     >
@@ -657,6 +667,7 @@ defineExpose({
                                             skill.id,
                                         desc: skill.desc || skill.description,
                                         packageName: skill.packageName,
+                                        editorPath: skill.editorPath,
                                         group: 'Skills',
                                     })
                                 "

@@ -1225,6 +1225,37 @@ describe('Team source write policy', () => {
   })
 })
 
+describe('instruction and skill origin policy', () => {
+  it('allows direct user writes to Personal skill documents', async () => {
+    const { gate, requests } = makeGate()
+    await gate.check(
+      tool('fs.write'),
+      { path: '.mim/origins/you/skills/email/SKILL.md', content: 'x' },
+      { actor: 'user' },
+    )
+    expect(requests).toHaveLength(0)
+  })
+
+  it('hard-denies writes to Mim built-ins for every actor', async () => {
+    const { gate, requests } = makeGate({ mode: 'developer' })
+    await expect(gate.check(
+      tool('fs.write'),
+      { path: '.mim/origins/mim/skills/build-app/SKILL.md', content: 'x' },
+      { actor: 'user' },
+    )).rejects.toThrow('read-only')
+    expect(requests).toHaveLength(0)
+  })
+
+  it('denies app access to Personal origin documents', async () => {
+    const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
+    await expect(gate.check(
+      tool('fs.read'),
+      { path: '.mim/origins/you/instructions.md' },
+      { actor: 'package', package_id: 'p1' },
+    )).rejects.toThrow(PermissionDeniedError)
+  })
+})
+
 describe('Team tool policies', () => {
   it('classifies Team discovery separately from connection and network sync', () => {
     expect(getToolPolicy('team.status')).toMatchObject({ category: 'read', risk: 'low' })

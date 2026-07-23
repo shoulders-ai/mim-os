@@ -379,11 +379,13 @@ function resolveWorkspacePath(tools: ToolRegistry, relativePath: string): string
 
 // Prevent symlink-based escapes: if any component in the resolved path is a
 // symlink whose real target lands outside the workspace, reject the operation.
-// Paths under .mim/team/ are exempt because that checkout symlink is the one
-// managed external root. The permission gate protects the mount itself.
+// Paths under the Team checkout and the exact Personal/Mim origin mounts are
+// exempt because Mim creates those links. The permission gate protects the
+// managed roots and makes Mim-authored content read-only.
 function assertNoSymlinkEscape(resolved: string, root: string): void {
   const rel = relative(root, resolved)
   if (rel === join('.mim', 'team') || rel.startsWith(`${join('.mim', 'team')}${sep}`)) return
+  if (isManagedOriginPath(rel)) return
 
   // Walk to the deepest component that exists as a directory entry. lstat
   // (not existsSync) so a DANGLING symlink is still inspected — existsSync
@@ -430,6 +432,15 @@ function assertNoSymlinkEscape(resolved: string, root: string): void {
   if (realRel.startsWith('..') || isAbsolute(realRel)) {
     throw new Error('Path resolves outside workspace via symlink')
   }
+}
+
+function isManagedOriginPath(rel: string): boolean {
+  const mounts = [
+    join('.mim', 'origins', 'you', 'instructions.md'),
+    join('.mim', 'origins', 'you', 'skills'),
+    join('.mim', 'origins', 'mim', 'skills'),
+  ]
+  return mounts.some(mount => rel === mount || rel.startsWith(`${mount}${sep}`))
 }
 
 function lexists(path: string): boolean {

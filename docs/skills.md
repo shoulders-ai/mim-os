@@ -1,212 +1,106 @@
 # Skills
 
-Filesystem skill system for the Mim AI agent. **Status: implemented.**
+Mim loads filesystem skills from four authored origins and app packages. An
+authored skill is a directory containing `SKILL.md`; supporting files may sit
+beside it.
 
-Skills are markdown instruction folders. Authored skills are managed in
-Settings -> Skills. App-bundled skills are owned by their apps and are managed in
-Settings -> Apps.
+## Authored origins and precedence
 
-## What a skill is
+Authored skills resolve by folder/frontmatter name, from least to most
+specific:
 
-A skill is a folder with a required `SKILL.md` file plus optional bundled
-resources:
+1. **Mim** — bundled skills from the application build.
+2. **Team** — `~/.mim/team/skills/`.
+3. **You** — `~/.mim/skills/`.
+4. **Project** — `<project>/skills/`.
 
-```text
-skills/
-  issue-work/
-    SKILL.md
-    references/
-    scripts/
-    assets/
-```
+The later definition wins. The detailed catalog retains the shadowed metadata
+for explanation, but Chat activates only the winning definition. App-bundled
+skills use package-qualified ids and remain a separate namespace.
 
-`SKILL.md` starts with YAML frontmatter:
+Settings → Skills presents the resolved authored catalog as one searchable
+list. It uses the current Project name, the actual Team name, **You**, and
+**Mim** as origin labels. Each user's enable/disable choices are stored in
+`skills.disabled` in `~/.mim/config.yaml`; toggles never edit Team or Project
+content.
+
+New skills can be created in You, Project, or Team. Clicking any row opens its
+`SKILL.md` in the normal document editor. Project, Team, and Personal skill
+documents save normally. Mim skills open read-only.
+
+## Editor paths
+
+Project and Team skill documents already have Project-relative paths:
+
+- `skills/<name>/SKILL.md`
+- `.mim/team/skills/<name>/SKILL.md`
+
+Mim gives Personal and built-in documents narrow managed paths so the existing
+editor, watcher, stale-write check, and save flow can be reused without
+granting general access outside the Project:
+
+- `.mim/origins/you/skills/<name>/SKILL.md`
+- `.mim/origins/mim/skills/<name>/SKILL.md`
+
+Only these exact origin mounts bypass the filesystem symlink-escape guard.
+Apps cannot access Personal or Mim origin documents, and every actor is denied
+writes to Mim built-ins.
+
+## `SKILL.md`
+
+Every skill begins with YAML frontmatter:
 
 ```markdown
 ---
-name: issue-work
-description: Use when the user wants to plan, triage, reference, create, update, or continue work tracked in Mim issues.
-tools: [issues.list, issues.update]
-unlocks: [issues.list, issues.update]
+name: review-notes
+description: Use when reviewing research notes for gaps and contradictions.
+tools: [fs_read]
+unlocks: [comments_add]
 ---
 
-# Issue Work
-...
+# Review notes
+
+Follow the instructions here.
 ```
 
-## Frontmatter
+- `name` is required and must match the directory name.
+- `description` is required and is shown in the catalog/system prompt.
+- `tools` documents relevant tools.
+- `unlocks` names tools hidden until the skill activates.
 
-- `name` is required and must match the skill folder name for loaded roots.
-- `description` is required and is the activation signal shown in the catalog.
-- `tools` is descriptive. It tells the catalog what the skill commonly uses.
-- `unlocks` is the gating list. Tools named here are hidden from chat until the
-  skill activates.
+The loader reports invalid frontmatter as diagnostics without breaking the
+rest of the catalog. `skill.list` returns metadata, `skill.get` returns the
+body for activation, `skill.setDisabled` changes the Personal toggle, and the
+create/import/delete tools accept a `personal`, `project`, or `team`
+destination. There is no skill-source registry or source-management API; Team
+sync belongs to the single Team connection.
 
-Activation still unions `tools` and `unlocks` for compatibility with older
-skills, but new skills should put gating intent in `unlocks`.
+Activated and composer-selected skills retain their origin and editor path.
+Chat renders the origin and can open the same `SKILL.md`.
 
-## Discovery and identity
+## Instructions
 
-`createSkillLoader` scans authored roots in this precedence order:
+Instructions use the same origin vocabulary. The prompt composes them from
+least to most specific:
 
-| Source | Path | Managed in Settings |
-|---|---|---|
-| Built-in | `<dist>/../../skills/` | yes, read-only |
-| Added source | local folder or git mirror from `~/.mim/config.yaml` | yes, source-managed |
-| Personal | `~/.mim/skills/` | yes, owned |
-| Workspace | `{workspace}/skills/` | yes, override escape hatch |
+1. Mim's built-in runtime instructions.
+2. Team `instructions.md`.
+3. Personal `~/.mim/instructions.md`.
+4. Project `AGENTS.md`.
 
-Authored skills use `id === name`. Precedence is last-wins:
-`built-in < added sources < personal < workspace`. A higher-precedence skill
-with the same name shadows the lower copy; diagnostics retain the shadow chain.
-
-The built-in `build-app` skill teaches the agent to create or debug workspace
-skills and apps. It gates app authoring tools such as
-`package_create`, `package_validate`, `package_reload`, `app_status`,
-`app_enable`, and app runtime test tools until the skill is active.
-
-Enabled apps can also ship `skills/<name>/SKILL.md`. App skills do
-not participate in authored-skill shadowing and do not appear in Settings ->
-Skills. Their activation id is:
-
-```text
-package:<packageId>/<skillName>
-```
-
-An app skill cannot be activated by bare name. This prevents an app skill and
-a Personal/Workspace skill with the same folder name from silently hijacking
-each other.
-
-## Global config
-
-Skill library state lives in `~/.mim/config.yaml`:
-
-```yaml
-skillSources:
-  team:
-    name: Team skills
-    git: https://github.com/acme/mim-skills.git
-    trusted: true
-  local-lab:
-    name: Local lab
-    path: /Users/me/lab-skills
-    trusted: true
-skills:
-  disabled:
-    - issue-work
-```
-
-`skills.disabled` contains authored skill names only. It does not target
-`package:<packageId>/<skillName>` ids; app skills are controlled by app
-enablement/trust.
-
-Git skill sources are cloned/refreshed under
-`~/.mim/skill-sources/<sourceId>/`. Local path sources are read in place.
-Sources must be inspected and confirmed before they are written to config.
-
-## Progressive disclosure
-
-| Tier | Content | Loaded when | Code path |
-|---|---|---|---|
-| 0 | `id`, `name`, `description`, descriptive `tools`/`unlocks` | each chat turn | `skill.list` -> `formatSkillCatalogSection` |
-| 1 | full `SKILL.md` body plus unlocked tools | model calls `skill(name_or_id)` or composer sends selected `skills[]` | `skill.get`, `activateSelectedSkillsFromRegistry` |
-| 2 | referenced files/assets/scripts | when the active skill instructs the agent to read/run them | ordinary file and terminal tools |
-
-Composer skill chips are one-send context and can include multiple skills.
-Authored chips use bare names; app-bundled chips use app-qualified ids.
-
-## Tools
-
-- `skill.list` returns active authored skills plus app skills for chat.
-  With `{ detailed: true }`, it returns Settings metadata for authored skills
-  only, including disabled rows and shadow chains.
-- `skill.get` activates an authored name or an app-qualified id and returns
-  the skill body.
-- `skill.setDisabled` writes global `skills.disabled`.
-- `skill.create` creates a Personal skill in `~/.mim/skills/<name>/`.
-  It accepts generated `content` and bundled relative `files` for starter
-  templates, validates that `SKILL.md` frontmatter matches the requested name,
-  and rejects traversal, absolute paths, symlinks, `.git`, and replacement
-  `SKILL.md` entries before writing.
-- `skill.templateList` lists built-in Personal skill starters.
-- `skill.templateContent` renders a starter as `content` plus optional bundled
-  files. It does not write to disk.
-- `skill.inspectImport` inspects one `SKILL.md` folder before import.
-- `skill.import` copies an inspected folder into Personal after
-  `confirmed: true`.
-- `skill.delete` deletes a Personal skill.
-- `skillSource.list` lists trusted user-added sources.
-- `skillSource.inspect` previews a local folder or git repo before trust.
-- `skillSource.add` writes a trusted source after `confirmed: true`.
-- `skillSource.refresh` refreshes a source; git sources fetch and checkout the
-  remote default branch, local path sources are re-scanned on demand.
-- `skillSource.remove` removes the source config. Git mirrors are deleted;
-  local source folders are untouched.
-
-`skill.*` and `skillSource.*` are denied to app actors.
-
-## Tool gating
-
-1. `skill.list` returns enabled skills.
-2. `listSkillUnlocks` builds the controlled set from every enabled skill's
-   `unlocks`.
-3. `createSkillActiveToolPolicy` removes controlled tools from the visible chat
-   tool set.
-4. `skill(name_or_id)` or composer pre-activation adds that skill's
-   `tools ∪ unlocks` to `activeTools`.
-
-The `skill` activation tool itself is never gated.
-
-## Settings panel
-
-Settings -> Skills is a management and audit surface, not an authoring editor.
-
-It shows authored skills grouped as Personal, added sources, Workspace
-overrides, and Built-in. App-bundled skills remain in Settings -> Apps under
-"Teaches the agent".
-
-Row actions:
-
-- Reveal folder: all authored skills.
-- Edit: Personal only, opens `SKILL.md` with the OS default handler.
-- Delete: Personal only, after inline confirmation.
-- Toggle: all authored skills, writing global `skills.disabled`.
-
-The Add menu is ordered by common intake jobs: Add a source, Import skill from
-folder, New Personal skill from template. Import and source add both show
-inspection results before the operation becomes active. New Personal skill from
-template opens a Select template selector; choosing a template pre-fills the
-name and description and writes any bundled reference files. Creating a
-Personal skill reveals the folder and shows a confirmation toast; it does not
-auto-open an editor.
-
-## App capability display
-
-`package.capabilities.list` scans `{package.dir}/skills/` and returns
-`skills: [{ id, label }]` beside jobs and tools. Settings -> Apps renders this
-as "Teaches the agent". The scan is lightweight and does not import app backend
-code.
+Settings shows document links instead of an embedded instructions textarea.
+Personal and Mim instructions use `.mim/origins/you/instructions.md` and
+`.mim/origins/mim/instructions.md`; Team and Project use their natural paths.
 
 ## Implementation map
 
-- `src/main/skills.ts` - filesystem loader, source/app identity,
-  precedence, shadow diagnostics, disabled filtering.
-- `src/main/userConfig.ts` - global `skillSources` and `skills.disabled`
-  parsing/writing.
-- `src/main/tools/skills.ts` - skill and skill-source tools.
-- `src/main/ai/aiRuntime.ts` - skill activation tool, composer
-  pre-activation, gated-tool derivation.
-- `src/main/ai/systemPrompt.ts` - catalog formatter and standalone prompt path.
-- `src/main/tools/packageRuntime.ts` - app capability skill summaries.
-- `src/renderer/components/settings/SkillsSettingsPanel.vue` - Settings ->
-  Skills.
-- `src/renderer/components/settings/AppsSettingsPanel.vue` - app skills
-  under app capabilities.
-- `src/renderer/components/chat/ChatView.vue` and
-  `src/renderer/components/chat/ChatComposer.vue` - composer skill suggestions
-  and one-send selected skills.
-
-## Pending
-
-- Agent-authored "save this as a skill" flow.
-- Richer source health timestamps in Settings.
+- `src/main/skills.ts` — scan, validation, precedence, diagnostics.
+- `src/main/ai/instructions.ts` — instruction composition and managed editor
+  documents.
+- `src/main/ai/systemPrompt.ts` — prompt assembly and compact skill catalog.
+- `src/main/tools/skills.ts` — skill/instruction tools and destinations.
+- `src/renderer/components/settings/SkillsSettingsPanel.vue` — flat catalog.
+- `src/renderer/components/settings/InstructionsSettingsPanel.vue` — editor
+  links.
+- `src/renderer/components/chat/ChatMessage.vue` and `ChatComposer.vue` — skill
+  provenance and editor handoff.

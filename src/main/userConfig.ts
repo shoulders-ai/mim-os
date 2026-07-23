@@ -9,13 +9,6 @@ import { randomBytes } from 'crypto'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { userHomeDir } from '@main/platform.js'
 
-export interface SkillSourceConfig {
-  name?: string
-  git?: string
-  path?: string
-  trusted?: boolean
-}
-
 export interface UserConfig {
   user: { name?: string; email?: string; timezone?: string }
   team?: { repository: string }
@@ -42,14 +35,12 @@ export interface UserConfig {
     slack?: Record<string, unknown>
   }
   registry: { url?: string }
-  skillSources: Record<string, SkillSourceConfig>
   skills: { disabled: string[] }
 }
 
 export const DEFAULT_REGISTRY_URL = 'https://github.com/shoulders-ai/mim-apps.git'
 export const DEFAULT_REGISTRY_INDEX_URL = 'https://raw.githubusercontent.com/shoulders-ai/mim-apps/refs/heads/main/index.json'
 export const USER_SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
-export const USER_SKILL_SOURCE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 let cache: { home: string; config: UserConfig } | null = null
 
@@ -96,7 +87,6 @@ function emptyConfig(): UserConfig {
     preferences: {},
     connectors: {},
     registry: {},
-    skillSources: {},
     skills: { disabled: [] },
   }
 }
@@ -169,7 +159,6 @@ export function loadUserConfig(home?: string): UserConfig {
           config.connectors.google = connectors.google as Record<string, unknown>
         }
 
-        config.skillSources = parseSkillSources(r.skillSources)
         config.skills.disabled = parseDisabledSkillNames(r.skills)
       }
     }
@@ -206,9 +195,6 @@ export function loadUserConfig(home?: string): UserConfig {
       ...(config.connectors.slack ? { slack: Object.freeze({ ...config.connectors.slack }) } : {}),
     }),
     registry: Object.freeze(config.registry),
-    skillSources: Object.freeze(Object.fromEntries(
-      Object.entries(config.skillSources).map(([id, source]) => [id, Object.freeze({ ...source })]),
-    )),
     skills: Object.freeze({
       disabled: Object.freeze([...config.skills.disabled]),
     }),
@@ -267,33 +253,6 @@ export function setTeamConnection(team: { repository: string }, home?: string): 
   if (!repository) throw new Error('Team repository must be credential-free and non-empty')
   const raw = readRawConfig(home)
   raw.team = { repository }
-  writeRawConfig(raw, home)
-}
-
-export function writeSkillSource(id: string, source: SkillSourceConfig, home?: string): void {
-  if (!USER_SKILL_SOURCE_ID_PATTERN.test(id)) throw new Error(`Invalid skill source id: ${id}`)
-  const hasGit = typeof source.git === 'string' && source.git.length > 0
-  const hasPath = typeof source.path === 'string' && source.path.length > 0
-  if (hasGit === hasPath) throw new Error('Skill source must specify exactly one of git or path')
-  const raw = readRawConfig(home)
-  const skillSources = objectValue(raw.skillSources)
-  const entry: Record<string, unknown> = {}
-  if (source.name !== undefined) entry.name = source.name
-  if (source.git !== undefined) entry.git = source.git
-  if (source.path !== undefined) entry.path = source.path
-  if (source.trusted !== undefined) entry.trusted = source.trusted
-  skillSources[id] = entry
-  raw.skillSources = skillSources
-  writeRawConfig(raw, home)
-}
-
-export function removeSkillSource(id: string, home?: string): void {
-  if (!USER_SKILL_SOURCE_ID_PATTERN.test(id)) throw new Error(`Invalid skill source id: ${id}`)
-  const raw = readRawConfig(home)
-  const skillSources = objectValue(raw.skillSources)
-  delete skillSources[id]
-  if (Object.keys(skillSources).length) raw.skillSources = skillSources
-  else delete raw.skillSources
   writeRawConfig(raw, home)
 }
 
@@ -376,25 +335,4 @@ function parseDisabledSkillNames(rawSkills: unknown): string[] {
       .filter((item): item is string => typeof item === 'string' && USER_SKILL_NAME_PATTERN.test(item))
       .sort(),
   )]
-}
-
-function parseSkillSources(rawSources: unknown): Record<string, SkillSourceConfig> {
-  const raw = objectValue(rawSources)
-  const out: Record<string, SkillSourceConfig> = {}
-  for (const [id, value] of Object.entries(raw)) {
-    if (!USER_SKILL_SOURCE_ID_PATTERN.test(id)) continue
-    const source = objectValue(value)
-    const hasGit = typeof source.git === 'string' && source.git.length > 0
-    const hasPath = typeof source.path === 'string' && source.path.length > 0
-    if (hasGit === hasPath) continue
-    const entry: SkillSourceConfig = {}
-    const name = str(source.name)
-    if (name !== undefined) entry.name = name
-    if (hasGit) entry.git = source.git as string
-    if (hasPath) entry.path = source.path as string
-    const trusted = bool(source.trusted)
-    if (trusted !== undefined) entry.trusted = trusted
-    out[id] = entry
-  }
-  return out
 }

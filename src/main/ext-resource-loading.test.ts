@@ -44,23 +44,20 @@ describe('external resource loading', () => {
     rmSync(externalRoot, { recursive: true, force: true })
   })
 
-  describe('skills from an external source folder', () => {
-    it('discovers the greet skill from the external source root', () => {
+  describe('skills from the Team source folder', () => {
+    it('discovers the greet skill from the Team root', () => {
       const loader = createSkillLoader({
         builtinDir: '/nonexistent-builtin',
         personalDir: '/nonexistent-personal',
-        getSourceSkillRoots: () => [{
-          id: 'ext-test',
-          name: 'External Test',
-          dir: join(externalRoot, 'skills'),
-        }],
+        teamDir: join(externalRoot, 'skills'),
+        teamName: 'External Test',
       })
 
       const skills = loader.list()
       const greet = skills.find(s => s.name === 'greet')
       expect(greet).toBeDefined()
-      expect(greet!.source).toBe('source')
-      expect(greet!.sourceId).toBe('ext-test')
+      expect(greet!.source).toBe('team')
+      expect(greet!.sourceName).toBe('External Test')
       expect(greet!.description).toBe('Use when the user wants a friendly greeting or needs a morale boost.')
     })
 
@@ -68,11 +65,8 @@ describe('external resource loading', () => {
       const loader = createSkillLoader({
         builtinDir: '/nonexistent-builtin',
         personalDir: '/nonexistent-personal',
-        getSourceSkillRoots: () => [{
-          id: 'ext-test',
-          name: 'External Test',
-          dir: join(externalRoot, 'skills'),
-        }],
+        teamDir: join(externalRoot, 'skills'),
+        teamName: 'External Test',
       })
 
       const skill = loader.get('greet')

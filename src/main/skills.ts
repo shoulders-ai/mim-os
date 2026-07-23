@@ -3,7 +3,7 @@ import { join, resolve } from 'path'
 import { parse as parseYaml } from 'yaml'
 import { userHomeDir } from '@main/platform.js'
 
-export type AuthoredSkillSource = 'builtin' | 'source' | 'personal' | 'workspace'
+export type AuthoredSkillSource = 'mim' | 'team' | 'personal' | 'project'
 export type SkillSource = AuthoredSkillSource | 'package'
 
 export interface SkillMetadata {
@@ -16,8 +16,8 @@ export interface SkillMetadata {
   source: SkillSource
   dir: string
   path: string
+  editorPath?: string
   diagnostics: string[]
-  sourceId?: string
   sourceName?: string
   packageId?: string
   packageName?: string
@@ -37,7 +37,6 @@ export interface SkillDiagnostic {
   source: SkillSource
   path: string
   message: string
-  sourceId?: string
   packageId?: string
 }
 
@@ -48,8 +47,7 @@ export interface SkillLoader {
   diagnostics(): SkillDiagnostic[]
 }
 
-export interface SourceSkillRoot {
-  id: string
+export interface TeamSkillRoot {
   name?: string
   dir: string
 }
@@ -62,13 +60,10 @@ export interface PackageSkillRoot {
 
 export interface SkillLoaderOptions {
   builtinDir?: string
+  teamDir?: string
+  teamName?: string
   personalDir?: string
-  /**
-   * Back-compat alias for the previous user-global root name. New callers
-   * should pass personalDir.
-   */
-  globalDir?: string
-  getSourceSkillRoots?: () => SourceSkillRoot[]
+  getTeamSkillRoot?: () => TeamSkillRoot | null | undefined
   getPackageSkillRoots?: () => PackageSkillRoot[]
   getWorkspacePath?: () => string | null | undefined
   disabledNames?: Set<string>
@@ -84,7 +79,6 @@ interface ScanResult {
 interface AuthoredSkillRoot {
   source: AuthoredSkillSource
   dir: string
-  sourceId?: string
   sourceName?: string
 }
 
@@ -160,7 +154,6 @@ function scanSkills(options: SkillLoaderOptions): ScanResult {
           name: candidate.name,
           source: candidate.source,
           path: candidate.path,
-          sourceId: candidate.sourceId,
           message: `Skill ${candidate.name} from ${existing.source} is shadowed by ${candidate.source}`,
         })
       }
@@ -201,32 +194,32 @@ function authoredSkillRoots(options: SkillLoaderOptions, diagnostics: SkillDiagn
     roots.push(root)
   }
 
-  pushRoot({ source: 'builtin', dir: options.builtinDir ?? resolveBuiltinSkillsDir() })
+  pushRoot({ source: 'mim', dir: options.builtinDir ?? resolveBuiltinSkillsDir() })
 
   try {
-    for (const source of options.getSourceSkillRoots?.() ?? []) {
-      if (!source?.id || !source.dir) continue
+    const team = options.getTeamSkillRoot?.()
+      ?? (options.teamDir ? { dir: options.teamDir, name: options.teamName } : null)
+    if (team?.dir) {
       pushRoot({
-        source: 'source',
-        dir: source.dir,
-        sourceId: source.id,
-        sourceName: source.name,
+        source: 'team',
+        dir: team.dir,
+        sourceName: team.name,
       })
     }
   } catch (err) {
     diagnostics.push({
       name: '*',
-      source: 'source',
+      source: 'team',
       path: '',
-      message: `Could not read skill sources: ${(err as Error).message}`,
+      message: `Could not read Team skills: ${(err as Error).message}`,
     })
   }
 
-  const personalDir = options.personalDir ?? options.globalDir ?? PERSONAL_SKILLS_DIR
+  const personalDir = options.personalDir ?? PERSONAL_SKILLS_DIR
   if (personalDir) pushRoot({ source: 'personal', dir: personalDir })
 
   const workspacePath = options.getWorkspacePath?.()
-  if (workspacePath) pushRoot({ source: 'workspace', dir: join(workspacePath, 'skills') })
+  if (workspacePath) pushRoot({ source: 'project', dir: join(workspacePath, 'skills') })
 
   return roots
 }
@@ -286,7 +279,6 @@ function readSkillFile(input: {
     name: input.expectedName,
     source: input.root.source,
     path: input.path,
-    ...(input.root.source === 'source' ? { sourceId: input.root.sourceId } : {}),
     ...(input.root.source === 'package' ? { packageId: input.root.packageId } : {}),
     message,
   })
@@ -346,9 +338,10 @@ function readSkillFile(input: {
       source: input.root.source,
       dir: input.dir,
       path: input.path,
+      ...(editorPathForSkill(input.root, name) ? { editorPath: editorPathForSkill(input.root, name) } : {}),
       diagnostics: [],
-      ...(input.root.source === 'source'
-        ? { sourceId: input.root.sourceId, sourceName: input.root.sourceName }
+      ...(input.root.source === 'team'
+        ? { sourceName: input.root.sourceName }
         : {}),
       ...(input.root.source === 'package'
         ? { packageId: input.root.packageId, packageName: input.root.packageName }
@@ -357,4 +350,12 @@ function readSkillFile(input: {
     },
     diagnostics,
   }
+}
+
+function editorPathForSkill(root: SkillRoot, name: string): string | undefined {
+  if (root.source === 'mim') return `.mim/origins/mim/skills/${name}/SKILL.md`
+  if (root.source === 'team') return `.mim/team/skills/${name}/SKILL.md`
+  if (root.source === 'personal') return `.mim/origins/you/skills/${name}/SKILL.md`
+  if (root.source === 'project') return `skills/${name}/SKILL.md`
+  return undefined
 }

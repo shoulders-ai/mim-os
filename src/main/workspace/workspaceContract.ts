@@ -73,7 +73,7 @@ export interface WorkspaceClassification {
 
 const CONTRACT_FILES: ContractFile[] = ['mim.yaml', 'AGENTS.md', 'CLAUDE.md']
 
-export const DEFAULT_AGENTS_MD = `# Agent Instructions
+export const MIM_INSTRUCTIONS_TEMPLATE = `# Agent Instructions
 
 You are the AI agent in Mim, a workspace kernel for research teams. Mim runs as an Electron desktop app with three core surfaces: Chat (you), Editor (document viewer/editor), and Terminal (shell).
 
@@ -162,6 +162,11 @@ Use \`log_append\` only for durable activity notes that future work should see, 
 
 - Make focused, reviewable changes.
 - Prefer existing files and patterns over introducing new ones.
+`
+
+export const DEFAULT_PROJECT_AGENTS_MD = `# Project Instructions
+
+Add durable guidance that is specific to this Project.
 `
 
 export const DEFAULT_CLAUDE_MD = '@AGENTS.md\n'
@@ -472,7 +477,7 @@ export function scaffoldWorkspace(dir: string, opts: { name: string }): { create
 
   const agentsPath = join(dir, 'AGENTS.md')
   if (!existsSync(agentsPath)) {
-    writeFileSync(agentsPath, DEFAULT_AGENTS_MD)
+    writeFileSync(agentsPath, DEFAULT_PROJECT_AGENTS_MD)
     created.push('AGENTS.md')
   }
 

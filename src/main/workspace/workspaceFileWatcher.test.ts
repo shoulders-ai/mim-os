@@ -118,4 +118,17 @@ describe('workspace file watcher', () => {
       { ignoreInitial: true },
     )
   })
+
+  it('watches explicitly opened Personal and Mim origin documents', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mim-watch-origins-'))
+    dirs.push(dir)
+    const emit = vi.fn()
+    const { watch } = watchHarness()
+    const watcher = createWorkspaceFileWatcher({ emit, watch })
+
+    await watcher.setWorkspace(dir)
+    expect(watcher.watchFile('.mim/origins/you/instructions.md')).toBe(true)
+    expect(watcher.watchFile('.mim/origins/you/skills/email/SKILL.md')).toBe(true)
+    expect(watcher.watchFile('.mim/origins/mim/skills/build-app/SKILL.md')).toBe(true)
+  })
 })

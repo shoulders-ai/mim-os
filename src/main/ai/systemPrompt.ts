@@ -4,12 +4,13 @@ import { readLogbook } from '@main/logbook.js'
 import { userHomeDir } from '@main/platform.js'
 import { createSkillLoader } from '@main/skills.js'
 import { loadUserConfig } from '@main/userConfig.js'
-import { DEFAULT_AGENTS_MD } from '@main/workspace/workspaceContract.js'
 import { renderWorkspaceTree } from '@main/ai/workspaceTree.js'
+import { composeInstructions, loadInstructionDocuments } from '@main/ai/instructions.js'
 
 export interface SystemPromptOptions {
   includeSkillCatalog?: boolean
   skillCatalog?: string
+  homeDir?: string
 }
 
 export interface PromptSkillMetadata {
@@ -107,76 +108,8 @@ Integration credentials are stored in the OS keychain, not in workspace files. N
 Enablement:
 - The committed mim.yaml apps map shares/pins workspace apps for collaborators, but does not enable anyone's sidebar. Local .mim/packages/enabled.json controls the current user's sidebar/capability enablement for this workspace. Use app.add to install/add personally, and app.share to share a registry app with the workspace.`
 
-export const PACKAGES_SECTION = `Apps are UI extensions that run in sandboxed iframes. Each app lives in packages/{id}/ and contains:
-- package.json — manifest with id, name, description, icon, ui path
-- ui/index.html — the UI entry point
-
-Apps use the SDK at /sdk/mim.js to interact with the kernel:
-
-\`\`\`html
-<!DOCTYPE html>
-<html>
-<head>
-  <link rel="stylesheet" href="/sdk/tokens.css">
-</head>
-<body>
-  <script type="module">
-    import { runtime } from '/sdk/mim.js'
-
-    // Call any tool
-    const files = await runtime.call('fs.list', { path: '.' })
-
-    // Listen for events
-    runtime.on('packages:changed', (data) => { /* ... */ })
-  </script>
-</body>
-</html>
-\`\`\`
-
-When the user asks you to build a UI, create an app. Use plain HTML + JS with the SDK. The tokens.css file provides design tokens (--color-ink, --color-accent, --font-sans, etc.) so apps match the Mim aesthetic.`
-
 export function resolveTemplateVars(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (match, key) => key in vars ? vars[key] : match)
-}
-
-function buildLegacyPreamble(weekday: string, date: string): string {
-  return `# ROLE
-
-You are the AI agent in Mim, a workspace kernel for research teams. Mim runs as an Electron desktop app with three core surfaces: Chat (you), Editor (document viewer/editor), and Terminal (shell).
-
-Be precise and concise. Flag uncertainty. Never fabricate citations.
-
-Mim may show progress while you work. After finishing, progress may be collapsed. Make the final response stand on its own, including anything important the user needs to know.
-
-Today is ${weekday}, ${date}.
-
-
-# WORKSPACE
-
-The workspace is a directory on the user's machine. Committed layout:
-- mim.yaml — Project config (name, app pins, skills, registries, sync)
-- AGENTS.md — the durable contract for any agent working here
-- CLAUDE.md — contract pointer (usually references AGENTS.md)
-- issues/ — issue records, one markdown file each (present when the issues app is enabled)
-- knowledge/ — knowledge records, one markdown file each (present when the knowledge app is enabled)
-- packages/ — installed apps (UI extensions)
-
-Runtime (gitignored, not committed):
-- .mim/ — runtime config, Team checkout mount, event log, chat sessions, and agent-context.md (the volatile current-state digest)
-
-Attached-file context blocks with a path attribute identify a workspace-relative file path; use that path with fs.* tools when you need to inspect or edit the file. Direct attachments may only have a name.
-
-You can read, write, and manage files within the workspace. File mutation tools perform the real filesystem action after the system permission gate allows them. If approval is required, the tool call pauses until the user approves or denies it.
-
-
-# TOOLS
-
-${TOOL_CATALOG}
-
-
-# APPS
-
-${PACKAGES_SECTION}`
 }
 
 export function buildPromptTemplateVars(
@@ -200,49 +133,13 @@ export function buildPromptTemplateVars(
 }
 
 export function getSystemPrompt(workspacePath?: string, options: SystemPromptOptions = {}): string {
-  const agentsContent = workspacePath
-    ? readFileSafe(join(workspacePath, 'AGENTS.md'))
-    : null
-
-  const isTemplateMode = agentsContent !== null
-    ? agentsContent.includes('{{TOOL_SET}}')
-    : DEFAULT_AGENTS_MD.includes('{{TOOL_SET}}')
-
-  if (isTemplateMode) {
-    const template = agentsContent ?? DEFAULT_AGENTS_MD
-    const skillCatalogValue = options.skillCatalog
-      ?? (options.includeSkillCatalog !== false ? skillCatalogSection(workspacePath) : null)
-      ?? ''
-    const vars = buildPromptTemplateVars(workspacePath, { skillCatalog: skillCatalogValue })
-    return resolveTemplateVars(template, vars)
-  }
-
-  const now = new Date()
-  const weekday = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][now.getDay()]
-  const date = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
-
-  const preamble = buildLegacyPreamble(weekday, date)
-  const sections: string[] = [preamble]
-
-  if (options.skillCatalog) {
-    sections.push(options.skillCatalog)
-  } else if (options.includeSkillCatalog !== false) {
-    const skills = skillCatalogSection(workspacePath)
-    if (skills) sections.push(skills)
-  }
-
-  if (!workspacePath) return sections.join('\n\n\n')
-
-  if (agentsContent !== null) {
-    sections.push(`# WORKSPACE CONTRACT (AGENTS.md)\n\n${agentsContent}`)
-  }
-
-  const context = readFileSafe(join(workspacePath, '.mim', 'agent-context.md'))
-  if (context !== null) {
-    sections.push(`# WORKSPACE CONTEXT (.mim/agent-context.md)\n\n${context}`)
-  }
-
-  return sections.join('\n\n\n')
+  const home = options.homeDir ?? userHomeDir()
+  const skillCatalogValue = options.skillCatalog
+    ?? (options.includeSkillCatalog !== false ? skillCatalogSection(workspacePath, home) : null)
+    ?? ''
+  const vars = buildPromptTemplateVars(workspacePath, { skillCatalog: skillCatalogValue })
+  const documents = loadInstructionDocuments({ workspacePath, homeDir: home })
+  return resolveTemplateVars(composeInstructions(documents), vars)
 }
 
 function projectLogContext(workspacePath?: string): string {
@@ -265,17 +162,13 @@ function workspaceTreeContext(workspacePath?: string): string {
   }
 }
 
-function skillCatalogSection(workspacePath?: string): string | null {
-  const home = userHomeDir()
+function skillCatalogSection(workspacePath: string | undefined, home: string): string | null {
+  const teamSkillsDir = loadUserConfig(home).team
+    ? join(home, '.mim', 'team', 'skills')
+    : undefined
   const loader = createSkillLoader({
     personalDir: join(home, '.mim', 'skills'),
-    getSourceSkillRoots: () => Object.entries(loadUserConfig(home).skillSources)
-      .filter(([, source]) => source.trusted === true)
-      .map(([id, source]) => ({
-        id,
-        name: source.name,
-        dir: source.path ?? join(home, '.mim', 'skill-sources', id),
-      })),
+    teamDir: teamSkillsDir,
     getWorkspacePath: () => workspacePath,
     getDisabledSkillNames: () => new Set(loadUserConfig(home).skills.disabled),
   })

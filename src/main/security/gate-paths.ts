@@ -1,6 +1,6 @@
 import { isAbsolute, relative, resolve, sep } from 'path'
 
-export type PermissionPathKind = 'workspace' | 'team' | 'sensitive' | 'outside-workspace' | 'invalid'
+export type PermissionPathKind = 'workspace' | 'team' | 'personal' | 'mim' | 'sensitive' | 'outside-workspace' | 'invalid'
 
 export interface PermissionPathClassification {
   kind: PermissionPathKind
@@ -89,6 +89,8 @@ export function classifyPermissionPath(
   if (isSameOrChildPath(absolutePath, base)) {
     const team = classifyTeamPath(absolutePath, base)
     if (team) return team
+    const origin = classifyOriginPath(absolutePath, base)
+    if (origin) return origin
     if (isEnablementLedger(absolutePath, base)) {
       return {
         kind: 'sensitive',
@@ -108,6 +110,26 @@ export function classifyPermissionPath(
     reason: 'Outside workspace',
     absolutePath,
   }
+}
+
+function classifyOriginPath(absolutePath: string, base: string): PermissionPathClassification | null {
+  const segments = relative(base, absolutePath).split(sep)
+  if (segments[0] !== '.mim' || segments[1] !== 'origins') return null
+  if (segments[2] === 'you') {
+    return {
+      kind: 'personal',
+      reason: 'Personal instructions or skills',
+      absolutePath,
+    }
+  }
+  if (segments[2] === 'mim') {
+    return {
+      kind: 'mim',
+      reason: 'Mim built-in instructions or skills',
+      absolutePath,
+    }
+  }
+  return null
 }
 
 function findSensitiveLocation(absolutePath: string): string | null {

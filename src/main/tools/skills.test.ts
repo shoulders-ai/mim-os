@@ -64,11 +64,8 @@ describe('skill tools', () => {
       'skill.inspectImport',
       'skill.import',
       'skill.delete',
-      'skillSource.list',
-      'skillSource.inspect',
-      'skillSource.add',
-      'skillSource.remove',
-      'skillSource.refresh',
+      'instruction.list',
+      'instruction.open',
     ]) {
       const def = tools.get(name)
       expect(def, name).toBeDefined()
@@ -85,7 +82,7 @@ describe('skill tools', () => {
       name: 'issue-work',
       description: 'Use when working with Mim issues.',
       tools: ['issues.list', 'issues.update'],
-      source: 'builtin',
+      source: 'mim',
     })
     expect(result.skills[0]).not.toHaveProperty('body')
   })
@@ -340,63 +337,46 @@ describe('skill tools', () => {
     })
   })
 
-  it('inspects, adds, lists, refreshes, and removes a local skill source', async () => {
-    const sourceRoot = join(root, 'team-source')
-    mkdirSync(join(sourceRoot, 'team-review'), { recursive: true })
-    writeFileSync(join(sourceRoot, 'team-review', 'SKILL.md'), [
-      '---',
-      'name: team-review',
-      'description: Use team review.',
-      'unlocks: [issues.update]',
-      '---',
-      '',
-      '# Team Review',
-    ].join('\n'))
+  it('creates skills in You, Project, and Team destinations with normal editor paths', async () => {
+    mkdirSync(join(home, '.mim', 'team'), { recursive: true })
+    writeFileSync(join(home, '.mim', 'team', 'team.yaml'), 'name: Shoulders\n')
 
-    await expect(tools.call('skillSource.add', {
-      id: 'team',
-      path: sourceRoot,
-      name: 'Team skills',
-    }, ctx)).rejects.toThrow('confirmation')
+    const personal = await tools.call('skill.create', { name: 'personal-style' }, ctx) as { skill: Record<string, unknown> }
+    const project = await tools.call('skill.create', { name: 'project-review', destination: 'project' }, ctx) as { skill: Record<string, unknown> }
+    const team = await tools.call('skill.create', { name: 'team-review', destination: 'team' }, ctx) as { skill: Record<string, unknown> }
 
-    await expect(tools.call('skillSource.inspect', {
-      id: 'team',
-      path: sourceRoot,
-      name: 'Team skills',
-    }, ctx)).resolves.toMatchObject({
-      id: 'team',
-      skillCount: 1,
-      unlocks: ['issues.update'],
+    expect(personal.skill).toMatchObject({
+      source: 'personal',
+      editorPath: '.mim/origins/you/skills/personal-style/SKILL.md',
     })
-
-    await tools.call('skillSource.add', {
-      id: 'team',
-      path: sourceRoot,
-      name: 'Team skills',
-      confirmed: true,
-    }, ctx)
-
-    await expect(tools.call('skillSource.list', {}, ctx)).resolves.toMatchObject({
-      sources: [
-        {
-          id: 'team',
-          name: 'Team skills',
-          kind: 'path',
-          location: sourceRoot,
-          trusted: true,
-          skillCount: 1,
-        },
-      ],
+    expect(project.skill).toMatchObject({
+      source: 'project',
+      editorPath: 'skills/project-review/SKILL.md',
     })
-    await expect(tools.call('skill.get', { name: 'team-review' }, ctx)).resolves.toMatchObject({
-      skill: {
-        source: 'source',
-        sourceId: 'team',
-      },
+    expect(team.skill).toMatchObject({
+      source: 'team',
+      editorPath: '.mim/team/skills/team-review/SKILL.md',
     })
-    await expect(tools.call('skillSource.refresh', { id: 'team' }, ctx)).resolves.toMatchObject({ refreshed: 'team' })
+    expect(existsSync(join(home, '.mim', 'team', 'skills', 'team-review', 'SKILL.md'))).toBe(true)
+  })
 
-    await tools.call('skillSource.remove', { id: 'team' }, ctx)
-    await expect(tools.call('skillSource.list', {}, ctx)).resolves.toMatchObject({ sources: [] })
+  it('lists instruction origins and creates optional Team instructions on open', async () => {
+    mkdirSync(join(home, '.mim', 'team'), { recursive: true })
+    writeFileSync(join(home, '.mim', 'team', 'team.yaml'), 'name: Shoulders\n')
+    writeFileSync(join(workspaceDir, 'mim.yaml'), 'name: Alpha\n')
+
+    const listed = await tools.call('instruction.list', {}, ctx) as { instructions: Array<Record<string, unknown>> }
+    expect(listed.instructions).toEqual([
+      expect.objectContaining({ origin: 'personal', label: 'You', writable: true }),
+      expect.objectContaining({ origin: 'team', label: 'Shoulders', writable: true }),
+      expect.objectContaining({ origin: 'project', label: 'Alpha', writable: true }),
+      expect.objectContaining({ origin: 'mim', label: 'Mim', writable: false }),
+    ])
+
+    await expect(tools.call('instruction.open', { origin: 'team' }, ctx)).resolves.toMatchObject({
+      origin: 'team',
+      editorPath: '.mim/team/instructions.md',
+    })
+    expect(existsSync(join(home, '.mim', 'team', 'instructions.md'))).toBe(true)
   })
 })

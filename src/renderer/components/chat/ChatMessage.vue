@@ -156,6 +156,25 @@ function skillPartBody(part) {
   return [skill.description, skill.body].filter(Boolean).join('\n\n')
 }
 
+function skillPartOrigin(part) {
+  const skill = part.output?.skill
+  if (!skill) return ''
+  if (skill.sourceName) return skill.sourceName
+  if (skill.source === 'personal') return 'You'
+  if (skill.source === 'project') return 'Project'
+  if (skill.source === 'mim') return 'Mim'
+  return ''
+}
+
+function skillPartEditorPath(part) {
+  return part.output?.skill?.editorPath || ''
+}
+
+function openSkill(part) {
+  const path = skillPartEditorPath(part)
+  if (path) emit('open-file', path)
+}
+
 // --- Text extraction ---
 
 const messageText = computed(() => {
@@ -463,9 +482,21 @@ onUnmounted(() => {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
             <span>Using skill</span>
             <span class="font-medium text-ink-2">{{ skillPartName(entry.part) }}</span>
+            <span v-if="skillPartOrigin(entry.part)" class="rounded-[3px] bg-chrome-mid px-1.5 py-0.5 text-[9px] font-medium text-ink-3">
+              {{ skillPartOrigin(entry.part) }}
+            </span>
             <span v-if="getToolState(entry.part) === 'output-available'" class="w-[5px] h-[5px] rounded-full bg-add shrink-0" />
             <span v-else-if="getToolState(entry.part) !== 'error'" class="cm-tool-spinner shrink-0" />
             <span v-if="entry.part.errorText" class="text-[10px] font-semibold text-rem uppercase">error</span>
+          </button>
+          <button
+            v-if="skillPartEditorPath(entry.part)"
+            type="button"
+            title="Open skill"
+            class="ml-4 rounded-[4px] px-1.5 py-0.5 text-[10px] text-ink-3 hover:bg-chrome-mid hover:text-ink-2"
+            @click="openSkill(entry.part)"
+          >
+            Open
           </button>
           <div v-if="expandedTools[entry.index]" class="mt-1 mb-1 ml-4 border-l-2 border-rule-light pl-2.5">
             <div v-if="entry.part.errorText" class="font-sans text-[12px] text-rem">{{ entry.part.errorText }}</div>

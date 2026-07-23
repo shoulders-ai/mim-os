@@ -10,30 +10,25 @@ import {
   writeFileSync,
 } from 'fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
-import { tmpdir } from 'os'
-import { randomBytes } from 'crypto'
 import { parse as parseYaml } from 'yaml'
 import {
   createSkillLoader,
   type PackageSkillRoot,
   type Skill,
   type SkillLoader,
-  type SkillMetadata,
-  type SourceSkillRoot,
 } from '@main/skills.js'
-import { cloneRepo, checkoutRemoteDefault, fetchRepo } from '@main/git.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
 import {
   loadUserConfig,
-  removeSkillSource,
   setUserSkillDisabled,
   USER_SKILL_NAME_PATTERN,
-  USER_SKILL_SOURCE_ID_PATTERN,
-  writeSkillSource,
-  type SkillSourceConfig,
 } from '@main/userConfig.js'
 import { userHomeDir } from '@main/platform.js'
 import { listSkillTemplates, renderSkillTemplate } from '@main/templates/skillTemplates.js'
+import {
+  ensureInstructionEditorDocuments,
+  loadInstructionDocuments,
+} from '@main/ai/instructions.js'
 
 export interface SkillToolOptions {
   loader?: SkillLoader
@@ -50,17 +45,7 @@ interface ParsedSkillFolder {
   diagnostics: string[]
 }
 
-interface InspectedSkillSource {
-  id: string
-  name?: string
-  kind: 'path' | 'git'
-  location: string
-  root: string
-  skillCount: number
-  skills: SkillMetadata[]
-  unlocks: string[]
-  diagnostics: string[]
-}
+type SkillDestination = 'personal' | 'project' | 'team'
 
 function objectSchema(properties: Record<string, unknown>, required: string[] = []) {
   return { type: 'object', properties, required }
@@ -71,15 +56,28 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
   const personalDir = options.personalDir ?? join(home, '.mim', 'skills')
   const loader = () => options.loader ?? createDefaultLoader(tools, options, home, personalDir)
   const emitChanged = () => options.emit?.('skills:changed')
+  const ensureEditorDocuments = () => {
+    const workspacePath = tools.getWorkspacePath()
+    if (!workspacePath) return
+    ensureInstructionEditorDocuments({
+      workspacePath,
+      homeDir: home,
+      builtinSkillsDir: options.builtinDir,
+    })
+  }
 
   tools.register({
     name: 'skill.list',
     description: 'List available AI skills as metadata only. Body text is returned by skill.get. Pass detailed=true for Settings metadata including disabled and shadowed authored skills.',
     inputSchema: objectSchema({ detailed: { type: 'boolean' } }),
-    execute: async (params) => ({
-      skills: params.detailed === true ? loader().listDetailed() : loader().list(),
-      diagnostics: loader().diagnostics(),
-    }),
+    execute: async (params) => {
+      ensureEditorDocuments()
+      const listed = params.detailed === true ? loader().listDetailed() : loader().list()
+      return {
+        skills: listed.map(skill => decorateSkillOrigin(skill, tools, home)),
+        diagnostics: loader().diagnostics(),
+      }
+    },
   })
 
   tools.register({
@@ -91,7 +89,7 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
       if (!name) throw new Error('Missing required parameter: name')
       const skill = loader().get(name)
       if (!skill) throw new Error(`Skill not found: ${name}`)
-      return { skill }
+      return { skill: decorateSkillOrigin(skill, tools, home) }
     },
   })
 
@@ -112,16 +110,19 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
 
   tools.register({
     name: 'skill.create',
-    description: 'Create a new Personal skill at ~/.mim/skills/<name>/SKILL.md.',
+    description: 'Create a new skill for You, the current Project, or the connected Team.',
     inputSchema: objectSchema({
       name: { type: 'string' },
       description: { type: 'string' },
       content: { type: 'string' },
       files: { type: 'object' },
+      destination: { type: 'string', enum: ['personal', 'project', 'team'] },
     }, ['name']),
     execute: async (params) => {
       const name = requireSkillName(params.name)
-      const dir = join(personalDir, name)
+      const destination = requireDestination(params.destination)
+      const root = destinationRoot(destination, tools, home, personalDir)
+      const dir = join(root, name)
       const path = join(dir, 'SKILL.md')
       const extraFiles = validateSkillExtraFiles(params.files, dir)
       const requestedDescription = optionalStringParam(params.description)
@@ -148,14 +149,16 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
         writeFileSync(file.path, file.content, 'utf-8')
       }
       emitChanged()
+      ensureEditorDocuments()
       return {
         skill: {
           id: name,
           name,
           description,
-          source: 'personal',
+          source: sourceForDestination(destination),
           dir,
           path,
+          editorPath: editorPathForDestination(destination, name),
         },
       }
     },
@@ -163,7 +166,7 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
 
   tools.register({
     name: 'skill.templateList',
-    description: 'List built-in starter templates for creating Personal skills.',
+    description: 'List built-in starter templates for creating authored skills.',
     inputSchema: objectSchema({}),
     execute: async () => listSkillTemplates(),
   })
@@ -187,9 +190,14 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
 
   tools.register({
     name: 'skill.inspectImport',
-    description: 'Inspect a SKILL.md folder before importing it into Personal skills.',
-    inputSchema: objectSchema({ folder: { type: 'string' } }, ['folder']),
+    description: 'Inspect a SKILL.md folder before importing it into You, Project, or Team.',
+    inputSchema: objectSchema({
+      folder: { type: 'string' },
+      destination: { type: 'string', enum: ['personal', 'project', 'team'] },
+    }, ['folder']),
     execute: async (params) => {
+      const destination = requireDestination(params.destination)
+      const root = destinationRoot(destination, tools, home, personalDir)
       const folder = requireAbsoluteFolder(params.folder)
       assertNoSymlinks(folder)
       const inspected = inspectSkillFolder(folder, 'personal', {}, { requireFolderName: false })
@@ -197,25 +205,28 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
         skill: inspected.skill,
         unlocks: inspected.unlocks,
         diagnostics: inspected.diagnostics,
-        destination: join(personalDir, inspected.skill.name),
-        collision: existsSync(join(personalDir, inspected.skill.name, 'SKILL.md')),
+        destination: join(root, inspected.skill.name),
+        collision: existsSync(join(root, inspected.skill.name, 'SKILL.md')),
       }
     },
   })
 
   tools.register({
     name: 'skill.import',
-    description: 'Import an inspected skill folder into Personal skills. Requires confirmed=true.',
+    description: 'Import an inspected skill folder into You, Project, or Team. Requires confirmed=true.',
     inputSchema: objectSchema({
       folder: { type: 'string' },
       confirmed: { type: 'boolean' },
+      destination: { type: 'string', enum: ['personal', 'project', 'team'] },
     }, ['folder']),
     execute: async (params) => {
       if (params.confirmed !== true) throw new Error('Import requires confirmation after inspection')
+      const destinationKind = requireDestination(params.destination)
+      const root = destinationRoot(destinationKind, tools, home, personalDir)
       const folder = requireAbsoluteFolder(params.folder)
       assertNoSymlinks(folder)
       const inspected = inspectSkillFolder(folder, 'personal', {}, { requireFolderName: false })
-      const destination = join(personalDir, inspected.skill.name)
+      const destination = join(root, inspected.skill.name)
       if (existsSync(destination)) throw new Error(`Skill already exists: ${inspected.skill.name}`)
       copyTreeNoSymlinks(folder, destination)
       emitChanged()
@@ -223,9 +234,10 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
       return {
         skill: imported ? metadataOnly(imported) : {
           ...metadataOnly(inspected.skill),
-          source: 'personal',
+          source: sourceForDestination(destinationKind),
           dir: destination,
           path: join(destination, 'SKILL.md'),
+          editorPath: editorPathForDestination(destinationKind, inspected.skill.name),
         },
         unlocks: inspected.unlocks,
         diagnostics: inspected.diagnostics,
@@ -235,12 +247,16 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
 
   tools.register({
     name: 'skill.delete',
-    description: 'Delete a Personal skill by name.',
-    inputSchema: objectSchema({ name: { type: 'string' } }, ['name']),
+    description: 'Delete a writable skill from You, Project, or Team.',
+    inputSchema: objectSchema({
+      name: { type: 'string' },
+      destination: { type: 'string', enum: ['personal', 'project', 'team'] },
+    }, ['name']),
     execute: async (params) => {
       const name = requireSkillName(params.name)
-      const dir = join(personalDir, name)
-      if (!existsSync(dir)) throw new Error(`Personal skill not found: ${name}`)
+      const destination = requireDestination(params.destination)
+      const dir = join(destinationRoot(destination, tools, home, personalDir), name)
+      if (!existsSync(dir)) throw new Error(`Skill not found: ${name}`)
       rmSync(dir, { recursive: true, force: true })
       emitChanged()
       return { deleted: name }
@@ -248,76 +264,34 @@ export function registerSkillTools(tools: ToolRegistry, options: SkillToolOption
   })
 
   tools.register({
-    name: 'skillSource.list',
-    description: 'List trusted user-added skill sources and their current scan status.',
+    name: 'instruction.list',
+    description: 'List composed instruction origins and their editor paths.',
     inputSchema: objectSchema({}),
-    execute: async () => ({ sources: listConfiguredSources(home) }),
-  })
-
-  tools.register({
-    name: 'skillSource.inspect',
-    description: 'Inspect a local path or Git repository before adding it as a trusted skill source.',
-    inputSchema: objectSchema({
-      id: { type: 'string' },
-      name: { type: 'string' },
-      path: { type: 'string' },
-      git: { type: 'string' },
-    }),
-    execute: async (params) => inspectSourceParams(params, home),
-  })
-
-  tools.register({
-    name: 'skillSource.add',
-    description: 'Add an inspected local path or Git repository as a trusted skill source. Requires confirmed=true.',
-    inputSchema: objectSchema({
-      id: { type: 'string' },
-      name: { type: 'string' },
-      path: { type: 'string' },
-      git: { type: 'string' },
-      confirmed: { type: 'boolean' },
-    }),
-    execute: async (params) => {
-      if (params.confirmed !== true) throw new Error('Adding a skill source requires confirmation after inspection')
-      const inspected = await inspectSourceParams(params, home)
-      const entry: SkillSourceConfig = {
-        ...(inspected.name ? { name: inspected.name } : {}),
-        trusted: true,
-        ...(inspected.kind === 'path' ? { path: inspected.location } : { git: inspected.location }),
+    execute: async () => {
+      const workspacePath = tools.getWorkspacePath()
+      if (!workspacePath) throw new Error('No workspace open')
+      ensureEditorDocuments()
+      return {
+        instructions: instructionList(workspacePath, home),
       }
-      if (inspected.kind === 'git') {
-        await syncGitSkillSource(inspected.location, sourceMirrorDir(home, inspected.id))
-      }
-      writeSkillSource(inspected.id, entry, home)
-      emitChanged()
-      return { source: sourceListItem(inspected.id, entry, home), inspected }
     },
   })
 
   tools.register({
-    name: 'skillSource.remove',
-    description: 'Remove a user-added skill source from ~/.mim/config.yaml. Git mirrors are deleted; local path contents are untouched.',
-    inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
+    name: 'instruction.open',
+    description: 'Ensure and return the normal editor path for one instruction origin.',
+    inputSchema: objectSchema({
+      origin: { type: 'string', enum: ['mim', 'team', 'personal', 'project'] },
+    }, ['origin']),
     execute: async (params) => {
-      const id = requireSourceId(params.id)
-      const source = loadUserConfig(home).skillSources[id]
-      removeSkillSource(id, home)
-      if (source?.git) rmSync(sourceMirrorDir(home, id), { recursive: true, force: true })
-      emitChanged()
-      return { removed: id }
-    },
-  })
-
-  tools.register({
-    name: 'skillSource.refresh',
-    description: 'Refresh a user-added skill source. Git sources fetch latest default branch; local paths are re-scanned on demand.',
-    inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
-    execute: async (params) => {
-      const id = requireSourceId(params.id)
-      const source = loadUserConfig(home).skillSources[id]
-      if (!source) throw new Error(`Skill source not found: ${id}`)
-      if (source.git) await syncGitSkillSource(source.git, sourceMirrorDir(home, id))
-      emitChanged()
-      return { refreshed: id, source: sourceListItem(id, source, home) }
+      const workspacePath = tools.getWorkspacePath()
+      if (!workspacePath) throw new Error('No workspace open')
+      const origin = requireInstructionOrigin(params.origin)
+      ensureEditorDocuments()
+      ensureOptionalInstruction(origin, workspacePath, home)
+      const item = instructionList(workspacePath, home).find(entry => entry.origin === origin)
+      if (!item) throw new Error(`Instruction origin is unavailable: ${origin}`)
+      return item
     },
   })
 }
@@ -328,139 +302,140 @@ function createDefaultLoader(
   home: string,
   personalDir: string,
 ): SkillLoader {
+  const currentTeamName = teamName(home)
   return createSkillLoader({
     builtinDir: options.builtinDir,
     personalDir,
+    teamDir: currentTeamName ? join(home, '.mim', 'team', 'skills') : undefined,
+    teamName: currentTeamName ?? undefined,
     getWorkspacePath: () => tools.getWorkspacePath(),
-    getSourceSkillRoots: () => sourceRootsFromConfig(home),
     getPackageSkillRoots: options.getPackageSkillRoots,
     getDisabledSkillNames: () => new Set(loadUserConfig(home).skills.disabled),
   })
 }
 
-function sourceRootsFromConfig(home: string): SourceSkillRoot[] {
-  return Object.entries(loadUserConfig(home).skillSources)
-    .filter(([, source]) => source.trusted === true)
-    .map(([id, source]) => ({
-      id,
-      name: source.name,
-      dir: source.path ?? sourceMirrorDir(home, id),
-    }))
+function destinationRoot(
+  destination: SkillDestination,
+  tools: ToolRegistry,
+  home: string,
+  personalDir: string,
+): string {
+  if (destination === 'personal') return personalDir
+  const workspace = tools.getWorkspacePath()
+  if (!workspace) throw new Error('No workspace open')
+  if (destination === 'project') return join(workspace, 'skills')
+  const name = teamName(home)
+  if (!name) throw new Error('No Team source connected')
+  return join(home, '.mim', 'team', 'skills')
 }
 
-function listConfiguredSources(home: string): Array<Record<string, unknown>> {
-  return Object.entries(loadUserConfig(home).skillSources)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([id, source]) => sourceListItem(id, source, home))
+function decorateSkillOrigin<T extends { source: string; sourceName?: string }>(
+  skill: T,
+  tools: ToolRegistry,
+  home: string,
+): T {
+  let sourceName = skill.sourceName
+  if (skill.source === 'personal') sourceName = 'You'
+  else if (skill.source === 'project') sourceName = projectName(tools.getWorkspacePath() ?? '') ?? 'Project'
+  else if (skill.source === 'team') sourceName = sourceName || teamName(home) || 'Team'
+  else if (skill.source === 'mim') sourceName = 'Mim'
+  return { ...skill, ...(sourceName ? { sourceName } : {}) }
 }
 
-function sourceListItem(id: string, source: SkillSourceConfig, home: string): Record<string, unknown> {
-  const kind = source.path ? 'path' : 'git'
-  const location = source.path ?? source.git ?? ''
-  const root = source.path ?? sourceMirrorDir(home, id)
-  const scan = inspectSkillSourceRoot(id, source.name, kind, location, root)
-  return {
-    id,
-    ...(source.name ? { name: source.name } : {}),
-    kind,
-    location,
-    trusted: source.trusted === true,
-    status: scan.status,
-    skillCount: scan.skillCount,
-    unlocks: scan.unlocks,
-    diagnostics: scan.diagnostics,
+function requireDestination(value: unknown): SkillDestination {
+  if (value === undefined || value === '') return 'personal'
+  if (value === 'personal' || value === 'project' || value === 'team') return value
+  throw new Error(`Invalid skill destination: ${String(value)}`)
+}
+
+function sourceForDestination(destination: SkillDestination): 'personal' | 'project' | 'team' {
+  return destination
+}
+
+function editorPathForDestination(destination: SkillDestination, name: string): string {
+  if (destination === 'personal') return `.mim/origins/you/skills/${name}/SKILL.md`
+  if (destination === 'team') return `.mim/team/skills/${name}/SKILL.md`
+  return `skills/${name}/SKILL.md`
+}
+
+function instructionList(workspacePath: string, home: string): Array<Record<string, unknown>> {
+  const byOrigin = new Map(
+    loadInstructionDocuments({ workspacePath, homeDir: home })
+      .map(doc => [doc.origin, {
+        origin: doc.origin,
+        label: doc.label,
+        editorPath: doc.editorPath,
+        writable: doc.writable,
+      }]),
+  )
+  const team = teamName(home)
+  if (team && !byOrigin.has('team')) {
+    byOrigin.set('team', {
+      origin: 'team',
+      label: team,
+      editorPath: '.mim/team/instructions.md',
+      writable: true,
+    })
   }
+  if (!byOrigin.has('project')) {
+    byOrigin.set('project', {
+      origin: 'project',
+      label: projectName(workspacePath) ?? 'Project',
+      editorPath: 'AGENTS.md',
+      writable: true,
+    })
+  }
+  return (['personal', 'team', 'project', 'mim'] as const)
+    .flatMap(origin => byOrigin.get(origin) ?? [])
 }
 
-async function inspectSourceParams(params: Record<string, unknown>, home: string): Promise<InspectedSkillSource> {
-  const rawPath = typeof params.path === 'string' ? params.path.trim() : ''
-  const rawGit = typeof params.git === 'string' ? params.git.trim() : ''
-  if (Boolean(rawPath) === Boolean(rawGit)) throw new Error('Specify exactly one of path or git')
+function ensureOptionalInstruction(
+  origin: 'mim' | 'team' | 'personal' | 'project',
+  workspacePath: string,
+  home: string,
+): void {
+  if (origin === 'mim' || origin === 'personal') return
+  const path = origin === 'team'
+    ? join(home, '.mim', 'team', 'instructions.md')
+    : join(workspacePath, 'AGENTS.md')
+  if (origin === 'team' && !teamName(home)) throw new Error('No Team source connected')
+  if (existsSync(path)) return
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(
+    path,
+    origin === 'team'
+      ? '# Team Instructions\n\nAdd guidance that applies across Team Projects.\n'
+      : '# Project Instructions\n\nAdd guidance specific to this Project.\n',
+    'utf-8',
+  )
+}
 
-  const name = typeof params.name === 'string' && params.name.trim() ? params.name.trim() : undefined
-  const id = requireSourceId(typeof params.id === 'string' && params.id.trim()
-    ? params.id
-    : defaultSourceId(name ?? (rawPath || rawGit)))
+function requireInstructionOrigin(value: unknown): 'mim' | 'team' | 'personal' | 'project' {
+  if (value === 'mim' || value === 'team' || value === 'personal' || value === 'project') return value
+  throw new Error(`Invalid instruction origin: ${String(value)}`)
+}
 
-  if (rawPath) {
-    const root = requireAbsoluteFolder(rawPath)
-    const scan = inspectSkillSourceRoot(id, name, 'path', root, root)
-    return {
-      id,
-      ...(name ? { name } : {}),
-      kind: 'path',
-      location: root,
-      root,
-      ...scan,
-    }
-  }
+function teamName(home: string): string | null {
+  return yamlName(join(home, '.mim', 'team', 'team.yaml'))
+}
 
-  const tmp = join(tmpdir(), `mim-skill-source-${id}-${randomBytes(6).toString('hex')}`)
+function projectName(workspace: string): string | null {
+  return yamlName(join(workspace, 'mim.yaml'))
+}
+
+function yamlName(path: string): string | null {
   try {
-    await syncGitSkillSource(rawGit, tmp)
-    const scan = inspectSkillSourceRoot(id, name, 'git', rawGit, tmp)
-    return {
-      id,
-      ...(name ? { name } : {}),
-      kind: 'git',
-      location: rawGit,
-      root: tmp,
-      ...scan,
-    }
-  } finally {
-    rmSync(tmp, { recursive: true, force: true })
-  }
-}
-
-function inspectSkillSourceRoot(
-  id: string,
-  name: string | undefined,
-  kind: 'path' | 'git',
-  location: string,
-  root: string,
-): Omit<InspectedSkillSource, 'id' | 'name' | 'kind' | 'location' | 'root'> & { status: string } {
-  const diagnostics: string[] = []
-  if (!existsSync(root)) {
-    return { status: 'missing', skillCount: 0, skills: [], unlocks: [], diagnostics: [`Source not found: ${location}`] }
-  }
-  try {
-    if (!statSync(root).isDirectory()) {
-      return { status: 'invalid', skillCount: 0, skills: [], unlocks: [], diagnostics: [`Source is not a directory: ${location}`] }
-    }
-  } catch (err) {
-    return { status: 'error', skillCount: 0, skills: [], unlocks: [], diagnostics: [(err as Error).message] }
-  }
-
-  const skills: SkillMetadata[] = []
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue
-    const folder = join(root, entry.name)
-    try {
-      if (lstatSync(folder).isSymbolicLink()) {
-        diagnostics.push(`Skipping symlinked skill folder: ${entry.name}`)
-        continue
-      }
-      const parsed = inspectSkillFolder(folder, 'source', { sourceId: id, sourceName: name })
-      skills.push(metadataOnly(parsed.skill))
-      diagnostics.push(...parsed.diagnostics)
-    } catch (err) {
-      diagnostics.push(`${entry.name}: ${(err as Error).message}`)
-    }
-  }
-  const unlocks = uniqueSorted(skills.flatMap(skill => skill.unlocks))
-  return {
-    status: 'ok',
-    skillCount: skills.length,
-    skills: skills.sort((a, b) => a.name.localeCompare(b.name)),
-    unlocks,
-    diagnostics,
+    const parsed = parseYaml(readFileSync(path, 'utf-8')) as { name?: unknown }
+    return typeof parsed?.name === 'string' && parsed.name.trim() ? parsed.name.trim() : null
+  } catch {
+    return null
   }
 }
 
 function inspectSkillFolder(
   folder: string,
-  source: 'personal' | 'source',
-  extra: { sourceId?: string; sourceName?: string } = {},
+  source: 'personal',
+  _extra: Record<string, never> = {},
   options: { requireFolderName?: boolean } = {},
 ): ParsedSkillFolder {
   const skillMd = join(folder, 'SKILL.md')
@@ -502,7 +477,6 @@ function inspectSkillFolder(
     dir: folder,
     path: skillMd,
     diagnostics: [],
-    ...(source === 'source' ? { sourceId: extra.sourceId, sourceName: extra.sourceName } : {}),
     body: match[2].trim(),
   }
   return { skill, unlocks, diagnostics }
@@ -615,12 +589,6 @@ function assertNoExistingSymlinkParent(root: string, target: string): void {
   }
 }
 
-function requireSourceId(value: unknown): string {
-  const id = typeof value === 'string' ? value.trim() : ''
-  if (!USER_SKILL_SOURCE_ID_PATTERN.test(id)) throw new Error(`Invalid skill source id: ${id || String(value)}`)
-  return id
-}
-
 function requireAbsoluteFolder(value: unknown): string {
   const folder = typeof value === 'string' ? value.trim() : ''
   if (!folder) throw new Error('Missing required folder path')
@@ -659,36 +627,10 @@ function copyTreeNoSymlinks(source: string, destination: string): void {
   copyFileSync(source, destination)
 }
 
-async function syncGitSkillSource(url: string, destination: string): Promise<void> {
-  if (!url.trim()) throw new Error('Missing git URL')
-  if (existsSync(destination)) {
-    await fetchRepo(destination)
-    await checkoutRemoteDefault(destination)
-    return
-  }
-  mkdirSync(dirname(destination), { recursive: true })
-  await cloneRepo(url, destination)
-  await checkoutRemoteDefault(destination)
-}
-
-function sourceMirrorDir(home: string, id: string): string {
-  return join(home, '.mim', 'skill-sources', id)
-}
-
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map(item => item.trim())
     : []
-}
-
-function uniqueSorted(items: string[]): string[] {
-  return [...new Set(items)].sort()
-}
-
-function defaultSourceId(value: string): string {
-  const source = value.trim().replace(/\.git$/, '').split(/[\\/]/).pop() || 'skills'
-  const slug = source.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64)
-  return USER_SKILL_SOURCE_ID_PATTERN.test(slug) ? slug : `source-${randomBytes(3).toString('hex')}`
 }
 
 function personalSkillTemplate(name: string, description: string): string {

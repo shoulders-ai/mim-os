@@ -49,9 +49,10 @@ describe('filesystem skill loader', () => {
         description: 'Use when the user is planning or updating Mim issues.',
         tools: ['issues.list', 'issues.update'],
         unlocks: [],
-        source: 'builtin',
+        source: 'mim',
         dir: join(builtinDir, 'issue-work'),
         path: join(builtinDir, 'issue-work', 'SKILL.md'),
+        editorPath: '.mim/origins/mim/skills/issue-work/SKILL.md',
         diagnostics: [],
       },
     ])
@@ -59,7 +60,7 @@ describe('filesystem skill loader', () => {
     expect(loader.get('issue-work')?.body).toContain('Use carefully.')
   })
 
-  it('lets workspace skills shadow personal, source, and builtin skills by folder name', () => {
+  it('lets Project skills shadow Personal, Team, and Mim skills by folder name', () => {
     writeSkill(builtinDir, 'issue-work', 'name: issue-work\ndescription: Builtin')
     writeSkill(sourceDir, 'issue-work', 'name: issue-work\ndescription: Source')
     writeSkill(personalDir, 'issue-work', 'name: issue-work\ndescription: Personal')
@@ -68,16 +69,17 @@ describe('filesystem skill loader', () => {
     const loader = createSkillLoader({
       builtinDir,
       personalDir,
-      getSourceSkillRoots: () => [{ id: 'team', name: 'Team', dir: sourceDir }],
+      teamDir: sourceDir,
+      teamName: 'Team',
       getWorkspacePath: () => workspaceDir,
     })
 
     expect(loader.get('issue-work')).toMatchObject({
       name: 'issue-work',
       description: 'Workspace',
-      source: 'workspace',
+      source: 'project',
     })
-    expect(loader.listDetailed()[0].shadows.map(skill => skill.source)).toEqual(['builtin', 'source', 'personal'])
+    expect(loader.listDetailed()[0].shadows.map(skill => skill.source)).toEqual(['mim', 'team', 'personal'])
     expect(loader.diagnostics()).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: 'issue-work', message: expect.stringContaining('shadowed') }),
     ]))
@@ -101,14 +103,15 @@ describe('filesystem skill loader', () => {
     const loader = createSkillLoader({
       builtinDir,
       personalDir,
-      getSourceSkillRoots: () => [{ id: 'team', name: 'Shoulders', dir: sourceDir }],
+      teamDir: sourceDir,
+      teamName: 'Shoulders',
       getWorkspacePath: () => workspaceDir,
     })
 
-    expect(loader.get('project-wins')).toMatchObject({ source: 'workspace', description: 'Project' })
+    expect(loader.get('project-wins')).toMatchObject({ source: 'project', description: 'Project' })
     expect(loader.get('you-win')).toMatchObject({ source: 'personal', description: 'You' })
-    expect(loader.get('team-wins')).toMatchObject({ source: 'source', description: 'Team', sourceName: 'Shoulders' })
-    expect(loader.get('mim-wins')).toMatchObject({ source: 'builtin', description: 'Mim' })
+    expect(loader.get('team-wins')).toMatchObject({ source: 'team', description: 'Team', sourceName: 'Shoulders' })
+    expect(loader.get('mim-wins')).toMatchObject({ source: 'mim', description: 'Mim' })
   })
 
   it('diagnoses invalid skill frontmatter without failing the catalog', () => {
@@ -219,7 +222,7 @@ describe('filesystem skill loader', () => {
     })
 
     expect(loader.list()).toEqual([
-      expect.objectContaining({ name: 'ok', source: 'builtin' }),
+      expect.objectContaining({ name: 'ok', source: 'mim' }),
     ])
   })
 
@@ -255,7 +258,7 @@ describe('filesystem skill loader', () => {
     expect(skill).toMatchObject({
       id: 'build-app',
       name: 'build-app',
-      source: 'builtin',
+      source: 'mim',
     })
     expect(skill?.description).toContain('teach Mim a recurring capability')
     expect(skill?.unlocks).toEqual(expect.arrayContaining([
@@ -283,7 +286,7 @@ describe('filesystem skill loader', () => {
 
     expect(loader.get('build-app')).toMatchObject({
       name: 'build-app',
-      source: 'builtin',
+      source: 'mim',
     })
     expect(loader.diagnostics()).toEqual([])
   })
@@ -310,9 +313,9 @@ describe('filesystem skill loader', () => {
       expect.objectContaining({
         id: 'issue-work',
         name: 'issue-work',
-        source: 'workspace',
+        source: 'project',
         enabled: false,
-        shadows: [expect.objectContaining({ source: 'builtin' })],
+        shadows: [expect.objectContaining({ source: 'mim' })],
       }),
     ]))
   })

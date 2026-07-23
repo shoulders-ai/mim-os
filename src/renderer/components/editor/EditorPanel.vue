@@ -1076,6 +1076,7 @@ async function openFile(path: string): Promise<void> {
     originalContent: content,
     version,
     dirty: false,
+    readOnly: path.startsWith('.mim/origins/mim/'),
     externalState: undefined,
     truncated,
   })

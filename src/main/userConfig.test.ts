@@ -9,8 +9,6 @@ import {
   registryUrl,
   DEFAULT_REGISTRY_URL,
   setUserSkillDisabled,
-  writeSkillSource,
-  removeSkillSource,
   setPersonalSetting,
   setTeamConnection,
 } from '@main/userConfig.js'
@@ -314,7 +312,7 @@ describe('userConfig — skill config', () => {
     reset()
   })
 
-  it('parses skill sources and globally disabled authored skills', () => {
+  it('ignores retired skill sources and parses globally disabled authored skills', () => {
     writeConfig(home, [
       'skillSources:',
       '  acme-research:',
@@ -332,16 +330,7 @@ describe('userConfig — skill config', () => {
 
     const config = loadUserConfig(home)
 
-    expect(config.skillSources).toEqual({
-      'acme-research': {
-        name: 'Acme Research',
-        git: 'https://github.com/acme/mim-skills.git',
-        trusted: true,
-      },
-      'local-team': {
-        path: '/Users/test/team-skills',
-      },
-    })
+    expect(config).not.toHaveProperty('skillSources')
     expect(config.skills.disabled).toEqual(['docx-review', 'issue-work'])
   })
 
@@ -366,31 +355,4 @@ describe('userConfig — skill config', () => {
     expect(readFileSync(join(home, '.mim', 'config.yaml'), 'utf-8')).toContain('user:')
   })
 
-  it('writes and removes skill sources while preserving registry config', () => {
-    writeConfig(home, [
-      'registry:',
-      '  url: https://private.example.com/reg.git',
-      '',
-    ].join('\n'))
-
-    writeSkillSource('acme-research', {
-      name: 'Acme Research',
-      git: 'https://github.com/acme/mim-skills.git',
-      trusted: true,
-    }, home)
-    writeSkillSource('local-team', {
-      path: '/Users/test/team-skills',
-      trusted: true,
-    }, home)
-    removeSkillSource('acme-research', home)
-
-    const config = loadUserConfig(home)
-    expect(config.registry.url).toBe('https://private.example.com/reg.git')
-    expect(config.skillSources).toEqual({
-      'local-team': {
-        path: '/Users/test/team-skills',
-        trusted: true,
-      },
-    })
-  })
 })

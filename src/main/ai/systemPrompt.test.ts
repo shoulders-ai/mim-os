@@ -6,9 +6,12 @@ import { buildPromptTemplateVars, getSystemPrompt, PROJECT_LOG_MAX_CHARS, resolv
 
 describe('getSystemPrompt', () => {
   let dir: string
+  let home: string
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'mim-sysprompt-'))
+    home = join(dir, 'home')
+    mkdirSync(home, { recursive: true })
   })
 
   afterEach(() => {
@@ -36,22 +39,30 @@ describe('getSystemPrompt', () => {
     expect(out).toContain('Make the final response stand on its own')
   })
 
-  it('appends AGENTS.md and agent-context.md sections with their contents in legacy mode', () => {
+  it('composes Mim, Team, Personal, and Project instructions in precedence order', () => {
+    mkdirSync(join(home, '.mim', 'team'), { recursive: true })
+    writeFileSync(join(home, '.mim', 'team', 'team.yaml'), 'name: Shoulders\n')
+    writeFileSync(join(home, '.mim', 'team', 'instructions.md'), 'TEAM BODY')
+    writeFileSync(join(home, '.mim', 'instructions.md'), 'PERSONAL BODY')
     writeFileSync(join(dir, 'AGENTS.md'), 'CONTRACT BODY HERE')
     mkdirSync(join(dir, '.mim'), { recursive: true })
     writeFileSync(join(dir, '.mim', 'agent-context.md'), 'CONTEXT BODY HERE')
-    const out = getSystemPrompt(dir)
-    expect(out).toContain('# WORKSPACE CONTRACT (AGENTS.md)')
+    const out = getSystemPrompt(dir, { homeDir: home })
+    expect(out).toMatch(
+      /# MIM INSTRUCTIONS[\s\S]*# TEAM INSTRUCTIONS — Shoulders[\s\S]*# PERSONAL INSTRUCTIONS — You[\s\S]*# PROJECT INSTRUCTIONS — Project/,
+    )
+    expect(out).toContain('TEAM BODY')
+    expect(out).toContain('PERSONAL BODY')
     expect(out).toContain('CONTRACT BODY HERE')
-    expect(out).toContain('# WORKSPACE CONTEXT (.mim/agent-context.md)')
     expect(out).toContain('CONTEXT BODY HERE')
   })
 
-  it('omits a section when its file is absent in legacy mode', () => {
+  it('omits optional instruction origins when their files are absent', () => {
     writeFileSync(join(dir, 'AGENTS.md'), 'ONLY CONTRACT')
-    const out = getSystemPrompt(dir)
-    expect(out).toContain('# WORKSPACE CONTRACT (AGENTS.md)')
-    expect(out).not.toContain('# WORKSPACE CONTEXT')
+    const out = getSystemPrompt(dir, { homeDir: home })
+    expect(out).toContain('# PROJECT INSTRUCTIONS — Project')
+    expect(out).not.toContain('# TEAM INSTRUCTIONS')
+    expect(out).not.toContain('# PERSONAL INSTRUCTIONS')
   })
 
   it('never throws when files are missing', () => {
@@ -126,11 +137,12 @@ describe('getSystemPrompt', () => {
     expect(out).toMatch(/\w+day, \d+ \w+ \d{4}/)
   })
 
-  it('falls back to legacy mode when AGENTS.md has no templates', () => {
+  it('composes plain AGENTS.md after the Mim instructions', () => {
     writeFileSync(join(dir, 'AGENTS.md'), 'Plain workspace contract without templates')
-    const out = getSystemPrompt(dir)
-    expect(out).toContain('# WORKSPACE CONTRACT (AGENTS.md)')
-    expect(out).toContain('# ROLE')
+    const out = getSystemPrompt(dir, { homeDir: home })
+    expect(out).toContain('# MIM INSTRUCTIONS')
+    expect(out).toContain('# PROJECT INSTRUCTIONS — Project')
+    expect(out).toContain('Plain workspace contract without templates')
   })
 
   it('resolves {{AGENT_CONTEXT}} from .mim/agent-context.md', () => {

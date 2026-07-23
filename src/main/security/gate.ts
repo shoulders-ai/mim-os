@@ -342,11 +342,8 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'web.live.open': { category: 'network', risk: 'medium', targetParam: 'url' },
   'web.live.act': { category: 'network', risk: 'medium', targetParam: 'action' },
   'web.search': { category: 'network', risk: 'medium', targetParam: 'query' },
-  'skillSource.list': { category: 'read', risk: 'low' },
-  'skillSource.inspect': { category: 'network', risk: 'medium' },
-  'skillSource.add': { category: 'settings', risk: 'medium', targetParam: 'id' },
-  'skillSource.remove': { category: 'settings', risk: 'medium', targetParam: 'id' },
-  'skillSource.refresh': { category: 'network', risk: 'medium', targetParam: 'id' },
+  'instruction.list': { category: 'read', risk: 'low' },
+  'instruction.open': { category: 'write', risk: 'low', targetParam: 'origin' },
   'team.status': { category: 'read', risk: 'low' },
   'team.open': { category: 'read', risk: 'low' },
   'team.connect': { category: 'network', risk: 'medium', targetParam: 'repository' },
@@ -441,6 +438,12 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
         record({ ...baseEvent, pathKind: 'team', decision: 'denied', reason })
         throw new PermissionDeniedError(`Permission denied: ${reason}`)
       }
+      for (const info of [pathInfo, secondaryPathInfo]) {
+        if (info?.kind !== 'mim') continue
+        const reason = 'Mim built-in documents are read-only'
+        record({ ...baseEvent, pathKind: 'mim', decision: 'denied', reason })
+        throw new PermissionDeniedError(`Permission denied: ${reason}`)
+      }
     }
 
     if (
@@ -498,6 +501,11 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
     }
 
     if (ctx.actor === 'package') {
+      if (pathInfo?.kind === 'personal' || pathInfo?.kind === 'mim') {
+        const reason = `App ${ctx.package_id} cannot access Personal or Mim instruction and skill documents`
+        record({ ...baseEvent, decision: 'denied', reason })
+        throw new PermissionDeniedError(`Permission denied: ${reason}`)
+      }
       const packageReason = packagePermissionViolation(tool.name, policy, params, ctx, options.getPackagePermissions)
       if (packageReason) {
         record({ ...baseEvent, decision: 'denied', reason: packageReason })
@@ -985,7 +993,7 @@ function packagePermissionViolation(
     return null
   }
 
-  if (toolName.startsWith('skill.') || toolName.startsWith('skillSource.')) {
+  if (toolName.startsWith('skill.') || toolName.startsWith('instruction.')) {
     return `App ${ctx.package_id} cannot access AI skill activation state`
   }
 

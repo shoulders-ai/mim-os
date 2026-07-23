@@ -7,6 +7,7 @@ export interface ComposerAtItem {
   path?: string
   mediaType?: string | null
   packageName?: string
+  editorPath?: string
 }
 
 export interface ContextChip {
@@ -17,10 +18,11 @@ export interface ContextChip {
   path?: string
   mediaType?: string | null
   packageName?: string
+  editorPath?: string
 }
 
 export interface ComposerContextSources {
-  skills?: Array<{ id: string; name?: string; label?: string; desc?: string; description?: string; packageName?: string }>
+  skills?: Array<{ id: string; name?: string; label?: string; desc?: string; description?: string; packageName?: string; editorPath?: string }>
   projectFiles?: Array<{ path: string; name?: string; mediaType?: string | null }>
   packageTools?: Array<{ id?: string; name: string; label?: string; description?: string; packageName?: string }>
   hasDocument?: boolean
@@ -40,6 +42,7 @@ export function buildAtItems(sources: ComposerContextSources = {}): ComposerAtIt
       desc: skill.desc || skill.description,
       group: 'Skills',
       packageName: skill.packageName,
+      editorPath: skill.editorPath,
     })
   }
 

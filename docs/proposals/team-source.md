@@ -1,7 +1,7 @@
 # Mim Restructure: Project, You, and Team
 
 Status: product direction, scope model, UX, and implementation programme
-accepted; implementation is in progress, with phases 1 through 5 complete.
+accepted; implementation is in progress, with phases 1 through 6 complete.
 
 Mim is a local, file-native workbench where humans and agents work together on
 real project files. Collaboration is local-first: every human and agent works
@@ -407,7 +407,7 @@ paths removed rather than left beside the replacement.
    index, search, `@` mention, editor, and native-open flows to the Team
    `files/` root. Make the root writable and remove collections, path bindings,
    read-only badges, write policies, and Resources Settings.
-6. **Compose instructions and unify Skills.** Load Personal, Team, Project, and
+6. **Compose instructions and unify Skills — complete.** Load Personal, Team, Project, and
    Mim origins with explicit precedence. Build the flat Skills list, origin
    chips, per-user toggles, create destinations, editor opening, and normal
    save/sync for writable `SKILL.md` files. Replace the Settings textarea for

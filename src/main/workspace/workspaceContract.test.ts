@@ -12,10 +12,11 @@ import {
   readCommittedApp,
   setAppEnabled,
   removeApp,
-  DEFAULT_AGENTS_MD,
+  DEFAULT_PROJECT_AGENTS_MD,
+  MIM_INSTRUCTIONS_TEMPLATE,
 } from '@main/workspace/workspaceContract.js'
 
-const EXPECTED_AGENTS_MD = DEFAULT_AGENTS_MD
+const EXPECTED_AGENTS_MD = DEFAULT_PROJECT_AGENTS_MD
 
 describe('workspaceContract — mim.yaml parse/serialize', () => {
   it('round-trips { name }', () => {
@@ -538,10 +539,12 @@ describe('workspaceContract — scaffoldWorkspace', () => {
   })
 })
 
-describe('workspaceContract — default AGENTS.md', () => {
-  it('includes project log context and one concise logging instruction', () => {
-    expect(DEFAULT_AGENTS_MD).toContain('{{PROJECT_LOG}}')
-    expect(DEFAULT_AGENTS_MD).toContain('Use `log_append` only for durable activity notes')
-    expect(DEFAULT_AGENTS_MD).toContain('do not log routine progress or implementation chatter')
+describe('workspaceContract — instruction defaults', () => {
+  it('keeps dynamic runtime context in Mim and scaffolds a Project-only document', () => {
+    expect(MIM_INSTRUCTIONS_TEMPLATE).toContain('{{PROJECT_LOG}}')
+    expect(MIM_INSTRUCTIONS_TEMPLATE).toContain('Use `log_append` only for durable activity notes')
+    expect(MIM_INSTRUCTIONS_TEMPLATE).toContain('do not log routine progress or implementation chatter')
+    expect(DEFAULT_PROJECT_AGENTS_MD).toContain('Project Instructions')
+    expect(DEFAULT_PROJECT_AGENTS_MD).not.toContain('{{TOOL_SET}}')
   })
 })

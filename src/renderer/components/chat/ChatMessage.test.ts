@@ -72,7 +72,9 @@ describe('ChatMessage', () => {
   })
 
   it('renders skill activation as a first-class line with expandable instructions', async () => {
+    const openFile = vi.fn()
     mounted = mountMessage({
+      onOpenFile: openFile,
       isLastAssistant: true,
       isActiveAssistant: true,
       chatStatus: 'streaming',
@@ -84,7 +86,17 @@ describe('ChatMessage', () => {
             type: 'tool-skill',
             state: 'output-available',
             input: { name: 'issue-work' },
-            output: { skill: { name: 'issue-work', description: 'Work with Mim issues.', body: '# Issue Work\n\nIssues are durable.', tools: ['issues.list'] } },
+            output: {
+              skill: {
+                name: 'issue-work',
+                description: 'Work with Mim issues.',
+                body: '# Issue Work\n\nIssues are durable.',
+                tools: ['issues.list'],
+                source: 'team',
+                sourceName: 'Shoulders',
+                editorPath: '.mim/team/skills/issue-work/SKILL.md',
+              },
+            },
           },
           { type: 'text', text: 'Done.' },
         ],
@@ -94,6 +106,7 @@ describe('ChatMessage', () => {
 
     expect(mounted.root.textContent).toContain('Using skill')
     expect(mounted.root.textContent).toContain('issue-work')
+    expect(mounted.root.textContent).toContain('Shoulders')
     // Instructions are collapsed until expanded.
     expect(mounted.root.textContent).not.toContain('Issues are durable')
 
@@ -103,6 +116,9 @@ describe('ChatMessage', () => {
     await flushUi()
 
     expect(mounted.root.textContent).toContain('Issues are durable')
+
+    mounted.root.querySelector<HTMLButtonElement>('button[title="Open skill"]')?.click()
+    expect(openFile).toHaveBeenCalledWith('.mim/team/skills/issue-work/SKILL.md')
   })
 
   it('collapses finished assistant details and expands them on click', async () => {

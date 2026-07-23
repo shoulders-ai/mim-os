@@ -1,8 +1,5 @@
 // @vitest-environment happy-dom
 
-// InstructionsSettingsPanel: workspace contract (AGENTS.md) editor with
-// explicit save, restore-default, and template variable annotation.
-
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick } from 'vue'
 import InstructionsSettingsPanel from './InstructionsSettingsPanel.vue'
@@ -18,28 +15,43 @@ describe('InstructionsSettingsPanel', () => {
   let root: HTMLElement
   let app: ReturnType<typeof createApp> | null
   let call: ReturnType<typeof vi.fn>
-  const AGENTS_CONTENT = '# Agent Instructions\n\nCustom workspace rules here.\n'
 
   beforeEach(() => {
     root = document.createElement('div')
     document.body.appendChild(root)
     app = null
-
     call = vi.fn(async (tool: string, params?: Record<string, unknown>) => {
-      if (tool === 'fs.read') return { content: AGENTS_CONTENT }
-      if (tool === 'fs.write') return { ok: true }
-      if (tool === 'workspace.defaultAgentsMd') return { content: '# Default\n' }
+      if (tool === 'instruction.list') {
+        return {
+          instructions: [
+            { origin: 'personal', label: 'You', editorPath: '.mim/origins/you/instructions.md', writable: true },
+            { origin: 'team', label: 'Shoulders', editorPath: '.mim/team/instructions.md', writable: true },
+            { origin: 'project', label: 'Alpha', editorPath: 'AGENTS.md', writable: true },
+            { origin: 'mim', label: 'Mim', editorPath: '.mim/origins/mim/instructions.md', writable: false },
+          ],
+        }
+      }
+      if (tool === 'instruction.open') {
+        const origin = params?.origin as string
+        const paths: Record<string, string> = {
+          personal: '.mim/origins/you/instructions.md',
+          team: '.mim/team/instructions.md',
+          project: 'AGENTS.md',
+          mim: '.mim/origins/mim/instructions.md',
+        }
+        return { origin, editorPath: paths[origin] }
+      }
+      if (tool === 'editor.open') return { opened: params?.path }
       return {}
     })
     Object.defineProperty(window, 'kernel', {
       configurable: true,
-      value: { call, on: vi.fn(), off: vi.fn(), getWorkspace: vi.fn(async () => '/workspace') },
+      value: { call, on: vi.fn(), off: vi.fn() },
     })
   })
 
   afterEach(() => {
     app?.unmount()
-    app = null
     root.remove()
     vi.restoreAllMocks()
   })
@@ -49,106 +61,27 @@ describe('InstructionsSettingsPanel', () => {
     app.mount(root)
   }
 
-  it('loads and displays AGENTS.md content', async () => {
+  it('shows composed origins as document links without an inline form', async () => {
     mount()
     await flushUi()
 
-    const textarea = root.querySelector<HTMLTextAreaElement>('textarea')
-    expect(textarea).toBeTruthy()
-    expect(textarea!.value).toBe(AGENTS_CONTENT)
-    expect(call).toHaveBeenCalledWith('fs.read', expect.objectContaining({ path: 'AGENTS.md', full: true }))
+    expect(call).toHaveBeenCalledWith('instruction.list', {})
+    expect(root.textContent).toContain('You')
+    expect(root.textContent).toContain('Shoulders')
+    expect(root.textContent).toContain('Alpha')
+    expect(root.textContent).toContain('Mim')
+    expect(root.querySelector('textarea')).toBeNull()
+    expect(root.textContent).toContain('read only')
   })
 
-  it('shows the description text', async () => {
+  it('opens an instruction document in the normal editor', async () => {
     mount()
     await flushUi()
 
-    expect(root.textContent).toContain('AGENTS.md')
-  })
-
-  it('shows Restore default button', async () => {
-    mount()
+    root.querySelector<HTMLButtonElement>('[data-testid="instruction-open-team"]')?.click()
     await flushUi()
 
-    const button = root.querySelector('[data-testid="restore-default-btn"]')
-    expect(button).toBeTruthy()
-    expect(button!.textContent?.trim()).toContain('Restore default')
-  })
-
-  it('shows Save button when content has changed', async () => {
-    mount()
-    await flushUi()
-
-    // No save button when content matches saved state.
-    expect(root.querySelector('[data-testid="save-btn"]')).toBeNull()
-
-    // Change textarea value.
-    const textarea = root.querySelector<HTMLTextAreaElement>('textarea')!
-    textarea.value = '# Modified content\n'
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushUi()
-
-    const saveBtn = root.querySelector('[data-testid="save-btn"]')
-    expect(saveBtn).toBeTruthy()
-    expect(saveBtn!.textContent?.trim()).toBe('Save')
-  })
-
-  it('hides Save button when content matches saved state', async () => {
-    mount()
-    await flushUi()
-
-    expect(root.querySelector('[data-testid="save-btn"]')).toBeNull()
-  })
-
-  it('saves when Save button is clicked', async () => {
-    mount()
-    await flushUi()
-
-    const textarea = root.querySelector<HTMLTextAreaElement>('textarea')!
-    const newContent = '# Updated instructions\n'
-    textarea.value = newContent
-    textarea.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushUi()
-
-    const saveBtn = root.querySelector<HTMLButtonElement>('[data-testid="save-btn"]')!
-    expect(saveBtn).toBeTruthy()
-    saveBtn.click()
-    await flushUi()
-
-    expect(call).toHaveBeenCalledWith('fs.write', { path: 'AGENTS.md', content: newContent })
-  })
-
-  it('shows template variable annotation', async () => {
-    mount()
-    await flushUi()
-
-    const annotation = root.querySelector('[data-testid="template-vars-annotation"]')
-    expect(annotation).toBeTruthy()
-    expect(annotation!.textContent).toContain('{{DATE_TODAY}}')
-    expect(annotation!.textContent).toContain('{{TOOL_SET}}')
-    expect(annotation!.textContent).toContain('{{PROJECT_LOG}}')
-  })
-
-  it('shows default content and Save button when AGENTS.md does not exist', async () => {
-    call = vi.fn(async (tool: string) => {
-      if (tool === 'fs.read') throw new Error('File not found')
-      if (tool === 'fs.write') return { ok: true }
-      if (tool === 'workspace.defaultAgentsMd') return { content: '# Default\n' }
-      return {}
-    })
-    Object.defineProperty(window, 'kernel', {
-      configurable: true,
-      value: { call, on: vi.fn(), off: vi.fn() },
-    })
-
-    mount()
-    await flushUi()
-
-    const textarea = root.querySelector<HTMLTextAreaElement>('textarea')
-    expect(textarea).toBeTruthy()
-    expect(textarea!.value).toBe('# Default\n')
-
-    const saveBtn = root.querySelector('[data-testid="save-btn"]')
-    expect(saveBtn).toBeTruthy()
+    expect(call).toHaveBeenCalledWith('instruction.open', { origin: 'team' })
+    expect(call).toHaveBeenCalledWith('editor.open', { path: '.mim/team/instructions.md' })
   })
 })

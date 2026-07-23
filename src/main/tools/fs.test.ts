@@ -635,6 +635,25 @@ describe('File tools', () => {
       }, ctx) as { content: string }
       expect(result.content).toBe('top-secret')
     })
+
+    it('allows only the managed Personal and Mim origin mounts', async () => {
+      mkdirSync(join(dir, '.mim', 'origins', 'you'), { recursive: true })
+      mkdirSync(join(dir, '.mim', 'origins', 'mim'), { recursive: true })
+      symlinkSync(outsideDir, join(dir, '.mim', 'origins', 'you', 'skills'))
+      symlinkSync(outsideDir, join(dir, '.mim', 'origins', 'mim', 'skills'))
+
+      await expect(tools.call('fs.read', {
+        path: '.mim/origins/you/skills/secret.txt',
+      }, ctx)).resolves.toMatchObject({ content: 'top-secret' })
+      await expect(tools.call('fs.read', {
+        path: '.mim/origins/mim/skills/secret.txt',
+      }, ctx)).resolves.toMatchObject({ content: 'top-secret' })
+
+      symlinkSync(outsideDir, join(dir, '.mim', 'origins', 'other'))
+      await expect(tools.call('fs.read', {
+        path: '.mim/origins/other/secret.txt',
+      }, ctx)).rejects.toThrow('symlink')
+    })
   })
 
   describe('fs.read full mode', () => {

@@ -1047,7 +1047,14 @@ async function loadPackageContext() {
       id: skill.name || skill.id,
       name: skill.name || skill.id,
       desc: skill.description || '',
-      packageName: skill.source ? `skill:${skill.source}` : 'skill',
+      packageName: skill.sourceName || (
+        skill.source === 'personal' ? 'You'
+          : skill.source === 'project' ? 'Project'
+            : skill.source === 'mim' ? 'Mim'
+              : skill.source === 'team' ? 'Team'
+                : 'App'
+      ),
+      editorPath: skill.editorPath,
     }))
     : []
 
@@ -1222,6 +1229,7 @@ onUnmounted(() => {
           @stop="handleStop"
           @update:model-id="onModelChange"
           @update:control-id="onControlChange"
+          @open-file="onOpenFile"
         />
         <ChatComposerFooter
           layout="landing"
@@ -1349,6 +1357,7 @@ onUnmounted(() => {
       @stop="handleStop"
       @update:model-id="onModelChange"
       @update:control-id="onControlChange"
+      @open-file="onOpenFile"
     />
     <ChatComposerFooter
       v-if="!isEmptyChat"
