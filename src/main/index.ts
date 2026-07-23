@@ -28,10 +28,6 @@ import { registerCommentTools } from '@main/tools/comments.js'
 import { registerWorkspaceTools } from '@main/tools/workspace.js'
 import { registerPackageTools } from '@main/tools/packages.js'
 import { registerPackageRuntimeTools } from '@main/tools/packageRuntime.js'
-import { registerRegistryTools } from '@main/tools/registryTools.js'
-import { lookupRegistryEntry, setAccountRegistryDev } from '@main/packages/registrySources.js'
-import { registerInstallTools } from '@main/tools/install.js'
-import { DEFAULT_CACHE_ROOT } from '@main/packages/cacheLayout.js'
 import { registerBridgeTools } from '@main/tools/bridge.js'
 import { clearEditorState, dropWindow as dropEditorWindow, findWindowIdForPath, noteWindowFocused, registerEditorStateTools, setMainWindowId, updateWindowEditorState } from '@main/tools/editorState.js'
 import {
@@ -84,7 +80,6 @@ import { createNamedPackageToolSync, type NamedPackageToolSync } from '@main/pac
 import { createAgentContextContributionsProvider, createLocalPackageStatusProvider } from '@main/packages/packageContributions.js'
 import { registerCoreAppTools } from '@main/tools/coreApps.js'
 import { createAgentMounts } from '@main/ai/agentMounts.js'
-import { checkForUpdates } from '@main/packages/updateCheck.js'
 import { registerLogbookTools } from '@main/tools/logbook.js'
 import { registerWebTools } from '@main/tools/web.js'
 import { createElectronLiveBrowserDriver } from '@main/web/liveBrowser.js'
@@ -100,7 +95,6 @@ import {
   readBrowserSessionSettings,
 } from '@main/web/browserSessionSettings.js'
 import { parseAllowedHttpUrl } from '@main/web/urlPolicy.js'
-import { registerAccountTools, readAccountToken, setAccountDev } from '@main/tools/account.js'
 import { registerSlackTools } from '@main/integrations/slack/tools.js'
 import { SlackIntegration } from '@main/integrations/slack/client.js'
 import { createSlackSocketModeListener } from '@main/integrations/slack/listener.js'
@@ -734,12 +728,6 @@ async function boot(): Promise<void> {
   void slackMcp.refresh()
   void googleMcp.refresh()
   registerTelemetryTools(tools, telemetry)
-  setAccountDev(is.dev)
-  setAccountRegistryDev(is.dev)
-  registerAccountTools(tools, (channel) => {
-    mainWindow?.webContents.send(channel)
-    server?.broadcast(channel, {})
-  })
   telemetry.track('app_open', {
     appVersion,
     platform: telemetryConfig.platform,
@@ -902,29 +890,6 @@ async function boot(): Promise<void> {
       server?.broadcast(channel, payload ?? {})
     },
   })
-  const cacheRoot = DEFAULT_CACHE_ROOT
-  const installGlobalDir = join(HOME_DIR, '.mim', 'packages')
-  registerRegistryTools(tools, {
-    packages,
-    enablement: packageEnablement,
-    cacheRoot,
-    globalDir: installGlobalDir,
-    getWorkspacePath: () => tools.getWorkspacePath(),
-    getAccountToken: () => readAccountToken(),
-  })
-  registerInstallTools(tools, {
-    packages,
-    enablement: packageEnablement,
-    cacheRoot,
-    globalDir: installGlobalDir,
-    clock: () => Date.now(),
-    lookupRegistryEntry: (id, version) => lookupRegistryEntry(id, {
-      workspacePath: tools.getWorkspacePath(),
-      cacheRoot,
-      version,
-      isSourceTrusted: (s) => packageEnablement.isRegistryTrusted(s),
-    }, { getAccountToken: () => readAccountToken() }),
-  })
   registerCoreAppTools(tools, {
     packages,
     enablement: packageEnablement,
@@ -1043,23 +1008,6 @@ async function boot(): Promise<void> {
     console.error('[mcp] Failed to write discovery file', err)
   }
 
-  // Fire-and-forget update check, broadcast to renderer + WebSocket so the
-  // Apps surface can show update badges. Swallows errors silently — offline
-  // and missing mirrors are normal. Runs at boot and on workspace switch.
-  function refreshAppUpdates(workspacePath: string | null): void {
-    void checkForUpdates({
-      workspacePath,
-      cacheRoot,
-      globalDir: installGlobalDir,
-      isSourceTrusted: (s) => packageEnablement.isRegistryTrusted(s),
-      getAccountToken: () => readAccountToken(),
-    }).then((result) => {
-      mainWindow?.webContents.send('apps:updates', result)
-      server?.broadcast('apps:updates', result)
-    }).catch(() => { /* offline is normal */ })
-  }
-  refreshAppUpdates(tools.getWorkspacePath())
-
   async function openWorkspacePath(path: string): Promise<string> {
     await subagentManagerRef?.interruptActive()
     await tools.call('workspace.open', { path }, { actor: 'user' })
@@ -1092,7 +1040,6 @@ async function boot(): Promise<void> {
     broadcastToRenderers('workspace:changed', path)
     // Notify package iframes via WebSocket so they reload their data
     server?.broadcast('workspace:changed', { path })
-    refreshAppUpdates(path)
     return path
   }
 

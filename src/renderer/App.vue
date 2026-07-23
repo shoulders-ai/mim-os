@@ -13,7 +13,6 @@ import PaneRecoveryState from './components/workbench/PaneRecoveryState.vue'
 import SettingsDialog from './components/settings/SettingsDialog.vue'
 import { DEFAULT_SETTINGS_SECTION, type SettingsSection } from './components/settings/sections.js'
 import InitWorkspaceBanner from './components/InitWorkspaceBanner.vue'
-import MissingAppsBanner from './components/MissingAppsBanner.vue'
 import AddProjectDialog from './components/AddProjectDialog.vue'
 import ToastHost from './components/ToastHost.vue'
 import WelcomeDialog from './components/WelcomeDialog.vue'
@@ -1116,7 +1115,6 @@ onMounted(async () => {
     refreshApps: () => appsStore.refresh(),
     refreshAppAgents: () => appAgentsStore.refresh(),
     handleWorkspaceChanged,
-    setAppUpdates: updates => appsStore.setUpdates(updates),
     refreshKeyStatuses: () => settingsStore.refreshKeyStatuses(),
     enqueueApproval: request => approvalsStore.enqueue(request as ApprovalRequest),
     openFileInEditor,
@@ -1265,7 +1263,6 @@ onBeforeUnmount(() => {
           :missing="workspaceStatus.missing"
           @initialize="initializeWorkspace"
         />
-        <MissingAppsBanner :key="`missing-apps-${workspacePath ?? 'none'}`" />
         <PaneRecoveryState
           v-if="workNavigationError"
           pane="work"

@@ -959,16 +959,15 @@ export async function createAiSdkTools({
     }),
 
     app_status: tool({
-      description: 'Read resolved app/package state: installed, enabled, trust-needed, install-needed, source, and data-folder presence.',
+      description: 'Read Mim, Team, and Project apps with local activation, origin, permission-review, and data-folder state.',
       inputSchema: z.object({}),
       execute: async () => call('app.status', {}),
     }),
 
     app_enable: tool({
-      description: 'Enable an installed package for this workspace. Does not acknowledge trust; if trust is needed, tell the user to review and trust it in Settings > Apps.',
+      description: 'Enable an available app for this person in the current Project. Permission review remains a user action in Settings > Apps & agents.',
       inputSchema: z.object({
         id: z.string(),
-        layer: z.enum(['workspace', 'local']).optional(),
       }),
       execute: async (params) => call('app.enable', params),
     }),
@@ -1005,35 +1004,6 @@ export async function createAiSdkTools({
         inputs: looseObjectSchema.optional(),
       }),
       execute: async (params) => call('package.jobs.start', params),
-    }),
-
-    registry_list: tool({
-      description: 'List packages available in the registry, with install state for this workspace.',
-      inputSchema: z.object({}),
-      execute: async () => call('registry.list', {}),
-    }),
-
-    package_install: tool({
-      description: 'Install a package globally, by registry id or direct repo URL. The permission gate pauses for user approval when policy requires it.',
-      inputSchema: z.object({
-        id: z.string().optional(),
-        version: z.string().optional(),
-        repo: z.string().optional(),
-        ref: z.string().optional(),
-      }),
-      execute: async (params) => call('package.install', params),
-    }),
-
-    package_update: tool({
-      description: 'Update an installed package to the latest registry version, repointing the workspace pin if one exists.',
-      inputSchema: z.object({ id: z.string() }),
-      execute: async ({ id }) => call('package.update', { id }),
-    }),
-
-    package_uninstall: tool({
-      description: 'Remove an installed package version from the global install dir.',
-      inputSchema: z.object({ id: z.string(), version: z.string() }),
-      execute: async (params) => call('package.uninstall', params),
     }),
 
     connections_status: tool({

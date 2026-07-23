@@ -70,12 +70,11 @@ describe('getSystemPrompt', () => {
     expect(() => getSystemPrompt('/nonexistent/path/xyz')).not.toThrow()
   })
 
-  it('advertises the registry/install tools wired in both kernels', () => {
+  it('advertises direct app origins without retired registry/install tools', () => {
     const out = getSystemPrompt()
-    expect(out).toContain('registry_list')
-    expect(out).toContain('package_install')
-    expect(out).toContain('package_update')
-    expect(out).toContain('package_uninstall')
+    expect(out).toContain('apps available from Mim, the Team, and the current Project')
+    expect(out).not.toContain('registry_list')
+    expect(out).not.toContain('package_install')
   })
 
   it('advertises the single web read workhorse', () => {

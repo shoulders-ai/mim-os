@@ -6,13 +6,6 @@ export interface KernelEventBus {
   off(channel: string, cb: (...args: unknown[]) => void): void
 }
 
-export interface AppUpdate {
-  id: string
-  installed: string
-  latest: string
-  registryId: string
-}
-
 export interface AppShellToast {
   kind: 'error' | 'info'
   message: string
@@ -27,7 +20,6 @@ export interface AppKernelEventDeps {
   refreshApps(): Promise<unknown> | unknown
   refreshAppAgents(): Promise<unknown> | unknown
   handleWorkspaceChanged(path: unknown): Promise<unknown> | unknown
-  setAppUpdates(updates: Record<string, { installed: string; latest: string; registryId: string }>): void
   refreshKeyStatuses(): Promise<unknown> | unknown
   enqueueApproval(request: unknown): void
   openFileInEditor(path: string): Promise<unknown> | unknown
@@ -71,9 +63,6 @@ export function registerAppKernelEvents(
     ['apps:changed', () => {
       void deps.refreshApps()
       void deps.refreshAppAgents()
-    }],
-    ['apps:updates', (payload: unknown) => {
-      deps.setAppUpdates(appUpdatesMap(payload))
     }],
     ['ai:keys-changed', () => {
       void deps.refreshKeyStatuses()
@@ -200,26 +189,6 @@ export function registerAppKernelEvents(
       kernel.off(channel, handler)
     }
   }
-}
-
-function appUpdatesMap(payload: unknown): Record<string, { installed: string; latest: string; registryId: string }> {
-  const updates = isRecord(payload) && Array.isArray(payload.updates)
-    ? payload.updates
-    : []
-  const map: Record<string, { installed: string; latest: string; registryId: string }> = {}
-  for (const item of updates) {
-    if (!isRecord(item)) continue
-    const { id, installed, latest, registryId } = item
-    if (
-      typeof id === 'string'
-      && typeof installed === 'string'
-      && typeof latest === 'string'
-      && typeof registryId === 'string'
-    ) {
-      map[id] = { installed, latest, registryId }
-    }
-  }
-  return map
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

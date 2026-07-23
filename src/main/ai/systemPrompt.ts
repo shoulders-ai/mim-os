@@ -79,16 +79,10 @@ Web:
 Use web_read with stateful=false by default for ordinary read-only pages, docs, articles, PDFs, and search-result follow-up. Use browser_open directly when the task requires clicking, typing, scrolling, waiting for lazy-loaded content, dismissing a non-legal cookie banner, or operating a web app. If the page needs sign-in, cookies, or consent already set up through Website Access, use stateful=true; the per-domain approval can be granted directly from chat. If user-assisted login, MFA, CAPTCHA, legal/account consent, or explicit human verification is required, show the live browser with visible=true or browser_act(action="show"), pause, and ask the user to complete the step in that window. Do not ask the user to copy/paste, screenshot, export, or manually browse elsewhere unless browser reading is unavailable or the user explicitly chooses that path.
 
 App management:
-- package_create(id, name, description, html, js?) — create a new app
-- package_edit(id, file, content) — edit an app file
+- package_create(id, name, description, html, js?, destination?) — create a Project or Team app
+- package_edit(id, file, content) — edit a Team or Project app file
 - package_delete(id) — remove an app
-- package_list() — list installed apps
-
-Registry and install:
-- registry_list() — list apps available in the registry, with install state. Always shows the effective registry URL.
-- package_install(id?, version?, repo?, ref?) — install globally to ~/.mim/packages/<id>/<version>/, by registry id or direct repo URL. Verifies the pinned commit, manifest id, engines, and permissions against the registry entry before copying.
-- package_update(id) — install the latest registry version side-by-side and repoint the workspace pin if one exists.
-- package_uninstall(id, version) — remove an installed version from the global dir.
+- package_list() — list apps available from Mim, the Team, and the current Project
 
 Integrations (Slack, Google):
 - connections_status() — check connection state for all integrations, including Slack bot accounts referenced by workspace routines. Returns what is configured, authenticated identity, granted scopes, and policy flags. Always available.
@@ -106,7 +100,7 @@ Integrations (Slack, Google):
 Integration credentials are stored in the OS keychain, not in workspace files. Never write tokens or secrets to settings.json, .mim/, or any file — use the tools above. After connecting, use connections_configure to enable capabilities through the tool policy, then the data tools (gmail_search, calendar_events, drive_search, slack_search, etc.) become available from the next message.
 
 Enablement:
-- The committed mim.yaml apps map shares/pins workspace apps for collaborators, but does not enable anyone's sidebar. Local .mim/packages/enabled.json controls the current user's sidebar/capability enablement for this workspace. Use app.add to install/add personally, and app.share to share a registry app with the workspace.`
+- Team and Project determine app availability. Local .mim/packages/enabled.json controls this person's activation choices in this Project checkout; app toggles never modify shared source state.`
 
 export function resolveTemplateVars(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (match, key) => key in vars ? vars[key] : match)

@@ -113,7 +113,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 - **App loader.** Workspace > global precedence, version pins, manifest validation. `src/main/packages/packages.ts`, `packageManifest.ts`, `packageEnablement.ts`.
 - **App runtime.** Backend jobs, app data, JSON Schema tool input validation, per-package app-tool serialization, agent descriptor parsing, `ctx.http` (host allowlist), `ctx.secrets` (keychain), named tools. `src/main/packages/packageRuntime.ts`, `packageJobs.ts`, `packageData.ts`, `packageHttp.ts`, `packageSecrets.ts`, `namedPackageTools.ts`. Docs: [app-system-api.md](app-system-api.md).
-- **Registry & install.** Multi-source resolution with ownership rule, trust gating, archive/git/local installs, and active-workspace package update checks. `src/main/packages/registrySources.ts`, `registryIndex.ts`, `updateCheck.ts`, `tools/registryTools.ts`, `tools/install.ts`. Docs: [private-registry.md](private-registry.md) for the authenticated account registry.
+- **App discovery and activation.** Direct Mim, Team, and Project roots with Project > Team > Mim precedence, local per-Project activation, permission review, and live rescans. `src/main/packages/packages.ts`, `packageEnablement.ts`, `tools/coreApps.ts`, `tools/packages.ts`. Docs: [app-system-api.md](app-system-api.md), [custom-apps.md](custom-apps.md).
 - **Core-app tools.** `app.status/enable/disable/remove/trust` for personal enablement. `src/main/tools/coreApps.ts`.
 - **App authoring.** Starter templates, create/validate/reload authoring loop. `src/main/tools/packages.ts`, `templates/appTemplates.ts`.
 - **App server.** Express + WebSocket for desktop app/AI/MCP routes, SDK file serving, and app/MCP tool dispatch. `src/main/server/server.ts`.
@@ -123,7 +123,6 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 ### Main Process — Integrations
 
 - **Slack & Google.** Keychain-backed connectors, Google browser OAuth, kernel tools, AI tool builders, and Settings > Tools availability policy. Slack also has routine-listener runtime: bot/app-token credential tools, one-shot capability-based bot setup/check tools, Socket Mode listener lifecycle, metadata-only event ledger, durable Slack thread-to-Mim-session routing, routine dispatcher, and bot thread replies. Data tools are exposed over MCP when connected and enabled. AI agent can manage connection lifecycle (connect, disconnect, configure policy) via `connections_status`, `google_set_oauth_client`, `google_connect`, `slack_connect`, `slack_bot_connect`, `slack_bot_setup`, `slack_bot_check`, `connections_configure` tools. File-based credential ingestion reads secrets server-side so they never enter model context. `src/main/integrations/`, `src/main/tools/toolPolicy.ts`. Docs: [integrations.md](integrations.md), [proposals/slack-listener.md](proposals/slack-listener.md).
-- **Account tokens.** Org registry token management in `~/.mim/keys.env`. `src/main/tools/account.ts`.
 
 ### Main Process — Observability
 
@@ -214,7 +213,6 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [skills.md](skills.md) | Filesystem skill system |
 | [custom-apps.md](custom-apps.md) | Building workspace apps/skills |
 | [granola-private-app.md](granola-private-app.md) | Private Granola app rationale, implementation, and operations |
-| [private-registry.md](private-registry.md) | Private app registry (mim-web), client tokens, entitlements |
 | [app-system-api.md](app-system-api.md) | App system contract and author API |
 | [package-runtime.md](package-runtime.md) | App runtime architecture |
 | [docx-review-workflow.md](docx-review-workflow.md) | DOCX review workflow |
@@ -290,8 +288,6 @@ src/
       packageSecrets.ts         # ctx.secrets keychain
       namedPackageTools.ts      # Named app tools as registry tools
       packageContributions.ts   # Agent-context contributions
-      registrySources.ts        # Multi-source resolution
-      registryIndex.ts          # Registry index parser
       cacheLayout.ts            # ~/.mim/cache/ layout
       semver.ts                 # Strict semver helpers
     mcp/
@@ -348,7 +344,6 @@ src/
       editorState.ts            # editor.state open-tab snapshot
       packages.ts               # App authoring tools
       coreApps.ts               # App enablement tools
-      registryTools.ts          # Registry list/trust
       install.ts                # App install/add/share
       documents.ts              # DOCX/PDF/import tools
       export.ts                 # PDF/DOCX export tools
@@ -367,7 +362,6 @@ src/
       comments.ts               # Comment tools
       references.ts             # Bibliography tools
       routines.ts               # Routine definition/manual run/webhook secret tools
-      account.ts                # Account token tools
       telemetry.ts              # Telemetry tools
     templates/
       appTemplates.ts           # Starter app scaffolds
@@ -473,7 +467,7 @@ src/
       settings/
         SettingsDialog.vue      # Settings shell
         sections.ts             # Section id protocol
-        AppsSettingsPanel.vue   # Apps + CLI tools
+        AppsSettingsPanel.vue   # Mim/Team/Project apps + CLI agents
         AiSettingsPanel.vue     # Keys + model defaults
         ConnectionsSettingsPanel.vue  # Integrations + website access
         ToolsSettingsPanel.vue  # Agent tool availability policy

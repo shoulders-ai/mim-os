@@ -1,7 +1,7 @@
 # Mim Restructure: Project, You, and Team
 
 Status: product direction, scope model, UX, and implementation programme
-accepted; implementation is in progress, with phases 1 through 6 complete.
+accepted; implementation is in progress, with phases 1 through 7 complete.
 
 Mim is a local, file-native workbench where humans and agents work together on
 real project files. Collaboration is local-first: every human and agent works
@@ -412,7 +412,7 @@ paths removed rather than left beside the replacement.
    chips, per-user toggles, create destinations, editor opening, and normal
    save/sync for writable `SKILL.md` files. Replace the Settings textarea for
    instructions with editor links.
-7. **Unify Apps and agents.** Discover Team apps directly from the Team source,
+7. **Unify Apps and agents — complete.** Discover Team apps directly from the Team source,
    Project apps from the Project, and Mim apps from the build. Preserve runtime,
    validation, updates, developer information, overrides, and the existing
    per-user/per-Project enablement file. Delete registry browse/source/account

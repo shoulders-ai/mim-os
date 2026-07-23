@@ -56,7 +56,7 @@ export function registerPackageTools(
 
   tools.register({
     name: 'package.create',
-    description: 'Create a new app in the workspace',
+    description: 'Create a new app in the current Project or connected Team source',
     inputSchema: objectSchema({
       id: { type: 'string' },
       name: { type: 'string' },
@@ -72,10 +72,11 @@ export function registerPackageTools(
       provides: { type: 'object' },
       dataFolder: { type: 'string' },
       views: { type: 'array' },
+      destination: { type: 'string', enum: ['project', 'team'] },
       override: { type: 'boolean' },
     }, ['id', 'name']),
     execute: async (params) => {
-      const workspace = requireWorkspace(tools)
+      requireWorkspace(tools)
       const id = requireString(params, 'id')
       const name = requireString(params, 'name')
       const description = optionalString(params, 'description') ?? ''
@@ -89,21 +90,27 @@ export function registerPackageTools(
       const provides = optionalObject(params, 'provides')
       const dataFolder = optionalString(params, 'dataFolder')
       const views = packageViews(params, name, html)
+      const destination = optionalString(params, 'destination') ?? 'project'
       const override = params.override === true
 
       validatePackageId(id)
+      if (destination !== 'project' && destination !== 'team') {
+        throw new Error('destination must be project or team')
+      }
 
       if (!override) {
         const existing = packages.get(id)
-        if (existing && existing.source === 'global') {
+        if (existing) {
           throw new Error(
             `App "${id}" already exists as a ${existing.source} app. ` +
-            `Pass override: true to create a workspace override.`,
+            `Pass override: true to create an override.`,
           )
         }
       }
 
-      const pkgDir = join(workspace, 'packages', id)
+      const root = packages.root(destination)
+      if (!root) throw new Error(`${destination === 'team' ? 'Team' : 'Project'} app source is unavailable`)
+      const pkgDir = join(root, id)
       if (existsSync(pkgDir)) {
         throw new Error(`App already exists: ${id}`)
       }
@@ -172,16 +179,19 @@ export function registerPackageTools(
     name: 'package.edit',
     description: 'Edit a file within an existing app',
     execute: async (params) => {
-      const workspace = requireWorkspace(tools)
+      requireWorkspace(tools)
       const id = requireString(params, 'id')
       const file = requireString(params, 'file')
       const content = requireString(params, 'content')
 
       validatePackageId(id)
-      const pkgDir = join(workspace, 'packages', id)
-      if (!existsSync(pkgDir)) {
+      const existing = packages.get(id)
+      if (existing?.source === 'mim') {
         throw new Error(`App not found: ${id}`)
       }
+      const projectRoot = packages.root('project')
+      const pkgDir = existing?.dir ?? (projectRoot ? join(projectRoot, id) : '')
+      if (!pkgDir || !existsSync(pkgDir)) throw new Error(`App not found: ${id}`)
 
       // Resolve and validate path stays within the app directory
       const target = resolve(pkgDir, normalize(file))
@@ -202,14 +212,17 @@ export function registerPackageTools(
     name: 'package.delete',
     description: 'Delete an app from the workspace',
     execute: async (params) => {
-      const workspace = requireWorkspace(tools)
+      requireWorkspace(tools)
       const id = requireString(params, 'id')
 
       validatePackageId(id)
-      const pkgDir = join(workspace, 'packages', id)
-      if (!existsSync(pkgDir)) {
+      const existing = packages.get(id)
+      if (existing?.source === 'mim') {
         throw new Error(`App not found: ${id}`)
       }
+      const projectRoot = packages.root('project')
+      const pkgDir = existing?.dir ?? (projectRoot ? join(projectRoot, id) : '')
+      if (!pkgDir || !existsSync(pkgDir)) throw new Error(`App not found: ${id}`)
 
       rmSync(pkgDir, { recursive: true, force: true })
       return { deleted: id }
@@ -249,10 +262,13 @@ export function registerPackageTools(
     description: 'Validate a workspace app before or after reload',
     inputSchema: objectSchema({ id: { type: 'string' } }, ['id']),
     execute: async (params) => {
-      const workspace = requireWorkspace(tools)
+      requireWorkspace(tools)
       const id = requireString(params, 'id')
       validatePackageId(id)
-      return validateWorkspacePackage(workspace, id)
+      const pkg = packages.get(id)
+      const root = pkg ? packages.root(pkg.source) : packages.root('project')
+      if (!root) throw new Error(`App source is unavailable: ${id}`)
+      return validatePackage(root, id)
     },
   })
 
@@ -415,7 +431,7 @@ interface ValidationSummary {
   agents: number
 }
 
-async function validateWorkspacePackage(workspace: string, id: string): Promise<{
+async function validatePackage(root: string, id: string): Promise<{
   id: string
   path: string
   valid: boolean
@@ -423,7 +439,7 @@ async function validateWorkspacePackage(workspace: string, id: string): Promise<
   warnings: ValidationDiagnostic[]
   summary: ValidationSummary
 }> {
-  const pkgDir = join(workspace, 'packages', id)
+  const pkgDir = join(root, id)
   const errors: ValidationDiagnostic[] = []
   const warnings: ValidationDiagnostic[] = []
   const summary: ValidationSummary = { tools: 0, jobs: 0, skills: 0, namedTools: 0, agents: 0 }

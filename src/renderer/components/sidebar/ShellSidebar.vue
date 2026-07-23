@@ -965,11 +965,6 @@ onUnmounted(() => {
               @click="$emit('manageApps')"
             >
               <IconSettings :size="13" :stroke="1.8" />
-              <span
-                v-if="appsStore.updateCount > 0"
-                data-testid="manage-apps-badge"
-                class="absolute -right-px -top-px h-[7px] w-[7px] rounded-full bg-accent ring-2 ring-chrome"
-              />
             </button>
           </template>
         </div>

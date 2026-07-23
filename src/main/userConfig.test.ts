@@ -6,8 +6,6 @@ import {
   loadUserConfig,
   resolveModelDefault,
   reset,
-  registryUrl,
-  DEFAULT_REGISTRY_URL,
   setUserSkillDisabled,
   setPersonalSetting,
   setTeamConnection,
@@ -243,58 +241,6 @@ describe('userConfig — resolveModelDefault', () => {
     writeConfig(home, 'defaults:\n  models:\n    chat: gpt-5.4\n')
     reset()
     expect(resolveModelDefault('chat', {})).toBe('gpt-5.4')
-  })
-})
-
-describe('userConfig — registry.url', () => {
-  let home: string
-
-  beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'mim-home-'))
-    reset()
-    process.env.HOME = home
-  })
-
-  afterEach(() => {
-    rmSync(home, { recursive: true, force: true })
-    reset()
-  })
-
-  it('returns DEFAULT_REGISTRY_URL when no config file exists', () => {
-    expect(registryUrl()).toBe(DEFAULT_REGISTRY_URL)
-  })
-
-  it('returns DEFAULT_REGISTRY_URL when config has no registry section', () => {
-    writeConfig(home, 'user:\n  name: Paul\n')
-    reset()
-    expect(registryUrl()).toBe(DEFAULT_REGISTRY_URL)
-  })
-
-  it('returns the override when registry.url is set in config.yaml', () => {
-    writeConfig(home, [
-      'registry:',
-      '  url: https://git.corp.example.com/mim-registry.git',
-      '',
-    ].join('\n'))
-    reset()
-    expect(registryUrl()).toBe('https://git.corp.example.com/mim-registry.git')
-  })
-
-  it('ignores non-string registry.url values', () => {
-    writeConfig(home, 'registry:\n  url: 42\n')
-    reset()
-    expect(registryUrl()).toBe(DEFAULT_REGISTRY_URL)
-  })
-
-  it('loadUserConfig exposes the registry.url field', () => {
-    writeConfig(home, 'registry:\n  url: https://private.example.com/reg.git\n')
-    reset()
-    const config = loadUserConfig(home)
-    expect(config.registry.url).toBe('https://private.example.com/reg.git')
-  })
-
-  it('DEFAULT_REGISTRY_URL is an HTTPS URL', () => {
-    expect(DEFAULT_REGISTRY_URL).toMatch(/^https:\/\//)
   })
 })
 

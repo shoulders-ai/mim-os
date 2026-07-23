@@ -79,7 +79,7 @@ describe('apps store (resolved state)', () => {
     expect(store.isVisible('unknown')).toBe(false)
   })
 
-  it('exposes needsTrust and needsInstall from resolved state', async () => {
+  it('exposes permission review and has no missing-install registry state', async () => {
     stubKernel([
       makeApp({ id: 'vendor-pkg', needsTrust: true, installed: true }),
       makeApp({ id: 'missing-pkg', needsInstall: true, installed: false }),
@@ -88,7 +88,7 @@ describe('apps store (resolved state)', () => {
     await store.refresh()
 
     expect(store.apps['vendor-pkg']?.needsTrust).toBe(true)
-    expect(store.apps['missing-pkg']?.needsInstall).toBe(true)
+    expect(store.apps['missing-pkg']?.needsInstall).toBe(false)
   })
 
   it('exposes shadowed flag from resolved state', async () => {

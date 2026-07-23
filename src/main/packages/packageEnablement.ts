@@ -1,22 +1,15 @@
-import { createHash } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { join } from 'path'
-import type { LoadedPackage } from '@main/packages/packages.js'
+import type { LoadedPackage } from './packages.js'
 import { atomicWriteJson } from '@main/atomicJson.js'
 
 interface EnablementFile {
   enabled?: string[]
   disabled?: string[]
   trusted?: string[]
-  registries?: string[]
 }
 
 export type EnablementPackage = Pick<LoadedPackage, 'manifest' | 'source' | 'dir'>
-
-export interface RegistryTrustSource {
-  id: string
-  location: string
-}
 
 export interface PackageEnablementStore {
   isEnabled(pkg: EnablementPackage): boolean
@@ -26,64 +19,58 @@ export interface PackageEnablementStore {
   isTrusted(pkg: EnablementPackage): boolean
   ackTrust(pkg: EnablementPackage): void
   needsTrust(pkg: EnablementPackage): boolean
-  isRegistryTrusted(source: RegistryTrustSource): boolean
-  ackRegistryTrust(source: RegistryTrustSource): void
   diagnostics(): string[]
 }
 
-export interface PackageEnablementOptions {
+export function createPackageEnablementStore(options: {
   getWorkspacePath: () => string | null
-}
-
-export function createPackageEnablementStore(options: PackageEnablementOptions): PackageEnablementStore {
+}): PackageEnablementStore {
+  type State = Required<EnablementFile>
   let cachedPath: string | null = null
-  let cachedState: Required<EnablementFile> = { enabled: [], disabled: [], trusted: [], registries: [] }
+  let cachedState: State = { enabled: [], disabled: [], trusted: [] }
   let cachedDiagnostics: string[] = []
 
-  function pathForWorkspace(): string | null {
-    const workspace = options.getWorkspacePath()
-    return workspace ? join(workspace, '.mim', 'packages', 'enabled.json') : null
+  function statePath(): string | null {
+    const project = options.getWorkspacePath()
+    return project ? join(project, '.mim', 'packages', 'enabled.json') : null
   }
 
-  function load(): Required<EnablementFile> {
-    const path = pathForWorkspace()
+  function load(): State {
+    const path = statePath()
     if (!path) {
       cachedPath = null
-      cachedState = { enabled: [], disabled: [], trusted: [], registries: [] }
+      cachedState = { enabled: [], disabled: [], trusted: [] }
       cachedDiagnostics = []
       return cachedState
     }
     if (cachedPath === path) return cachedState
-
     cachedPath = path
     cachedDiagnostics = []
     if (!existsSync(path)) {
-      cachedState = { enabled: [], disabled: [], trusted: [], registries: [] }
+      cachedState = { enabled: [], disabled: [], trusted: [] }
       return cachedState
     }
     try {
       const raw = JSON.parse(readFileSync(path, 'utf-8')) as EnablementFile
       cachedState = {
-        enabled: Array.isArray(raw.enabled) ? raw.enabled.filter(isPackageIdLike) : [],
-        disabled: Array.isArray(raw.disabled) ? raw.disabled.filter(isPackageIdLike) : [],
-        trusted: Array.isArray(raw.trusted) ? raw.trusted.filter(isTrustEntryLike) : [],
-        registries: Array.isArray(raw.registries) ? raw.registries.filter(isRegistryTrustEntryLike) : [],
+        enabled: Array.isArray(raw.enabled) ? raw.enabled.filter(isPackageId) : [],
+        disabled: Array.isArray(raw.disabled) ? raw.disabled.filter(isPackageId) : [],
+        trusted: Array.isArray(raw.trusted) ? raw.trusted.filter(isTrustEntry) : [],
       }
-    } catch (err) {
-      cachedDiagnostics = [`Could not read app enablement file: ${(err as Error).message}`]
-      cachedState = { enabled: [], disabled: [], trusted: [], registries: [] }
+    } catch (error) {
+      cachedDiagnostics = [`Could not read app enablement file: ${(error as Error).message}`]
+      cachedState = { enabled: [], disabled: [], trusted: [] }
     }
     return cachedState
   }
 
-  function save(state: Required<EnablementFile>): void {
-    const path = pathForWorkspace()
-    if (!path) throw new Error('No workspace open')
-    const clean: Required<EnablementFile> = {
+  function save(state: State): void {
+    const path = statePath()
+    if (!path) throw new Error('No Project open')
+    const clean = {
       enabled: [...new Set(state.enabled)].sort(),
       disabled: [...new Set(state.disabled)].sort(),
       trusted: [...new Set(state.trusted)].sort(),
-      registries: [...new Set(state.registries)].sort(),
     }
     atomicWriteJson(path, clean)
     cachedPath = path
@@ -91,99 +78,68 @@ export function createPackageEnablementStore(options: PackageEnablementOptions):
   }
 
   function requiresTrust(pkg: EnablementPackage): boolean {
-    if (pkg.source !== 'workspace') return false
-    return pkg.manifest.backend !== undefined || hasEffectivePermissions(pkg)
+    return pkg.source !== 'mim' && (
+      pkg.manifest.backend !== undefined
+      || pkg.manifest.permissions.workspace?.read === true
+      || pkg.manifest.permissions.workspace?.write === true
+      || pkg.manifest.permissions.ai === true
+      || (pkg.manifest.permissions.http?.length ?? 0) > 0
+      || (pkg.manifest.permissions.secrets?.length ?? 0) > 0
+    )
   }
 
   function isTrusted(pkg: EnablementPackage): boolean {
-    const trusted = load().trusted
-    const id = pkg.manifest.id
-    return trusted.includes(`${id}@*`)
+    return load().trusted.includes(`${pkg.manifest.id}@*`)
   }
 
   return {
     isEnabled(pkg) {
-      const id = pkg.manifest.id
-      const trusted = !requiresTrust(pkg) || isTrusted(pkg)
       const state = load()
-      if (state.enabled.includes(id)) return trusted
-      if (state.disabled.includes(id)) return false
-      return false
+      if (state.disabled.includes(pkg.manifest.id)) return false
+      return state.enabled.includes(pkg.manifest.id)
+        && (!requiresTrust(pkg) || isTrusted(pkg))
     },
-
     setEnabled(packageId, enabled) {
-      if (!isPackageIdLike(packageId)) throw new Error(`Invalid app id: ${packageId}`)
+      if (!isPackageId(packageId)) throw new Error(`Invalid app id: ${packageId}`)
       const state = load()
-      const next = {
-        enabled: state.enabled.filter(id => id !== packageId),
-        disabled: state.disabled.filter(id => id !== packageId),
+      save({
+        enabled: enabled
+          ? [...state.enabled.filter(id => id !== packageId), packageId]
+          : state.enabled.filter(id => id !== packageId),
+        disabled: enabled
+          ? state.disabled.filter(id => id !== packageId)
+          : [...state.disabled.filter(id => id !== packageId), packageId],
         trusted: state.trusted,
-        registries: state.registries,
-      }
-      if (enabled) next.enabled.push(packageId)
-      else next.disabled.push(packageId)
-      save(next)
+      })
     },
-
     clearOverride(packageId) {
-      if (!isPackageIdLike(packageId)) throw new Error(`Invalid app id: ${packageId}`)
+      if (!isPackageId(packageId)) throw new Error(`Invalid app id: ${packageId}`)
       const state = load()
-      const inEnabled = state.enabled.includes(packageId)
-      const inDisabled = state.disabled.includes(packageId)
-      if (!inEnabled && !inDisabled) return
       save({
         enabled: state.enabled.filter(id => id !== packageId),
         disabled: state.disabled.filter(id => id !== packageId),
         trusted: state.trusted,
-        registries: state.registries,
       })
     },
-
     localOverride(packageId) {
       const state = load()
-      if (state.disabled.includes(packageId)) return false
       if (state.enabled.includes(packageId)) return true
+      if (state.disabled.includes(packageId)) return false
       return null
     },
-
     isTrusted,
-
     ackTrust(pkg) {
       const id = pkg.manifest.id
-      const entry = `${id}@*`
       const state = load()
       save({
         enabled: state.enabled,
         disabled: state.disabled,
-        trusted: [...state.trusted.filter(e => !e.startsWith(`${id}@`)), entry],
-        registries: state.registries,
+        trusted: [...state.trusted.filter(entry => !entry.startsWith(`${id}@`)), `${id}@*`],
       })
     },
-
     needsTrust(pkg) {
-      // Committed or not: any workspace copy the trust gate would block must
-      // surface the prompt, or enabling it dead-ends with no path to trust.
       return requiresTrust(pkg) && !isTrusted(pkg)
     },
-
-    isRegistryTrusted(source) {
-      const state = load()
-      const locationHash = createHash('sha256').update(source.location).digest('hex').slice(0, 12)
-      return state.registries.includes(`${source.id}@${locationHash}`)
-    },
-
-    ackRegistryTrust(source) {
-      const locationHash = createHash('sha256').update(source.location).digest('hex').slice(0, 12)
-      const entry = `${source.id}@${locationHash}`
-      const state = load()
-      save({
-        enabled: state.enabled,
-        disabled: state.disabled,
-        trusted: state.trusted,
-        registries: [...state.registries.filter(e => !e.startsWith(`${source.id}@`)), entry],
-      })
-    },
-
     diagnostics() {
       load()
       return cachedDiagnostics
@@ -191,26 +147,10 @@ export function createPackageEnablementStore(options: PackageEnablementOptions):
   }
 }
 
-function hasEffectivePermissions(pkg: EnablementPackage): boolean {
-  const p = pkg.manifest.permissions
-  return p.workspace?.read === true
-    || p.workspace?.write === true
-    || p.ai === true
-    || (p.http?.length ?? 0) > 0
-    || (p.secrets?.length ?? 0) > 0
-}
-
-function isPackageIdLike(value: unknown): value is string {
+function isPackageId(value: unknown): value is string {
   return typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,59}$/.test(value)
 }
 
-function isTrustEntryLike(value: unknown): value is string {
-  return typeof value === 'string'
-    && /^[a-z0-9][a-z0-9_-]{0,59}@\*$/.test(value)
-}
-
-// Registry trust entries: "<id>@<sha256(location)[0..12]>"
-function isRegistryTrustEntryLike(value: unknown): value is string {
-  return typeof value === 'string'
-    && /^[a-z0-9][a-z0-9_-]{0,59}@[0-9a-f]{12}$/.test(value)
+function isTrustEntry(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-z0-9][a-z0-9_-]{0,59}@\*$/.test(value)
 }

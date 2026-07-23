@@ -34,12 +34,9 @@ export interface UserConfig {
     google?: Record<string, unknown>
     slack?: Record<string, unknown>
   }
-  registry: { url?: string }
   skills: { disabled: string[] }
 }
 
-export const DEFAULT_REGISTRY_URL = 'https://github.com/shoulders-ai/mim-apps.git'
-export const DEFAULT_REGISTRY_INDEX_URL = 'https://raw.githubusercontent.com/shoulders-ai/mim-apps/refs/heads/main/index.json'
 export const USER_SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 let cache: { home: string; config: UserConfig } | null = null
@@ -86,7 +83,6 @@ function emptyConfig(): UserConfig {
     defaults: { models: {} },
     preferences: {},
     connectors: {},
-    registry: {},
     skills: { disabled: [] },
   }
 }
@@ -146,9 +142,6 @@ export function loadUserConfig(home?: string): UserConfig {
           config.preferences.automationApprovalMode = preferences.automationApprovalMode
         }
 
-        const registry = (r.registry && typeof r.registry === 'object') ? r.registry as Record<string, unknown> : {}
-        config.registry.url = str(registry.url)
-
         const connectors = (r.connectors && typeof r.connectors === 'object' && !Array.isArray(r.connectors))
           ? r.connectors as Record<string, unknown>
           : {}
@@ -178,8 +171,6 @@ export function loadUserConfig(home?: string): UserConfig {
   for (const k of Object.keys(config.preferences) as (keyof UserConfig['preferences'])[]) {
     if (config.preferences[k] === undefined) delete config.preferences[k]
   }
-  if (config.registry.url === undefined) delete config.registry.url
-
   config.skills.disabled = [...new Set(config.skills.disabled.filter(name => USER_SKILL_NAME_PATTERN.test(name)))].sort()
 
   const frozen = Object.freeze({
@@ -194,7 +185,6 @@ export function loadUserConfig(home?: string): UserConfig {
       ...(config.connectors.google ? { google: Object.freeze({ ...config.connectors.google }) } : {}),
       ...(config.connectors.slack ? { slack: Object.freeze({ ...config.connectors.slack }) } : {}),
     }),
-    registry: Object.freeze(config.registry),
     skills: Object.freeze({
       disabled: Object.freeze([...config.skills.disabled]),
     }),
@@ -263,11 +253,6 @@ export function resolveModelDefault(
   if (opts.override) return opts.override
   const config = loadUserConfig()
   return config.defaults.models[feature]
-}
-
-export function registryUrl(): string {
-  const config = loadUserConfig()
-  return config.registry.url ?? DEFAULT_REGISTRY_URL
 }
 
 function configPath(home?: string): string {

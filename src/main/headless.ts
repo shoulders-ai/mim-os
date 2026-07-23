@@ -23,11 +23,7 @@ import { registerAiTools } from '@main/ai/ai.js'
 import { registerArchiveTools } from '@main/tools/archive.js'
 import { registerCoreAppTools } from '@main/tools/coreApps.js'
 import { createAgentMounts } from '@main/ai/agentMounts.js'
-import { registerRegistryTools } from '@main/tools/registryTools.js'
-import { lookupRegistryEntry } from '@main/packages/registrySources.js'
-import { registerInstallTools } from '@main/tools/install.js'
 import { registerPackageTools } from '@main/tools/packages.js'
-import { DEFAULT_CACHE_ROOT } from '@main/packages/cacheLayout.js'
 import { registerDocumentTools } from '@main/tools/documents.js'
 import { registerExportTools } from '@main/tools/export.js'
 import { registerReferencesTools } from '@main/tools/references.js'
@@ -59,7 +55,6 @@ import { registerCodeTools } from '@main/tools/code.js'
 import { registerSlackTools } from '@main/integrations/slack/tools.js'
 import { registerGoogleTools } from '@main/integrations/google/tools.js'
 import { registerWebTools } from '@main/tools/web.js'
-import { readAccountToken, registerAccountTools } from '@main/tools/account.js'
 import { registerWorkspaceTools } from '@main/tools/workspace.js'
 import { registerSessionTools } from '@main/sessions.js'
 import { registerRoutineTools } from '@main/tools/routines.js'
@@ -227,7 +222,6 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   registerWebTools(tools)
   registerSlackTools(tools)
   registerGoogleTools(tools)
-  registerAccountTools(tools, () => {})
   registerTelemetryTools(tools, telemetry)
   registerCoreAppTools(tools)
   telemetry.track('app_open', {
@@ -292,31 +286,6 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       await namedTools.sync()
       await subagentManagerRef?.reconcile()
 
-      const cacheRoot = DEFAULT_CACHE_ROOT
-      const globalDir = join(HOME, '.mim', 'packages')
-
-      registerRegistryTools(tools, {
-        packages,
-        enablement,
-        cacheRoot,
-        globalDir,
-        getWorkspacePath: () => tools.getWorkspacePath(),
-        getAccountToken: () => readAccountToken(),
-      })
-
-      registerInstallTools(tools, {
-        packages,
-        enablement,
-        cacheRoot,
-        globalDir,
-        clock: () => Date.now(),
-        lookupRegistryEntry: (id, version) => lookupRegistryEntry(id, {
-          workspacePath: tools.getWorkspacePath(),
-          cacheRoot,
-          version,
-          isSourceTrusted: (s) => enablement.isRegistryTrusted(s),
-        }, { getAccountToken: () => readAccountToken() }),
-      })
     },
     async shutdown() {
       await subagentManagerRef?.dispose()

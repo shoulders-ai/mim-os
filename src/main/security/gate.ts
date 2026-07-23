@@ -349,27 +349,11 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'team.connect': { category: 'network', risk: 'medium', targetParam: 'repository' },
   'team.sync': { category: 'network', risk: 'medium' },
   'app.status': { category: 'read', risk: 'low' },
-  'app.add': { category: 'network', risk: 'medium', targetParam: 'id' },
-  'app.share': { category: 'network', risk: 'medium', targetParam: 'id' },
   'app.enable': { category: 'settings', risk: 'medium', targetParam: 'id' },
   'app.disable': { category: 'settings', risk: 'medium', targetParam: 'id' },
   'app.trust': { category: 'settings', risk: 'high', targetParam: 'id' },
-  'app.remove': { category: 'settings', risk: 'medium', targetParam: 'id' },
-  'app.updates': { category: 'read', risk: 'low' },
   'app.templateList': { category: 'read', risk: 'low' },
   'app.templateContent': { category: 'read', risk: 'low', targetParam: 'templateId' },
-  'registry.list': { category: 'network', risk: 'medium' },
-  'registry.trust': { category: 'settings', risk: 'high', targetParam: 'id' },
-  'registry.inspectSource': { category: 'read', risk: 'low', targetParam: 'path' },
-  'registry.addSource': { category: 'settings', risk: 'medium', targetParam: 'id' },
-  'registry.removeSource': { category: 'settings', risk: 'medium', targetParam: 'id' },
-  'package.install': { category: 'network', risk: 'medium', targetParam: 'id' },
-  'package.update': { category: 'network', risk: 'medium', targetParam: 'id' },
-  'package.uninstall': { category: 'settings', risk: 'medium', targetParam: 'id' },
-  'account.status': { category: 'read', risk: 'low' },
-  'account.validate': { category: 'network', risk: 'medium' },
-  'account.setToken': { category: 'secrets', risk: 'high' },
-  'account.clearToken': { category: 'secrets', risk: 'high' },
 }
 
 export function getToolPolicy(name: string): ToolPolicy {
@@ -447,7 +431,7 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
     }
 
     if (
-      (tool.name === 'app.trust' || tool.name === 'registry.trust') &&
+      tool.name === 'app.trust' &&
       ctx.actor !== 'user' &&
       ctx.actor !== 'system' &&
       ctx.actor !== 'package'
@@ -922,19 +906,9 @@ function packagePermissionViolation(
     return `App ${ctx.package_id} cannot manage app installation or enablement`
   }
 
-  if (toolName === 'registry.list' || toolName === 'registry.trust' || toolName === 'registry.inspectSource' || toolName === 'registry.addSource' || toolName === 'registry.removeSource' || toolName === 'app.updates') {
-    return `App ${ctx.package_id} cannot access the app registry`
-  }
-  if (toolName === 'package.install' || toolName === 'package.update' || toolName === 'package.uninstall' || toolName === 'app.add' || toolName === 'app.share') {
-    return `App ${ctx.package_id} cannot manage app installation`
-  }
-
   if (toolName === 'app.enable' || toolName === 'app.disable') {
     if (params.id === ctx.package_id) return null
     return `App ${ctx.package_id} cannot manage enablement of other apps`
-  }
-  if (toolName === 'app.remove') {
-    return `App ${ctx.package_id} cannot remove apps from the workspace`
   }
   if (toolName === 'app.trust') {
     return `App ${ctx.package_id} cannot acknowledge app trust`
@@ -968,10 +942,6 @@ function packagePermissionViolation(
 
   if (toolName === 'config.get') {
     return `App ${ctx.package_id} cannot access Personal config`
-  }
-
-  if (toolName.startsWith('account.')) {
-    return `App ${ctx.package_id} cannot access account settings`
   }
 
   if (toolName.startsWith('session.')) {

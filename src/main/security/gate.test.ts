@@ -872,25 +872,13 @@ describe('app, skill, and app-owned named tool policies', () => {
     expect(getToolPolicy('skill.templateList')).toMatchObject({ category: 'read', risk: 'low' })
     expect(getToolPolicy('skill.templateContent')).toMatchObject({ category: 'read', risk: 'low', targetParam: 'templateId' })
     expect(getToolPolicy('app.status')).toMatchObject({ category: 'read', risk: 'low' })
-    expect(getToolPolicy('app.add')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'id' })
-    expect(getToolPolicy('app.share')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'id' })
     expect(getToolPolicy('app.enable')).toMatchObject({ category: 'settings', risk: 'medium', targetParam: 'id' })
     expect(getToolPolicy('app.disable')).toMatchObject({ category: 'settings', risk: 'medium', targetParam: 'id' })
     expect(getToolPolicy('app.trust')).toMatchObject({ category: 'settings', risk: 'high', targetParam: 'id' })
-    expect(getToolPolicy('app.remove')).toMatchObject({ category: 'settings', risk: 'medium', targetParam: 'id' })
-    expect(getToolPolicy('app.updates')).toMatchObject({ category: 'read', risk: 'low' })
     expect(getToolPolicy('app.templateList')).toMatchObject({ category: 'read', risk: 'low' })
     expect(getToolPolicy('app.templateContent')).toMatchObject({ category: 'read', risk: 'low', targetParam: 'templateId' })
     expect(getToolPolicy('package.validate')).toMatchObject({ category: 'read', risk: 'low', targetParam: 'id' })
     expect(getToolPolicy('package.reload')).toMatchObject({ category: 'settings', risk: 'medium', targetParam: 'id' })
-    expect(getToolPolicy('account.status')).toMatchObject({ category: 'read', risk: 'low' })
-    expect(getToolPolicy('account.validate')).toMatchObject({ category: 'network', risk: 'medium' })
-    expect(getToolPolicy('account.setToken')).toMatchObject({ category: 'secrets', risk: 'high' })
-    expect(getToolPolicy('account.clearToken')).toMatchObject({ category: 'secrets', risk: 'high' })
-  })
-
-  it('classifies registry.trust as settings/high with targetParam id', () => {
-    expect(getToolPolicy('registry.trust')).toMatchObject({ category: 'settings', risk: 'high', targetParam: 'id' })
   })
 })
 
@@ -991,50 +979,6 @@ describe('app-owned named tool permission enforcement', () => {
     ).rejects.toThrow('cannot acknowledge app trust')
   })
 
-  it('denies registry.trust to app actors', async () => {
-    const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
-    await expect(
-      gate.check(tool('registry.trust'), { id: 'acme' }, { actor: 'package', package_id: 'board' }),
-    ).rejects.toThrow('cannot access the app registry')
-  })
-
-  it('denies registry.list to app actors', async () => {
-    const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
-    await expect(
-      gate.check(tool('registry.list'), {}, { actor: 'package', package_id: 'board' }),
-    ).rejects.toThrow('cannot access the app registry')
-  })
-
-  it('denies app.remove to app actors', async () => {
-    const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
-    await expect(
-      gate.check(tool('app.remove'), { id: 'board' }, { actor: 'package', package_id: 'board' }),
-    ).rejects.toThrow('cannot remove apps')
-  })
-
-  it('denies app.share to app actors', async () => {
-    const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
-    await expect(
-      gate.check(tool('app.share'), { id: 'github-monitor' }, { actor: 'package', package_id: 'board' }),
-    ).rejects.toThrow('cannot manage app installation')
-  })
-
-  it('denies account tools to app actors', async () => {
-    const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
-    for (const name of ['account.status', 'account.validate', 'account.setToken', 'account.clearToken']) {
-      await expect(
-        gate.check(tool(name), { token: 'secret' }, { actor: 'package', package_id: 'board' }),
-      ).rejects.toThrow('cannot access account settings')
-    }
-  })
-
-  it('denies app.updates to app actors (same class as registry.list)', async () => {
-    const { gate } = makeGate({ packagePermissions: { workspace: { read: true, write: true } } })
-    await expect(
-      gate.check(tool('app.updates'), {}, { actor: 'package', package_id: 'board' }),
-    ).rejects.toThrow('cannot access the app registry')
-  })
-
   it('allows the user actor everything', async () => {
     const { gate, requests } = makeGate({
       getDynamicToolPolicy: name => name === 'issues.delete'
@@ -1045,8 +989,7 @@ describe('app-owned named tool permission enforcement', () => {
     for (const name of [
       'issues.delete',
       'skill.list', 'skill.get',
-      'app.status', 'app.enable', 'app.disable', 'app.trust', 'app.remove', 'app.share', 'app.updates',
-      'account.status', 'account.validate', 'account.setToken', 'account.clearToken',
+      'app.status', 'app.enable', 'app.disable', 'app.trust',
     ]) {
       await gate.check(tool(name), { id: 'board' }, u)
     }
@@ -1088,7 +1031,7 @@ describe('enablement ledger is protected from direct fs.write (Decision 12)', ()
   })
 })
 
-describe('app.trust and registry.trust are user-only (Decision 12)', () => {
+describe('app.trust is user-only', () => {
   it('hard-denies the ai actor without ever prompting', async () => {
     const { gate, requests, decisions } = makeGate({ mode: 'normal' })
 
@@ -1105,33 +1048,10 @@ describe('app.trust and registry.trust are user-only (Decision 12)', () => {
     })
   })
 
-  it('hard-denies registry.trust for ai actor', async () => {
-    const { gate, requests, decisions } = makeGate({ mode: 'normal' })
-
-    await expect(
-      gate.check(tool('registry.trust'), { id: 'acme' }, { actor: 'ai', sessionId: 's1' }),
-    ).rejects.toThrow('Trust acknowledgement is user-only')
-
-    expect(requests).toHaveLength(0)
-    expect(decisions.at(-1)).toMatchObject({
-      decision: 'denied',
-      tool: 'registry.trust',
-      actor: 'ai',
-    })
-  })
-
   it('hard-denies the ai actor even in developer mode (mirrors readonly-resource writes)', async () => {
     const { gate, requests } = makeGate({ mode: 'developer' })
     await expect(
       gate.check(tool('app.trust'), { id: 'vendored' }, { actor: 'ai' }),
-    ).rejects.toThrow('Trust acknowledgement is user-only')
-    expect(requests).toHaveLength(0)
-  })
-
-  it('hard-denies registry.trust for ai actor in developer mode', async () => {
-    const { gate, requests } = makeGate({ mode: 'developer' })
-    await expect(
-      gate.check(tool('registry.trust'), { id: 'acme' }, { actor: 'ai' }),
     ).rejects.toThrow('Trust acknowledgement is user-only')
     expect(requests).toHaveLength(0)
   })
@@ -1142,11 +1062,6 @@ describe('app.trust and registry.trust are user-only (Decision 12)', () => {
     expect(requests).toHaveLength(0)
   })
 
-  it('still allows the user actor for registry.trust', async () => {
-    const { gate, requests } = makeGate({ mode: 'strict' })
-    await gate.check(tool('registry.trust'), { id: 'acme' }, { actor: 'user' })
-    expect(requests).toHaveLength(0)
-  })
 })
 
 describe('permission parameter redaction', () => {

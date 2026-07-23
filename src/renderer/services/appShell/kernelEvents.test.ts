@@ -20,7 +20,6 @@ function makeHarness(overrides: Partial<AppKernelEventDeps> = {}) {
     refreshApps: vi.fn(),
     refreshAppAgents: vi.fn(),
     handleWorkspaceChanged: vi.fn(),
-    setAppUpdates: vi.fn(),
     refreshKeyStatuses: vi.fn(),
     enqueueApproval: vi.fn(),
     openFileInEditor: vi.fn(),
@@ -67,7 +66,6 @@ describe('app shell kernel events', () => {
       'packages:changed',
       'workspace:changed',
       'apps:changed',
-      'apps:updates',
       'ai:keys-changed',
       'gate:request',
       'bridge:editor:open',
@@ -99,31 +97,21 @@ describe('app shell kernel events', () => {
 
     unregister()
 
-    expect(kernel.off).toHaveBeenCalledTimes(31)
+    expect(kernel.off).toHaveBeenCalledTimes(30)
     expect(registeredChannels()).toEqual([])
     expect(deps.refreshApps).not.toHaveBeenCalled()
   })
 
-  it('updates app state and app-update badges from kernel events', () => {
+  it('updates package and local app state from kernel events', () => {
     const { deps, kernel, emit } = makeHarness()
     registerAppKernelEvents(kernel, deps)
 
     const packages = [{ manifest: { id: 'slides', name: 'Slides' }, dir: '/pkg', source: 'registry' }]
     emit('packages:changed', packages)
     emit('apps:changed')
-    emit('apps:updates', {
-      updates: [
-        { id: 'slides', installed: '1.0.0', latest: '1.1.0', registryId: 'default' },
-        { id: 'scholar', installed: '0.2.0', latest: '0.3.0', registryId: 'default' },
-      ],
-    })
 
     expect(deps.setPackages).toHaveBeenCalledWith(packages)
     expect(deps.refreshApps).toHaveBeenCalledTimes(2)
-    expect(deps.setAppUpdates).toHaveBeenCalledWith({
-      slides: { installed: '1.0.0', latest: '1.1.0', registryId: 'default' },
-      scholar: { installed: '0.2.0', latest: '0.3.0', registryId: 'default' },
-    })
   })
 
   it('routes bridge and menu events through the same App shell actions', () => {

@@ -259,7 +259,7 @@ describe('headless app.enable', () => {
   })
 })
 
-describe('headless registry and install tool registration', () => {
+describe('headless direct app tool registration', () => {
   let root: string
 
   beforeEach(() => {
@@ -271,34 +271,16 @@ describe('headless registry and install tool registration', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
-  it('registers registry.list tool in headless kernel', async () => {
+  it('registers direct app tools and omits retired registry/install tools', async () => {
     const kernel = createHeadlessKernel()
     await kernel.openWorkspace(root)
-    const tool = kernel.tools.get('registry.list')
-    expect(tool).toBeDefined()
-    expect(tool!.name).toBe('registry.list')
-  })
-
-  it('registers the package.install tool in headless kernel', async () => {
-    const kernel = createHeadlessKernel()
-    await kernel.openWorkspace(root)
-    const tool = kernel.tools.get('package.install')
-    expect(tool).toBeDefined()
-    expect(tool!.name).toBe('package.install')
-  })
-
-  it('registers the package.update tool in headless kernel', async () => {
-    const kernel = createHeadlessKernel()
-    await kernel.openWorkspace(root)
-    const tool = kernel.tools.get('package.update')
-    expect(tool).toBeDefined()
-  })
-
-  it('registers the package.uninstall tool in headless kernel', async () => {
-    const kernel = createHeadlessKernel()
-    await kernel.openWorkspace(root)
-    const tool = kernel.tools.get('package.uninstall')
-    expect(tool).toBeDefined()
+    expect(kernel.tools.get('app.status')).toBeDefined()
+    expect(kernel.tools.get('package.list')).toBeDefined()
+    expect(kernel.tools.get('registry.list')).toBeUndefined()
+    expect(kernel.tools.get('package.install')).toBeUndefined()
+    expect(kernel.tools.get('package.update')).toBeUndefined()
+    expect(kernel.tools.get('package.uninstall')).toBeUndefined()
+    await kernel.shutdown()
   })
 })
 

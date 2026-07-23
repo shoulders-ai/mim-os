@@ -19,11 +19,12 @@ function frontmatterOf(content: string): Record<string, unknown> {
   return parsed as Record<string, unknown>
 }
 
-function stubPackageLoader() {
+function stubPackageLoader(projectRoot: string) {
   return {
     list: () => [],
     get: () => undefined,
     diagnostics: () => [],
+    root: (source: string) => source === 'project' ? join(projectRoot, 'packages') : null,
     onChange: () => {},
     rescan: async () => {},
   }
@@ -151,7 +152,7 @@ describe('starter templates', () => {
     root = mkdtempSync(join(tmpdir(), 'mim-template-test-'))
     const tools = createToolRegistry(createTraceLog())
     tools.setWorkspacePath(root)
-    registerPackageTools(tools, stubPackageLoader() as never)
+    registerPackageTools(tools, stubPackageLoader(root) as never)
 
     for (const template of listAppTemplates().templates) {
       const id = `${template.defaultId}-demo`

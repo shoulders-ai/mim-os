@@ -283,28 +283,22 @@ describe('central AI runtime tools', () => {
     ])
   })
 
-  it('exposes the registry and install tools on the chat profile', async () => {
+  it('exposes direct app tools and omits retired registry/install tools', async () => {
     const { tools, calls } = mockRegistry()
     const aiTools = await createAiSdkTools({ tools, profile: 'chat', sessionId: 's1' })
 
-    expect(aiTools.registry_list).toBeDefined()
     expect(aiTools.package_readme).toBeDefined()
-    expect(aiTools.package_install).toBeDefined()
-    expect(aiTools.package_update).toBeDefined()
-    expect(aiTools.package_uninstall).toBeDefined()
+    expect(aiTools.registry_list).toBeUndefined()
+    expect(aiTools.package_install).toBeUndefined()
+    expect(aiTools.package_update).toBeUndefined()
+    expect(aiTools.package_uninstall).toBeUndefined()
 
     await aiTools.package_readme.execute?.({ id: 'slides' }, {})
-    await aiTools.package_install.execute?.({ id: 'github-monitor', version: '1.2.0' }, {})
 
     expect(calls).toEqual([
       {
         name: 'package.readme',
         params: { id: 'slides' },
-        ctx: { actor: 'ai', sessionId: 's1' },
-      },
-      {
-        name: 'package.install',
-        params: { id: 'github-monitor', version: '1.2.0' },
         ctx: { actor: 'ai', sessionId: 's1' },
       },
     ])

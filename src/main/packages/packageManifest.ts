@@ -1,7 +1,7 @@
 import { existsSync } from 'fs'
 import { isAbsolute, relative, resolve } from 'path'
 
-export type PackageSource = 'workspace' | 'global'
+export type PackageSource = 'mim' | 'team' | 'project'
 export type PackageViewRole = 'work' | 'artifact' | 'either'
 
 // Packages may not claim system/settings/secrets categories — those are core-only.

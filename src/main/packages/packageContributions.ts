@@ -58,7 +58,7 @@ export function createLocalPackageStatusProvider(options: {
 
     for (const id of ids) {
       const pkg = options.packages.get(id)
-      if (!pkg || pkg.source !== 'workspace') {
+      if (!pkg || pkg.source !== 'project') {
         results.push({
           id,
           enabled: false,

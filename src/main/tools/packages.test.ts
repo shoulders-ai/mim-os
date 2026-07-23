@@ -7,7 +7,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 // Minimal stub for PackageLoader
-function stubPackageLoader() {
+function stubPackageLoader(projectRoot: string) {
   const pkgs: Array<{
     manifest: {
       id: string
@@ -26,10 +26,11 @@ function stubPackageLoader() {
     list: () => pkgs,
     get: (id: string) => pkgs.find(p => p.manifest.id === id),
     diagnostics: () => [],
+    root: (source: string) => source === 'project' ? join(projectRoot, 'packages') : null,
     onChange: () => {},
     rescan: vi.fn(async () => {}),
     _add(manifest: { id: string; name: string; backend?: string; permissions?: Record<string, unknown> }, dir: string) {
-      pkgs.push({ manifest, dir, source: 'workspace', hasReadme: existsSync(join(dir, 'README.md')) })
+      pkgs.push({ manifest, dir, source: 'project', hasReadme: existsSync(join(dir, 'README.md')) })
     },
     _addWithSource(manifest: { id: string; name: string; backend?: string; permissions?: Record<string, unknown> }, dir: string, source: string) {
       pkgs.push({ manifest, dir, source, hasReadme: existsSync(join(dir, 'README.md')) })
@@ -49,7 +50,7 @@ describe('App tools', () => {
     const trace = createTraceLog()
     tools = createToolRegistry(trace)
     tools.setWorkspacePath(dir)
-    loader = stubPackageLoader()
+    loader = stubPackageLoader(dir)
     registerPackageTools(tools, loader as any)
   })
 
