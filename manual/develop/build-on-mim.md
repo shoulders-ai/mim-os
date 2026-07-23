@@ -30,7 +30,7 @@ The `mim` binary boots a headless tool registry without Electron. It runs worksp
 
 ## Workspace contract
 
-Every Mim workspace has a `mim.yaml` config, an `AGENTS.md` system prompt, and a `.mim/` runtime directory. The config declares shared apps, registries, resource collections, and sync mode. See [workspace contract](workspace-contract) for the schema and layout.
+Every Mim Project has a `mim.yaml` config, an `AGENTS.md` system prompt, and a `.mim/` runtime directory. The config declares app pins, registries, and sync mode. A connected Team contributes shared files at `.mim/team/files`. See [workspace contract](workspace-contract) for the schema and layout.
 
 ## Models
 

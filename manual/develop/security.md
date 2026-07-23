@@ -51,7 +51,7 @@ Static `EFFECT_OVERRIDES` reclassify specific tools. For example, `workspace.ori
 
 ::: rows
 - `workspace` -- inside the workspace. Normal approval rules apply.
-- `resource` -- inside `.mim/resources/` mounts. Readonly collections hard-deny writes for every actor, including `user` and developer mode.
+- `team` -- inside the managed `.mim/team/` checkout. Contributions are writable under normal rules; mutation of the checkout mount itself is denied.
 - `sensitive` -- credential and config locations. Always prompts in strict and normal, even when a session "always allow" is active.
 - `outside-workspace` -- outside the workspace root. Same floor behavior as sensitive.
 - `invalid` -- no path or empty. Denied.

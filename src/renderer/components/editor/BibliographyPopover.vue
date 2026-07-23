@@ -34,7 +34,7 @@ function bibliographySourceLabel(source: string): string {
   if (source === 'document') return 'Nearby'
   if (source === 'references-folder') return 'References'
   if (source === 'workspace-root') return 'Workspace'
-  if (source === 'resource') return 'Shared'
+  if (source === 'team') return 'Team'
   return 'Candidate'
 }
 

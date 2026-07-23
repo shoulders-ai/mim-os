@@ -8,7 +8,6 @@ import {
   IconFileText,
   IconFolder,
   IconFolders,
-  IconLock,
 } from '@tabler/icons-vue'
 import {
   WORKSPACE_DRAG_MIME,
@@ -37,7 +36,6 @@ const props = defineProps<{
   selectedIndex: number
   query: string
   activeFilePath?: string
-  resourceRootCount: number
   emptyText: string
   directoryError: string
   sortKey: SortKey
@@ -56,14 +54,14 @@ const emit = defineEmits<{
   emptyContextmenu: [event: MouseEvent]
   dropExternal: [files: File[], targetDir: string | null]
   dropWorkspace: [source: WorkspaceDragPayload, targetDir: string | null]
-  scrollToResources: [event: MouseEvent]
+  scrollToTeam: [event: MouseEvent]
 }>()
 
 // Right-click on the scroll pane outside any row (rows stop propagation by
 // preventing default first in their own handler upstream).
 function onContainerContextmenu(event: MouseEvent) {
   const target = event.target as HTMLElement | null
-  if (target?.closest('[data-testid="files-row"], [data-testid="files-resources-header"]')) return
+  if (target?.closest('[data-testid="files-row"], [data-testid="files-team-header"]')) return
   emit('emptyContextmenu', event)
 }
 
@@ -278,14 +276,13 @@ function fileIconClass(row: FileRow): string {
       <button
         v-if="row.sectionLabel"
         type="button"
-        data-testid="files-resources-header"
-        class="sticky bottom-0 z-10 flex h-7 w-full items-center gap-1.5 border-y border-rule-light/70 bg-chrome-high px-3 text-left font-sans text-[10px] font-[650] uppercase tracking-normal text-ink-4 hover:text-ink-2"
-        title="Scroll to shared resources"
-        @click="emit('scrollToResources', $event)"
+        data-testid="files-team-header"
+        class="sticky bottom-0 z-10 flex h-7 w-full items-center gap-1.5 border-y border-rule-light/70 bg-chrome-high px-3 text-left font-sans text-[10px] font-[650] uppercase tracking-normal text-ink-4 hover:bg-chrome-mid hover:text-ink-2"
+        title="Scroll to Team Files"
+        @click="emit('scrollToTeam', $event)"
       >
         <IconFolders :size="12" :stroke-width="2" class="shrink-0" />
         <span>{{ row.sectionLabel }}</span>
-        <span class="inline-flex h-4 items-center rounded-full bg-chrome-mid px-1.5 font-semibold text-ink-4">{{ resourceRootCount }}</span>
       </button>
       <button
         type="button"
@@ -342,13 +339,6 @@ function fileIconClass(row: FileRow): string {
             :stroke-width="1.9"
             :class="fileIconClass(row)"
           />
-          <IconLock
-            v-if="row.readonly"
-            :size="11"
-            :stroke-width="2"
-            class="shrink-0 text-ink-4"
-            title="Read-only resource"
-          />
           <span class="min-w-0 truncate leading-tight">
             <span
               data-testid="files-row-name"
@@ -367,11 +357,6 @@ function fileIconClass(row: FileRow): string {
             </span>
             <span v-if="expandedLoading.has(row.path)" class="pl-1 text-ink-4">...</span>
           </span>
-          <span
-            v-if="row.statusLabel"
-            class="inline-flex h-4 shrink-0 items-center rounded-full bg-chrome-mid px-1.5 font-sans text-[9px] font-semibold text-ink-3"
-            title="Configure in Settings -> Resources"
-          >{{ row.statusLabel }}</span>
         </span>
         <span class="min-w-0 truncate font-mono text-[10px] text-ink-3">
           {{ locationLabel(row, showLocationColumn) }}

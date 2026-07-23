@@ -113,7 +113,10 @@ Locations: `.ssh .gnupg .aws .config/gcloud .kube .docker .npmrc .pypirc /etc
 Prefix segments: `.env` (matches `.env`, `.env.production`, `.env.local`, etc.
 but not `envelope.md` or `environment.ts`). SSH key patterns:
 `id_rsa`/`id_ed25519`/`id_ecdsa`/`id_dsa` and their `.pub` counterparts.
-Classification → `workspace` | `sensitive` | `outside-workspace` | `invalid`.
+Classification → `workspace` | `team` | `sensitive` | `outside-workspace` |
+`invalid`. Paths below `.mim/team/` are `team`: contributions are writable
+under the normal actor rules, while mutation of the `.mim/team` checkout mount
+itself is hard-denied.
 
 ## Redaction & audit (two separate redactors)
 
@@ -189,9 +192,9 @@ clears the approval store queue so inline cards disappear immediately.
   server) as defense in depth behind DOMPurify.
 - **Symlink escape prevention**: `resolveWorkspacePath` in `src/main/tools/fs.ts`
   checks that symlinks — including dangling ones, whose targets a write would
-  create — resolve inside the workspace (`.mim/resources/` mounts exempt — they
-  have their own write-policy gate). Errors during the check fail closed except
-  ENOENT.
+  create — resolve inside the workspace. The one managed `.mim/team/` checkout
+  is exempt so Team contributions work through normal file tools; the gate
+  protects the mount itself. Errors during the check fail closed except ENOENT.
 - **CORS**: the local Express server restricts `Access-Control-Allow-Origin` to
   the app's own `127.0.0.1:<port>`, `localhost:<port>`, `null` (file://), and
   the dev server origin. Foreign web pages get no CORS headers.
@@ -250,8 +253,8 @@ clears the approval store queue so inline cards disappear immediately.
   it resolves, blocks execution on denial, and redacts event summaries.
 - `src/main/tools/fs.test.ts` — symlink escape prevention: rejects symlinks
   pointing outside workspace for read/write/delete (including dangling links),
-  rejects symlinked directories, allows workspace-internal symlinks, exempts
-  `.mim/resources/` managed mounts.
+  rejects symlinked directories, allows workspace-internal symlinks, and exempts
+  the one managed `.mim/team/` checkout.
 - `src/renderer/services/sanitize.test.ts` — DOMPurify wrapper strips scripts,
   event handlers, iframes, forms, `javascript:` hrefs, and `data-*` attributes.
 - `src/main/server/server.test.ts` — CORS origin restriction: allows same-origin

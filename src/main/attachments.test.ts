@@ -63,6 +63,27 @@ describe('main attachment reader', () => {
     }
   })
 
+  it('annotates files from the managed Team checkout with their Team path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mim-attachment-test-'))
+    const team = mkdtempSync(join(tmpdir(), 'mim-attachment-team-'))
+    try {
+      mkdirSync(join(dir, '.mim'), { recursive: true })
+      mkdirSync(join(team, 'files'), { recursive: true })
+      writeFileSync(join(team, 'files', 'brief.md'), '# Brief', 'utf-8')
+      symlinkSync(team, join(dir, '.mim', 'team'), 'dir')
+
+      expect(readAttachmentPath(join(dir, '.mim', 'team', 'files', 'brief.md'), {
+        workspacePath: dir,
+      })).toMatchObject({
+        path: '.mim/team/files/brief.md',
+        content: '# Brief',
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      rmSync(team, { recursive: true, force: true })
+    }
+  })
+
   it('reads image and binary attachments as data URLs', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mim-attachment-test-'))
     try {

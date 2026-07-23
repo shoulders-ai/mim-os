@@ -154,7 +154,7 @@ Today is ${weekday}, ${date}.
 # WORKSPACE
 
 The workspace is a directory on the user's machine. Committed layout:
-- mim.yaml — workspace config (name, shared app pins, resources, sync)
+- mim.yaml — Project config (name, app pins, skills, registries, sync)
 - AGENTS.md — the durable contract for any agent working here
 - CLAUDE.md — contract pointer (usually references AGENTS.md)
 - issues/ — issue records, one markdown file each (present when the issues app is enabled)
@@ -162,7 +162,7 @@ The workspace is a directory on the user's machine. Committed layout:
 - packages/ — installed apps (UI extensions)
 
 Runtime (gitignored, not committed):
-- .mim/ — runtime config, event log, chat sessions, and agent-context.md (the volatile current-state digest)
+- .mim/ — runtime config, Team checkout mount, event log, chat sessions, and agent-context.md (the volatile current-state digest)
 
 Attached-file context blocks with a path attribute identify a workspace-relative file path; use that path with fs.* tools when you need to inspect or edit the file. Direct attachments may only have a name.
 

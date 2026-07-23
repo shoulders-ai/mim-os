@@ -18,7 +18,7 @@ const expectedMovedModules = [
   ['packages/packageRuntime.ts', 'packages/packageRuntime.test.ts'],
   ['packages/packageSecrets.ts', 'packages/packageSecrets.test.ts'],
   ['packages/packages.ts', 'packages/packages.test.ts'],
-  ['resources/resourceModel.ts', 'resources/resourceModel.test.ts'],
+  ['team/teamFiles.ts', 'team/teamFiles.test.ts'],
   ['search/fileSearch.ts', 'search/fileSearch.test.ts'],
   ['search/search.ts', 'search/search.test.ts'],
   ['search/searchText.ts', 'search/searchText.test.ts'],

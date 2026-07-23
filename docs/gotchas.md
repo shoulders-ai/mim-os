@@ -215,13 +215,17 @@ Themes are applied via `<html data-theme="white">`, not CSS classes. The app def
 
 The main process re-resolves provider keys on every request (`resolveKey` reads `~/.mim/keys.env` fresh, falling back to `process.env`), so a key change is live in main immediately. The file wins over the environment on purpose: Settings must stay authoritative, otherwise a key exported in the shell that launched the app silently shadows every set/replace/remove made in the app. The renderer is what goes stale: AI surfaces read provider-configured booleans, and if each component fetches `ai.keyStatus` once on mount and caches it locally, adding a key in Settings won't reach chat/inline until an app restart. Read key status only from the shared settings store (`keyStatuses`/`providerConfigured`/`anyKeyConfigured`); never re-introduce a per-component copy. `ai.setKey`/`ai.clearKey` emit `ai:keys-changed` (sent to the renderer and broadcast to package iframes); `App.vue` re-fetches the store on that event, and long-lived closures (e.g. the chat engine's `prepareSendMessagesRequest`) must read the store ref live rather than snapshot it.
 
-## Shared resources: mim.yaml only round-trips known keys
+## Team checkout mount is the sole external workspace symlink
 
-`serializeMimYaml` (`src/main/workspace/workspaceContract.ts`) emits **only** recognized keys — comments and unknown top-level keys are dropped on the next write. The resource tools read-modify-write `mim.yaml` through `parseMimYaml`/`serializeMimYaml`, so anything not in the schema is lost. When adding a committed field, extend both the parser and serializer (and `parseCollections`/`serializeCollections` for the `collections:` map). The `collections:` serializer also intentionally drops local machine paths: only `name/git/write` travel in `mim.yaml`; folder paths live in gitignored `.mim/resources.json` and must never leak into the committed file.
+The connected checkout lives at `~/.mim/team` and is mounted at
+`<project>/.mim/team`. `syncTeamFilesMount` only creates, retargets, or removes
+that symlink/junction; a real file or directory at the mount location is a
+conflict and is never replaced or deleted. The filesystem symlink guard exempts
+only `.mim/team/`, while the permission gate protects the mount itself.
 
-## Shared resources: mounts are symlinks under .mim/resources, mirrors are a third storage location
-
-A mounted collection is a **symlink** at `.mim/resources/<id>` pointing at its backing root. `syncMounts` only ever creates/removes symlinks; a real file/dir squatting on a mount path is reported as a conflict and left untouched, and foreign symlinks outside the mounts dir are never touched. Because `fs.list` skips `.mim` and never follows symlinks, mount files are invisible to the normal walk — the file index (`workspaceFileIndex.ts`), file search (`fileSearch.ts`), and Files browse tree each list mounts explicitly. Git mirrors live in `app.getPath('userData')/resources/<hash>/repo` — a per-machine cache shared across workspaces and a **third** storage location beyond the workspace tree and `.mim/`. It is never committed and is not part of the workspace, so a clone on another machine has no mirror until `resources.sync` runs (status `not-synced` until then).
+Normal Project traversal skips `.mim`, so the Files surface, file index, and
+content search explicitly traverse only `.mim/team/files`. Do not add another
+external-root exception or expose the rest of the Team checkout as Files rows.
 
 ## Symlinks refused in installed package trees
 
@@ -246,10 +250,6 @@ A committed `mim.yaml` app entry means "this workspace uses this app" and may pi
 ## Multiple installed app versions are normal
 
 Global installs are side-by-side under `~/.mim/packages/<id>/<version>/`. Updating an app does not delete older versions. The loader chooses the workspace-pinned version when `mim.yaml` pins one, otherwise the highest installed semver. Settings > Apps Browse collapses multiple registry entries with the same app id to one row for the newest registry version.
-
-## Shared resources: readonly writes are hard-denied for every actor
-
-The permission gate denies writes to `readonly`/unknown resource collections (and to mount roots) for **every** actor — user, ai, package, and even developer-bypass mode — *before* any allow path. This is intentional: a write to a pull-only git mirror would be clobbered on the next sync, and readonly is the safe default for shared assets. Only `direct` collections accept writes, and those still go through the normal approval flow. Do not "fix" a blocked write by loosening the gate; change the collection's write policy instead (`resources.setPolicy`, or the badge toggle in Settings → Resources). Git collections are always readonly regardless of config.
 
 ## Package UI iframes can only load files under ui/
 
@@ -415,7 +415,7 @@ When killing a timed-out child process on POSIX, signal the process group (`proc
 Every other channel stays on `sendToRenderer` (main-window-only):
 
 - `gate:request` -- approval cards live only in the main window's chat. Broadcasting would enqueue duplicates and risk double-handled approvals.
-- `packages:changed`, `resources:changed` -- only the main window's Navigator reacts; pop-outs have no Navigator or resource UI.
+- `packages:changed`, `team:changed` -- only the main window's Navigator reacts; pop-outs have no Navigator or Team UI.
 - Package job events, agent session events, subagent events, auto-updater -- main window surfaces only.
 - `bridge:*` commands -- always target one specific window (the main window).
 - `menu:*` commands -- Phase 2 will add focused-window routing; until then they target main.

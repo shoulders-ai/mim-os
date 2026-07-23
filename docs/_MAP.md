@@ -27,7 +27,6 @@ Electron App
     ├─ ai/            model registry, runtime, agent context, system prompt
     ├─ packages/      loader, manifests, enablement, runtime, jobs, data, HTTP, secrets
     ├─ comments/      inline comment models (markdown tags, code @mim markers) + path dispatch
-    ├─ resources/     shared resource collection model
     ├─ search/        SQLite FTS, file content search, text matching
     ├─ security/      permission gate and path classifier
     ├─ subagents/     durable delegated-thread scheduler and persisted types
@@ -74,7 +73,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Routines.** Workspace-local definitions under `routines/`; revision-aware create/edit/duplicate/Trash lifecycle; machine-local four-state activation and run state under `.mim/routines/`; manual chat-turn runs; desktop schedule/file/webhook/Slack automation; source-file live refresh; authority review; routine session metadata; and the dense Routines work surface. `src/main/routines/`, `tools/routines.ts`, `server/server.ts`, `sessions.ts`, `src/renderer/components/routines/`, `src/renderer/stores/routines.ts`. Docs: [routines.md](routines.md), [design-system.md](design-system.md#617-routines-work-surface).
 - **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
 - **Git tools.** Status/diff/log/commit/pull/push and opt-in managed sync. `src/main/git.ts`, `tools/git.ts`, `tools/sync.ts`.
-- **Team source.** One Personal connection, deterministic `~/.mim/team/` checkout, fixed contribution contract, and writable system-Git sync. `src/main/team/teamSource.ts`, `tools/team.ts`. Docs: [team.md](team.md), [git.md](git.md).
+- **Team source.** One Personal connection, deterministic `~/.mim/team/` checkout, fixed contribution contract, writable system-Git sync, and safe Project mount at `.mim/team`. `src/main/team/teamSource.ts`, `src/main/team/teamFiles.ts`, `tools/team.ts`. Docs: [team.md](team.md), [git.md](git.md).
 - **Personal config.** `~/.mim/config.yaml` (identity, appearance/editor/layout preferences, model defaults, skill activation, one credential-free Team repository, and currently legacy source configuration). Never holds keys or tokens. `src/main/userConfig.ts`.
 - **Settings tools.** Route Personal preferences to `~/.mim/config.yaml` and current-Project runtime/tool state to `.mim/settings.json`; agent tool availability policy remains Project-local for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
@@ -210,7 +209,6 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [observability.md](observability.md) | Trace stream, audit, outcomes |
 | [telemetry.md](telemetry.md) | Anonymous usage telemetry |
 | [logbook.md](logbook.md) | Human-readable activity log |
-| [resources.md](resources.md) | Currently implemented shared resource collections; target simplification is the single Team source |
 | [routines.md](routines.md) | Routine definition lifecycle, activation, automation triggers, runs, and permissions |
 | [subagents.md](subagents.md) | Durable delegated threads, communication, scheduling, authority, persistence, and Navigator behavior |
 | [skills.md](skills.md) | Filesystem skill system |
@@ -229,7 +227,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 ### Proposals
 
-- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phases 1–4 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
+- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phases 1–5 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
 - [proposals/r-first-class.md](proposals/r-first-class.md) — **implemented** (phases 1-5; phase 6 deferred). First-class R/Rmd/Quarto: `code.run` execution primitive, plot/artifact viewing, Cmd+Enter send-to-terminal, render loop, R modelling skill.
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/popout-editor-window.md](proposals/popout-editor-window.md) — **implemented** (phases 0-3; phase 4 deferred). Pop-out editor windows: move any editor tab into its own OS window and back, with full tab-state transfer, per-window close guards, focused-window menu routing, and macOS native touches.
@@ -299,8 +297,9 @@ src/
     mcp/
       stdio.ts                  # MCP stdio bridge
       discovery.ts              # ~/.mim/server.json helpers
-    resources/resourceModel.ts  # Shared resource collections
-    team/teamSource.ts          # One Team connection, checkout contract + Git sync
+    team/
+      teamSource.ts             # One Team connection, checkout contract + Git sync
+      teamFiles.ts              # Safe Project checkout mount + Team Files root
     search/
       search.ts                 # SQLite FTS5 session search
       fileSearch.ts             # Workspace file content search
@@ -367,7 +366,6 @@ src/
       code.ts                   # code.run + shell.run execution tools
       comments.ts               # Comment tools
       references.ts             # Bibliography tools
-      resources.ts              # Resource collection tools
       routines.ts               # Routine definition/manual run/webhook secret tools
       account.ts                # Account token tools
       telemetry.ts              # Telemetry tools
@@ -396,7 +394,6 @@ src/
       appAgents.ts              # App-mounted agent state (package agents)
       coreApps.ts               # Resolved per-app state
       toasts.ts                 # Toast notifications
-      resources.ts              # Resource collections
     services/
       ai/
         modelControls.js        # Model selection + defaults

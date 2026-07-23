@@ -14,6 +14,7 @@ describe('Team tools', () => {
     sync: ReturnType<typeof vi.fn>
   }
   let emit: ReturnType<typeof vi.fn>
+  let onChanged: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     tools = createToolRegistry(createTraceLog())
@@ -24,7 +25,8 @@ describe('Team tools', () => {
       sync: vi.fn(async () => ({ state: 'synced' })),
     }
     emit = vi.fn()
-    registerTeamTools(tools, { source, emit })
+    onChanged = vi.fn(async () => undefined)
+    registerTeamTools(tools, { source, emit, onChanged })
   })
 
   it('registers the single-source status, connect, open, and sync surface', () => {
@@ -52,6 +54,7 @@ describe('Team tools', () => {
     expect(emit).toHaveBeenCalledTimes(2)
     expect(emit).toHaveBeenNthCalledWith(1, 'team:changed')
     expect(emit).toHaveBeenNthCalledWith(2, 'team:changed')
+    expect(onChanged).toHaveBeenCalledTimes(2)
   })
 
   it('rejects an empty repository before reaching the resolver', async () => {

@@ -97,7 +97,7 @@ function workspaceRelativeAttachmentPath(filePath: string, workspacePath?: strin
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) return undefined
 
   const slashRel = toSlashPath(rel)
-  if (slashRel === '.mim/resources' || slashRel.startsWith('.mim/resources/')) return slashRel
+  if (slashRel === '.mim/team' || slashRel.startsWith('.mim/team/')) return slashRel
 
   try {
     const realRoot = realpathSync(root)

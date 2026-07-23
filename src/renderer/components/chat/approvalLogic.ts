@@ -25,8 +25,6 @@ export interface ApprovalLike {
   reason?: string
   target?: string
   pathKind?: string
-  // Set when pathKind is 'resource': the mounted collection the path belongs to.
-  resourceCollectionId?: string
   // Human-readable action label from the resolved tool policy (package tools).
   label?: string
   sessionId?: string
@@ -198,11 +196,7 @@ export function approvalNote(approval: ApprovalLike): string {
   }
   if (approval.pathKind === 'sensitive') return 'This file is in a sensitive location. Check it before allowing.'
   if (approval.pathKind === 'outside-workspace') return 'This is outside your workspace folder.'
-  if (approval.pathKind === 'resource') {
-    return approval.resourceCollectionId
-      ? `This writes to the shared resource "${approval.resourceCollectionId}".`
-      : 'This writes to a shared resource collection.'
-  }
+  if (approval.pathKind === 'team') return 'This writes to your Team source.'
   return ''
 }
 

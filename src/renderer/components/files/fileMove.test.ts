@@ -75,15 +75,24 @@ describe('fileMove', () => {
     })
   })
 
-  it('keeps managed Mim paths out of manual drag moves', () => {
-    expect(isWorkspaceDragRow(row('.mim/resources/templates/a.md'))).toBe(false)
-    expect(isWorkspaceDropDir(row('.mim/resources/templates', 'directory'))).toBe(false)
-    expect(buildWorkspaceMovePlan({ path: '.mim/resources/templates/a.md', type: 'file' }, '.')).toMatchObject({
-      ok: false,
+  it('allows moves within and across the writable Team Files root', () => {
+    expect(isWorkspaceDragRow(row('.mim/team/files/a.md'))).toBe(true)
+    expect(isWorkspaceDropDir(row('.mim/team/files', 'directory'))).toBe(true)
+    expect(buildWorkspaceMovePlan({ path: '.mim/team/files/a.md', type: 'file' }, '.')).toMatchObject({ ok: true })
+    expect(buildWorkspaceMovePlan({ path: 'README.md', type: 'file' }, '.mim/team/files')).toEqual({
+      ok: true,
+      move: {
+        oldPath: 'README.md',
+        newPath: '.mim/team/files/README.md',
+        type: 'file',
+      },
     })
-    expect(buildWorkspaceMovePlan({ path: 'README.md', type: 'file' }, '.mim/resources/templates')).toMatchObject({
-      ok: false,
-    })
+  })
+
+  it('keeps Team infrastructure and other managed Mim paths out of manual moves', () => {
+    expect(isWorkspaceDragRow(row('.mim/team/files', 'directory'))).toBe(false)
+    expect(isWorkspaceDragRow(row('.mim/team/team.yaml'))).toBe(false)
+    expect(isWorkspaceDropDir(row('.mim/packages', 'directory'))).toBe(false)
   })
 
   it('allows normal workspace files and directories', () => {

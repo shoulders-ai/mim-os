@@ -19,18 +19,6 @@ export interface MimSkillsConfig {
   disabled?: string[]
 }
 
-export type CollectionWritePolicy = 'readonly' | 'direct'
-
-// One committed shared-resource collection. `git` makes it a portable git
-// source; without `git` it is an expectation each machine satisfies with a
-// local path binding in .mim/resources.json. Local paths never belong here —
-// they do not travel between machines. See docs/resources.md.
-export interface MimCollectionConfig {
-  name?: string
-  git?: string
-  write?: CollectionWritePolicy
-}
-
 // One committed registry source. Exactly one of `git` (HTTPS, credential-free),
 // `path` (workspace-relative dir containing index.json), or `url` (direct HTTPS
 // URL to an index.json file) must be present. Reserved ids: `default`, `user`.
@@ -54,17 +42,14 @@ export interface MimConfig {
   slack?: string
   apps?: MimAppsConfig
   skills?: MimSkillsConfig
-  // Committed shared-resource collections, keyed by kebab-case slug id.
-  collections?: Record<string, MimCollectionConfig>
   // Committed registry sources, keyed by kebab-case slug id.
   registries?: Record<string, MimRegistryConfig>
   // Explicit workspace sync mode. Omitted means infer safe defaults.
   sync?: MimSyncConfig
 }
 
-const COLLECTION_WRITE_POLICIES: CollectionWritePolicy[] = ['readonly', 'direct']
 const SYNC_MODES: MimSyncMode[] = ['manual', 'managed']
-export const COLLECTION_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/
+export const SOURCE_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/
 export const PACKAGE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,59}$/
 export const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 
@@ -101,7 +86,7 @@ Today is {{DATE_TODAY}}.
 ## Workspace
 
 The workspace is a directory on the user's machine. Committed layout:
-- mim.yaml — workspace config (name, shared app pins, resources, sync)
+- mim.yaml — Project config (name, app pins, skills, registries, sync)
 - AGENTS.md — the durable contract for any agent working here
 - CLAUDE.md — contract pointer (usually references AGENTS.md)
 - issues/ — issue records, one markdown file each (present when the issues app is enabled)
@@ -191,8 +176,6 @@ export function parseMimYaml(text: string): MimConfig {
   if (apps) config.apps = apps
   const skills = parseSkills(raw.skills)
   if (skills) config.skills = skills
-  const collections = parseCollections(raw.collections)
-  if (collections) config.collections = collections
   const registries = parseRegistries(raw.registries)
   if (registries) config.registries = registries
   const sync = parseSync(raw.sync)
@@ -220,26 +203,6 @@ function parseSkills(raw: unknown): MimSkillsConfig | undefined {
   return disabled.length > 0 ? { disabled } : undefined
 }
 
-// Tolerant: invalid ids, non-object entries, unknown entry keys, and invalid
-// write policies are dropped rather than failing the whole file.
-function parseCollections(raw: unknown): Record<string, MimCollectionConfig> | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
-  const out: Record<string, MimCollectionConfig> = {}
-  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!COLLECTION_ID_PATTERN.test(id)) continue
-    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
-    const source = value as Record<string, unknown>
-    const entry: MimCollectionConfig = {}
-    if (typeof source.name === 'string') entry.name = source.name
-    if (typeof source.git === 'string') entry.git = source.git
-    if (COLLECTION_WRITE_POLICIES.includes(source.write as CollectionWritePolicy)) {
-      entry.write = source.write as CollectionWritePolicy
-    }
-    out[id] = entry
-  }
-  return Object.keys(out).length > 0 ? out : undefined
-}
-
 // Tolerant: invalid ids, reserved ids, non-object entries, entries with
 // both/neither git+path, credential URLs, absolute/traversal paths are
 // dropped rather than failing the whole file.
@@ -247,7 +210,7 @@ function parseRegistries(raw: unknown): Record<string, MimRegistryConfig> | unde
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
   const out: Record<string, MimRegistryConfig> = {}
   for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
-    if (!COLLECTION_ID_PATTERN.test(id)) continue
+    if (!SOURCE_ID_PATTERN.test(id)) continue
     if (RESERVED_REGISTRY_IDS.has(id)) continue
     if (!value || typeof value !== 'object' || Array.isArray(value)) continue
     const source = value as Record<string, unknown>
@@ -328,8 +291,6 @@ export function serializeMimYaml(config: MimConfig): string {
   if (apps) out.apps = apps
   const skills = serializeSkills(config.skills)
   if (skills) out.skills = skills
-  const collections = serializeCollections(config.collections)
-  if (collections) out.collections = collections
   const registries = serializeRegistries(config.registries)
   if (registries) out.registries = registries
   const sync = serializeSync(config.sync)
@@ -353,29 +314,13 @@ function serializeSkills(skills: MimSkillsConfig | undefined): MimSkillsConfig |
   return disabled.length > 0 ? { disabled } : undefined
 }
 
-function serializeCollections(
-  collections: Record<string, MimCollectionConfig> | undefined,
-): Record<string, MimCollectionConfig> | undefined {
-  if (!collections) return undefined
-  const out: Record<string, MimCollectionConfig> = {}
-  for (const [id, entry] of Object.entries(collections)) {
-    if (!COLLECTION_ID_PATTERN.test(id)) continue
-    const clean: MimCollectionConfig = {}
-    if (entry.name !== undefined) clean.name = entry.name
-    if (entry.git !== undefined) clean.git = entry.git
-    if (entry.write !== undefined) clean.write = entry.write
-    out[id] = clean
-  }
-  return Object.keys(out).length > 0 ? out : undefined
-}
-
 function serializeRegistries(
   registries: Record<string, MimRegistryConfig> | undefined,
 ): Record<string, MimRegistryConfig> | undefined {
   if (!registries) return undefined
   const out: Record<string, MimRegistryConfig> = {}
   for (const [id, entry] of Object.entries(registries)) {
-    if (!COLLECTION_ID_PATTERN.test(id)) continue
+    if (!SOURCE_ID_PATTERN.test(id)) continue
     if (RESERVED_REGISTRY_IDS.has(id)) continue
     const clean: MimRegistryConfig = {}
     if (entry.name !== undefined) clean.name = entry.name

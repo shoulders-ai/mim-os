@@ -28,7 +28,6 @@ function mountRows(rows: FileRow[], listeners: Record<string, unknown> = {}) {
     showLocationColumn: false,
     selectedIndex: -1,
     query: '',
-    resourceRootCount: 0,
     emptyText: 'No files',
     directoryError: '',
     sortKey: 'name',

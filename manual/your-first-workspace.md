@@ -86,7 +86,7 @@ A search field at the top searches by file name and content. To import files fro
 Opening a file from the files surface places it in the editor. The files surface is for navigation; editing, formatting, and export are covered in [writing](writing).
 
 ::: under-the-hood
-The `mim.yaml` file is a YAML document. Its schema supports fields for the workspace name, app pins, skill configuration, resource collections, registry sources, integration accounts, and sync settings. A minimal file contains only `name`:
+The `mim.yaml` file is a YAML document. Its schema supports fields for the Project name, app pins, skill configuration, registry sources, integration accounts, and sync settings. A minimal file contains only `name`:
 
 ```yaml
 name: my-research-paper

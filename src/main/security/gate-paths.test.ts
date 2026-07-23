@@ -67,44 +67,33 @@ describe('permission path classification', () => {
   })
 })
 
-describe('permission path classification — resource mounts', () => {
+describe('permission path classification — Team source', () => {
   const workspacePath = '/Users/test/workspace'
 
-  it('classifies files under .mim/resources/<id> as resource paths', () => {
-    expect(classifyPermissionPath('.mim/resources/templates/proposal.md', workspacePath)).toMatchObject({
-      kind: 'resource',
-      resourceCollectionId: 'templates',
-      isResourceRoot: false,
-      absolutePath: '/Users/test/workspace/.mim/resources/templates/proposal.md',
+  it('classifies files under .mim/team/files as writable Team paths', () => {
+    expect(classifyPermissionPath('.mim/team/files/proposal.md', workspacePath)).toMatchObject({
+      kind: 'team',
+      isTeamRoot: false,
+      absolutePath: '/Users/test/workspace/.mim/team/files/proposal.md',
     })
   })
 
-  it('classifies nested resource files with the right collection id', () => {
-    expect(classifyPermissionPath('/Users/test/workspace/.mim/resources/journal-guidance/a/b/c.md', workspacePath)).toMatchObject({
-      kind: 'resource',
-      resourceCollectionId: 'journal-guidance',
+  it('classifies all Team contributions with Team provenance', () => {
+    expect(classifyPermissionPath('/Users/test/workspace/.mim/team/skills/review/SKILL.md', workspacePath)).toMatchObject({
+      kind: 'team',
+      isTeamRoot: false,
     })
   })
 
-  it('marks the mount symlink itself as a resource root', () => {
-    expect(classifyPermissionPath('.mim/resources/templates', workspacePath)).toMatchObject({
-      kind: 'resource',
-      resourceCollectionId: 'templates',
-      isResourceRoot: true,
+  it('marks only the checkout mount itself as the protected Team root', () => {
+    expect(classifyPermissionPath('.mim/team', workspacePath)).toMatchObject({
+      kind: 'team',
+      isTeamRoot: true,
     })
-  })
-
-  it('marks the mounts dir itself as a resource root without a collection', () => {
-    expect(classifyPermissionPath('.mim/resources', workspacePath)).toMatchObject({
-      kind: 'resource',
-      isResourceRoot: true,
-    })
-    expect(classifyPermissionPath('.mim/resources', workspacePath).resourceCollectionId).toBeUndefined()
   })
 
   it('leaves other .mim paths as plain workspace paths', () => {
     expect(classifyPermissionPath('.mim/settings.json', workspacePath)).toMatchObject({ kind: 'workspace' })
-    expect(classifyPermissionPath('.mim/resources.json', workspacePath)).toMatchObject({ kind: 'workspace' })
   })
 
   it('classifies the app enablement/trust ledger as sensitive', () => {
@@ -118,13 +107,13 @@ describe('permission path classification — resource mounts', () => {
   })
 
   it('resolves dot-dot segments before classifying', () => {
-    expect(classifyPermissionPath('.mim/resources/templates/../../settings.json', workspacePath)).toMatchObject({
+    expect(classifyPermissionPath('.mim/team/files/../../settings.json', workspacePath)).toMatchObject({
       kind: 'workspace',
     })
   })
 
-  it('keeps sensitive-segment precedence inside mounts', () => {
-    expect(classifyPermissionPath('.mim/resources/templates/credentials/aws.json', workspacePath)).toMatchObject({
+  it('keeps sensitive-segment precedence inside Team Files', () => {
+    expect(classifyPermissionPath('.mim/team/files/credentials/aws.json', workspacePath)).toMatchObject({
       kind: 'sensitive',
     })
   })

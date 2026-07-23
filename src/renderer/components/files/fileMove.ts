@@ -53,14 +53,13 @@ export function pruneNestedDragItems(items: WorkspaceDragItem[]): WorkspaceDragI
 }
 
 export function isWorkspaceDragRow(row: FileRow): boolean {
-  return !row.disabled && !isManagedMimPath(row.path)
+  return !row.disabled && !isProtectedMimPath(row.path)
 }
 
 export function isWorkspaceDropDir(row: FileRow): boolean {
   return row.type === 'directory'
     && !row.disabled
-    && !row.collection
-    && !isManagedMimPath(row.path)
+    && !isProtectedMimPath(row.path, true)
 }
 
 export function buildWorkspaceMovePlan(
@@ -68,10 +67,10 @@ export function buildWorkspaceMovePlan(
   targetDir: string,
 ): WorkspaceMovePlan {
   const dir = normalizeDir(targetDir)
-  if (!source.path || isManagedMimPath(source.path)) {
+  if (!source.path || isProtectedMimPath(source.path)) {
     return { ok: false, reason: 'Managed Mim folders cannot be moved from Files.' }
   }
-  if (isManagedMimPath(dir)) {
+  if (isProtectedMimPath(dir, true)) {
     return { ok: false, reason: 'Managed Mim folders are not move targets.' }
   }
   if (source.type === 'directory' && (dir === source.path || dir.startsWith(`${source.path}/`))) {
@@ -99,6 +98,8 @@ function normalizeDir(dir: string): string {
   return dir === '' ? '.' : dir.replace(/\/+$/, '') || '.'
 }
 
-function isManagedMimPath(path: string): boolean {
+function isProtectedMimPath(path: string, allowTeamFilesRoot = false): boolean {
+  if (path === '.mim/team/files') return !allowTeamFilesRoot
+  if (path.startsWith('.mim/team/files/')) return false
   return path === '.mim' || path.startsWith('.mim/')
 }

@@ -91,6 +91,7 @@ describe('workspace file watcher', () => {
 
     await watcher.setWorkspace(first)
     expect(watcher.watchFile('node_modules/pkg/index.js')).toBe(false)
+    expect(watcher.watchFile('.mim/packages/app/data.json')).toBe(false)
     expect(watcher.watchFile('../outside.md')).toBe(false)
     expect(watcher.watchFile('docs/a.md')).toBe(true)
     expect(watch).toHaveBeenCalledTimes(1)
@@ -101,5 +102,20 @@ describe('workspace file watcher', () => {
 
     expect(watcher.watchFile('docs/b.md')).toBe(true)
     expect(watch).toHaveBeenLastCalledWith(join(second, 'docs/b.md'), expect.any(Object))
+  })
+
+  it('watches explicitly opened Team files through the managed mount', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mim-watch-team-'))
+    dirs.push(dir)
+    const emit = vi.fn()
+    const { watch } = watchHarness()
+    const watcher = createWorkspaceFileWatcher({ emit, watch })
+
+    await watcher.setWorkspace(dir)
+    expect(watcher.watchFile('.mim/team/files/brief.md')).toBe(true)
+    expect(watch).toHaveBeenCalledWith(
+      join(dir, '.mim/team/files/brief.md'),
+      { ignoreInitial: true },
+    )
   })
 })

@@ -74,3 +74,33 @@ connected checkout is missing, `team.sync` clones and validates it again.
 Apps cannot access the Personal Team connection or its management tools.
 Team-provided capabilities are exposed through their natural scoped runtime
 surfaces in later resolution layers.
+
+## Team Files
+
+Every open Project gets one managed checkout mount:
+
+```text
+<project>/.mim/team  ->  ~/.mim/team
+```
+
+The Files surface exposes only `.mim/team/files` as a writable folder named
+**Files**, grouped under the real Team name from `team.yaml`. The checkout-wide
+mount gives every Team contribution one stable provenance path; Team
+instructions, skills, apps, and routines are not shown as file roots.
+
+The optional `files/` directory may be absent. It then behaves as an empty
+writable root: the first create or move into Team Files creates it in the Team
+checkout. Project files and Team files use the same `fs.*`, editor, native-open,
+watcher, search, attachment, bibliography, and `@` mention paths. Search/index
+results retain Team provenance.
+
+`src/main/team/teamFiles.ts` owns mount reconciliation. It creates, retargets,
+or removes only the `.mim/team` symlink/junction and never replaces or deletes a
+real path at that location. Arbitrary collection mounts, path bindings,
+read-only policies, and the former Resources settings no longer exist.
+
+The permission classifier labels checkout paths as `team`. Team contributions
+are writable under the normal user, AI, and app rules; AI writes prompt in
+Normal mode with Team-specific copy. Only the `.mim/team` mount itself is
+protected from file mutations. The filesystem symlink guard exempts this one
+managed external root and continues to reject arbitrary symlink escapes.

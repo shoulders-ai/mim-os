@@ -10,26 +10,20 @@ const BASE_ENTRIES = [
   { name: 'src', path: 'src', type: 'directory' },
 ]
 
-const MOUNT_ENTRIES = [
-  { name: 'logo.svg', path: '.mim/resources/designs/logo.svg', type: 'file' },
+const TEAM_ENTRIES = [
+  { name: 'logo.svg', path: '.mim/team/files/logo.svg', type: 'file' },
 ]
 
-describe('workspaceFileIndex with resource mounts', () => {
+describe('workspaceFileIndex with Team Files', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('merges files from ok mounts and tags them with the collection id', async () => {
+  it('merges writable Team files and tags them with Team provenance', async () => {
     stubKernel((tool, params) => {
       if (tool === 'fs.list' && !params?.path) return { entries: BASE_ENTRIES, truncated: false }
-      if (tool === 'fs.list' && params?.path === '.mim/resources/designs') {
-        return { entries: MOUNT_ENTRIES, truncated: false }
-      }
-      if (tool === 'resources.collections') {
-        return { collections: [
-          { id: 'designs', status: 'ok', mountPath: '.mim/resources/designs' },
-          { id: 'brand', status: 'not-synced', mountPath: '.mim/resources/brand' },
-        ] }
+      if (tool === 'fs.list' && params?.path === '.mim/team/files') {
+        return { entries: TEAM_ENTRIES, truncated: false }
       }
       throw new Error(`Unexpected tool: ${tool} ${JSON.stringify(params)}`)
     })
@@ -39,17 +33,14 @@ describe('workspaceFileIndex with resource mounts', () => {
 
     const paths = files.value.map(f => f.path)
     expect(paths).toContain('src/index.ts')
-    expect(paths).toContain('.mim/resources/designs/logo.svg')
-    // not-synced collection is never listed
-    expect(files.value.some(f => f.collection === 'brand')).toBe(false)
-    const mounted = files.value.find(f => f.path === '.mim/resources/designs/logo.svg')
-    expect(mounted?.collection).toBe('designs')
+    expect(paths).toContain('.mim/team/files/logo.svg')
+    expect(files.value.find(f => f.path === '.mim/team/files/logo.svg')?.source).toBe('team')
   })
 
-  it('still indexes the workspace when resources.collections fails', async () => {
+  it('still indexes the Project when optional Team Files are unavailable', async () => {
     stubKernel((tool, params) => {
       if (tool === 'fs.list' && !params?.path) return { entries: BASE_ENTRIES, truncated: false }
-      if (tool === 'resources.collections') throw new Error('no workspace')
+      if (tool === 'fs.list' && params?.path === '.mim/team/files') throw new Error('No Team files')
       throw new Error(`Unexpected tool: ${tool}`)
     })
 

@@ -124,22 +124,23 @@ describe('references tools', () => {
     expect(read.references.map(ref => ref.key)).toEqual(['team2022'])
   })
 
-  it('sets the active bibliography path to a mounted resource bibliography', async () => {
-    const resourceDir = mkdtempSync(join(tmpdir(), 'mim-resource-set-bib-test-'))
+  it('sets the active bibliography path to a Team bibliography', async () => {
+    const teamDir = mkdtempSync(join(tmpdir(), 'mim-team-set-bib-test-'))
     try {
-      writeFileSync(join(resourceDir, 'shared.bib'), '@book{team2023, title={Shared Resource}, year={2023}}')
-      mkdirSync(join(dir, '.mim', 'resources'), { recursive: true })
-      symlinkSync(resourceDir, join(dir, '.mim', 'resources', 'shared'), 'dir')
+      mkdirSync(join(teamDir, 'files'))
+      writeFileSync(join(teamDir, 'files', 'shared.bib'), '@book{team2023, title={Team Library}, year={2023}}')
+      mkdirSync(join(dir, '.mim'), { recursive: true })
+      symlinkSync(teamDir, join(dir, '.mim', 'team'), 'dir')
 
       const result = await tools.call('references.setBibliographyPath', {
-        path: '.mim/resources/shared/shared.bib',
+        path: '.mim/team/files/shared.bib',
       }, ctx) as { path: string }
 
-      expect(result.path).toBe('.mim/resources/shared/shared.bib')
+      expect(result.path).toBe('.mim/team/files/shared.bib')
       expect(JSON.parse(readFileSync(join(dir, '.mim', 'settings.json'), 'utf-8'))['references.bibPath'])
-        .toBe('.mim/resources/shared/shared.bib')
+        .toBe('.mim/team/files/shared.bib')
     } finally {
-      rmSync(resourceDir, { recursive: true, force: true })
+      rmSync(teamDir, { recursive: true, force: true })
     }
   })
 
@@ -154,7 +155,7 @@ describe('references tools', () => {
       .rejects.toThrow(/outside workspace|traversal/i)
   })
 
-  it('rejects non-resource symlinks that resolve outside the workspace', async () => {
+  it('rejects non-Team symlinks that resolve outside the workspace', async () => {
     const outside = mkdtempSync(join(tmpdir(), 'mim-outside-bib-test-'))
     try {
       writeFileSync(join(outside, 'outside.bib'), '@book{outside2024, title={Outside}, year={2024}}')
@@ -234,12 +235,13 @@ describe('references tools', () => {
       .toBe('references/references.bib')
   })
 
-  it('discovers bibliographies in mounted resource collections', async () => {
-    const resourceDir = mkdtempSync(join(tmpdir(), 'mim-resource-bib-test-'))
+  it('discovers bibliographies in Team Files', async () => {
+    const teamDir = mkdtempSync(join(tmpdir(), 'mim-team-bib-test-'))
     try {
-      writeFileSync(join(resourceDir, 'shared.bib'), '@book{team2021, title={Team Library}, year={2021}}')
-      mkdirSync(join(dir, '.mim', 'resources'), { recursive: true })
-      symlinkSync(resourceDir, join(dir, '.mim', 'resources', 'shared'), 'dir')
+      mkdirSync(join(teamDir, 'files'))
+      writeFileSync(join(teamDir, 'files', 'shared.bib'), '@book{team2021, title={Team Library}, year={2021}}')
+      mkdirSync(join(dir, '.mim'), { recursive: true })
+      symlinkSync(teamDir, join(dir, '.mim', 'team'), 'dir')
 
       const result = await tools.call('references.resolveBibliography', {
         markdown: 'See [@team2021].',
@@ -250,12 +252,12 @@ describe('references tools', () => {
         unresolved_citations: string[]
       }
 
-      expect(result.path).toBe('.mim/resources/shared/shared.bib')
-      expect(result.source).toBe('resource')
+      expect(result.path).toBe('.mim/team/files/shared.bib')
+      expect(result.source).toBe('team')
       expect(result.citations).toBe(1)
       expect(result.unresolved_citations).toEqual([])
     } finally {
-      rmSync(resourceDir, { recursive: true, force: true })
+      rmSync(teamDir, { recursive: true, force: true })
     }
   })
 

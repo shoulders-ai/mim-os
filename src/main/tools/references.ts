@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, readFileSync, readlinkSync, readdirSync, realpathSync, statSync, type Dirent } from 'fs'
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { parseAuthors, parseBibtex, type BibEntry } from '@main/export/citations.js'
 import type { ToolContext, ToolRegistry } from '@main/tools/registry.js'
 import {
@@ -32,7 +32,7 @@ export interface DuplicateReferenceKey {
 
 export interface BibliographyCandidate {
   path: string
-  source: 'frontmatter' | 'saved' | 'default' | 'document' | 'references-folder' | 'workspace-root' | 'resource'
+  source: 'frontmatter' | 'saved' | 'default' | 'document' | 'references-folder' | 'workspace-root' | 'team'
   matched: number
   total: number
   unresolvedKeys: string[]
@@ -40,8 +40,8 @@ export interface BibliographyCandidate {
 }
 
 const BIB_CACHE = new Map<string, { size: number; mtimeMs: number; entries: BibEntry[] }>()
-const MAX_RESOURCE_BIBS = 20
-const MAX_RESOURCE_DIRS = 80
+const MAX_TEAM_BIBS = 20
+const MAX_TEAM_DIRS = 80
 
 export function registerReferencesTools(tools: ToolRegistry): void {
   tools.register({
@@ -107,11 +107,11 @@ export function registerReferencesTools(tools: ToolRegistry): void {
 
   tools.register({
     name: 'references.setBibliographyPath',
-    description: 'Set the active workspace bibliography path after validating it is a workspace or mounted-resource .bib file.',
+    description: 'Set the active bibliography after validating it is a Project or Team .bib file.',
     inputSchema: {
       type: 'object',
       properties: {
-        path: { type: 'string', description: 'Workspace-relative or .mim/resources-mounted BibTeX file to use for editor and export citation resolution.' },
+        path: { type: 'string', description: 'Project-relative or .mim/team/files BibTeX file to use for editor and export citation resolution.' },
       },
       required: ['path'],
     },
@@ -256,7 +256,7 @@ function discoverCandidates(
   for (const path of bibFilesInDir(root, docDir || '.')) add(path, 'document')
   for (const path of bibFilesInDir(root, 'references')) add(path, 'references-folder')
   for (const path of bibFilesInDir(root, '.')) add(path, 'workspace-root')
-  for (const path of resourceBibFiles(root)) add(path, 'resource')
+  for (const path of teamBibFiles(root)) add(path, 'team')
 
   return out
 }
@@ -380,14 +380,14 @@ function bibFilesInDir(root: string, relDir: string): string[] {
   }
 }
 
-function resourceBibFiles(root: string): string[] {
-  const resourcesDir = join(root, '.mim', 'resources')
-  if (!existsSync(resourcesDir)) return []
+function teamBibFiles(root: string): string[] {
+  const filesDir = join(root, '.mim', 'team', 'files')
+  if (!existsSync(filesDir)) return []
   const out: string[] = []
-  const queue = ['.mim/resources']
+  const queue = ['.mim/team/files']
   let visited = 0
 
-  while (queue.length > 0 && visited < MAX_RESOURCE_DIRS && out.length < MAX_RESOURCE_BIBS) {
+  while (queue.length > 0 && visited < MAX_TEAM_DIRS && out.length < MAX_TEAM_BIBS) {
     const relDir = queue.shift()!
     visited++
     let entries: Dirent[]
@@ -400,7 +400,7 @@ function resourceBibFiles(root: string): string[] {
       const rel = toSlashPath(join(relDir, entry.name))
       if (entry.isFile() && extname(entry.name).toLowerCase() === '.bib') {
         out.push(rel)
-        if (out.length >= MAX_RESOURCE_BIBS) break
+        if (out.length >= MAX_TEAM_BIBS) break
       } else if (isDirectoryEntry(root, rel, entry)) {
         queue.push(rel)
       }
@@ -453,7 +453,7 @@ function resolveWorkspacePath(workspacePath: string, path: string): string {
 
 function assertNoSymlinkEscape(resolved: string, root: string): void {
   const rel = relative(root, resolved)
-  if (rel.startsWith(join('.mim', 'resources'))) return
+  if (rel === join('.mim', 'team') || rel.startsWith(`${join('.mim', 'team')}${sep}`)) return
 
   let check = resolved
   while (!lexists(check)) {

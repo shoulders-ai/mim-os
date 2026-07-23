@@ -2,16 +2,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { detectToolchain, type ToolchainEntry } from '@main/toolchain/toolchain.js'
 import { spawnSync } from 'child_process'
 import { basename, join } from 'path'
-import { classifyWorkspace, parseMimYaml, type CollectionWritePolicy } from '@main/workspace/workspaceContract.js'
-import type { CollectionStatus } from '@main/resources/resourceModel.js'
+import { classifyWorkspace, parseMimYaml } from '@main/workspace/workspaceContract.js'
 import { computeTraceStatsSync, renderTraceHealth } from '@main/trace/query.js'
 
-export interface AgentContextResource {
-  id: string
+export interface AgentContextTeam {
   name: string
-  mountPath: string
-  write: CollectionWritePolicy
-  status: CollectionStatus
+  filesPath: string
 }
 
 export interface AgentContextApp {
@@ -44,7 +40,7 @@ export interface AgentContextData {
   workspace: { name: string; path: string; initialized: boolean }
   generatedAt: string
   apps: AgentContextApp[]
-  resources?: AgentContextResource[]
+  team?: AgentContextTeam
   appSections?: AgentContextAppSection[]
   localPackages?: AgentContextLocalPackage[]
   toolchain?: string[]
@@ -55,18 +51,18 @@ export interface AgentContextData {
 export interface AgentContextDeps {
   now?: () => number
   readRecentChanges?: (cwd: string, limit: number) => string[]
-  readResources?: (workspacePath: string) => AgentContextResource[]
+  readTeam?: (workspacePath: string) => AgentContextTeam | null
   resolveApps?: (workspacePath: string) => AgentContextApp[]
   readTraceHealth?: (workspacePath: string) => string[]
   readToolchain?: () => Promise<ToolchainEntry[]>
 }
 
-let defaultReadResources: ((workspacePath: string) => AgentContextResource[]) | null = null
+let defaultReadTeam: ((workspacePath: string) => AgentContextTeam | null) | null = null
 
-export function setAgentContextResourceReader(
-  reader: ((workspacePath: string) => AgentContextResource[]) | null,
+export function setAgentContextTeamReader(
+  reader: ((workspacePath: string) => AgentContextTeam | null) | null,
 ): void {
-  defaultReadResources = reader
+  defaultReadTeam = reader
 }
 
 let defaultResolveApps: ((workspacePath: string) => AgentContextApp[]) | null = null
@@ -153,14 +149,10 @@ export function renderAgentContext(data: AgentContextData): string {
     }
   }
 
-  if (data.resources && data.resources.length > 0) {
+  if (data.team) {
     lines.push('')
-    lines.push('## Shared resources')
-    lines.push('Mounted folders. Read and write files at the paths below with the normal fs.* tools; readonly collections reject writes.')
-    const sorted = [...data.resources].sort((a, b) => a.id.localeCompare(b.id))
-    for (const r of sorted) {
-      lines.push(`- ${titleOf(r.name)} (${r.id}): ${r.mountPath} [${r.write}, ${r.status}]`)
-    }
+    lines.push(`## Team: ${titleOf(data.team.name)}`)
+    lines.push(`Shared files are writable with normal fs.* tools at ${data.team.filesPath}.`)
   }
 
   if (data.traceHealth && data.traceHealth.length > 0) {
@@ -256,10 +248,10 @@ export function gatherAgentContext(workspacePath: string, deps: AgentContextDeps
     recentChanges: readRecentChanges(workspacePath, RECENT_CHANGES_LIMIT),
   }
 
-  const readResources = deps.readResources ?? defaultReadResources
-  if (readResources) {
+  const readTeam = deps.readTeam ?? defaultReadTeam
+  if (readTeam) {
     try {
-      data.resources = readResources(workspacePath)
+      data.team = readTeam(workspacePath) ?? undefined
     } catch {
       // best-effort
     }

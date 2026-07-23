@@ -29,7 +29,6 @@ import type {
   FileRowBase,
   FsEntry,
   Mode,
-  ResourceRoot,
   RowCompareOptions,
   SortDirection,
   SortKey,
@@ -83,7 +82,7 @@ const query = ref('')
 const mode = ref<Mode>('browse')
 const currentDir = ref('.')
 const directoryEntries = ref<FsEntry[]>([])
-const resourceRoots = ref<ResourceRoot[]>([])
+const teamName = ref('')
 const directoryError = ref('')
 const directoryLoading = ref(false)
 const selectedIndex = ref(0)
@@ -130,38 +129,31 @@ const breadcrumbItems = computed<BreadcrumbItem[]>(() => {
   return items
 })
 
-// Mounted resource collections live under .mim/resources/<id> (symlinks) and are
-// invisible to fs.list, so surface the ok ones as navigable roots at the
-// workspace root. Reusing the directory-row machinery means expand/navigate/open
-// all work via the normal fs.* path. See docs/resources.md.
-const resourceRootRows = computed<FileRowBase[]>(() =>
-  resourceRoots.value.map((root, index) => ({
-    path: root.mountPath,
-    name: root.name,
-    dir: 'resources',
-    type: 'directory' as const,
-    kind: 'Resource',
-    positions: [],
-    level: 0,
-    collection: root.id,
-    readonly: root.write === 'readonly',
-    disabled: root.status !== 'ok',
-    statusLabel: root.status !== 'ok' ? root.status : undefined,
-    sectionLabel: index === 0 ? 'Shared resources' : undefined,
-  }))
+// Team Files is the one shared, writable root. The mount covers the checkout,
+// while Files exposes only its files/ contribution.
+const teamRootRow = computed<FileRowBase | null>(() =>
+  teamName.value
+    ? {
+        path: '.mim/team/files',
+        name: 'Files',
+        dir: 'team',
+        type: 'directory' as const,
+        kind: 'Team',
+        positions: [],
+        level: 0,
+        sectionLabel: teamName.value,
+      }
+    : null
 )
 
 const browseRows = computed<FileRowBase[]>(() => {
   const base = buildBrowseRows(sortFileEntries(directoryEntries.value, sortOptions.value), 0)
-  if (currentDir.value === '.' && resourceRootRows.value.length > 0) {
+  if (currentDir.value === '.' && teamRootRow.value) {
     const out = [...base]
-    for (const root of resourceRootRows.value) {
-      out.push(root)
-      // Resource roots are not part of directoryEntries, so buildBrowseRows
-      // never visits them; splice their expanded children in here.
-      if (!root.disabled && expandedPaths.value.has(root.path)) {
-        out.push(...buildBrowseRows(sortFileEntries(expandedChildren.value[root.path] ?? [], sortOptions.value), 1))
-      }
+    const root = teamRootRow.value
+    out.push(root)
+    if (expandedPaths.value.has(root.path)) {
+      out.push(...buildBrowseRows(sortFileEntries(expandedChildren.value[root.path] ?? [], sortOptions.value), 1))
     }
     return out
   }
@@ -226,7 +218,7 @@ watch(currentDir, (path) => {
   expandedPaths.value = new Set()
   expandedChildren.value = {}
   void loadDirectory(path)
-  if (path === '.') void loadResourceRoots()
+  if (path === '.') void loadTeamRoot()
 }, { immediate: true })
 
 watch([query, mode], () => {
@@ -293,20 +285,18 @@ async function loadDirectory(path: string) {
 // The section header pins to the bottom of the scroll pane (sticky) so the
 // group stays discoverable under a long workspace listing; clicking it brings
 // the section itself into view.
-function scrollToResources(event: MouseEvent) {
+function scrollToTeam(event: MouseEvent) {
   (event.currentTarget as HTMLElement | null)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
 }
 
-async function loadResourceRoots() {
+async function loadTeamRoot() {
   try {
-    const result = await window.kernel.call('resources.collections') as {
-      collections?: ResourceRoot[]
+    const result = await window.kernel.call('team.status') as {
+      team?: { name?: unknown } | null
     }
-    // Keep non-ok collections too: they render disabled with their status, so
-    // a declared-but-unbound or unsynced collection is still discoverable.
-    resourceRoots.value = result.collections ?? []
+    teamName.value = typeof result.team?.name === 'string' ? result.team.name : ''
   } catch {
-    resourceRoots.value = []
+    teamName.value = ''
   }
 }
 
@@ -334,7 +324,7 @@ async function refreshExpandedChildren() {
 async function refresh() {
   await Promise.all([
     loadDirectory(currentDir.value),
-    loadResourceRoots(),
+    loadTeamRoot(),
     index.refresh(),
     refreshExpandedChildren(),
   ])
@@ -981,7 +971,6 @@ async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: stri
       :selected-index="selectedIndex"
       :query="query"
       :active-file-path="activeFilePath"
-      :resource-root-count="resourceRoots.length"
       :empty-text="emptyText"
       :directory-error="directoryError"
       :sort-key="sortKey"
@@ -997,7 +986,7 @@ async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: stri
       @empty-contextmenu="openEmptyContextMenu"
       @drop-external="handleExternalDrop"
       @drop-workspace="handleWorkspaceDrop"
-      @scroll-to-resources="scrollToResources"
+      @scroll-to-team="scrollToTeam"
     />
 
     <FilesContextMenu

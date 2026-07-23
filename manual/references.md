@@ -25,7 +25,7 @@ bibliography: path/to/library.bib
 ---
 ```
 
-When a document contains citations, Mim searches for the best-matching `.bib` file in a fixed priority order: the document's frontmatter `bibliography` field, the saved workspace setting, the default path, then a broader scan of `.bib` files near the document, in a `references/` folder, at the workspace root, and inside `.mim/resources/`. The first file found is used automatically. If Mim selects a bibliography through this search, it persists the choice as the workspace setting so subsequent documents resolve the same way.
+When a document contains citations, Mim searches for the best-matching `.bib` file in a fixed priority order: the document's frontmatter `bibliography` field, the saved Project setting, the default path, then a broader scan of `.bib` files near the document, in a `references/` folder, at the Project root, and inside Team Files at `.mim/team/files/`. The first file found is used automatically. If Mim selects a bibliography through this search, it persists the choice as the Project setting so subsequent documents resolve the same way.
 
 ## Citing while writing
 

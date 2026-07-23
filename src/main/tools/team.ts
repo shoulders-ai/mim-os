@@ -4,6 +4,7 @@ import type { ToolRegistry } from '@main/tools/registry.js'
 export interface TeamToolOptions {
   source: TeamSource
   emit?: (channel: string) => void
+  onChanged?: () => void | Promise<void>
 }
 
 export function registerTeamTools(tools: ToolRegistry, options: TeamToolOptions): void {
@@ -23,6 +24,7 @@ export function registerTeamTools(tools: ToolRegistry, options: TeamToolOptions)
     execute: async (params) => {
       const repository = requireString(params, 'repository')
       const result = await options.source.connect(repository)
+      await options.onChanged?.()
       options.emit?.('team:changed')
       return result
     },
@@ -41,6 +43,7 @@ export function registerTeamTools(tools: ToolRegistry, options: TeamToolOptions)
     inputSchema: objectSchema({}),
     execute: async () => {
       const result = await options.source.sync()
+      await options.onChanged?.()
       options.emit?.('team:changed')
       return result
     },

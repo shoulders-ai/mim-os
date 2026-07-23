@@ -25,8 +25,8 @@ interface FileMatch {
   path: string
   line: number
   snippet: string
-  // Set when the hit lives inside a mounted resource collection.
-  collection?: string
+  // Set when the hit lives in the connected Team source.
+  source?: 'team'
 }
 
 interface PreparedQuery {
@@ -61,16 +61,14 @@ export async function searchFiles(
   dirCount = 0
 
   await walk(workspacePath, workspacePath, preparedQuery, globRe, results, maxResults, signal, deadline)
-  await searchMounts(workspacePath, preparedQuery, globRe, results, maxResults, signal, deadline)
+  await searchTeamFiles(workspacePath, preparedQuery, globRe, results, maxResults, signal, deadline)
 
   return results
 }
 
-// Mounted resource collections live under .mim/resources/<id> (symlinks), so
-// the normal walk skips them via SKIP_DIRS. Walk each mount explicitly and tag
-// hits with the collection id. Dangling symlinks are ignored; symlinked dirs
-// are followed one level here while SKIP_DIRS still prunes .git/.mim inside.
-async function searchMounts(
+// The Team checkout is mounted under .mim, which the normal Project walk skips.
+// Search its optional files/ contribution explicitly and retain provenance.
+async function searchTeamFiles(
   workspacePath: string,
   query: PreparedQuery,
   globRe: RegExp | null,
@@ -80,31 +78,17 @@ async function searchMounts(
   deadline: number,
 ): Promise<void> {
   if (results.length >= max || (signal && signal.aborted) || Date.now() >= deadline) return
-  const mountsDir = join(workspacePath, '.mim', 'resources')
-
-  let entries
+  const filesPath = join(workspacePath, '.mim', 'team', 'files')
   try {
-    entries = await readdir(mountsDir, { withFileTypes: true })
+    if (!(await stat(filesPath)).isDirectory()) return
   } catch {
     return
   }
 
-  for (const entry of entries) {
-    if (results.length >= max || (signal && signal.aborted) || Date.now() >= deadline) return
-    const mountPath = join(mountsDir, entry.name)
-    let s
-    try {
-      s = await stat(mountPath) // follows the symlink
-    } catch {
-      continue
-    }
-    if (!s.isDirectory()) continue
-
-    const before = results.length
-    await walk(workspacePath, mountPath, query, globRe, results, max, signal, deadline)
-    for (let i = before; i < results.length; i++) {
-      results[i].collection = entry.name
-    }
+  const before = results.length
+  await walk(workspacePath, filesPath, query, globRe, results, max, signal, deadline)
+  for (let i = before; i < results.length; i++) {
+    results[i].source = 'team'
   }
 }
 

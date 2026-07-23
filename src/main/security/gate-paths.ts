@@ -1,16 +1,14 @@
 import { isAbsolute, relative, resolve, sep } from 'path'
 
-export type PermissionPathKind = 'workspace' | 'resource' | 'sensitive' | 'outside-workspace' | 'invalid'
+export type PermissionPathKind = 'workspace' | 'team' | 'sensitive' | 'outside-workspace' | 'invalid'
 
 export interface PermissionPathClassification {
   kind: PermissionPathKind
   reason: string
   absolutePath: string | null
-  // Set for kind 'resource': the collection id under .mim/resources/, and
-  // whether the path IS a mount root (the mounts dir or a mount symlink itself)
-  // rather than a file inside one. See docs/resources.md.
-  resourceCollectionId?: string
-  isResourceRoot?: boolean
+  // The checkout mount itself is protected; contributions beneath it are
+  // ordinary writable Team paths.
+  isTeamRoot?: boolean
 }
 
 const SENSITIVE_LOCATIONS = [
@@ -89,8 +87,8 @@ export function classifyPermissionPath(
   }
 
   if (isSameOrChildPath(absolutePath, base)) {
-    const resource = classifyResourcePath(absolutePath, base)
-    if (resource) return resource
+    const team = classifyTeamPath(absolutePath, base)
+    if (team) return team
     if (isEnablementLedger(absolutePath, base)) {
       return {
         kind: 'sensitive',
@@ -152,26 +150,14 @@ function findSensitiveSegment(absolutePath: string): string | null {
   return null
 }
 
-// Paths under <workspace>/.mim/resources/ are mounted shared collections.
-// They classify as 'resource' so the gate can apply collection write policy.
-function classifyResourcePath(absolutePath: string, base: string): PermissionPathClassification | null {
+function classifyTeamPath(absolutePath: string, base: string): PermissionPathClassification | null {
   const segments = relative(base, absolutePath).split(sep)
-  if (segments[0] !== '.mim' || segments[1] !== 'resources') return null
-  if (segments.length === 2) {
-    return {
-      kind: 'resource',
-      reason: 'Resource mounts directory',
-      absolutePath,
-      isResourceRoot: true,
-    }
-  }
-  const collectionId = segments[2]
+  if (segments[0] !== '.mim' || segments[1] !== 'team') return null
   return {
-    kind: 'resource',
-    reason: `Shared resource collection: ${collectionId}`,
+    kind: 'team',
+    reason: 'Connected Team source',
     absolutePath,
-    resourceCollectionId: collectionId,
-    isResourceRoot: segments.length === 3,
+    isTeamRoot: segments.length === 2,
   }
 }
 

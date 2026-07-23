@@ -28,26 +28,12 @@ export interface FileRow {
   positions: number[]
   level: number
   gi: number
-  // Set on mounted resource collection roots (see docs/resources.md).
-  collection?: string
-  readonly?: boolean
-  // Unavailable collections (missing binding/source, not synced) stay listed
-  // for discoverability but are inert.
   disabled?: boolean
-  statusLabel?: string
-  // Renders a group header above this row (first resource root).
+  // Renders a group header above the Team Files root.
   sectionLabel?: string
 }
 
 export type FileRowBase = Omit<FileRow, 'gi'>
-
-export interface ResourceRoot {
-  id: string
-  name: string
-  mountPath: string
-  write: 'readonly' | 'direct'
-  status: string
-}
 
 export interface FileContentMatch {
   path: string

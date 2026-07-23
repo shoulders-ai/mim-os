@@ -17,8 +17,6 @@ export interface ApprovalRequest {
   reason: string
   target?: string
   pathKind?: string
-  // Set when pathKind is 'resource': the mounted collection the path belongs to.
-  resourceCollectionId?: string
   // Human-readable action label from the resolved tool policy (package tools).
   label?: string
   params: Record<string, unknown>

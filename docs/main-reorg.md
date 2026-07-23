@@ -17,7 +17,7 @@ but not app-specific issue or knowledge models.
 - `ai/` — model registry, central runtime, agent context, system prompt.
 - `packages/` — package loader, manifest validation, enablement, runtime, jobs,
   data, HTTP, and secrets.
-- `resources/` — shared resource collection model.
+- `team/` — one Team source contract and Project mount.
 - `search/` — SQLite session search, file content search, message text rows, and
   text matching.
 - `security/` — permission gate and path classifier.

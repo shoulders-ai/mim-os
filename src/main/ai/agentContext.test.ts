@@ -162,59 +162,22 @@ describe('renderAgentContext', () => {
     expect(out.toLowerCase()).toContain('no recent commits')
   })
 
-  it('omits the Shared resources section when there are none', () => {
+  it('omits the Team section when no Team is connected', () => {
     const out = renderAgentContext(baseData())
-    expect(out).not.toContain('## Shared resources')
+    expect(out).not.toContain('## Team:')
   })
 
-  it('omits the Shared resources section when the list is empty', () => {
-    const out = renderAgentContext(baseData({ resources: [] }))
-    expect(out).not.toContain('## Shared resources')
-  })
-
-  it('renders shared resources with name, mount path, write policy and status', () => {
+  it('renders the one Team name and writable Files path without policies or statuses', () => {
     const out = renderAgentContext(
       baseData({
-        resources: [
-          { id: 'designs', name: 'Designs', mountPath: '.mim/resources/designs', write: 'readonly', status: 'ok' },
-          { id: 'team-docs', name: 'Team docs', mountPath: '.mim/resources/team-docs', write: 'direct', status: 'ok' },
-        ],
+        team: { name: 'Shoulders', filesPath: '.mim/team/files' },
       }),
     )
-    expect(out).toContain('## Shared resources')
-    expect(out).toContain('Designs')
-    expect(out).toContain('.mim/resources/designs')
-    expect(out).toContain('readonly')
-    expect(out).toContain('Team docs')
-    expect(out).toContain('.mim/resources/team-docs')
-    expect(out).toContain('direct')
-  })
-
-  it('renders shared resources order-independently', () => {
-    const a = baseData({
-      resources: [
-        { id: 'a', name: 'A', mountPath: '.mim/resources/a', write: 'readonly', status: 'ok' },
-        { id: 'b', name: 'B', mountPath: '.mim/resources/b', write: 'readonly', status: 'ok' },
-      ],
-    })
-    const b = baseData({
-      resources: [
-        { id: 'b', name: 'B', mountPath: '.mim/resources/b', write: 'readonly', status: 'ok' },
-        { id: 'a', name: 'A', mountPath: '.mim/resources/a', write: 'readonly', status: 'ok' },
-      ],
-    })
-    expect(renderAgentContext(a)).toBe(renderAgentContext(b))
-  })
-
-  it('surfaces a non-ok resource status so the agent knows it is unavailable', () => {
-    const out = renderAgentContext(
-      baseData({
-        resources: [
-          { id: 'mirror', name: 'Mirror', mountPath: '.mim/resources/mirror', write: 'readonly', status: 'not-synced' },
-        ],
-      }),
-    )
-    expect(out).toContain('not-synced')
+    expect(out).toContain('## Team: Shoulders')
+    expect(out).toContain('.mim/team/files')
+    expect(out).toContain('writable')
+    expect(out).not.toContain('readonly')
+    expect(out).not.toContain('not-synced')
   })
 
   it('uses no em dashes or emojis', () => {
@@ -316,15 +279,13 @@ describe('gatherAgentContext', () => {
     expect(data.recentChanges).toEqual(['c1', 'c2'])
   })
 
-  it('passes through shared resources from the injected reader', () => {
+  it('passes through the Team from the injected reader', () => {
     const data = gatherAgentContext(dir, {
       now: () => NOW_MS,
       readRecentChanges: () => [],
-      readResources: () => [
-        { id: 'designs', name: 'Designs', mountPath: '.mim/resources/designs', write: 'readonly', status: 'ok' },
-      ],
+      readTeam: () => ({ name: 'Shoulders', filesPath: '.mim/team/files' }),
     })
-    expect(data.resources?.map(r => r.id)).toEqual(['designs'])
+    expect(data.team).toEqual({ name: 'Shoulders', filesPath: '.mim/team/files' })
   })
 
   it('passes through trace health from the injected reader', () => {
@@ -336,9 +297,9 @@ describe('gatherAgentContext', () => {
     expect(data.traceHealth).toEqual(['Top failing tools: fs.read 2/3 errors'])
   })
 
-  it('leaves resources undefined when no resource reader is injected', () => {
+  it('leaves Team undefined when no Team reader is injected', () => {
     const data = gatherAgentContext(dir, { now: () => NOW_MS, readRecentChanges: () => [] })
-    expect(data.resources).toBeUndefined()
+    expect(data.team).toBeUndefined()
   })
 
   it('never throws on a missing git repo (default reader)', () => {
@@ -601,20 +562,18 @@ describe('renderAgentContext — app sections', () => {
     expect(out.indexOf('## A App Status')).toBeLessThan(out.indexOf('## Z App Status'))
   })
 
-  it('places app sections after the app digest and before shared resources', () => {
+  it('places app sections after the app digest and before Team context', () => {
     const data = baseData({
       apps: [{ id: 'knowledge', enabled: true }],
       appSections: [{ appId: 'test', title: 'Test Section', body: 'Body here.' }],
-      resources: [
-        { id: 'r1', name: 'R1', mountPath: '.mim/resources/r1', write: 'readonly', status: 'ok' },
-      ],
+      team: { name: 'Shoulders', filesPath: '.mim/team/files' },
     })
     const out = renderAgentContext(data)
     const appsPos = out.indexOf('Apps enabled:')
     const sectionPos = out.indexOf('## Test Section')
-    const resourcesPos = out.indexOf('## Shared resources')
+    const teamPos = out.indexOf('## Team: Shoulders')
     expect(appsPos).toBeLessThan(sectionPos)
-    expect(sectionPos).toBeLessThan(resourcesPos)
+    expect(sectionPos).toBeLessThan(teamPos)
   })
 
   it('omits app sections when the array is empty', () => {

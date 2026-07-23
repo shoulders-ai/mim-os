@@ -29,7 +29,6 @@ function makeGate(options: {
   packagePermissions?: PackagePermissions
   requests?: PermissionApprovalRequest[]
   decisions?: PermissionDecisionEvent[]
-  resourcePolicies?: Record<string, 'readonly' | 'direct'>
   getDynamicToolPolicy?: (toolName: string) => ToolPolicy | undefined
   resolveSavedBrowserSessionGrant?: Parameters<typeof createPermissionGate>[0]['resolveSavedBrowserSessionGrant']
   grantSavedBrowserSessionDomain?: Parameters<typeof createPermissionGate>[0]['grantSavedBrowserSessionDomain']
@@ -41,9 +40,6 @@ function makeGate(options: {
     getWorkspacePath: () => options.workspacePath ?? '/Users/test/workspace',
     getPackagePermissions: options.packagePermissions
       ? () => options.packagePermissions
-      : undefined,
-    getResourceWritePolicy: options.resourcePolicies
-      ? (id) => options.resourcePolicies?.[id] ?? null
       : undefined,
     getDynamicToolPolicy: options.getDynamicToolPolicy,
     resolveSavedBrowserSessionGrant: options.resolveSavedBrowserSessionGrant,
@@ -1173,162 +1169,59 @@ describe('permission parameter redaction', () => {
   })
 })
 
-describe('resource collection write policy', () => {
-  const readonlyGate = () => makeGate({ resourcePolicies: { templates: 'readonly', snippets: 'direct' } })
-
-  it('denies AI writes into a readonly collection', async () => {
-    const { gate, requests, decisions } = readonlyGate()
-    await expect(
-      gate.check(tool('fs.write'), { path: '.mim/resources/templates/proposal.md', content: 'x' }, { actor: 'ai', sessionId: 's1' }),
-    ).rejects.toThrow(PermissionDeniedError)
-    expect(requests).toHaveLength(0)
-    expect(decisions.at(-1)).toMatchObject({ decision: 'denied', pathKind: 'resource' })
-  })
-
-  it('denies USER writes into a readonly collection (hard invariant)', async () => {
-    const { gate } = readonlyGate()
-    await expect(
-      gate.check(tool('fs.write'), { path: '.mim/resources/templates/proposal.md', content: 'x' }, { actor: 'user' }),
-    ).rejects.toThrow(PermissionDeniedError)
-  })
-
-  it('denies writes into an unknown collection', async () => {
-    const { gate } = readonlyGate()
-    await expect(
-      gate.check(tool('fs.write'), { path: '.mim/resources/mystery/file.md', content: 'x' }, { actor: 'ai' }),
-    ).rejects.toThrow(PermissionDeniedError)
-  })
-
-  it('denies writes into mounts when no resolver is wired', async () => {
-    const { gate } = makeGate()
-    await expect(
-      gate.check(tool('fs.write'), { path: '.mim/resources/templates/file.md', content: 'x' }, { actor: 'ai' }),
-    ).rejects.toThrow(PermissionDeniedError)
-  })
-
-  it('still denies readonly writes in developer mode', async () => {
-    const { gate } = makeGate({ mode: 'developer', resourcePolicies: { templates: 'readonly' } })
-    await expect(
-      gate.check(tool('fs.write'), { path: '.mim/resources/templates/file.md', content: 'x' }, { actor: 'ai' }),
-    ).rejects.toThrow(PermissionDeniedError)
-  })
-
-  it('protects mount roots from deletion even when the collection is writable', async () => {
-    const { gate } = readonlyGate()
-    await expect(
-      gate.check(tool('fs.delete'), { path: '.mim/resources/snippets' }, { actor: 'user' }),
-    ).rejects.toThrow(PermissionDeniedError)
-  })
-
-  it('allows user writes into a direct collection without prompting', async () => {
-    const { gate, requests, decisions } = readonlyGate()
-    await gate.check(tool('fs.write'), { path: '.mim/resources/snippets/limitations.md', content: 'x' }, { actor: 'user' })
+describe('Team source write policy', () => {
+  it('allows direct user writes into Team Files', async () => {
+    const { gate, requests, decisions } = makeGate()
+    await gate.check(tool('fs.write'), { path: '.mim/team/files/limitations.md', content: 'x' }, { actor: 'user' })
     expect(requests).toHaveLength(0)
     expect(decisions.at(-1)).toMatchObject({ decision: 'allowed', reason: 'direct user action' })
   })
 
-  it('asks before AI writes into a direct collection and proceeds on approval', async () => {
-    const { gate, requests } = readonlyGate()
+  it('asks before AI writes into Team Files and proceeds on approval', async () => {
+    const { gate, requests } = makeGate()
     const pending = gate.check(
       tool('fs.write'),
-      { path: '.mim/resources/snippets/limitations.md', content: 'x' },
+      { path: '.mim/team/files/limitations.md', content: 'x' },
       { actor: 'ai', sessionId: 's1' },
     )
     await Promise.resolve()
     expect(requests).toHaveLength(1)
-    expect(requests[0]).toMatchObject({ pathKind: 'resource', reason: 'Shared resource write requires approval' })
+    expect(requests[0]).toMatchObject({ pathKind: 'team', reason: 'Team file write requires approval' })
     gate.respond(requests[0].requestId, { approved: true })
     await expect(pending).resolves.toBeUndefined()
   })
 
-  it('bypasses the direct-collection prompt in developer mode', async () => {
-    const { gate, requests, decisions } = makeGate({ mode: 'developer', resourcePolicies: { snippets: 'direct' } })
-    await gate.check(tool('fs.write'), { path: '.mim/resources/snippets/x.md', content: 'x' }, { actor: 'ai' })
+  it('bypasses the Team-file prompt in developer mode', async () => {
+    const { gate, requests, decisions } = makeGate({ mode: 'developer' })
+    await gate.check(tool('fs.write'), { path: '.mim/team/files/x.md', content: 'x' }, { actor: 'ai' })
     expect(requests).toHaveLength(0)
     expect(decisions.at(-1)).toMatchObject({ decision: 'bypassed' })
   })
 
-  it('denies renames that would move a file INTO a readonly mount', async () => {
-    const { gate } = readonlyGate()
+  it('protects the Team checkout mount itself from mutation', async () => {
+    const { gate } = makeGate()
     await expect(
-      gate.check(
-        tool('fs.rename'),
-        { old_path: 'drafts/new-template.md', new_path: '.mim/resources/templates/new-template.md' },
-        { actor: 'user' },
-      ),
+      gate.check(tool('fs.delete'), { path: '.mim/team' }, { actor: 'user' }),
     ).rejects.toThrow(PermissionDeniedError)
   })
 
-  it('leaves reads inside readonly mounts ungated for AI', async () => {
-    const { gate, requests, decisions } = readonlyGate()
-    await gate.check(tool('fs.read'), { path: '.mim/resources/templates/proposal.md' }, { actor: 'ai', sessionId: 's1' })
+  it('leaves reads inside Team Files ungated for AI', async () => {
+    const { gate, requests, decisions } = makeGate()
+    await gate.check(tool('fs.read'), { path: '.mim/team/files/proposal.md' }, { actor: 'ai', sessionId: 's1' })
     expect(requests).toHaveLength(0)
-    expect(decisions.at(-1)).toMatchObject({ decision: 'allowed', pathKind: 'resource' })
+    expect(decisions.at(-1)).toMatchObject({ decision: 'allowed', pathKind: 'team' })
   })
 
-  it('denies app writes to readonly collections but allows direct with workspace.write', async () => {
-    const permissions: PackagePermissions = { workspace: { read: true, write: true } }
-    const { gate } = makeGate({ packagePermissions: permissions, resourcePolicies: { templates: 'readonly', snippets: 'direct' } })
-    await expect(
-      gate.check(tool('fs.write'), { path: '.mim/resources/templates/x.md', content: 'x' }, { actor: 'package', package_id: 'p1' }),
-    ).rejects.toThrow(PermissionDeniedError)
-    await expect(
-      gate.check(tool('fs.write'), { path: '.mim/resources/snippets/x.md', content: 'x' }, { actor: 'package', package_id: 'p1' }),
-    ).resolves.toBeUndefined()
-  })
-
-  it('does not affect ordinary workspace writes', async () => {
-    const { gate, requests } = readonlyGate()
-    const pending = gate.check(tool('fs.write'), { path: 'notes/todo.md', content: 'x' }, { actor: 'ai', sessionId: 's1' })
-    await Promise.resolve()
-    expect(requests).toHaveLength(1)
-    expect(requests[0]).toMatchObject({ reason: 'This changes your workspace' })
-    gate.respond(requests[0].requestId, { approved: true })
-    await pending
-  })
-})
-
-describe('resources tool policies', () => {
-  it('classifies the resources.* tools', () => {
-    expect(getToolPolicy('resources.collections')).toMatchObject({ category: 'read', risk: 'low' })
-    expect(getToolPolicy('resources.resolvePath')).toMatchObject({ category: 'read', risk: 'low', targetParam: 'id' })
-    expect(getToolPolicy('resources.add')).toMatchObject({ category: 'write', risk: 'medium', targetParam: 'id' })
-    expect(getToolPolicy('resources.remove')).toMatchObject({ category: 'write', risk: 'medium', targetParam: 'id' })
-    expect(getToolPolicy('resources.sync')).toMatchObject({ category: 'network', risk: 'medium', targetParam: 'id' })
-    expect(getToolPolicy('resources.setPolicy')).toMatchObject({ category: 'write', risk: 'medium', targetParam: 'id' })
-  })
-
-  it('denies packages from managing collections but allows reads with workspace.read', async () => {
+  it('lets apps write Team Files only with workspace.write', async () => {
     const permissions: PackagePermissions = { workspace: { read: true, write: true } }
     const { gate } = makeGate({ packagePermissions: permissions })
-    for (const name of ['resources.add', 'resources.remove', 'resources.sync', 'resources.setPolicy']) {
-      await expect(
-        gate.check(tool(name), { id: 'x' }, { actor: 'package', package_id: 'p1' }),
-      ).rejects.toThrow(PermissionDeniedError)
-    }
     await expect(
-      gate.check(tool('resources.collections'), {}, { actor: 'package', package_id: 'p1' }),
+      gate.check(tool('fs.write'), { path: '.mim/team/files/x.md', content: 'x' }, { actor: 'package', package_id: 'p1' }),
     ).resolves.toBeUndefined()
+    const withoutWrite = makeGate({ packagePermissions: { workspace: { read: true } } }).gate
     await expect(
-      gate.check(tool('resources.resolvePath'), { id: 'x' }, { actor: 'package', package_id: 'p1' }),
-    ).resolves.toBeUndefined()
-  })
-
-  it('denies app resource reads without workspace.read', async () => {
-    const permissions: PackagePermissions = {}
-    const { gate } = makeGate({ packagePermissions: permissions })
-    await expect(
-      gate.check(tool('resources.collections'), {}, { actor: 'package', package_id: 'p1' }),
+      withoutWrite.check(tool('fs.write'), { path: '.mim/team/files/x.md', content: 'x' }, { actor: 'package', package_id: 'p1' }),
     ).rejects.toThrow(PermissionDeniedError)
-  })
-
-  it('prompts before AI adds a collection in normal mode', async () => {
-    const { gate, requests } = makeGate()
-    const pending = gate.check(tool('resources.add'), { id: 'x', path: '/tmp/x' }, { actor: 'ai', sessionId: 's1' })
-    await Promise.resolve()
-    expect(requests).toHaveLength(1)
-    gate.respond(requests[0].requestId, { approved: true })
-    await pending
   })
 })
 

@@ -69,7 +69,8 @@ import { registerSearchTools } from '@main/tools/search.js'
 import { registerGitTools } from '@main/tools/git.js'
 import { registerSyncTools } from '@main/tools/sync.js'
 import { registerTeamTools } from '@main/tools/team.js'
-import { createTeamSource } from '@main/team/teamSource.js'
+import { createTeamSource, resolveTeamCheckout, teamCheckoutPath } from '@main/team/teamSource.js'
+import { syncTeamFilesMount } from '@main/team/teamFiles.js'
 import { registerTraceTools } from '@main/tools/trace.js'
 import { createHistoryStore, type HistoryStore } from '@main/history/history.js'
 import { registerHistoryTools } from '@main/tools/history.js'
@@ -107,10 +108,8 @@ import { registerGoogleTools } from '@main/integrations/google/tools.js'
 import { SLACK_MCP_TOOL_SPECS, GOOGLE_MCP_TOOL_SPECS } from '@main/server/server.js'
 import { registerTelemetryTools } from '@main/tools/telemetry.js'
 import { createKeytarSecretStore } from '@main/integrations/secrets.js'
-import { registerResourceTools } from '@main/tools/resources.js'
-import { resolveCollections, readResourceBindings, syncMounts } from '@main/resources/resourceModel.js'
 import { parseMimYaml, readCommittedApp, classifyWorkspace, scaffoldWorkspace } from '@main/workspace/workspaceContract.js'
-import { setAgentContextResourceReader, setAgentContextAppsResolver, setAgentContextContributionsProvider, setAgentContextLocalPackagesProvider, type AgentContextResource, type AgentContextApp } from '@main/ai/agentContext.js'
+import { setAgentContextTeamReader, setAgentContextAppsResolver, setAgentContextContributionsProvider, setAgentContextLocalPackagesProvider, type AgentContextApp } from '@main/ai/agentContext.js'
 import { resolveBootWorkspace, recordLastWorkspace, isDefaultWorkspace } from '@main/workspace/workspaceBoot.js'
 import { deleteMcpDiscoveryFile, writeMcpDiscoveryFile } from '@main/mcp/discovery.js'
 import { createWorkspaceFileWatcher } from '@main/workspace/workspaceFileWatcher.js'
@@ -464,45 +463,32 @@ async function boot(): Promise<void> {
   let slackListener: ReturnType<typeof createSlackSocketModeListener> | null = null
   let routineDefinitionRefreshTimer: ReturnType<typeof setTimeout> | null = null
 
-  // Git mirrors live in a single per-machine cache shared across workspaces, so
-  // a repo is cloned once no matter how many workspaces mount it.
-  const resourcesMirrorsDir = join(app.getPath('userData'), 'resources')
+  const teamSource = createTeamSource({ homeDir: HOME_DIR })
 
-  function resolveWorkspaceCollections(ws: string) {
-    const mimYamlPath = join(ws, 'mim.yaml')
-    const config = existsSync(mimYamlPath)
-      ? parseMimYaml(readFileSync(mimYamlPath, 'utf-8'))
-      : { name: '' }
-    return resolveCollections({
-      workspaceDir: ws,
-      config,
-      bindings: readResourceBindings(ws),
-      mirrorsDir: resourcesMirrorsDir,
-    })
-  }
-
-  // Reconcile .mim/resources/* symlinks with the resolved collections. Best
-  // effort: a sync failure must never block opening a workspace.
-  function syncWorkspaceMounts(ws: string): void {
+  async function syncWorkspaceTeamMount(ws: string): Promise<void> {
+    let team = null
     try {
-      syncMounts(ws, resolveWorkspaceCollections(ws))
+      team = await teamSource.open()
     } catch {
-      /* mount sync is non-fatal */
+      // A disconnected or stopped Team appears absent; Project opening remains
+      // independent from Team Git availability.
+    }
+    try {
+      syncTeamFilesMount(ws, team)
+    } catch {
+      // Mount reconciliation is best-effort and must not block Project open.
     }
   }
 
-  // Feeds the agent-context.md "Shared resources" section (see agentContext.ts).
-  setAgentContextResourceReader((ws): AgentContextResource[] =>
-    resolveWorkspaceCollections(ws).map((c) => ({
-      id: c.id,
-      name: c.name,
-      mountPath: c.mountPath.startsWith(ws)
-        ? toSlashPath(c.mountPath.slice(ws.length + 1))
-        : c.mountPath,
-      write: c.write,
-      status: c.status,
-    })),
-  )
+  setAgentContextTeamReader(() => {
+    if (!loadUserConfig(HOME_DIR).team?.repository) return null
+    try {
+      const team = resolveTeamCheckout(teamCheckoutPath(HOME_DIR))
+      return { name: team.name, filesPath: '.mim/team/files' }
+    } catch {
+      return null
+    }
+  })
 
   function updateRoutineApprovalSession(sessionId: string | undefined, routineId: string | undefined, data: Record<string, unknown>): void {
     if (!sessionId || !routineId) return
@@ -554,13 +540,6 @@ async function boot(): Promise<void> {
           routineCompletedAt: new Date().toISOString(),
         })
       }
-    },
-    // The gate hard-denies writes to readonly/unknown collections for every
-    // actor; this resolver supplies the effective per-collection policy.
-    getResourceWritePolicy: (id) => {
-      const ws = tools.getWorkspacePath()
-      if (!ws) return null
-      return resolveWorkspaceCollections(ws).find((c) => c.id === id)?.write ?? null
     },
     sendApprovalRequest: (request) => {
       if (!mainWindow || mainWindow.isDestroyed()) return false
@@ -707,7 +686,11 @@ async function boot(): Promise<void> {
   registerGitTools(tools)
   registerSyncTools(tools)
   registerTeamTools(tools, {
-    source: createTeamSource({ homeDir: HOME_DIR }),
+    source: teamSource,
+    onChanged: async () => {
+      const workspace = tools.getWorkspacePath()
+      if (workspace) await syncWorkspaceTeamMount(workspace)
+    },
     emit: (channel) => {
       mainWindow?.webContents.send(channel)
       server?.broadcast(channel, {})
@@ -761,13 +744,6 @@ async function boot(): Promise<void> {
     appVersion,
     platform: telemetryConfig.platform,
     runtime: 'electron',
-  })
-  registerResourceTools(tools, {
-    mirrorsDir: resourcesMirrorsDir,
-    emit: (channel) => {
-      mainWindow?.webContents.send(channel)
-      server?.broadcast(channel, {})
-    },
   })
   tools.register({
     name: 'documents.pickReviewFile',
@@ -875,7 +851,7 @@ async function boot(): Promise<void> {
 
   await workspaceFileWatcher.setWorkspace(bootWorkspace)
   scheduleAutoHistoryBaseline(history)
-  syncWorkspaceMounts(bootWorkspace)
+  await syncWorkspaceTeamMount(bootWorkspace)
   recordLastWorkspace(HOME_DIR, bootWorkspace)
   try { initSearchDb(bootWorkspace) } catch { /* search db init non-fatal */ }
   // Defer FTS reindex so the window paints before scanning session files.
@@ -1093,7 +1069,7 @@ async function boot(): Promise<void> {
     clearEditorState()
     await workspaceFileWatcher?.setWorkspace(path)
     scheduleAutoHistoryBaseline(history)
-    syncWorkspaceMounts(path)
+    await syncWorkspaceTeamMount(path)
     recordLastWorkspace(HOME_DIR, path)
     try { closeSearchDb(); initSearchDb(path) } catch { /* search db init non-fatal */ }
     // Defer FTS reindex so workspace switch feels instant.
@@ -1114,10 +1090,8 @@ async function boot(): Promise<void> {
     // guard applies; if a guard is cancelled, that popout survives (acceptable).
     closeAllPopouts()
     broadcastToRenderers('workspace:changed', path)
-    mainWindow?.webContents.send('resources:changed')
     // Notify package iframes via WebSocket so they reload their data
     server?.broadcast('workspace:changed', { path })
-    server?.broadcast('resources:changed', {})
     refreshAppUpdates(path)
     return path
   }

@@ -152,7 +152,7 @@ export function useEditorCitations(options: UseEditorCitationsOptions) {
   function resolveReferencePdfPath(pdfPath: string): string {
     const clean = pdfPath.replaceAll('\\', '/').replace(/^\/+/, '')
     if (!clean || clean.startsWith('..') || clean.includes('/../') || /^[A-Za-z]:/.test(clean)) return ''
-    if (clean.startsWith('references/') || clean.startsWith('.mim/resources/')) return clean
+    if (clean.startsWith('references/') || clean.startsWith('.mim/team/files/')) return clean
     const bibPath = activeReferencePath.value || ''
     const slash = bibPath.lastIndexOf('/')
     const base = slash > 0 ? bibPath.slice(0, slash) : ''

@@ -40,6 +40,7 @@ import { registerGitTools } from '@main/tools/git.js'
 import { registerSyncTools } from '@main/tools/sync.js'
 import { registerTeamTools } from '@main/tools/team.js'
 import { createTeamSource } from '@main/team/teamSource.js'
+import { syncTeamFilesMount } from '@main/team/teamFiles.js'
 import { registerTraceTools } from '@main/tools/trace.js'
 import { createHistoryStore } from '@main/history/history.js'
 import { registerHistoryTools } from '@main/tools/history.js'
@@ -188,8 +189,21 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   registerSearchTools(tools)
   registerGitTools(tools)
   registerSyncTools(tools)
+  const teamSource = createTeamSource({ homeDir: HOME })
+  async function syncCurrentTeamMount(): Promise<void> {
+    const workspace = tools.getWorkspacePath()
+    if (!workspace) return
+    let team = null
+    try {
+      team = await teamSource.open()
+    } catch {
+      // Team is optional; a Project can always open without it.
+    }
+    syncTeamFilesMount(workspace, team)
+  }
   registerTeamTools(tools, {
-    source: createTeamSource({ homeDir: HOME }),
+    source: teamSource,
+    onChanged: syncCurrentTeamMount,
   })
   registerTraceTools(tools)
   registerHistoryTools(tools, history)
@@ -246,6 +260,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
     async openWorkspace(path: string) {
       await subagentManagerRef?.interruptActive()
       await tools.call('workspace.open', { path }, { actor: 'system' })
+      await syncCurrentTeamMount()
       telemetry.track('workspace_open')
       const enablement = createPackageEnablementStore({
         getWorkspacePath: () => tools.getWorkspacePath(),

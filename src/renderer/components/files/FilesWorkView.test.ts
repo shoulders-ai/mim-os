@@ -822,23 +822,20 @@ describe('FilesWorkView', () => {
     expect(mounted.root.textContent).toContain('47 KB')
   })
 
-  it('groups resource mounts under a labeled section, disabling unavailable ones', async () => {
+  it('shows one writable Files root under the actual Team name', async () => {
     call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
       if (tool === 'fs.list' && params?.path === '.') {
         return { entries: [{ path: 'README.md', name: 'README.md', type: 'file' }], truncated: false }
       }
-      if (tool === 'fs.list' && params?.path === '.mim/resources/designs') {
+      if (tool === 'fs.list' && params?.path === '.mim/team/files') {
         return {
-          entries: [{ path: '.mim/resources/designs/logo.svg', name: 'logo.svg', type: 'file', size: 800 }],
+          entries: [{ path: '.mim/team/files/logo.svg', name: 'logo.svg', type: 'file', size: 800 }],
           truncated: false,
         }
       }
       if (tool === 'fs.list') return { entries: [], truncated: false }
-      if (tool === 'resources.collections') {
-        return { collections: [
-          { id: 'designs', name: 'Designs', mountPath: '.mim/resources/designs', write: 'readonly', status: 'ok' },
-          { id: 'brand', name: 'Brand', mountPath: '.mim/resources/brand', write: 'direct', status: 'not-synced' },
-        ] }
+      if (tool === 'team.status') {
+        return { state: 'synced', team: { name: 'Shoulders' } }
       }
       if (tool === 'search.files') return { results: [] }
       return { entries: [] }
@@ -847,13 +844,10 @@ describe('FilesWorkView', () => {
     mounted = mountFiles()
     await flushUi()
 
-    // Labeled section header, so collections read as a distinct group.
-    const header = mounted.root.querySelector<HTMLElement>('[data-testid="files-resources-header"]')
-    expect(header?.textContent).toContain('Shared resources')
-    expect(header?.textContent).toContain('2')
+    const header = mounted.root.querySelector<HTMLElement>('[data-testid="files-team-header"]')
+    expect(header?.textContent).toContain('Shoulders')
+    expect(header?.textContent).not.toMatch(/\b1\b/)
 
-    // The header pins to the bottom of the scroll pane so the section stays
-    // discoverable under a long workspace listing; clicking it scrolls there.
     expect(header?.className).toContain('sticky')
     const scrollSpy = vi.fn()
     header!.scrollIntoView = scrollSpy
@@ -862,30 +856,19 @@ describe('FilesWorkView', () => {
     expect(scrollSpy).toHaveBeenCalled()
 
     const rows = rowButtons(mounted.root)
-    const designs = rows.find(row => row.textContent?.includes('Designs'))!
-    const brand = rows.find(row => row.textContent?.includes('Brand'))!
-    expect(designs).toBeDefined()
-    // readonly roots carry a lock affordance
-    expect(mounted.root.querySelector('.tabler-icon-lock')).not.toBeNull()
+    const files = rows.find(row => row.textContent?.includes('Files'))!
+    expect(files).toBeDefined()
+    expect(files.disabled).toBe(false)
+    expect(mounted.root.querySelector('.tabler-icon-lock')).toBeNull()
+    expect(mounted.root.textContent).not.toContain('not-synced')
+    expect(mounted.root.textContent).not.toContain('.mim/team')
 
-    // Unavailable collections stay visible (discoverability) but inert,
-    // labeled with their status.
-    expect(brand).toBeDefined()
-    expect(brand.disabled).toBe(true)
-    expect(brand.textContent).toContain('not-synced')
-    brand.click()
+    files.click()
     await flushUi()
-    expect(call).not.toHaveBeenCalledWith('fs.list', expect.objectContaining({ path: '.mim/resources/brand' }))
-
-    // Available collections expand like normal folders — and their children
-    // actually render inline.
-    designs.click()
-    await flushUi()
-    expect(call).toHaveBeenCalledWith('fs.list', expect.objectContaining({ path: '.mim/resources/designs' }))
+    expect(call).toHaveBeenCalledWith('fs.list', expect.objectContaining({ path: '.mim/team/files' }))
     expect(mounted.root.textContent).toContain('logo.svg')
 
-    // Second click collapses again.
-    designs.click()
+    files.click()
     await flushUi()
     expect(mounted.root.textContent).not.toContain('logo.svg')
   })
@@ -1202,37 +1185,6 @@ describe('FilesWorkView', () => {
       expect(selectedNames(mounted.root)).toEqual([])
     })
 
-    it('excludes disabled resource-collection rows from select-all and range selection', async () => {
-      call.mockImplementation(async (tool: string, params?: Record<string, unknown>) => {
-        if (tool === 'fs.list' && params?.path === '.') {
-          return { entries: [{ path: 'README.md', name: 'README.md', type: 'file' }], truncated: false }
-        }
-        if (tool === 'fs.list') return { entries: [], truncated: false }
-        if (tool === 'resources.collections') {
-          return { collections: [
-            { id: 'brand', name: 'Brand', mountPath: '.mim/resources/brand', write: 'direct', status: 'not-synced' },
-          ] }
-        }
-        if (tool === 'search.files') return { results: [] }
-        return { entries: [] }
-      })
-      mounted = mountFiles()
-      await flushUi()
-
-      // Clicking a disabled row (even with a modifier) is a no-op for
-      // selection: it never joins, and it never clears what's selected.
-      clickRow(mounted.root, 'README.md', { metaKey: true })
-      clickRow(mounted.root, 'Brand', { shiftKey: true })
-      await flushUi()
-      expect(selectedNames(mounted.root)).toEqual(['README.md'])
-
-      // Select-all only picks up selectable rows.
-      input(mounted.root).dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'a', metaKey: true, bubbles: true, cancelable: true }),
-      )
-      await flushUi()
-      expect(selectedNames(mounted.root)).toEqual(['README.md'])
-    })
   })
 
   it('keeps secondary file commands in the More menu', async () => {

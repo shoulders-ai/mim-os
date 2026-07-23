@@ -626,12 +626,12 @@ describe('File tools', () => {
       expect(result.content).toBe('safe')
     })
 
-    it('allows .mim/resources/ symlinks (managed mounts)', async () => {
-      mkdirSync(join(dir, '.mim', 'resources'), { recursive: true })
-      symlinkSync(outsideDir, join(dir, '.mim', 'resources', 'docs'))
+    it('allows the managed .mim/team checkout symlink', async () => {
+      mkdirSync(join(dir, '.mim'), { recursive: true })
+      symlinkSync(outsideDir, join(dir, '.mim', 'team'))
 
       const result = await tools.call('fs.read', {
-        path: '.mim/resources/docs/secret.txt',
+        path: '.mim/team/secret.txt',
       }, ctx) as { content: string }
       expect(result.content).toBe('top-secret')
     })

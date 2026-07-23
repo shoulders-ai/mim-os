@@ -17,7 +17,7 @@ import { promisify } from 'util'
 
 const execFileAsync = promisify(execFile)
 import { createHash } from 'crypto'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'path'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import type { ToolRegistry } from '@main/tools/registry.js'
 import { findTextMatches } from '@main/search/textMatch.js'
 import { isImageMediaType, mediaTypeFromPath, MAX_ATTACHMENT_BYTES } from '@main/attachments.js'
@@ -379,11 +379,11 @@ function resolveWorkspacePath(tools: ToolRegistry, relativePath: string): string
 
 // Prevent symlink-based escapes: if any component in the resolved path is a
 // symlink whose real target lands outside the workspace, reject the operation.
-// Paths under .mim/resources/ are exempt — those are managed mounts with their
-// own write-policy gate.
+// Paths under .mim/team/ are exempt because that checkout symlink is the one
+// managed external root. The permission gate protects the mount itself.
 function assertNoSymlinkEscape(resolved: string, root: string): void {
   const rel = relative(root, resolved)
-  if (rel.startsWith(join('.mim', 'resources'))) return
+  if (rel === join('.mim', 'team') || rel.startsWith(`${join('.mim', 'team')}${sep}`)) return
 
   // Walk to the deepest component that exists as a directory entry. lstat
   // (not existsSync) so a DANGLING symlink is still inspected — existsSync

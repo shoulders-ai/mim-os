@@ -3,7 +3,6 @@ import { classifyPermissionPath, type PermissionPathClassification, type Permiss
 import type { PackagePermissions } from '@main/packages/packageManifest.js'
 import type { ToolContext, ToolDef } from '@main/tools/registry.js'
 import type { TraceLog } from '@main/trace/trace.js'
-import type { CollectionWritePolicy } from '@main/workspace/workspaceContract.js'
 
 export type ApprovalMode = 'normal' | 'strict' | 'developer'
 export type ToolRisk = 'low' | 'medium' | 'high'
@@ -31,8 +30,8 @@ export interface ToolPolicy {
   label?: string
   ownerPackageId?: string
   pathParam?: string
-  // A second path-bearing param (e.g. fs.rename new_path) that must also pass
-  // resource-collection write policy so files cannot be moved into a mount.
+  // A second path-bearing param (e.g. fs.rename new_path) that must pass the
+  // same path protections as the primary path.
   secondaryPathParam?: string
   targetParam?: string
 }
@@ -54,9 +53,6 @@ export interface PermissionApprovalRequest {
   reason: string
   target?: string
   pathKind?: PermissionPathKind
-  // Set when pathKind is 'resource': the mounted collection the path belongs to,
-  // so the approval surface can name it ("Shared resource: Designs").
-  resourceCollectionId?: string
   // Human-readable action label from the resolved tool policy (e.g. "Board: Delete issue").
   label?: string
   params: Record<string, unknown>
@@ -103,9 +99,6 @@ export interface PermissionGateOptions {
   getApprovalMode: () => ApprovalMode | Promise<ApprovalMode>
   getWorkspacePath: () => string | null
   getPackagePermissions?: (packageId: string) => PackagePermissions | undefined
-  // Effective write policy for a mounted resource collection. Absent resolver
-  // or unknown id means readonly — deny is the safe default for shared assets.
-  getResourceWritePolicy?: (collectionId: string) => CollectionWritePolicy | null | undefined
   // App-provided tools register per-tool policies at runtime. Consulted
   // after the static TOOL_POLICIES map: core tool policies cannot be overridden
   // by an app (security property).
@@ -354,15 +347,6 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'skillSource.add': { category: 'settings', risk: 'medium', targetParam: 'id' },
   'skillSource.remove': { category: 'settings', risk: 'medium', targetParam: 'id' },
   'skillSource.refresh': { category: 'network', risk: 'medium', targetParam: 'id' },
-  'resources.collections': { category: 'read', risk: 'low' },
-  'resources.resolvePath': { category: 'read', risk: 'low', targetParam: 'id' },
-  // Category 'write' so AI registration of new collections prompts in normal
-  // mode — adding a writable collection extends where writes can land.
-  'resources.add': { category: 'write', risk: 'medium', targetParam: 'id' },
-  'resources.remove': { category: 'write', risk: 'medium', targetParam: 'id' },
-  'resources.sync': { category: 'network', risk: 'medium', targetParam: 'id' },
-  // Same write category as add: flipping readonly -> direct widens write reach.
-  'resources.setPolicy': { category: 'write', risk: 'medium', targetParam: 'id' },
   'team.status': { category: 'read', risk: 'low' },
   'team.open': { category: 'read', risk: 'low' },
   'team.connect': { category: 'network', risk: 'medium', targetParam: 'repository' },
@@ -447,19 +431,15 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       params: redactedParams,
     }
 
-    // Resource collections: readonly (and unknown) collections hard-deny
-    // write-category tools for EVERY actor, before any allow path — including
-    // direct user actions and developer mode. This is the invariant that makes
-    // "read-only collection" a guarantee rather than a convention.
+    // The checkout symlink is infrastructure, not a file. Protect it before
+    // every actor's allow path while leaving all Team contributions writable.
     if (policy.category === 'write') {
       const secondaryPathInfo = getSecondaryPathInfo(policy, params, options.getWorkspacePath())
       for (const info of [pathInfo, secondaryPathInfo]) {
-        if (!info || info.kind !== 'resource') continue
-        const denial = resourceWriteDenial(info, options.getResourceWritePolicy)
-        if (denial) {
-          record({ ...baseEvent, pathKind: 'resource', decision: 'denied', reason: denial })
-          throw new PermissionDeniedError(`Permission denied: ${denial}`)
-        }
+        if (!info?.isTeamRoot) continue
+        const reason = 'The Team checkout mount is managed by Mim'
+        record({ ...baseEvent, pathKind: 'team', decision: 'denied', reason })
+        throw new PermissionDeniedError(`Permission denied: ${reason}`)
       }
     }
 
@@ -564,7 +544,6 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
         reason: approvalRequestReason,
         target,
         pathKind: pathInfo?.kind,
-        resourceCollectionId: pathInfo?.resourceCollectionId,
         label: policy.label,
         params: redactedParams,
         preview: buildApprovalPreview(tool.name, params),
@@ -781,21 +760,6 @@ function getSecondaryPathInfo(policy: ToolPolicy, params: Record<string, unknown
   return classifyPermissionPath(value, workspacePath)
 }
 
-function resourceWriteDenial(
-  info: PermissionPathClassification,
-  getResourceWritePolicy: PermissionGateOptions['getResourceWritePolicy'],
-): string | null {
-  if (info.isResourceRoot) {
-    return 'Resource mounts are managed via the resources.* tools'
-  }
-  const collectionId = info.resourceCollectionId
-  const policy = collectionId ? getResourceWritePolicy?.(collectionId) ?? null : null
-  if (policy !== 'direct') {
-    return `Resource collection "${collectionId ?? 'unknown'}" is read-only`
-  }
-  return null
-}
-
 function getTarget(policy: ToolPolicy, params: Record<string, unknown>, pathTarget?: string): string | undefined {
   if (pathTarget) return pathTarget
   if (!policy.targetParam) return undefined
@@ -878,10 +842,8 @@ function approvalReason(
   if (pathKind === 'sensitive' || pathKind === 'outside-workspace') {
     return pathReason ?? 'Path needs approval'
   }
-  // Writable ('direct') shared-resource collections; readonly/unknown ones were
-  // hard-denied before any approval flow ever reaches here.
-  if (pathKind === 'resource' && resolvedToolEffect(toolName, policy) === 'mutate') {
-    return 'Shared resource write requires approval'
+  if (pathKind === 'team' && resolvedToolEffect(toolName, policy) === 'mutate') {
+    return 'Team file write requires approval'
   }
   if (mode === 'strict') {
     return 'Strict mode: every action needs approval'
@@ -909,8 +871,8 @@ function routineApprovalReason(input: {
     if (input.pathFloorActive || input.needsSavedBrowserGrant) {
       return input.normalReason ?? 'Routine path needs approval'
     }
-    if (input.pathInfo?.kind === 'resource' && resolvedToolEffect(input.toolName, input.policy) === 'mutate') {
-      return input.normalReason ?? 'Shared resource write requires approval'
+    if (input.pathInfo?.kind === 'team' && resolvedToolEffect(input.toolName, input.policy) === 'mutate') {
+      return input.normalReason ?? 'Team file write requires approval'
     }
     return null
   }
@@ -986,15 +948,6 @@ function packagePermissionViolation(
 
   if (toolName.startsWith('team.')) {
     return `App ${ctx.package_id} cannot access the Personal Team connection or checkout`
-  }
-
-  // Apps may discover and read collections (via fs.* under the mount
-  // paths) but never manage them: registration changes mim.yaml / bindings.
-  if (toolName === 'resources.add' || toolName === 'resources.remove' || toolName === 'resources.sync' || toolName === 'resources.setPolicy') {
-    return `App ${ctx.package_id} cannot manage resource collections`
-  }
-  if ((toolName === 'resources.collections' || toolName === 'resources.resolvePath') && permissions.workspace?.read !== true) {
-    return `App ${ctx.package_id} did not declare workspace read permission`
   }
 
   if (policy.category === 'system') {

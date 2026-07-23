@@ -143,7 +143,7 @@ export function createWorkspaceFileWatcher(options: {
     const rel = relative(workspace, resolvedPath)
     if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null
     const normalized = toSlashPath(rel)
-    if (normalized.split('/').some(segment => IGNORED_SEGMENTS.has(segment))) return null
+    if (!isTeamPath(normalized) && normalized.split('/').some(segment => IGNORED_SEGMENTS.has(segment))) return null
     return normalized
   }
 
@@ -160,7 +160,7 @@ function normalizeChange(
   const rel = relative(workspace, resolvedPath)
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null
   const normalized = toSlashPath(rel)
-  if (normalized.split('/').some(segment => IGNORED_SEGMENTS.has(segment))) return null
+  if (!isTeamPath(normalized) && normalized.split('/').some(segment => IGNORED_SEGMENTS.has(segment))) return null
   return { path: normalized, kind: event }
 }
 
@@ -180,4 +180,8 @@ function coalesceKind(
 
 function toSlashPath(path: string): string {
   return path.split('\\').join('/')
+}
+
+function isTeamPath(path: string): boolean {
+  return path.startsWith('.mim/team/')
 }

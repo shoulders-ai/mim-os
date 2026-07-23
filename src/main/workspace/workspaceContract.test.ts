@@ -136,68 +136,19 @@ describe('workspaceContract — skills key', () => {
 
 })
 
-describe('workspaceContract — collections key', () => {
-  it('round-trips a git collection', () => {
-    const config = {
-      name: 'my-project',
-      collections: { 'journal-guidance': { name: 'Journal guidance', git: 'https://github.com/acme/guidance.git' } },
-    }
-    const text = serializeMimYaml(config)
-    expect(parseMimYaml(text)).toEqual(config)
-  })
+describe('workspaceContract — removed Resources schema', () => {
+  it('does not read or preserve legacy collections configuration', () => {
+    const parsed = parseMimYaml([
+      'name: solo',
+      'collections:',
+      '  templates:',
+      '    git: https://x.example/templates.git',
+      '    write: direct',
+      '',
+    ].join('\n'))
 
-  it('round-trips an expectation entry (no git) with a write policy', () => {
-    const config = {
-      name: 'my-project',
-      collections: { templates: { name: 'Company templates', write: 'direct' as const } },
-    }
-    const text = serializeMimYaml(config)
-    expect(parseMimYaml(text)).toEqual(config)
-  })
-
-  it('round-trips multiple collections', () => {
-    const config = {
-      name: 'x',
-      collections: {
-        templates: { write: 'readonly' as const },
-        guidance: { git: 'git@github.com:acme/guidance.git' },
-      },
-    }
-    expect(parseMimYaml(serializeMimYaml(config))).toEqual(config)
-  })
-
-  it('treats a missing collections key as no collections', () => {
-    expect(parseMimYaml('name: solo\n').collections).toBeUndefined()
-  })
-
-  it('drops invalid write policies on parse', () => {
-    const config = parseMimYaml('name: x\ncollections:\n  templates:\n    write: yolo\n')
-    expect(config.collections).toEqual({ templates: {} })
-  })
-
-  it('drops collection ids that are not kebab-case slugs', () => {
-    const config = parseMimYaml('name: x\ncollections:\n  "Bad Name!":\n    git: https://x.example/r.git\n  good-id:\n    git: https://x.example/r2.git\n')
-    expect(Object.keys(config.collections ?? {})).toEqual(['good-id'])
-  })
-
-  it('drops non-object collection entries on parse', () => {
-    const config = parseMimYaml('name: x\ncollections:\n  templates: true\n  guidance:\n    git: https://x.example/r.git\n')
-    expect(Object.keys(config.collections ?? {})).toEqual(['guidance'])
-  })
-
-  it('drops unknown keys inside a collection entry on parse', () => {
-    const config = parseMimYaml('name: x\ncollections:\n  templates:\n    name: T\n    path: /tmp/leaked-local-path\n')
-    expect(config.collections).toEqual({ templates: { name: 'T' } })
-  })
-
-  it('omits an empty collections map from serialized output', () => {
-    expect(serializeMimYaml({ name: 'solo', collections: {} })).not.toContain('collections')
-  })
-
-  it('existing files without collections are unaffected by a parse → serialize round-trip', () => {
-    const text = serializeMimYaml(parseMimYaml('name: solo\napps:\n  board: true\n'))
-    expect(text).not.toContain('collections')
-    expect(parseMimYaml(text)).toEqual({ name: 'solo', apps: { board: true } })
+    expect(parsed).toEqual({ name: 'solo' })
+    expect(serializeMimYaml(parsed)).not.toContain('collections')
   })
 })
 
@@ -470,13 +421,13 @@ describe('workspaceContract — removeApp', () => {
     expect(() => removeApp(dir, 'board')).not.toThrow()
   })
 
-  it('preserves other keys (name, other apps, collections)', () => {
+  it('preserves current keys and drops removed collections configuration', () => {
     write('name: ws\napps:\n  board: true\n  knowledge: false\ncollections:\n  guidance:\n    git: https://x.example/g.git\n')
     removeApp(dir, 'board')
     const config = parseMimYaml(readFileSync(join(dir, 'mim.yaml'), 'utf-8'))
     expect(config.name).toBe('ws')
     expect(config.apps).toEqual({ knowledge: false })
-    expect(config.collections).toEqual({ guidance: { git: 'https://x.example/g.git' } })
+    expect(config).not.toHaveProperty('collections')
   })
 
   it('round-trips: removing the only app drops the apps key entirely', () => {

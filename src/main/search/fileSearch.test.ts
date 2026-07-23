@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { searchFiles } from '@main/search/fileSearch.js'
-import { resolveCollections, syncMounts } from '@main/resources/resourceModel.js'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { syncTeamFilesMount } from '@main/team/teamFiles.js'
+import type { TeamCheckout } from '@main/team/teamSource.js'
 
 describe('File search', () => {
   let dir: string
@@ -196,7 +197,7 @@ describe('File search', () => {
   })
 })
 
-describe('File search — resource mounts', () => {
+describe('File search — Team Files', () => {
   let dir: string
   let source: string
 
@@ -210,80 +211,71 @@ describe('File search — resource mounts', () => {
     rmSync(source, { recursive: true, force: true })
   })
 
-  function mount(id: string, target: string) {
-    const mounts = join(dir, '.mim', 'resources')
-    mkdirSync(mounts, { recursive: true })
-    symlinkSync(target, join(mounts, id))
+  function mount(target: string) {
+    const mountRoot = join(dir, '.mim')
+    mkdirSync(mountRoot, { recursive: true })
+    symlinkSync(target, join(mountRoot, 'team'))
   }
 
-  it('searches inside mounted collections and tags hits with the collection id', async () => {
-    writeFileSync(join(source, 'guidance.md'), 'Submission deadline is strict.')
-    mount('journal-guidance', source)
+  it('searches inside Team Files and tags hits with Team provenance', async () => {
+    mkdirSync(join(source, 'files'))
+    writeFileSync(join(source, 'files', 'guidance.md'), 'Submission deadline is strict.')
+    mount(source)
 
     const results = await searchFiles(dir, 'submission deadline')
     expect(results.length).toBe(1)
-    expect(results[0].path).toBe('.mim/resources/journal-guidance/guidance.md')
-    expect(results[0].collection).toBe('journal-guidance')
+    expect(results[0].path).toBe('.mim/team/files/guidance.md')
+    expect(results[0].source).toBe('team')
   })
 
-  it('finds files through the real resolve, mount, and search seam', async () => {
-    writeFileSync(join(source, 'team-brief.md'), 'The launch phrase is reusable seam.')
-    const collections = resolveCollections({
-      workspaceDir: dir,
-      config: { name: 'Project' },
-      bindings: {
-        collections: {
-          team: { path: source, name: 'Shoulders', write: 'direct' },
-        },
-      },
-      mirrorsDir: join(dir, '.mim', 'mirrors'),
-    })
+  it('finds files through the real Team mount and search seam', async () => {
+    mkdirSync(join(source, 'files'))
+    writeFileSync(join(source, 'files', 'team-brief.md'), 'The launch phrase is reusable seam.')
+    const team = {
+      name: 'Shoulders',
+      root: source,
+      filesPath: join(source, 'files'),
+    } as TeamCheckout
 
-    expect(syncMounts(dir, collections)).toMatchObject({ mounted: ['team'], conflicts: [] })
+    expect(syncTeamFilesMount(dir, team)).toMatchObject({ mounted: true, conflict: false })
     expect(await searchFiles(dir, 'reusable seam')).toEqual([
       expect.objectContaining({
-        path: '.mim/resources/team/team-brief.md',
-        collection: 'team',
+        path: '.mim/team/files/team-brief.md',
+        source: 'team',
       }),
     ])
   })
 
-  it('does not tag ordinary workspace hits with a collection', async () => {
+  it('does not tag ordinary workspace hits as Team files', async () => {
     writeFileSync(join(dir, 'notes.md'), 'workspace deadline note')
     const results = await searchFiles(dir, 'deadline')
     expect(results.length).toBe(1)
-    expect(results[0].collection).toBeUndefined()
+    expect(results[0].source).toBeUndefined()
   })
 
-  it('still skips .git inside a mounted mirror', async () => {
+  it('still skips .git inside the Team checkout', async () => {
+    mkdirSync(join(source, 'files'))
     mkdirSync(join(source, '.git'), { recursive: true })
     writeFileSync(join(source, '.git', 'config'), 'mirrorsecret = true')
-    writeFileSync(join(source, 'real.md'), 'mirrorsecret in docs')
-    mount('mirror', source)
+    writeFileSync(join(source, 'files', 'real.md'), 'mirrorsecret in docs')
+    mount(source)
 
     const results = await searchFiles(dir, 'mirrorsecret')
     expect(results.length).toBe(1)
-    expect(results[0].path).toBe('.mim/resources/mirror/real.md')
+    expect(results[0].path).toBe('.mim/team/files/real.md')
   })
 
-  it('ignores dangling mount symlinks', async () => {
-    mount('gone', join(source, 'missing'))
+  it('ignores a dangling Team mount', async () => {
+    mount(join(source, 'missing'))
     writeFileSync(join(dir, 'ok.md'), 'findable text')
     expect((await searchFiles(dir, 'findable')).length).toBe(1)
   })
 
-  it('does not recurse into a mount that points at the workspace itself', async () => {
-    writeFileSync(join(dir, 'self.md'), 'loopword here')
-    mount('self', dir)
-    const results = await searchFiles(dir, 'loopword')
-    expect(results.length).toBeGreaterThanOrEqual(1)
-    expect(results.length).toBeLessThanOrEqual(2)
-  })
-
-  it('respects maxResults across workspace and mounts', async () => {
+  it('respects maxResults across Project and Team files', async () => {
     writeFileSync(join(dir, 'a.md'), 'needle\nneedle')
-    writeFileSync(join(source, 'b.md'), 'needle\nneedle')
-    mount('extra', source)
+    mkdirSync(join(source, 'files'))
+    writeFileSync(join(source, 'files', 'b.md'), 'needle\nneedle')
+    mount(source)
     expect((await searchFiles(dir, 'needle', { maxResults: 3 })).length).toBe(3)
   })
 })

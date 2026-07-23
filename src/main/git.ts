@@ -89,9 +89,9 @@ export async function cloneRepo(
 }
 
 /**
- * Fast-forward an existing clone from its origin. Used for pull-only resource
- * collection mirrors (see docs/resources.md): mirrors are never written to, so
- * --ff-only always applies. Falls back to isomorphic-git without system git.
+ * Fast-forward an existing pull-only clone from its origin. Registry mirrors
+ * are never written to, so --ff-only applies. Falls back to isomorphic-git
+ * without system git.
  */
 export async function pullRepo(dir: string): Promise<{ pulled: string }> {
   if (await hasSystemGit()) {

@@ -19,8 +19,8 @@ export interface IndexedFile {
   createdAt?: string
   /** Best-effort git author for the most recent change, when requested. */
   lastChangedBy?: string
-  /** Set when the file lives inside a mounted resource collection. */
-  collection?: string
+  /** Set when the file lives in the connected Team source. */
+  source?: 'team'
 }
 
 // fs.list caps results; surface the cap so the UI never silently truncates.
@@ -49,7 +49,7 @@ interface ListResult {
   truncated?: boolean
 }
 
-function toIndexed(result: ListResult, collection?: string): IndexedFile[] {
+function toIndexed(result: ListResult, source?: 'team'): IndexedFile[] {
   return (result.entries ?? [])
     .filter(e => e.type === 'file')
     .map(e => ({
@@ -60,7 +60,7 @@ function toIndexed(result: ListResult, collection?: string): IndexedFile[] {
       modifiedAt: e.modifiedAt,
       createdAt: e.createdAt,
       lastChangedBy: e.lastChangedBy,
-      collection,
+      source,
     }))
 }
 
@@ -72,47 +72,26 @@ async function listDir(path: string | undefined, max: number): Promise<ListResul
   }) as ListResult
 }
 
-// fs.list skips .mim and never follows symlinks, so mounted resource
-// collections (symlinks under .mim/resources/<id>) are invisible to the base
-// walk. List each ok mount explicitly so its files are @-mentionable and
-// searchable in the Files surface. See docs/resources.md.
-async function fetchMountFiles(budget: number): Promise<{ files: IndexedFile[]; truncated: boolean }> {
+// fs.list skips .mim during its Project walk. List the Team files contribution
+// explicitly so its files are @-mentionable and searchable.
+async function fetchTeamFiles(budget: number): Promise<{ files: IndexedFile[]; truncated: boolean }> {
   if (budget <= 0) return { files: [], truncated: true }
-  let collections: Array<{ id: string; status: string; mountPath: string }> = []
   try {
-    const result = await window.kernel.call('resources.collections') as {
-      collections?: Array<{ id: string; status: string; mountPath: string }>
-    }
-    collections = result.collections ?? []
+    const listed = await listDir('.mim/team/files', budget)
+    return { files: toIndexed(listed, 'team'), truncated: !!listed.truncated }
   } catch {
     return { files: [], truncated: false }
   }
-
-  const out: IndexedFile[] = []
-  let isTruncated = false
-  for (const c of collections) {
-    if (c.status !== 'ok') continue
-    const remaining = budget - out.length
-    if (remaining <= 0) { isTruncated = true; break }
-    try {
-      const listed = await listDir(c.mountPath, remaining)
-      out.push(...toIndexed(listed, c.id))
-      if (listed.truncated) isTruncated = true
-    } catch {
-      // a single bad mount must not break the whole index
-    }
-  }
-  return { files: out, truncated: isTruncated }
 }
 
 async function fetchIndex(): Promise<void> {
   const base = await listDir(undefined, MAX_FILES)
   const baseFiles = toIndexed(base)
 
-  const mounts = await fetchMountFiles(MAX_FILES - baseFiles.length)
+  const team = await fetchTeamFiles(MAX_FILES - baseFiles.length)
 
-  files.value = [...baseFiles, ...mounts.files]
-  truncated.value = !!base.truncated || mounts.truncated
+  files.value = [...baseFiles, ...team.files]
+  truncated.value = !!base.truncated || team.truncated
   loaded.value = true
 }
 
