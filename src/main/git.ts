@@ -33,6 +33,27 @@ export async function hasSystemGit(): Promise<boolean> {
   }
 }
 
+export function gitInstallAction(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'darwin') return 'Run xcode-select --install, then try again.'
+  if (platform === 'win32') return 'Run winget install --id Git.Git -e, then try again.'
+  return 'Run sudo apt install git, then try again.'
+}
+
+export async function hasSystemGitLfs(): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['lfs', 'version'], { timeout: 5000 })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function gitLfsInstallAction(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'darwin') return 'Run brew install git-lfs && git lfs install, then try again.'
+  if (platform === 'win32') return 'Run winget install --id GitHub.GitLFS -e, then git lfs install and try again.'
+  return 'Run sudo apt install git-lfs && git lfs install, then try again.'
+}
+
 function cloneWithSystemGit(
   url: string,
   target: string,

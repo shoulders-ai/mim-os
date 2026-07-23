@@ -64,6 +64,7 @@ import { registerAgentTools } from '@main/tools/agents.js'
 import { registerSearchTools } from '@main/tools/search.js'
 import { registerGitTools } from '@main/tools/git.js'
 import { registerSyncTools } from '@main/tools/sync.js'
+import { createBackgroundSync } from '@main/sync/backgroundSync.js'
 import { registerTeamTools } from '@main/tools/team.js'
 import { createTeamSource, resolveTeamCheckout, teamCheckoutPath } from '@main/team/teamSource.js'
 import { syncTeamFilesMount } from '@main/team/teamFiles.js'
@@ -157,6 +158,21 @@ let appUpdateInterval: ReturnType<typeof setInterval> | null = null
 let historyBaselineTimer: ReturnType<typeof setTimeout> | null = null
 let routineTickerInterval: ReturnType<typeof setInterval> | null = null
 let routineAutomationStop: (() => Promise<void>) | null = null
+let backgroundSync: ReturnType<typeof createBackgroundSync> | null = null
+let quitSyncPromise: Promise<void> | null = null
+let quitSyncComplete = false
+
+function finishBackgroundSyncThenQuit(): void {
+  if (quitSyncPromise) return
+  quitSyncPromise = backgroundSync?.beforeClose() ?? Promise.resolve()
+  void quitSyncPromise
+    .catch(error => console.warn('[sync] final sync did not complete', error))
+    .finally(() => {
+      quitSyncComplete = true
+      isQuitting = true
+      app.quit()
+    })
+}
 
 export const OPEN_DIRECTORY_DIALOG_PROPERTIES = ['openDirectory', 'createDirectory'] as const
 
@@ -555,6 +571,7 @@ async function boot(): Promise<void> {
     outcomes: traceOutcomes,
     history: history.toolObserver(),
     getCaptureContent: () => readTraceCaptureContent(tools?.getWorkspacePath() ?? null),
+    onMutation: path => backgroundSync?.changed(path),
   })
   workspaceFileWatcher = createWorkspaceFileWatcher({
     emit: (channel, payload) => {
@@ -693,6 +710,51 @@ async function boot(): Promise<void> {
     emit: (channel) => {
       mainWindow?.webContents.send(channel)
       server?.broadcast(channel, {})
+    },
+  })
+  backgroundSync = createBackgroundSync({
+    syncProject: async () => {
+      const current = await tools.call('sync.status', {}, { actor: 'system' }) as {
+        mode?: string
+        state?: string
+        gitAvailable?: boolean
+        git?: boolean
+        remote?: string | null
+        retryable?: boolean
+        message?: string
+      }
+      if (
+        current.mode !== 'managed'
+        || !current.gitAvailable
+        || !current.git
+        || !current.remote
+        || (current.state === 'stopped' && !current.retryable)
+      ) return
+      const result = await tools.call('sync.now', {}, { actor: 'system' }) as {
+        state?: string
+        retryable?: boolean
+        message?: string
+      }
+      if (result.state === 'stopped' && result.retryable) {
+        throw new Error(result.message ?? 'Project sync is waiting to retry')
+      }
+      broadcastToRenderers('sync:changed', { scope: 'project' })
+    },
+    syncTeam: async () => {
+      const current = await tools.call('team.status', {}, { actor: 'system' }) as Awaited<ReturnType<typeof teamSource.status>>
+      if (
+        !current.repository
+        || current.state === 'invalid'
+        || (current.state === 'stopped' && !current.retryable)
+      ) return
+      const result = await tools.call('team.sync', {}, { actor: 'system' }) as Awaited<ReturnType<typeof teamSource.sync>>
+      if (result.state === 'stopped' && result.retryable) {
+        throw new Error(result.message)
+      }
+    },
+    onError: (scope, error) => {
+      console.warn(`[sync] ${scope} will retry`, error)
+      broadcastToRenderers('sync:changed', { scope })
     },
   })
   registerTraceTools(tools)
@@ -845,6 +907,7 @@ async function boot(): Promise<void> {
   await workspaceFileWatcher.setWorkspace(bootWorkspace)
   scheduleAutoHistoryBaseline(history)
   await syncWorkspaceTeamMount(bootWorkspace)
+  void backgroundSync.open()
   recordLastWorkspace(HOME_DIR, bootWorkspace)
   try { initSearchDb(bootWorkspace) } catch { /* search db init non-fatal */ }
   // Defer FTS reindex so the window paints before scanning session files.
@@ -1023,6 +1086,7 @@ async function boot(): Promise<void> {
     await workspaceFileWatcher?.setWorkspace(path)
     scheduleAutoHistoryBaseline(history)
     await syncWorkspaceTeamMount(path)
+    void backgroundSync?.open()
     recordLastWorkspace(HOME_DIR, path)
     try { closeSearchDb(); initSearchDb(path) } catch { /* search db init non-fatal */ }
     // Defer FTS reindex so workspace switch feels instant.
@@ -1457,6 +1521,12 @@ async function boot(): Promise<void> {
       return
     }
 
+    if (!quitSyncComplete && backgroundSync) {
+      e.preventDefault()
+      finishBackgroundSyncThenQuit()
+      return
+    }
+
     // Closing the main window is the quit path on Windows/Linux. Mark it now
     // so window-all-closed -> app.quit() does not show the guard a second time.
     isQuitting = true
@@ -1499,6 +1569,11 @@ app.on('before-quit', (event) => {
     event.preventDefault()
     return
   }
+  if (!quitSyncComplete && backgroundSync) {
+    event.preventDefault()
+    finishBackgroundSyncThenQuit()
+    return
+  }
   isQuitting = true
 })
 
@@ -1520,6 +1595,8 @@ app.on('will-quit', () => {
   subagentShutdown = null
   void workspaceFileWatcher?.close()
   workspaceFileWatcher = null
+  backgroundSync?.stop()
+  backgroundSync = null
   deleteMcpDiscoveryFile(HOME_DIR)
   closeSearchDb()
   confirmAppQuit = null

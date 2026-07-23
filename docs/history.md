@@ -192,7 +192,8 @@ toggle. The technical controls are closed by default under **Advanced**:
 - Optimize history, which calls `history.prune` immediately;
 - Clear local history, which calls `history.clear`;
 - a separate **Local audit trail** toggle plus audit/content storage controls;
-- Sync controls for manual vs managed workspace sync.
+- Project sync controls, guided Git/LFS setup, automatic-sync state, and the
+  manual **Sync now** retry.
 
 Turning File recovery off asks for confirmation because future changes will no
 longer gain recovery points. It does not silently delete the versions the user

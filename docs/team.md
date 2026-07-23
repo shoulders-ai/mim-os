@@ -65,8 +65,15 @@ one Team-source instance:
 - `team.open` resolves the validated checkout and fixed paths for downstream
   surfaces.
 - `team.sync` stages and commits Team edits as `Mim Team sync`, rebases on the
-  remote, validates the pulled contract, and pushes. Conflicts stop sync for
-  explicit resolution; Mim never auto-resolves them.
+  remote, validates the pulled contract, and pushes. The desktop runs this
+  automatically on Project open, after file mutations, and before quit.
+
+Offline failures pause with a plain-language state and retry automatically.
+When the same path changed on both sides, Mim aborts the rebase, leaves the
+local working path intact, and writes timestamped `conflict-local` and
+`conflict-remote` sibling copies. Automatic retries stop until a person keeps
+the desired content and chooses **Sync now**; Mim never silently resolves a
+conflict.
 
 The checkout is writable ordinary Git state, not a pull-only mirror. If a
 connected checkout is missing, `team.sync` clones and validates it again.

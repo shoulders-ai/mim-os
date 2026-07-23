@@ -24,11 +24,25 @@ describe('StorageSettingsPanel', () => {
   let app: ReturnType<typeof createApp> | null
   let call: ReturnType<typeof vi.fn>
   let confirmAction: ReturnType<typeof vi.fn>
+  let syncStatus: Record<string, unknown>
 
   beforeEach(() => {
     root = document.createElement('div')
     document.body.appendChild(root)
     setActivePinia(createPinia())
+    syncStatus = {
+      mode: 'manual',
+      state: 'manual',
+      gitAvailable: true,
+      git: false,
+      remote: null,
+      dirty: false,
+      ahead: false,
+      behind: false,
+      conflicts: [],
+      retryable: false,
+      message: 'Manual',
+    }
     call = vi.fn(async (tool: string, params?: Record<string, unknown>) => {
       if (tool === 'history.stats') {
         return { bytes: 12 * 1024 * 1024, blobBytes: 11 * 1024 * 1024, fileCount: 8, versionCount: 42, prunedVersionCount: 12 }
@@ -37,7 +51,7 @@ describe('StorageSettingsPanel', () => {
         return { digestBytes: 2 * 1024 * 1024, payloadBytes: 8 * 1024 * 1024, payloadCount: 17, totalBytes: 10 * 1024 * 1024 }
       }
       if (tool === 'sync.status') {
-        return { mode: 'manual', state: 'manual', git: false, remote: null, dirty: false, ahead: false, behind: false, conflicts: [], message: 'Manual' }
+        return syncStatus
       }
       if (tool === 'history.prune' || tool === 'trace.prune' || tool === 'settings.set') return { ok: true, ...params }
       if (tool === 'telemetry.setEnabled') return { enabled: params?.enabled !== false, locked: false }
@@ -167,5 +181,35 @@ describe('StorageSettingsPanel', () => {
     expect(historyToggle.getAttribute('aria-checked')).toBe('true')
     expect(auditToggle.getAttribute('aria-checked')).toBe('true')
     expect(call).not.toHaveBeenCalledWith('settings.set', expect.anything())
+  })
+
+  it('shows guided Git setup and explains automatic managed sync', async () => {
+    syncStatus = {
+      mode: 'managed',
+      state: 'not-configured',
+      gitAvailable: false,
+      git: false,
+      remote: 'https://github.com/acme/project.git',
+      dirty: false,
+      ahead: false,
+      behind: false,
+      conflicts: [],
+      retryable: false,
+      gitInstallAction: 'Run xcode-select --install, then try again.',
+      lfsRequired: false,
+      lfsAvailable: null,
+      lfsInstallAction: null,
+      message: 'Git is required.',
+    }
+    await (app?.unmount())
+    root.innerHTML = ''
+    app = createApp(StorageSettingsPanel)
+    app.use(createPinia())
+    app.mount(root)
+    await flushUi()
+
+    expect(root.textContent).toContain('Mim syncs on open, after changes, and before quit')
+    expect(root.textContent).toContain('Run xcode-select --install')
+    expect(button(root, 'Sync now').disabled).toBe(true)
   })
 })

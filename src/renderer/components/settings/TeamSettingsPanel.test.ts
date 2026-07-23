@@ -35,9 +35,38 @@ describe('TeamSettingsPanel', () => {
 
     expect(root.textContent).toContain('Shoulders')
     expect(root.textContent).toContain('Files · Skills · Apps · Routines')
+    expect(root.textContent).toContain('automatically')
     root.querySelector<HTMLButtonElement>('[data-testid="team-open"]')?.click()
     await Promise.resolve()
     expect(revealInFinder).toHaveBeenCalledWith('/tmp/team')
+    app.unmount()
+  })
+
+  it('shows the system Git setup action before Team connection', async () => {
+    const call = vi.fn(async () => ({
+      state: 'disconnected',
+      repository: null,
+      message: 'Connect a Team source.',
+      team: null,
+      git: {
+        available: false,
+        installAction: 'Run winget install --id Git.Git -e, then try again.',
+        lfsRequired: false,
+        lfsAvailable: null,
+        lfsInstallAction: null,
+      },
+    }))
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call, revealInFinder: vi.fn(), on: vi.fn(), off: vi.fn() },
+    })
+    const root = document.createElement('div')
+    const app = createApp(TeamSettingsPanel)
+    app.mount(root)
+    await Promise.resolve()
+    await nextTick()
+
+    expect(root.textContent).toContain('Run winget install')
     app.unmount()
   })
 })

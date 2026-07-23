@@ -64,6 +64,7 @@ export interface ToolRegistry {
 export interface ToolRegistryOptions {
   outcomes?: TraceOutcomeTracker
   history?: HistoryToolObserver
+  onMutation?: (path: string, tool: string) => void
   // Capture redacted tool results as payload blobs (Activity content capture).
   // Defaults to enabled; the secret denylist below always wins regardless.
   getCaptureContent?: () => boolean
@@ -74,6 +75,18 @@ export interface ToolRegistryOptions {
 // tokens — the same known-safe set as the gate's approval preview.
 const PAYLOAD_CAPTURE_TOOLS = new Set(['fs.write', 'fs.edit', 'fs.create'])
 const OUTCOME_MUTATION_TOOLS = new Set(['fs.write', 'fs.edit', 'fs.create'])
+const MUTATION_SIGNAL_TOOLS = new Set([
+  'fs.write',
+  'fs.writeBytes',
+  'fs.edit',
+  'fs.create',
+  'fs.delete',
+  'fs.trash',
+  'fs.copy',
+  'fs.import',
+  'fs.mkdir',
+  'fs.rename',
+])
 
 // A single tool result that exceeds this serialized size is not blobbed — the
 // redacted digest still records the call. Keeps a huge fs.read or search dump
@@ -184,6 +197,8 @@ export function createToolRegistry(
           const afterMutation = snapshotWorkspaceFile(workspacePath, mutationPath)
           recordMutationOutcome(options.outcomes, spanCtx, name, mutationPath, beforeMutation, afterMutation)
         }
+        const changedPath = mutationSignalSubject(workspacePath, name, params)
+        if (changedPath) options.onMutation?.(changedPath, name)
         safeAfterHistory(options.history, workspacePath, name, params, result, spanCtx, historyPending)
         return result
       } catch (err) {
@@ -285,6 +300,19 @@ function mutationSubject(
   params: Record<string, unknown>,
 ): string | null {
   if (!workspacePath || !OUTCOME_MUTATION_TOOLS.has(tool) || typeof params.path !== 'string') return null
+  const root = resolve(workspacePath)
+  const resolved = resolve(root, params.path)
+  const rel = relative(root, resolved)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null
+  return rel.split('\\').join('/')
+}
+
+function mutationSignalSubject(
+  workspacePath: string | null,
+  tool: string,
+  params: Record<string, unknown>,
+): string | null {
+  if (!workspacePath || !MUTATION_SIGNAL_TOOLS.has(tool) || typeof params.path !== 'string') return null
   const root = resolve(workspacePath)
   const resolved = resolve(root, params.path)
   const rel = relative(root, resolved)

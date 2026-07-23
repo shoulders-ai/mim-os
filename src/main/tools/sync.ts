@@ -1,7 +1,20 @@
 import { execFile } from 'child_process'
-import { existsSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs'
 import { basename, join } from 'path'
 import { promisify } from 'util'
+import {
+  gitInstallAction,
+  gitLfsInstallAction,
+  hasSystemGit,
+  hasSystemGitLfs,
+} from '@main/git.js'
+import {
+  clearSyncStop,
+  isRetryableGitError,
+  preserveRebaseConflicts,
+  readSyncStop,
+  writeSyncStop,
+} from '@main/sync/conflicts.js'
 import type { ToolRegistry } from '@main/tools/registry.js'
 import {
   ensureWorkspaceGitignore,
@@ -61,6 +74,7 @@ function inferMode(config: MimConfig): MimSyncMode {
 }
 
 async function syncState(workspace: string) {
+  const systemGit = await hasSystemGit()
   const hasGit = existsSync(join(workspace, '.git'))
   const config = readWorkspaceConfig(workspace)
   const mode = inferMode(config)
@@ -76,24 +90,34 @@ async function syncState(workspace: string) {
   const conflict = hasGit
     ? (await gitMaybe(workspace, ['diff', '--name-only', '--diff-filter=U'])).split('\n').filter(Boolean)
     : []
+  const stop = readSyncStop(join(workspace, '.mim', 'sync-stop.json'))
+  const lfsRequired = repositoryUsesGitLfs(workspace)
+  const lfsAvailable = lfsRequired && systemGit ? await hasSystemGitLfs() : null
 
   let state: 'manual' | 'not-configured' | 'synced' | 'needs-sync' | 'stopped'
   if (mode === 'manual') state = 'manual'
-  else if (!hasGit || !remote) state = 'not-configured'
-  else if (conflict.length > 0) state = 'stopped'
+  else if (!systemGit || !hasGit || !remote) state = 'not-configured'
+  else if (stop || conflict.length > 0 || (lfsRequired && !lfsAvailable)) state = 'stopped'
   else if (dirty || ahead || behind) state = 'needs-sync'
   else state = 'synced'
 
   return {
     mode,
     state,
+    gitAvailable: systemGit,
     git: hasGit,
     remote: remote || null,
     dirty,
     ahead,
     behind,
-    conflicts: conflict,
-    message: syncMessage(mode, state),
+    conflicts: stop?.conflicts ?? conflict,
+    retryable: stop?.retryable ?? false,
+    gitInstallAction: systemGit ? null : gitInstallAction(),
+    lfsRequired,
+    lfsAvailable,
+    lfsInstallAction: lfsRequired && !lfsAvailable ? gitLfsInstallAction() : null,
+    message: stop?.message
+      ?? (lfsRequired && !lfsAvailable ? `Git LFS is required. ${gitLfsInstallAction()}` : syncMessage(mode, state)),
   }
 }
 
@@ -122,13 +146,13 @@ async function remoteHasBranch(workspace: string, branch: string): Promise<boole
 async function pullBeforePush(workspace: string): Promise<{ hadUpstream: boolean }> {
   const upstream = await currentUpstream(workspace)
   if (upstream) {
-    await git(workspace, ['pull', '--ff-only'])
+    await git(workspace, ['pull', '--rebase'])
     return { hadUpstream: true }
   }
 
   const branch = await currentBranch(workspace)
   if (branch && await remoteHasBranch(workspace, branch)) {
-    await git(workspace, ['pull', '--ff-only', 'origin', branch])
+    await git(workspace, ['pull', '--rebase', 'origin', branch])
   }
   return { hadUpstream: false }
 }
@@ -163,6 +187,9 @@ export function registerSyncTools(tools: ToolRegistry): void {
       if (remote) nextConfig.sync!.remote = remote
 
       if (mode === 'managed') {
+        if (!await hasSystemGit()) {
+          throw new Error(`Git is required for managed sync. ${gitInstallAction()}`)
+        }
         ensureWorkspaceGitignore(workspace)
         if (!existsSync(join(workspace, '.git'))) await execFileAsync('git', ['init', workspace], { timeout: 30000 })
         if (remote) {
@@ -183,6 +210,7 @@ export function registerSyncTools(tools: ToolRegistry): void {
     inputSchema: objectSchema({}),
     execute: async () => {
       const workspace = requireWorkspace(tools)
+      clearSyncStop(join(workspace, '.mim', 'sync-stop.json'))
       const status = await syncState(workspace)
       if (status.mode !== 'managed') throw new Error('Managed sync is not enabled for this workspace')
       if (!status.git) throw new Error('Managed sync needs a git repository')
@@ -202,13 +230,39 @@ export function registerSyncTools(tools: ToolRegistry): void {
         const { hadUpstream } = await pullBeforePush(workspace)
         await pushAfterSync(workspace, hadUpstream)
       } catch (err) {
-        return {
-          ...(await syncState(workspace)),
-          state: 'stopped',
-          message: err instanceof Error ? err.message : String(err),
+        const markerPath = join(workspace, '.mim', 'sync-stop.json')
+        const preserved = await preserveRebaseConflicts(workspace, markerPath, 'Project')
+        if (!preserved) {
+          const retryable = isRetryableGitError(err)
+          writeSyncStop(markerPath, {
+            message: retryable
+              ? 'Project sync paused while the remote is unavailable. Mim will retry automatically.'
+              : `Project sync stopped. ${err instanceof Error ? err.message : String(err)} Choose Sync now to retry.`,
+            conflicts: [],
+            retryable,
+          })
         }
+        return syncState(workspace)
       }
       return syncState(workspace)
     },
   })
+}
+
+function repositoryUsesGitLfs(root: string): boolean {
+  const pending = [root]
+  while (pending.length > 0) {
+    const dir = pending.pop()!
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === '.git' || entry.name === '.mim') continue
+      const path = join(dir, entry.name)
+      if (entry.isSymbolicLink()) continue
+      if (entry.isDirectory()) {
+        pending.push(path)
+      } else if (entry.isFile() && entry.name === '.gitattributes') {
+        if (/\bfilter\s*=\s*lfs\b/i.test(readFileSync(path, 'utf-8'))) return true
+      }
+    }
+  }
+  return false
 }

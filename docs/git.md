@@ -35,8 +35,15 @@ Git LFS is checked only when a Team repository's `.gitattributes` files request
 action if the capability is missing, and runs `git lfs pull` when available.
 
 Team sync stages writable source changes, commits them as `Mim Team sync`,
-pulls with rebase, validates the fixed Team contract, and pushes. A conflict
-stops the workflow for explicit resolution.
+pulls with rebase, validates the fixed Team contract, and pushes. Mim runs this
+workflow in the background on Project open, after file mutations, and before
+quit.
+
+If both sides edit the same path, Mim captures the local and remote Git stages,
+aborts the rebase, restores the local working file, and writes
+`*.conflict-local-*` and `*.conflict-remote-*` sibling copies. Automatic sync
+stops until the person keeps the desired content and chooses **Sync now**.
+Neither version is silently selected or discarded.
 
 ## Workspace Git Tools
 
@@ -86,16 +93,23 @@ into managed sync. `sync.status` reports manual vs managed mode, git presence,
 remote, dirty state, ahead/behind counts, and conflict state.
 
 `sync.configure` can switch modes and, for managed mode, initialize git and set
-the `origin` remote when provided. `sync.now` is conservative: it stages current
-changes, creates a "Mim sync" commit when needed, pulls with `--ff-only` when an
-upstream or matching remote branch exists, and pushes. First pushes set the
-upstream branch. It stops on conflicts, missing remotes, non-fast-forward pulls,
-or git errors. Mim does not auto-resolve conflicts.
+the `origin` remote when provided. Managed sync stages current changes, creates
+a "Mim sync" commit when needed, pulls with rebase when an upstream or matching
+remote branch exists, and pushes. First pushes set the upstream branch. The
+same workflow runs on Project open, after successful filesystem mutations, and
+before quit. `sync.now` remains the explicit retry and manual escape hatch.
+
+Network failures produce a plain-language paused state and retry in the
+background. Non-retryable errors stop automatic sync. Same-file conflicts use
+the same sibling-copy preservation as Team sync and require an explicit retry.
+The stop record is machine-local under `.mim/`.
 
 Managed configuration and every managed sync reassert `.mim/` in the workspace
 `.gitignore` before staging. This protects transcripts, traces, activation, and
 other machine-local runtime state even when managed sync was enabled on a
 workspace that did not pass through the normal scaffold.
 
-Settings > Workspace is the human manage surface for sync mode, remote, status,
-and Sync now.
+Settings > Project is the human manage surface for sync mode, remote, status,
+guided platform-specific Git/Git LFS setup, and **Sync now**. Git LFS is checked
+only when the Project attributes request `filter=lfs`; normal binary files do
+not require it.

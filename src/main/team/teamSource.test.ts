@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from 'fs'
@@ -237,6 +238,40 @@ describe('Team source connection and sync', () => {
     await clientB.sync()
     await clientA.sync()
     expect(readFileSync(join(teamCheckoutPath(homeA), 'files', 'brief.md'), 'utf-8')).toBe('Version B\n')
+  })
+
+  it('preserves both Team versions when two clients edit the same file', async () => {
+    const remote = seedRemote(root)
+    const homeA = join(root, 'home-a')
+    const homeB = join(root, 'home-b')
+    mkdirSync(homeA)
+    mkdirSync(homeB)
+    const clientA = createTeamSource({ homeDir: homeA })
+    const clientB = createTeamSource({ homeDir: homeB })
+    await clientA.connect(remote)
+    await clientB.connect(remote)
+    configureIdentity(teamCheckoutPath(homeA))
+    configureIdentity(teamCheckoutPath(homeB))
+
+    const pathA = join(teamCheckoutPath(homeA), 'files', 'brief.md')
+    const pathB = join(teamCheckoutPath(homeB), 'files', 'brief.md')
+    writeFileSync(pathA, 'baseline\n')
+    await clientA.sync()
+    await clientB.sync()
+
+    writeFileSync(pathA, 'client A\n')
+    writeFileSync(pathB, 'client B\n')
+    await clientA.sync()
+    const stopped = await clientB.sync()
+
+    expect(stopped).toMatchObject({ state: 'stopped', retryable: false })
+    expect(stopped.message).toContain('preserved')
+    const copies = readdirSync(join(teamCheckoutPath(homeB), 'files'))
+      .filter(name => name.startsWith('brief.conflict-'))
+    expect(copies).toHaveLength(2)
+    expect(copies.map(name => readFileSync(join(teamCheckoutPath(homeB), 'files', name), 'utf-8')).sort())
+      .toEqual(['client A\n', 'client B\n'])
+    expect(readFileSync(pathB, 'utf-8')).toBe('client B\n')
   })
 
   it('rejects HTTP repositories and credential-bearing URLs before invoking Git', async () => {

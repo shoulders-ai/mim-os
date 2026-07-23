@@ -67,13 +67,13 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Tool registry.** Universal dispatch with actor context and trace logging. `src/main/tools/registry.ts`.
 - **Permission gate.** Approval policy for AI/app tool calls, keyed on effect (read/mutate/external). `src/main/security/gate.ts`, `gate-paths.ts`. Docs: [security.md](security.md).
 - **File tools.** read/write/edit/create/delete/list/rename/copy/trash, workspace-scoped, stale-write protection via content hashes. `src/main/tools/fs.ts`, `workspaceFileWatcher.ts`.
-- **Local file history.** Optional per-file recovery under `.mim/history/`, independent of git, with resumable authored-text baselines, automatic exact/daily/weekly retention, and a soft byte budget. The normal Workspace control is on/off; technical storage controls live under Advanced. `src/main/history/`, `tools/history.ts`. UI: `HistoryRail.vue`, `StorageSettingsPanel.vue`. Docs: [history.md](history.md).
+- **Local file history.** Optional per-file recovery under `.mim/history/`, independent of git, with resumable authored-text baselines, automatic exact/daily/weekly retention, and a soft byte budget. The normal Project control is on/off; technical storage controls live under Advanced. `src/main/history/`, `tools/history.ts`. UI: `HistoryRail.vue`, `StorageSettingsPanel.vue`. Docs: [history.md](history.md).
 - **Sessions.** Chat session CRUD, atomic JSON in `.mim/sessions/`, manifest cache, and durable child-thread metadata. `src/main/sessions.ts`, `sessionManifest.ts`.
 - **Subagents.** Durable AI-created child sessions with asynchronous queueing, event-driven waits, scheduler lease release, safe-boundary steering, contextual follow-ups, interruption/stop, result paging, inherited authority, MCP exposure, and Navigator runs. `src/main/subagents/`, `tools/subagents.ts`, `ai/aiRuntime.ts`, `security/gate.ts`, `src/renderer/stores/runs.ts`. Docs: [subagents.md](subagents.md), design rationale: [proposals/subagents.md](proposals/subagents.md).
 - **Routines.** Team and Project definitions resolved into one catalog with Project overrides; revision-aware create/edit/duplicate/Trash lifecycle; machine-local four-state activation, visible machine ownership, and run state under `.mim/routines/`; manual chat-turn runs; desktop schedule/file/webhook/Slack automation; source-file live refresh; authority review; routine session metadata; and the dense Routines work surface. `src/main/routines/`, `tools/routines.ts`, `server/server.ts`, `sessions.ts`, `src/renderer/components/routines/`, `src/renderer/stores/routines.ts`. Docs: [routines.md](routines.md), [design-system.md](design-system.md#617-routines-work-surface).
 - **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
-- **Git tools.** Status/diff/log/commit/pull/push and opt-in managed sync. `src/main/git.ts`, `tools/git.ts`, `tools/sync.ts`.
-- **Team source.** One Personal connection, deterministic `~/.mim/team/` checkout, fixed contribution contract, writable system-Git sync, and safe Project mount at `.mim/team`. `src/main/team/teamSource.ts`, `src/main/team/teamFiles.ts`, `tools/team.ts`. Docs: [team.md](team.md), [git.md](git.md).
+- **Git tools.** Status/diff/log/commit/pull/push plus managed Project sync with Git/LFS preflight, open/save/quit lifecycle automation, offline retry, and conflict-copy preservation. `src/main/git.ts`, `src/main/sync/`, `tools/git.ts`, `tools/sync.ts`.
+- **Team source.** One Personal connection, deterministic `~/.mim/team/` checkout, fixed contribution contract, writable system-Git background sync, conflict-copy preservation, and safe Project mount at `.mim/team`. `src/main/team/teamSource.ts`, `src/main/team/teamFiles.ts`, `tools/team.ts`. Docs: [team.md](team.md), [git.md](git.md).
 - **Personal config.** `~/.mim/config.yaml` (identity, appearance/editor/layout preferences, model defaults, skill activation, one credential-free Team repository, and currently legacy source configuration). Never holds keys or tokens. `src/main/userConfig.ts`.
 - **Settings tools.** Route Personal preferences to `~/.mim/config.yaml` and current-Project runtime/tool state to `.mim/settings.json`; agent tool availability policy remains Project-local for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
@@ -296,6 +296,9 @@ src/
     team/
       teamSource.ts             # One Team connection, checkout contract + Git sync
       teamFiles.ts              # Safe Project checkout mount + Team Files root
+    sync/
+      backgroundSync.ts         # Open/save/quit sync lifecycle and offline retry
+      conflicts.ts              # Rebase conflict-copy preservation + stop state
     search/
       search.ts                 # SQLite FTS5 session search
       fileSearch.ts             # Workspace file content search

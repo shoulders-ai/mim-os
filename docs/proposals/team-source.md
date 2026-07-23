@@ -425,11 +425,13 @@ paths removed rather than left beside the replacement.
    ADVANCED navigation, move every retained control to its new owner, delete
    Workspace/Instructions/About remnants, and add the version/update footer.
    Settings remains a dense fixed-size dialog using existing UI primitives.
-10. **Finish invisible Git for beta.** Add Git/LFS preflight and guided setup,
-    then automate conservative Team and Project fetch/pull/commit/push. Preserve
-    both versions on conflicts, report plain-language sync state, and retain
-    manual **Sync now** and local history as escape hatches. Do not bundle Git
-    in this phase.
+10. **Finish invisible Git for beta — complete.** Git/LFS preflight reports
+    exact platform setup actions only when required. Managed Team and Project
+    sync runs on open, after successful file mutations, and before quit, with
+    offline retry and plain-language paused/stopped states. Rebase collisions
+    restore the local path and preserve timestamped local and remote sibling
+    copies; automatic retry then waits for the explicit **Sync now** escape
+    hatch. Local history remains independent, and Git is not bundled.
 11. **Add useful awareness in two cuts.** First show fetched Git-derived recent
     changes and authors. Later, if still valuable, add ephemeral open-file
     presence through a tiny online relay; do not introduce locks, authoritative

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import SettingsGroup from './SettingsGroup.vue'
 import SettingRow from './SettingRow.vue'
 import MimSegmented from '../ui/MimSegmented.vue'
@@ -18,12 +18,18 @@ interface HistoryStats {
 interface SyncStatus {
   mode: 'manual' | 'managed'
   state: 'manual' | 'not-configured' | 'synced' | 'needs-sync' | 'stopped'
+  gitAvailable: boolean
   git: boolean
   remote: string | null
   dirty: boolean
   ahead: boolean
   behind: boolean
   conflicts: string[]
+  retryable: boolean
+  gitInstallAction: string | null
+  lfsRequired: boolean
+  lfsAvailable: boolean | null
+  lfsInstallAction: string | null
   message: string
 }
 
@@ -44,7 +50,7 @@ const advancedOpen = ref(false)
 const settings = useSettingsStore()
 const syncModeOptions = [
   { value: 'manual', label: 'Manual', title: 'Mim reports sync state but does not run git automatically.' },
-  { value: 'managed', label: 'Managed', title: 'Mim can commit, pull, and push when you choose Sync now.' },
+  { value: 'managed', label: 'Managed', title: 'Mim syncs automatically and keeps Sync now as a manual retry.' },
 ]
 const historyBudgetOptions = [
   { value: 256 * 1024 * 1024, label: '256 MB' },
@@ -87,20 +93,28 @@ const traceStorageLabel = computed(() =>
 const syncLabel = computed(() => sync.value ? sync.value.message : 'Loading')
 const canSyncNow = computed(() =>
   sync.value?.mode === 'managed' &&
+  sync.value.gitAvailable &&
   sync.value.git &&
   Boolean(sync.value.remote) &&
-  sync.value.conflicts.length === 0
+  (!sync.value.lfsRequired || sync.value.lfsAvailable === true)
 )
+const setupAction = computed(() => sync.value?.gitInstallAction || sync.value?.lfsInstallAction || '')
 const syncNowDesc = computed(() => {
   if (!sync.value) return ''
   if (sync.value.mode !== 'managed') return 'Switch to managed sync first'
+  if (!sync.value.gitAvailable) return 'Install Git first'
   if (!sync.value.git) return 'Initialize managed sync first'
   if (!sync.value.remote) return 'Add a remote before syncing'
-  if (sync.value.conflicts.length > 0) return 'Resolve conflicts before syncing again'
+  if (sync.value.lfsRequired && !sync.value.lfsAvailable) return 'Install Git LFS first'
+  if (sync.value.state === 'stopped') return 'Automatic sync is paused; keep the version you want, then retry'
   return sync.value.state === 'synced' ? 'No changes waiting' : ''
 })
 
-onMounted(refresh)
+onMounted(() => {
+  void refresh()
+  window.kernel.on('sync:changed', loadSync)
+})
+onBeforeUnmount(() => window.kernel.off('sync:changed', loadSync))
 
 async function refresh() {
   error.value = ''
@@ -312,12 +326,18 @@ function normalizeSyncStatus(raw: unknown): SyncStatus {
   return {
     mode,
     state,
+    gitAvailable: value.gitAvailable === true,
     git: value.git === true,
     remote: remoteValue,
     dirty: value.dirty === true,
     ahead: value.ahead === true,
     behind: value.behind === true,
     conflicts,
+    retryable: value.retryable === true,
+    gitInstallAction: typeof value.gitInstallAction === 'string' ? value.gitInstallAction : null,
+    lfsRequired: value.lfsRequired === true,
+    lfsAvailable: typeof value.lfsAvailable === 'boolean' ? value.lfsAvailable : null,
+    lfsInstallAction: typeof value.lfsInstallAction === 'string' ? value.lfsInstallAction : null,
     message: typeof value.message === 'string' && value.message.trim() ? value.message : 'Manual sync',
   }
 }
@@ -455,7 +475,7 @@ function numberOrZero(value: unknown): number {
     </SettingsGroup>
 
     <SettingsGroup title="Sync">
-      <SettingRow label="Workspace" :desc="syncLabel">
+      <SettingRow label="Project" :desc="syncLabel">
         <MimSegmented
           :model-value="sync?.mode ?? 'manual'"
           :options="syncModeOptions"
@@ -464,6 +484,12 @@ function numberOrZero(value: unknown): number {
           @update:model-value="onSyncModeUpdate"
         />
       </SettingRow>
+
+      <SettingRow
+        v-if="setupAction"
+        label="Setup required"
+        :desc="setupAction"
+      />
 
       <SettingRow label="Remote" :desc="sync?.remote || 'No remote configured'">
         <div class="flex min-w-[280px] items-center gap-2">
@@ -486,17 +512,18 @@ function numberOrZero(value: unknown): number {
         </div>
       </SettingRow>
 
-      <SettingRow label="Sync now" :desc="syncNowDesc">
+      <SettingRow label="Automatic sync" desc="Mim syncs on open, after changes, and before quit.">
         <button
           type="button"
           class="h-7 rounded-[5px] bg-accent px-3 text-[12px] font-medium text-accent-ink hover:opacity-90 disabled:opacity-40"
-          title="Synchronize the workspace with its remote"
+          title="Synchronize the Project with its remote"
           :disabled="busy !== '' || !canSyncNow"
           @click="syncNow"
         >
           Sync now
         </button>
       </SettingRow>
+      <p v-if="syncNowDesc" class="m-0 text-[11px] text-ink-3">{{ syncNowDesc }}</p>
     </SettingsGroup>
 
     <p v-if="error" class="m-0 text-[11px] text-rem">{{ error }}</p>

@@ -18,6 +18,13 @@ interface TeamStatus {
       routines: number
     }
   } | null
+  git?: {
+    available: boolean
+    installAction: string | null
+    lfsRequired: boolean
+    lfsAvailable: boolean | null
+    lfsInstallAction: string | null
+  }
 }
 
 const status = ref<TeamStatus | null>(null)
@@ -26,6 +33,7 @@ const busy = ref('')
 const error = ref('')
 
 const connected = computed(() => Boolean(status.value?.repository && status.value.team))
+const setupAction = computed(() => status.value?.git?.installAction || status.value?.git?.lfsInstallAction || '')
 const contributionSummary = computed(() => {
   if (!status.value?.team) return ''
   const contributions = status.value.team.contributions
@@ -94,6 +102,7 @@ onBeforeUnmount(() => window.kernel.off('team:changed', refresh))
           {{ status.message }}
         </div>
         <div class="mt-4 border-t border-rule-light pt-3 text-[11px] text-ink-2">{{ contributionSummary }}</div>
+        <div class="mt-2 text-[11px] text-ink-3">Mim syncs this Team source automatically on open, after changes, and before quit.</div>
         <div class="mt-4 flex gap-2">
           <button type="button" data-testid="team-open" class="h-7 rounded-[5px] border border-rule-light px-3 text-[11px] text-ink-2 hover:bg-chrome-mid" @click="open">Open</button>
           <button type="button" class="h-7 rounded-[5px] bg-accent px-3 text-[11px] font-semibold text-accent-ink hover:bg-accent/90 disabled:opacity-50" :disabled="busy !== ''" @click="sync">
@@ -105,6 +114,7 @@ onBeforeUnmount(() => window.kernel.off('team:changed', refresh))
 
     <SettingsGroup v-else title="Team source">
       <p class="pb-3 text-[11px] leading-5 text-ink-3">Connect one writable Git repository for shared files, instructions, skills, apps, and routines.</p>
+      <SettingRow v-if="setupAction" label="Setup required" :desc="setupAction" />
       <SettingRow label="Repository" desc="Uses your system Git credentials.">
         <div class="flex min-w-[320px] gap-2">
           <input v-model="repository" placeholder="git@github.com:team/mim.git" class="h-8 min-w-0 flex-1 rounded-[5px] border border-rule-light bg-surface px-2 font-mono text-[10px] text-ink outline-none hover:bg-chrome-mid focus-visible:border-accent" @keydown.enter="connect" />

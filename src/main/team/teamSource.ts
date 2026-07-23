@@ -17,8 +17,20 @@ import {
 import { join } from 'path'
 import { promisify } from 'util'
 import { parse as parseYaml } from 'yaml'
-import { hasSystemGit } from '@main/git.js'
+import {
+  gitInstallAction,
+  gitLfsInstallAction,
+  hasSystemGit,
+  hasSystemGitLfs,
+} from '@main/git.js'
 import { userHomeDir } from '@main/platform.js'
+import {
+  clearSyncStop,
+  isRetryableGitError,
+  preserveRebaseConflicts,
+  readSyncStop,
+  writeSyncStop,
+} from '@main/sync/conflicts.js'
 import { loadUserConfig, setTeamConnection } from '@main/userConfig.js'
 
 const execFileAsync = promisify(execFile)
@@ -66,6 +78,7 @@ export interface TeamSourceStatus {
   ahead: number
   behind: number
   conflicts: string[]
+  retryable: boolean
   message: string
 }
 
@@ -165,7 +178,8 @@ export function createTeamSource(options: CreateTeamSourceOptions = {}): TeamSou
   const home = options.homeDir ?? userHomeDir()
   const platform = options.platform ?? process.platform
   const root = teamCheckoutPath(home)
-  const hasGitLfs = options.hasGitLfs ?? systemHasGitLfs
+  const hasGitLfs = options.hasGitLfs ?? hasSystemGitLfs
+  const stopPath = join(root, '.git', 'mim-sync-stop.json')
 
   async function gitAvailable(): Promise<boolean> {
     return hasSystemGit()
@@ -238,6 +252,16 @@ export function createTeamSource(options: CreateTeamSourceOptions = {}): TeamSou
       }
     }
 
+    const stop = readSyncStop(stopPath)
+    if (stop) {
+      return {
+        ...baseStatus('stopped', configured, root, git, stop.message),
+        team,
+        conflicts: stop.conflicts,
+        retryable: stop.retryable,
+      }
+    }
+
     const branchStatus = await gitMaybe(root, ['status', '--short', '--branch'])
     const lines = branchStatus.split('\n')
     const tracking = lines[0] ?? ''
@@ -263,6 +287,7 @@ export function createTeamSource(options: CreateTeamSourceOptions = {}): TeamSou
       ahead,
       behind,
       conflicts,
+      retryable: false,
       message: state === 'synced'
         ? 'Synced.'
         : state === 'stopped'
@@ -313,6 +338,7 @@ export function createTeamSource(options: CreateTeamSourceOptions = {}): TeamSou
       return status()
     }
 
+    clearSyncStop(stopPath)
     const before = await status()
     if (before.state === 'invalid') throw new Error(before.message)
     if (before.git.lfsRequired && !before.git.lfsAvailable) throw new Error(before.message)
@@ -326,10 +352,22 @@ export function createTeamSource(options: CreateTeamSourceOptions = {}): TeamSou
       resolveTeamCheckout(root)
       await gitExec(root, ['push'])
     } catch (error) {
+      const preserved = await preserveRebaseConflicts(root, stopPath, 'Team')
+      if (preserved) return status()
+      const retryable = isRetryableGitError(error)
+      if (retryable) {
+        writeSyncStop(stopPath, {
+          message: 'Team sync paused while the remote is unavailable. Mim will retry automatically.',
+          conflicts: [],
+          retryable: true,
+        })
+        return status()
+      }
       const current = await status()
       return {
         ...current,
         state: 'stopped',
+        retryable: false,
         message: error instanceof Error ? error.message : String(error),
       }
     }
@@ -432,27 +470,7 @@ function baseStatus(
     ahead: 0,
     behind: 0,
     conflicts: [],
+    retryable: false,
     message,
   }
-}
-
-function gitInstallAction(platform: NodeJS.Platform): string {
-  if (platform === 'darwin') return 'Run xcode-select --install, then try again.'
-  if (platform === 'win32') return 'Run winget install --id Git.Git -e, then try again.'
-  return 'Run sudo apt install git, then try again.'
-}
-
-async function systemHasGitLfs(): Promise<boolean> {
-  try {
-    await execFileAsync('git', ['lfs', 'version'], { timeout: 5000 })
-    return true
-  } catch {
-    return false
-  }
-}
-
-function gitLfsInstallAction(platform: NodeJS.Platform): string {
-  if (platform === 'darwin') return 'Run brew install git-lfs && git lfs install, then try again.'
-  if (platform === 'win32') return 'Run winget install --id GitHub.GitLFS -e, then git lfs install and try again.'
-  return 'Run sudo apt install git-lfs && git lfs install, then try again.'
 }

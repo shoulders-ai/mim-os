@@ -45,6 +45,21 @@ describe('ToolRegistry', () => {
     expect(result).toEqual({ echo: 'hello' })
   })
 
+  it('notifies background services after successful filesystem mutations', async () => {
+    const onMutation = vi.fn()
+    const mutationTools = createToolRegistry(makeTraceLog(dir), undefined, { onMutation })
+    mutationTools.setWorkspacePath(dir)
+    mutationTools.register({
+      name: 'fs.delete',
+      description: 'Delete',
+      execute: async () => ({ deleted: 'notes/a.md' }),
+    })
+
+    await mutationTools.call('fs.delete', { path: 'notes/a.md' }, { actor: 'user' })
+
+    expect(onMutation).toHaveBeenCalledWith('notes/a.md', 'fs.delete')
+  })
+
   it('throws on unknown tool', async () => {
     await expect(
       tools.call('nonexistent', {}, { actor: 'user' })

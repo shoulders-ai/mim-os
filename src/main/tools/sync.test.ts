@@ -1,5 +1,5 @@
 import { execFileSync } from 'child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -141,6 +141,49 @@ maybeDescribe('sync tools with git', () => {
       })
       expect(readFileSync(join(root, 'from-peer.md'), 'utf-8')).toBe('shared update\n')
       expect(gitOutput(root, ['log', '-1', '--pretty=%s'])).toBe('Peer update')
+    } finally {
+      rmSync(peer, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves both versions of a same-file conflict and reports a plain retry state', async () => {
+    execFileSync('git', ['init', '--bare', remoteRoot], { stdio: 'ignore' })
+    await tools.call('sync.configure', { mode: 'managed', remote: remoteRoot }, { actor: 'user' })
+    git(root, ['config', 'user.name', 'Mim Test'])
+    git(root, ['config', 'user.email', 'mim@example.test'])
+    writeFileSync(join(root, 'brief.md'), 'initial\n')
+    await tools.call('sync.now', {}, { actor: 'user' })
+
+    const peer = mkdtempSync(join(tmpdir(), 'mim-sync-conflict-peer-'))
+    try {
+      execFileSync('git', ['clone', remoteRoot, peer], { stdio: 'ignore' })
+      git(peer, ['config', 'user.name', 'Mim Peer'])
+      git(peer, ['config', 'user.email', 'peer@example.test'])
+      writeFileSync(join(peer, 'brief.md'), 'remote version\n')
+      git(peer, ['add', '-A'])
+      git(peer, ['commit', '-m', 'Remote edit'])
+      git(peer, ['push'])
+
+      writeFileSync(join(root, 'brief.md'), 'local version\n')
+      const status = await tools.call('sync.now', {}, { actor: 'user' }) as {
+        state: string
+        retryable: boolean
+        conflicts: string[]
+        message: string
+      }
+
+      expect(status).toMatchObject({
+        state: 'stopped',
+        retryable: false,
+      })
+      expect(status.message).toContain('preserved')
+      const copies = readdirSync(root).filter(name => name.startsWith('brief.conflict-'))
+      expect(copies).toHaveLength(2)
+      expect(copies.map(name => readFileSync(join(root, name), 'utf-8')).sort()).toEqual([
+        'local version\n',
+        'remote version\n',
+      ])
+      expect(readFileSync(join(root, 'brief.md'), 'utf-8')).toBe('local version\n')
     } finally {
       rmSync(peer, { recursive: true, force: true })
     }
