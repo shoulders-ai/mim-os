@@ -67,6 +67,7 @@ const toolsText = ref('')
 const approvalText = ref('')
 const steps = ref('')
 const missed = ref<'skip' | 'once'>('skip')
+const origin = ref<'team' | 'project'>('project')
 
 const isEdit = computed(() => Boolean(props.routine))
 const selectableModels = computed(() => [
@@ -86,6 +87,10 @@ const missedOptions = [
   { value: 'skip', label: 'Skip missed runs' },
   { value: 'once', label: 'Run once when available' },
 ]
+const originOptions = computed(() => [
+  { value: 'project', label: 'Project' },
+  ...(store.teamName ? [{ value: 'team', label: store.teamName }] : []),
+])
 const modes: Array<{ kind: TriggerKind; label: string }> = [
   { kind: 'manual', label: 'Manual' },
   { kind: 'daily', label: 'Daily' },
@@ -125,6 +130,7 @@ function resetDraft(): void {
   approvalText.value = routine?.approvalAllow.join(', ') ?? ''
   steps.value = routine?.steps ? String(routine.steps) : ''
   missed.value = routine?.missed ?? 'skip'
+  origin.value = routine?.origin ?? 'project'
   resetTrigger(routine)
 }
 
@@ -257,6 +263,7 @@ async function save(): Promise<void> {
 
   const input = {
     name: name.value.trim(),
+    ...(!props.routine ? { origin: origin.value } : {}),
     ...(description.value.trim() ? { description: description.value.trim() } : {}),
     ...(buildTrigger() ? { trigger: buildTrigger() } : {}),
     ...(agentId.value ? { agent: agentId.value } : {}),
@@ -346,7 +353,7 @@ function isFileEvent(value: unknown): value is 'add' | 'change' | 'unlink' {
       </div>
 
       <section class="grid gap-3">
-        <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+        <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px_220px]">
           <label class="grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">
             Identifier
             <input
@@ -358,6 +365,16 @@ function isFileEvent(value: unknown): value is 'add' | 'change' | 'unlink' {
               autocorrect="off"
             />
           </label>
+          <div class="grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">
+            Source
+            <MimSelect
+              v-model="origin"
+              :options="originOptions"
+              :disabled="isEdit"
+              tone="surface"
+              aria-label="Routine source"
+            />
+          </div>
           <div class="grid gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-3">
             Model
             <div class="flex h-8 items-center rounded-[5px] border border-rule-light bg-chrome-high px-1 hover:bg-chrome-mid">

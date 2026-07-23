@@ -4,6 +4,7 @@ import { ref } from 'vue'
 export interface RoutineDefinition {
   id: string
   path: string
+  origin: 'team' | 'project'
   name: string
   description?: string
   trigger?: Record<string, unknown>
@@ -17,6 +18,7 @@ export interface RoutineDefinition {
   authorityHash: string
   revision: string
   activation: 'manual' | 'active' | 'disabled' | 'review-required'
+  owner?: string
   nextRunAt?: string
   lastRunId?: string
   lastSuccessAt?: string
@@ -38,6 +40,7 @@ export interface RoutineRunResult {
 
 export interface CreateRoutineInput {
   name: string
+  origin?: 'team' | 'project'
   description?: string
   trigger?: Record<string, unknown>
   agent?: string
@@ -59,18 +62,25 @@ export const useRoutineStore = defineStore('routines', () => {
   const loading = ref(false)
   const loaded = ref(false)
   const error = ref('')
+  const teamName = ref('')
   const runningIds = ref(new Set<string>())
 
   async function load(): Promise<void> {
     loading.value = true
     error.value = ''
     try {
-      const result = await window.kernel.call('routine.list') as {
-        routines?: RoutineDefinition[]
-        diagnostics?: RoutineDiagnostic[]
-      }
+      const [result, teamStatus] = await Promise.all([
+        window.kernel.call('routine.list') as Promise<{
+          routines?: RoutineDefinition[]
+          diagnostics?: RoutineDiagnostic[]
+        }>,
+        window.kernel.call('team.status').catch(() => null) as Promise<{
+          team?: { name?: string } | null
+        } | null>,
+      ])
       routines.value = result.routines ?? []
       diagnostics.value = result.diagnostics ?? []
+      teamName.value = teamStatus?.team?.name ?? ''
     } catch (err) {
       error.value = err instanceof Error ? err.message : String(err)
     } finally {
@@ -141,6 +151,7 @@ export const useRoutineStore = defineStore('routines', () => {
     loading,
     loaded,
     error,
+    teamName,
     runningIds,
     load,
     create,

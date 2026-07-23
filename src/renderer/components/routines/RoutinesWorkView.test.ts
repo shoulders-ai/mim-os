@@ -157,6 +157,7 @@ describe('RoutinesWorkView', () => {
 
     expect(call).toHaveBeenCalledWith('routine.create', {
       name: 'daily-review',
+      origin: 'project',
       trigger: { schedule: '0 9 * * *' },
       model: 'claude-sonnet',
       body: 'Review the project.',

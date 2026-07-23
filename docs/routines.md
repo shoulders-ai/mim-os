@@ -1,12 +1,15 @@
 # Routines
 
-Routines are workspace-owned standing prompts stored as Markdown files under
-`routines/`. A routine run creates a normal Mim chat session and streams through
-the same AI runtime as an ordinary chat turn.
+Routines are standing prompts supplied by the current Project or the connected
+Team. Project definitions live under `routines/`; Team definitions live under
+`~/.mim/team/routines/` and are exposed to the editor through
+`.mim/team/routines/`. A routine run creates a normal Mim chat session and
+streams through the same AI runtime as an ordinary chat turn.
 
 ## Definition Files
 
-Each routine is `routines/<name>.md` with YAML frontmatter and a prompt body:
+Each routine is `<source>/routines/<name>.md` with YAML frontmatter and a prompt
+body:
 
 ```markdown
 ---
@@ -62,9 +65,16 @@ enabled/paused flags:
 
 Machine-local activation lives in version 2 of `.mim/routines/state.json`.
 Enabling stores an authority hash over trigger/model/agent/tools/approval/steps/
-missed fields. A prompt or description edit preserves active state; an
+missed fields plus the local machine hostname as the visible schedule owner.
+Team state keys are origin-qualified, so they cannot collide with Project
+state. A prompt or description edit preserves active state; an
 authority-bearing edit moves the routine to `review-required` until the user
 reviews and enables automatic runs again.
+
+This state belongs to the local Project checkout even for a Team routine. Two
+clients can therefore activate different Team routines, and only the chosen
+client runs its schedules, file triggers, Slack events, or webhooks. Activation
+never rewrites a Team or Project definition.
 
 Manual starts and runs are allowed for disabled routines so authors can test a
 routine before enabling it.
@@ -118,12 +128,15 @@ they never return the signing secret itself.
 
 ## Work Surface
 
-The Navigator has a dense Routines work surface. Rows lead with the human
-description, keep the stable identifier secondary, translate triggers into
-plain language, summarize access, and show last/next-run context. Failed and
-review-required routines sort to the top. Run or Run now is always visible;
-automatic routines use one Automatic toggle. Turning it on opens an authority
-review rather than relying on an ambiguous Resume action.
+The Navigator has one dense Routines work surface for Team and Project
+definitions. Project definitions override same-named Team definitions. Rows
+lead with the human description, keep the stable identifier secondary, label
+the actual Team name or Project origin, translate triggers into plain language,
+summarize access, and show the machine that owns active automatic runs plus
+last/next-run context. Failed and review-required routines sort to the top. Run
+or Run now is always visible; automatic routines use one Automatic toggle.
+Turning it on opens an authority review rather than relying on an ambiguous
+Resume action.
 
 Each row has an action menu for Edit routine, Open definition file, View last
 run, Duplicate, and Move to Trash. New and Edit share one structured dialog for

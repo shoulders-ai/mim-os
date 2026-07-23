@@ -92,14 +92,14 @@ export function createRoutineAutomation(options: RoutineAutomationOptions) {
       if (!routineEveryMs(routine) && !routineScheduleExpression(routine)) continue
       const next = routine.nextRunAt ? parseDate(routine.nextRunAt) : null
       if (!next) {
-        recordRoutineAutomationState(loaded.workspace, routine.id, {
+        recordRoutineAutomationState(loaded.workspace, routine, {
           nextRunAt: nextFireAfter(routine, at)?.toISOString(),
         })
         continue
       }
       if (next.getTime() > at.getTime()) continue
       await fireRoutine(loaded.workspace, routine, { trigger: 'schedule' }, at)
-      recordRoutineAutomationState(loaded.workspace, routine.id, {
+      recordRoutineAutomationState(loaded.workspace, routine, {
         nextRunAt: nextFireAfter(routine, at)?.toISOString(),
       })
     }
@@ -213,12 +213,12 @@ export function createRoutineAutomation(options: RoutineAutomationOptions) {
     running.add(routine.id)
     try {
       const result = await options.runRoutine(routine, context)
-      recordRoutineAutomationState(workspace, routine.id, {
+      recordRoutineAutomationState(workspace, routine, {
         lastRunId: result.routineRunId,
         lastSuccessAt: result.status === 'done' ? at.toISOString() : undefined,
       })
     } catch (err) {
-      recordRoutineAutomationState(workspace, routine.id, {
+      recordRoutineAutomationState(workspace, routine, {
         lastErrorAt: at.toISOString(),
       })
       throw err

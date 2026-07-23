@@ -63,6 +63,10 @@ async function enable(): Promise<void> {
           <dd class="text-ink">{{ routineTriggerLabel(routine) }}</dd>
         </div>
         <div class="grid grid-cols-[120px_minmax(0,1fr)] gap-3 px-3 py-2.5">
+          <dt class="font-medium text-ink-3">Owner</dt>
+          <dd class="text-ink">{{ routine.owner || 'This device' }}</dd>
+        </div>
+        <div class="grid grid-cols-[120px_minmax(0,1fr)] gap-3 px-3 py-2.5">
           <dt class="font-medium text-ink-3">Agent</dt>
           <dd class="break-all text-ink">{{ routine.agent || 'Default agent' }}</dd>
         </div>

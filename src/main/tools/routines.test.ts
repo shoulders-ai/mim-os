@@ -113,6 +113,33 @@ describe('routine tools', () => {
     expect(listed.routines).toEqual([])
   })
 
+  it('creates and updates writable Team routine definitions through the mounted Team source', async () => {
+    mkdirSync(join(dir, '.mim', 'team', 'routines'), { recursive: true })
+    registerRoutineTools(tools)
+
+    const created = await tools.call('routine.create', {
+      name: 'team-pulse',
+      origin: 'team',
+      body: 'Check the Team pulse.',
+    }, { actor: 'user' }) as { routine: { origin: string; path: string; revision: string } }
+
+    expect(created.routine).toMatchObject({
+      origin: 'team',
+      path: '.mim/team/routines/team-pulse.md',
+    })
+
+    const updated = await tools.call('routine.update', {
+      name: 'team-pulse',
+      expectedRevision: created.routine.revision,
+      body: 'Check and summarize the Team pulse.',
+    }, { actor: 'user' }) as { routine: { origin: string; body: string } }
+
+    expect(updated.routine).toMatchObject({
+      origin: 'team',
+      body: 'Check and summarize the Team pulse.',
+    })
+  })
+
   it('manual run is allowed for disabled routines and delegates to the runner', async () => {
     const runRoutine = vi.fn(async () => ({
       sessionId: 'session_routine',

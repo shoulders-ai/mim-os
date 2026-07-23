@@ -180,6 +180,95 @@ describe('routine definitions', () => {
     })
   })
 
+  it('resolves Team and Project routines together with Project overrides', () => {
+    const teamRoutinesDir = join(dir, 'connected-team', 'routines')
+    mkdirSync(teamRoutinesDir, { recursive: true })
+    mkdirSync(join(dir, 'routines'), { recursive: true })
+    writeFileSync(join(teamRoutinesDir, 'shared.md'), [
+      '---',
+      'name: shared',
+      'description: Team version.',
+      '---',
+      '',
+      'Run the Team version.',
+    ].join('\n'))
+    writeFileSync(join(teamRoutinesDir, 'team-only.md'), [
+      '---',
+      'name: team-only',
+      'description: Team only.',
+      '---',
+      '',
+      'Run everywhere.',
+    ].join('\n'))
+    writeFileSync(join(dir, 'routines', 'shared.md'), [
+      '---',
+      'name: shared',
+      'description: Project version.',
+      '---',
+      '',
+      'Run for this Project.',
+    ].join('\n'))
+
+    const catalog = loadRoutineCatalog(dir, { teamRoutinesDir })
+
+    expect(catalog.diagnostics).toEqual([])
+    expect(catalog.routines).toEqual([
+      expect.objectContaining({
+        id: 'shared',
+        origin: 'project',
+        path: 'routines/shared.md',
+        description: 'Project version.',
+      }),
+      expect.objectContaining({
+        id: 'team-only',
+        origin: 'team',
+        path: '.mim/team/routines/team-only.md',
+      }),
+    ])
+  })
+
+  it('keeps Team routine activation and owner independent for two client checkouts', () => {
+    const teamRoot = join(dir, 'connected-team')
+    const teamRoutinesDir = join(teamRoot, 'routines')
+    const clientA = join(dir, 'client-a')
+    const clientB = join(dir, 'client-b')
+    mkdirSync(teamRoutinesDir, { recursive: true })
+    mkdirSync(clientA, { recursive: true })
+    mkdirSync(clientB, { recursive: true })
+    const definitionPath = join(teamRoutinesDir, 'overnight.md')
+    writeFileSync(definitionPath, [
+      '---',
+      'name: overnight',
+      'trigger:',
+      '  every: 4h',
+      '---',
+      '',
+      'Run overnight work.',
+    ].join('\n'))
+    const definition = readFileSync(definitionPath, 'utf-8')
+
+    const routineA = loadRoutineCatalog(clientA, { teamRoutinesDir }).routines[0]
+    enableRoutine(clientA, routineA, { owner: 'always-on-a' })
+
+    expect(loadRoutineCatalog(clientA, { teamRoutinesDir }).routines[0]).toMatchObject({
+      origin: 'team',
+      activation: 'active',
+      owner: 'always-on-a',
+    })
+    const routineB = loadRoutineCatalog(clientB, { teamRoutinesDir }).routines[0]
+    expect(routineB).toMatchObject({
+      origin: 'team',
+      activation: 'review-required',
+    })
+    expect(routineB).not.toHaveProperty('owner')
+    expect(readRoutineState(clientA).routines?.['team:overnight']).toMatchObject({
+      enabled: true,
+      owner: 'always-on-a',
+    })
+    expect(existsSync(join(clientB, '.mim', 'routines', 'state.json'))).toBe(false)
+    expect(readFileSync(definitionPath, 'utf-8')).toBe(definition)
+  })
+
   it('ignores legacy state and requires automatic routines to be reviewed again', () => {
     mkdirSync(join(dir, 'routines'), { recursive: true })
     mkdirSync(join(dir, '.mim', 'routines'), { recursive: true })

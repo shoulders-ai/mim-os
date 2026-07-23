@@ -1,11 +1,13 @@
 import { createHash, randomBytes } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs'
+import { hostname } from 'os'
 import { basename, join } from 'path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
 import { atomicWriteJson } from '@main/atomicJson.js'
 
 export type RoutineRunStatus = 'working' | 'needs-approval' | 'done' | 'error' | 'stopped'
 export type RoutineActivation = 'manual' | 'active' | 'disabled' | 'review-required'
+export type RoutineOrigin = 'team' | 'project'
 export type RoutineSlackTriggerMode = 'mention' | 'always'
 export type RoutineFileTriggerEvent = 'add' | 'change' | 'unlink'
 
@@ -34,6 +36,7 @@ export interface RoutineSlackTrigger {
 export interface RoutineDefinition {
   id: string
   path: string
+  origin: RoutineOrigin
   name: string
   description?: string
   trigger?: Record<string, unknown>
@@ -47,6 +50,7 @@ export interface RoutineDefinition {
   authorityHash: string
   revision: string
   activation: RoutineActivation
+  owner?: string
   nextRunAt?: string
   lastRunId?: string
   lastSuccessAt?: string
@@ -74,10 +78,12 @@ export interface RoutineAutomationStatePatch {
 
 export interface LoadRoutineCatalogOptions {
   knownTools?: Set<string>
+  teamRoutinesDir?: string | null
 }
 
 export interface CreateRoutineInput {
   name: string
+  origin?: RoutineOrigin
   description?: string
   trigger?: Record<string, unknown>
   agent?: string
@@ -115,6 +121,7 @@ export interface ParsedRoutine {
 export interface RoutineState {
   enabled?: boolean
   authorityHash?: string
+  owner?: string
   updatedAt?: string
   nextRunAt?: string
   lastRunId?: string
@@ -137,76 +144,77 @@ const STATE_PATH = join('.mim', 'routines', 'state.json')
 const ROUTINE_TRIGGER_KINDS = ['schedule', 'every', 'files', 'webhook', 'slack'] as const
 
 export function loadRoutineCatalog(workspacePath: string, options: LoadRoutineCatalogOptions = {}): RoutineCatalog {
-  const routinesDir = join(workspacePath, 'routines')
-  if (!existsSync(routinesDir)) return { routines: [], diagnostics: [] }
-
-  const routines: RoutineDefinition[] = []
+  const sources: Array<{ origin: RoutineOrigin; dir: string; pathPrefix: string }> = [
+    {
+      origin: 'team',
+      dir: options.teamRoutinesDir ?? join(workspacePath, '.mim', 'team', 'routines'),
+      pathPrefix: '.mim/team/routines',
+    },
+    { origin: 'project', dir: join(workspacePath, 'routines'), pathPrefix: 'routines' },
+  ]
+  const routines = new Map<string, RoutineDefinition>()
   const diagnostics: RoutineDiagnostic[] = []
-  const seenNames = new Set<string>()
   const state = readRoutineState(workspacePath)
-  const files = readdirSync(routinesDir)
-    .filter(file => file.endsWith('.md'))
-    .sort((a, b) => a.localeCompare(b))
+  for (const source of sources) {
+    if (!existsSync(source.dir)) continue
+    const files = readdirSync(source.dir)
+      .filter(file => file.endsWith('.md'))
+      .sort((a, b) => a.localeCompare(b))
 
-  for (const file of files) {
-    const absolutePath = join(routinesDir, file)
-    if (!statSync(absolutePath).isFile()) continue
-    const relPath = `routines/${file}`
-    try {
-      const parsed = parseRoutineDefinition(relPath, readFileSync(absolutePath, 'utf-8'))
-      const fileId = basename(file, '.md')
-      if (parsed.name !== fileId) {
+    for (const file of files) {
+      const absolutePath = join(source.dir, file)
+      if (!statSync(absolutePath).isFile()) continue
+      const editorPath = `${source.pathPrefix}/${file}`
+      try {
+        const parsed = parseRoutineDefinition(editorPath, readFileSync(absolutePath, 'utf-8'))
+        const fileId = basename(file, '.md')
+        if (parsed.name !== fileId) {
+          diagnostics.push({
+            path: editorPath,
+            routineId: parsed.name,
+            severity: 'error',
+            message: `Routine name must match filename: ${fileId}`,
+          })
+          continue
+        }
+
+        const routineDiagnostics = validateRoutine(parsed, options.knownTools)
+        if (routineDiagnostics.length) {
+          diagnostics.push(...routineDiagnostics.map(message => ({
+            path: editorPath,
+            routineId: parsed.name,
+            severity: 'error' as const,
+            message,
+          })))
+          continue
+        }
+
+        routines.set(parsed.name, applyRoutineState(
+          { ...parsed, origin: source.origin },
+          state.routines?.[routineStateKey(source.origin, parsed.id)],
+        ))
+      } catch (err) {
         diagnostics.push({
-          path: relPath,
-          routineId: parsed.name,
+          path: editorPath,
           severity: 'error',
-          message: `Routine name must match filename: ${fileId}`,
+          message: err instanceof Error ? err.message : String(err),
         })
-        continue
       }
-      if (seenNames.has(parsed.name)) {
-        diagnostics.push({
-          path: relPath,
-          routineId: parsed.name,
-          severity: 'error',
-          message: `Duplicate routine name: ${parsed.name}`,
-        })
-        continue
-      }
-
-      const routineDiagnostics = validateRoutine(parsed, options.knownTools)
-      if (routineDiagnostics.length) {
-        diagnostics.push(...routineDiagnostics.map(message => ({
-          path: relPath,
-          routineId: parsed.name,
-          severity: 'error' as const,
-          message,
-        })))
-        continue
-      }
-
-      seenNames.add(parsed.name)
-      routines.push(applyRoutineState(parsed, state.routines?.[parsed.id]))
-    } catch (err) {
-      diagnostics.push({
-        path: relPath,
-        severity: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      })
     }
   }
 
-  const duplicateSlack = duplicateSlackBindingDiagnostics(routines)
+  const resolved = [...routines.values()].sort((a, b) => a.id.localeCompare(b.id))
+  const duplicateSlack = duplicateSlackBindingDiagnostics(resolved)
   if (duplicateSlack.length) {
     const duplicateRoutineIds = new Set(duplicateSlack.map(item => item.routineId).filter(Boolean) as string[])
     diagnostics.push(...duplicateSlack)
     return {
-      routines: routines.filter(routine => !duplicateRoutineIds.has(routine.id)),
+      routines: resolved.filter(routine => !duplicateRoutineIds.has(routine.id)),
       diagnostics,
     }
   }
 
-  return { routines, diagnostics }
+  return { routines: resolved, diagnostics }
 }
 
 export function loadRoutineDefinitions(workspacePath: string): RoutineCatalog {
@@ -259,7 +267,10 @@ export function createRoutineFile(workspacePath: string, input: CreateRoutineInp
     throw new Error('Routine name may contain only letters, numbers, dots, underscores, and hyphens')
   }
   const body = requiredString(input.body, 'body')
-  const routinesDir = join(workspacePath, 'routines')
+  const origin = input.origin ?? 'project'
+  const routinesDir = origin === 'team'
+    ? join(workspacePath, '.mim', 'team', 'routines')
+    : join(workspacePath, 'routines')
   const path = join(routinesDir, `${name}.md`)
   if (existsSync(path)) throw new Error(`Routine already exists: ${name}`)
 
@@ -268,11 +279,11 @@ export function createRoutineFile(workspacePath: string, input: CreateRoutineInp
   writeFileSync(path, content)
 
   const catalog = loadRoutineCatalog(workspacePath, { knownTools: input.knownTools })
-  const created = catalog.routines.find(routine => routine.id === name)
+  const created = catalog.routines.find(routine => routine.id === name && routine.origin === origin)
   if (!created) {
     try { unlinkSync(path) } catch { /* best effort rollback */ }
     const messages = catalog.diagnostics
-      .filter(diagnostic => diagnostic.routineId === name || diagnostic.path === `routines/${name}.md`)
+      .filter(diagnostic => diagnostic.routineId === name)
       .map(diagnostic => diagnostic.message)
     throw new Error(messages[0] ?? `Routine could not be created: ${name}`)
   }
@@ -281,31 +292,39 @@ export function createRoutineFile(workspacePath: string, input: CreateRoutineInp
 
 export function updateRoutineFile(workspacePath: string, input: UpdateRoutineInput): RoutineDefinition {
   const name = requiredString(input.name, 'name')
-  const path = join(workspacePath, 'routines', `${name}.md`)
+  const origin = input.origin ?? 'project'
+  const path = origin === 'team'
+    ? join(workspacePath, '.mim', 'team', 'routines', `${name}.md`)
+    : join(workspacePath, 'routines', `${name}.md`)
+  const editorPath = origin === 'team'
+    ? `.mim/team/routines/${name}.md`
+    : `routines/${name}.md`
   if (!existsSync(path)) throw new Error(`Routine not found: ${name}`)
 
   const previous = readFileSync(path, 'utf-8')
   if (routineRevision(previous) !== requiredString(input.expectedRevision, 'expectedRevision')) {
     throw new Error(`Routine changed since it was opened: ${name}`)
   }
-  const previousDefinition = parseRoutineDefinition(`routines/${name}.md`, previous)
+  const previousDefinition = parseRoutineDefinition(editorPath, previous)
 
   const content = serializeRoutineDefinition(input)
-  const parsed = parseRoutineDefinition(`routines/${name}.md`, content)
+  const parsed = parseRoutineDefinition(editorPath, content)
   if (parsed.name !== name) throw new Error(`Routine name must match filename: ${name}`)
   const diagnostics = validateRoutine(parsed, input.knownTools)
   if (diagnostics.length) throw new Error(diagnostics[0])
 
   atomicWriteText(path, content)
   const catalog = loadRoutineCatalog(workspacePath, { knownTools: input.knownTools })
-  const updated = catalog.routines.find(routine => routine.id === name)
+  const updated = catalog.routines.find(routine => routine.id === name && routine.origin === origin)
   if (!updated) {
     atomicWriteText(path, previous)
     const message = catalog.diagnostics.find(item => item.routineId === name)?.message
     throw new Error(message ?? `Routine could not be updated: ${name}`)
   }
-  if (previousDefinition.authorityHash !== parsed.authorityHash && invalidateRoutineActivation(workspacePath, name)) {
-    return loadRoutineCatalog(workspacePath, { knownTools: input.knownTools }).routines.find(routine => routine.id === name) ?? updated
+  if (previousDefinition.authorityHash !== parsed.authorityHash && invalidateRoutineActivation(workspacePath, origin, name)) {
+    return loadRoutineCatalog(workspacePath, { knownTools: input.knownTools }).routines.find(
+      routine => routine.id === name && routine.origin === origin,
+    ) ?? updated
   }
   return updated
 }
@@ -331,43 +350,52 @@ export function duplicateRoutineFile(
   })
 }
 
-export function enableRoutine(workspacePath: string, routine: Pick<RoutineDefinition, 'id' | 'authorityHash' | 'trigger'>): void {
+export function enableRoutine(
+  workspacePath: string,
+  routine: Pick<RoutineDefinition, 'id' | 'origin' | 'authorityHash' | 'trigger'>,
+  options: { owner?: string } = {},
+): void {
   if (!isAutomaticRoutine(routine)) throw new Error(`Manual routines do not have automatic runs: ${routine.id}`)
   const state = readRoutineState(workspacePath)
   state.routines ??= {}
-  state.routines[routine.id] = {
-    ...(state.routines[routine.id] ?? {}),
+  const key = routineStateKey(routine.origin, routine.id)
+  state.routines[key] = {
+    ...(state.routines[key] ?? {}),
     enabled: true,
     authorityHash: routine.authorityHash,
+    owner: options.owner?.trim() || hostname(),
     updatedAt: new Date().toISOString(),
   }
   writeRoutineState(workspacePath, state)
 }
 
-export function disableRoutine(workspacePath: string, routine: Pick<RoutineDefinition, 'id' | 'trigger'>): void {
+export function disableRoutine(workspacePath: string, routine: Pick<RoutineDefinition, 'id' | 'origin' | 'trigger'>): void {
   if (!isAutomaticRoutine(routine)) throw new Error(`Manual routines do not have automatic runs: ${routine.id}`)
   const state = readRoutineState(workspacePath)
   state.routines ??= {}
-  state.routines[routine.id] = {
-    ...(state.routines[routine.id] ?? {}),
+  const key = routineStateKey(routine.origin, routine.id)
+  state.routines[key] = {
+    ...(state.routines[key] ?? {}),
     enabled: false,
     updatedAt: new Date().toISOString(),
   }
   writeRoutineState(workspacePath, state)
 }
 
-export function removeRoutineState(workspacePath: string, routineId: string): void {
+export function removeRoutineState(workspacePath: string, routineId: string, origin: RoutineOrigin = 'project'): void {
   const state = readRoutineState(workspacePath)
-  if (!state.routines?.[routineId]) return
-  delete state.routines[routineId]
+  const key = routineStateKey(origin, routineId)
+  if (!state.routines?.[key]) return
+  delete state.routines[key]
   writeRoutineState(workspacePath, state)
 }
 
-function invalidateRoutineActivation(workspacePath: string, routineId: string): boolean {
+function invalidateRoutineActivation(workspacePath: string, origin: RoutineOrigin, routineId: string): boolean {
   const state = readRoutineState(workspacePath)
-  const existing = state.routines?.[routineId]
+  const key = routineStateKey(origin, routineId)
+  const existing = state.routines?.[key]
   if (existing?.enabled !== true) return false
-  state.routines![routineId] = {
+  state.routines![key] = {
     ...existing,
     enabled: false,
     updatedAt: new Date().toISOString(),
@@ -380,15 +408,20 @@ export function isAutomaticRoutine(routine: Pick<ParsedRoutine, 'trigger'>): boo
   return ROUTINE_TRIGGER_KINDS.some(kind => routine.trigger?.[kind] !== undefined)
 }
 
+export function routineStateKey(origin: RoutineOrigin, routineId: string): string {
+  return origin === 'team' ? `team:${routineId}` : routineId
+}
+
 export function recordRoutineAutomationState(
   workspacePath: string,
-  routineId: string,
+  routine: Pick<RoutineDefinition, 'id' | 'origin'>,
   patch: RoutineAutomationStatePatch,
 ): void {
   const state = readRoutineState(workspacePath)
   state.routines ??= {}
-  const existing = state.routines[routineId] ?? {}
-  state.routines[routineId] = {
+  const key = routineStateKey(routine.origin, routine.id)
+  const existing = state.routines[key] ?? {}
+  state.routines[key] = {
     ...existing,
     ...patch,
     updatedAt: new Date().toISOString(),
@@ -431,7 +464,10 @@ export function routineScheduleExpression(routine: Pick<RoutineDefinition, 'trig
   return typeof value === 'string' && value.trim() ? value.trim() : null
 }
 
-function applyRoutineState(routine: ParsedRoutine, state: RoutineState | undefined): RoutineDefinition {
+function applyRoutineState(
+  routine: ParsedRoutine & { origin: RoutineOrigin },
+  state: RoutineState | undefined,
+): RoutineDefinition {
   const activation: RoutineActivation = !isAutomaticRoutine(routine)
     ? 'manual'
     : state?.authorityHash !== routine.authorityHash
@@ -442,6 +478,7 @@ function applyRoutineState(routine: ParsedRoutine, state: RoutineState | undefin
   return {
     ...routine,
     activation,
+    ...(state?.owner ? { owner: state.owner } : {}),
     ...(state?.nextRunAt ? { nextRunAt: state.nextRunAt } : {}),
     ...(state?.lastRunId ? { lastRunId: state.lastRunId } : {}),
     ...(state?.lastSuccessAt ? { lastSuccessAt: state.lastSuccessAt } : {}),

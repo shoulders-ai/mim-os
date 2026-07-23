@@ -684,6 +684,10 @@ async function boot(): Promise<void> {
     onChanged: async () => {
       const workspace = tools.getWorkspacePath()
       if (workspace) await syncWorkspaceTeamMount(workspace)
+      await routineAutomation?.refresh()
+      await slackListener?.refresh()
+      broadcastToRenderers('routines:changed', {})
+      server?.broadcast('routines:changed', {})
     },
     emit: (channel) => {
       mainWindow?.webContents.send(channel)

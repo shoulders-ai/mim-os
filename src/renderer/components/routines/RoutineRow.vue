@@ -23,11 +23,13 @@ import {
 
 const props = withDefaults(defineProps<{
   routine: RoutineDefinition
+  sourceLabel?: string
   running?: boolean
   hasLastRun?: boolean
 }>(), {
   running: false,
   hasLastRun: false,
+  sourceLabel: '',
 })
 
 const emit = defineEmits<{
@@ -85,6 +87,9 @@ function toggleAutomation(): void {
                 }"
               >
                 {{ routineActivationLabel(routine) }}
+              </span>
+              <span class="shrink-0 rounded-full bg-chrome-high px-1.5 py-0.5 text-[10px] font-medium text-ink-3">
+                {{ sourceLabel || (routine.origin === 'team' ? 'Team' : 'Project') }}
               </span>
             </span>
             <span class="mt-0.5 block truncate font-mono text-[10px] text-ink-4">
@@ -158,6 +163,7 @@ function toggleAutomation(): void {
         <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-3">
           <span>{{ routineTriggerLabel(routine) }}</span>
           <span class="text-ink-4">{{ routineAccessSummary(routine) }}</span>
+          <span v-if="routine.owner" class="text-ink-4">Runs on {{ routine.owner }}</span>
         </div>
 
         <div

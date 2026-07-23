@@ -49,7 +49,7 @@ export function registerRoutineTools(tools: ToolRegistry, options: RegisterRouti
 
   tools.register({
     name: 'routine.list',
-    description: 'List workspace routines and validation diagnostics',
+    description: 'List Team and Project routines with validation diagnostics',
     inputSchema: { type: 'object', properties: {} },
     execute: async () => {
       const ws = requireWorkspace(tools)
@@ -73,11 +73,12 @@ export function registerRoutineTools(tools: ToolRegistry, options: RegisterRouti
 
   tools.register({
     name: 'routine.create',
-    description: 'Create a workspace routine definition; automatic runs require local review',
+    description: 'Create a Team or Project routine definition; automatic runs require local review',
     inputSchema: {
       type: 'object',
       properties: {
         name: { type: 'string' },
+        origin: { type: 'string', enum: ['team', 'project'] },
         description: { type: 'string' },
         trigger: { type: 'object' },
         agent: { type: 'string' },
@@ -127,7 +128,11 @@ export function registerRoutineTools(tools: ToolRegistry, options: RegisterRouti
     },
     execute: async (params) => {
       const ws = requireWorkspace(tools)
-      const routine = updateRoutineFile(ws, normalizeUpdateInput(params, runtimeOptions.knownTools?.()))
+      const existing = requireRoutine(ws, String(params.name ?? ''), runtimeOptions)
+      const routine = updateRoutineFile(ws, {
+        ...normalizeUpdateInput(params, runtimeOptions.knownTools?.()),
+        origin: existing.origin,
+      })
       await runtimeOptions.onChange?.()
       return { routine }
     },
@@ -209,7 +214,7 @@ export function registerRoutineTools(tools: ToolRegistry, options: RegisterRouti
             item.id !== routine.id && routineWebhookTrigger(item)?.secret === webhook.secret)
         : false
       await tools.call('fs.trash', { path: routine.path }, ctx)
-      removeRoutineState(ws, routine.id)
+      removeRoutineState(ws, routine.id, routine.origin)
       if (webhook && !sharedWebhookSecret) {
         await secretStore(runtimeOptions).delete(
           MIM_KEYCHAIN_SERVICE,
@@ -610,6 +615,7 @@ async function webhookSecretConfigured(options: RegisterRoutineToolsOptions, nam
 function normalizeCreateInput(params: Record<string, unknown>): CreateRoutineInput {
   return {
     name: String(params.name ?? ''),
+    origin: params.origin === 'team' ? 'team' : 'project',
     description: typeof params.description === 'string' ? params.description : undefined,
     trigger: isPlainObject(params.trigger) ? params.trigger : undefined,
     agent: typeof params.agent === 'string' ? params.agent : undefined,

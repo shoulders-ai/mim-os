@@ -417,7 +417,7 @@ paths removed rather than left beside the replacement.
    validation, updates, developer information, overrides, and the existing
    per-user/per-Project enablement file. Delete registry browse/source/account
    flows and merge CLI agents into Apps & agents.
-8. **Add Team routines.** Resolve Team and Project routine definitions in one
+8. **Add Team routines — complete.** Resolve Team and Project routine definitions in one
    surface, retain machine-local activation and schedule ownership, and make
    the chosen owner visible. Verify that two clients can make different
    activation choices without writing shared state.

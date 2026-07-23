@@ -10,6 +10,7 @@ function routine(overrides: Partial<RoutineDefinition> = {}): RoutineDefinition 
   return {
     id: 'pulse',
     path: 'routines/pulse.md',
+    origin: 'project',
     name: 'pulse',
     description: 'Check the project pulse.',
     trigger: { every: '4h' },
@@ -45,6 +46,7 @@ describe('RoutineRow', () => {
     expect(root.textContent).toContain('2 tools · 1 allowed without asking')
     expect(root.textContent).toContain('Completed')
     expect(root.textContent).toContain('Next')
+    expect(root.textContent).toContain('Project')
 
     root.querySelector<HTMLButtonElement>('[data-testid="routine-run"]')?.click()
     root.querySelector<HTMLButtonElement>('[data-testid="routine-edit"]')?.click()
@@ -54,6 +56,20 @@ describe('RoutineRow', () => {
     expect(onRun).toHaveBeenCalledOnce()
     expect(onEdit).toHaveBeenCalledOnce()
     expect(onDisable).toHaveBeenCalledOnce()
+    app.unmount()
+  })
+
+  it('shows the actual Team source and the local machine that owns automatic runs', () => {
+    const root = document.createElement('div')
+    const app = createApp(RoutineRow, {
+      routine: routine({ origin: 'team', owner: 'always-on-mac' }),
+      sourceLabel: 'Shoulders',
+    })
+    app.use(createPinia())
+    app.mount(root)
+
+    expect(root.textContent).toContain('Shoulders')
+    expect(root.textContent).toContain('Runs on always-on-mac')
     app.unmount()
   })
 

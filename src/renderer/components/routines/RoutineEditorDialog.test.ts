@@ -16,6 +16,7 @@ async function flushUi() {
 const existing: RoutineDefinition = {
   id: 'pulse',
   path: 'routines/pulse.md',
+  origin: 'project',
   name: 'pulse',
   description: 'Check project pulse.',
   trigger: { every: '4h' },

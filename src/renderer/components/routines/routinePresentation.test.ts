@@ -12,6 +12,7 @@ function routine(overrides: Partial<RoutineDefinition> = {}): RoutineDefinition 
   return {
     id: 'pulse',
     path: 'routines/pulse.md',
+    origin: 'project',
     name: 'pulse',
     tools: [],
     approvalAllow: [],

@@ -41,11 +41,13 @@ const onRoutinesChanged = () => {
 
 onMounted(() => {
   window.kernel.on('routines:changed', onRoutinesChanged)
+  window.kernel.on('team:changed', onRoutinesChanged)
   if (props.active) void store.load()
 })
 
 onBeforeUnmount(() => {
   window.kernel.off('routines:changed', onRoutinesChanged)
+  window.kernel.off('team:changed', onRoutinesChanged)
 })
 
 watch(() => props.active, active => {
@@ -167,6 +169,7 @@ function closeRemove(): void {
           v-for="routine in sortedRoutines"
           :key="routine.id"
           :routine="routine"
+          :source-label="routine.origin === 'team' ? store.teamName || 'Team' : 'Project'"
           :running="store.isRunning(routine.id)"
           :has-last-run="Boolean(lastRun(routine))"
           @run="runNow(routine)"
