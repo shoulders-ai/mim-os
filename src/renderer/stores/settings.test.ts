@@ -237,7 +237,7 @@ describe('renderer settings store', () => {
     })
   })
 
-  it('load() resets workspace-scoped settings before applying a new workspace', async () => {
+  it('load() resets settings before applying a fresh kernel response', async () => {
     const store = useSettingsStore()
     await store.set('rightPanelWidth', 700)
     const call = stubRendererGlobals({ theme: 'sage' })
@@ -397,7 +397,7 @@ describe('renderer settings store', () => {
     expect(JSON.parse(globalThis.localStorage?.getItem('mim:recentWorkspaces') ?? '[]')).toEqual(['/Users/test/b'])
   })
 
-  it('load() populates config refs from config.get independently of settings.get', async () => {
+  it('load() gets Personal model preferences from settings and identity from config.get', async () => {
     const call = vi.fn(async (tool: string) => {
       if (tool === 'settings.get') {
         return { settings: { lastChatModel: 'gpt-5.4', lastGhostModel: 'gpt-5.4-nano' } }
@@ -405,7 +405,6 @@ describe('renderer settings store', () => {
       if (tool === 'config.get') {
         return {
           user: { name: 'Paul' },
-          defaults: { models: { chat: 'claude-sonnet-4-6', ghost: 'claude-haiku-4-5-20251001' } },
         }
       }
       throw new Error(`Unexpected tool: ${tool}`)
@@ -417,15 +416,12 @@ describe('renderer settings store', () => {
     await store.load()
 
     expect(call).toHaveBeenCalledWith('config.get')
-    // config layer
-    expect(store.configChatModel).toBe('claude-sonnet-4-6')
-    expect(store.configGhostModel).toBe('claude-haiku-4-5-20251001')
-    // workspace-override layer stays independent
     expect(store.lastChatModel).toBe('gpt-5.4')
     expect(store.lastGhostModel).toBe('gpt-5.4-nano')
+    expect(store.configUserName).toBe('Paul')
   })
 
-  it('config refs default empty and stay empty when config.get fails', async () => {
+  it('Personal identity refs default empty and stay empty when config.get fails', async () => {
     const call = vi.fn(async (tool: string) => {
       if (tool === 'settings.get') return { settings: {} }
       if (tool === 'config.get') throw new Error('no config')
@@ -435,24 +431,22 @@ describe('renderer settings store', () => {
     vi.stubGlobal('document', { documentElement: { dataset: {} } })
     const store = useSettingsStore()
 
-    expect(store.configChatModel).toBe('')
-    expect(store.configGhostModel).toBe('')
+    expect(store.configUserName).toBe('')
 
     await store.load()
 
-    expect(store.configChatModel).toBe('')
-    expect(store.configGhostModel).toBe('')
+    expect(store.configUserName).toBe('')
     expect(store.loaded).toBe(true)
   })
 
-  it('config refs are not written back via set() / settings.set', async () => {
+  it('Personal identity refs are not written through settings.set', async () => {
     const call = stubRendererGlobals()
     const store = useSettingsStore()
 
-    await store.set('configChatModel', 'gpt-5.4')
+    await store.set('configUserName', 'Anna')
 
     expect(call).not.toHaveBeenCalled()
-    expect(store.configChatModel).toBe('')
+    expect(store.configUserName).toBe('')
   })
 
   it('refreshKeyStatuses() populates key status and drives providerConfigured/anyKeyConfigured', async () => {

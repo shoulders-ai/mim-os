@@ -117,11 +117,10 @@ export const useSettingsStore = defineStore('settings', () => {
   const telemetryEnabled = ref(true)
   const telemetryLocked = ref(false)
 
-  // ── User-global config layer (~/.mim/config.yaml via config.get) ──
-  // Read-only mirror of the config layer. Never persisted via set()/settings.set;
-  // intentionally excluded from `refs`.
-  const configChatModel = ref('')
-  const configGhostModel = ref('')
+  // ── Personal identity (~/.mim/config.yaml via config.get) ──
+  // Read-only identity mirror. Personal preferences and model defaults arrive
+  // through settings.get and persist through settings.set like the Project
+  // settings, while main routes them to the correct file.
   const configUserName = ref('')
   const configUserEmail = ref('')
   const configTimezone = ref('')
@@ -164,20 +163,15 @@ export const useSettingsStore = defineStore('settings', () => {
       // No workspace yet or settings don't exist — use defaults
     }
 
-    // User-global config layer is independent of workspace settings and may be
-    // present before any workspace is open. Failure leaves the config refs empty.
-    configChatModel.value = ''
-    configGhostModel.value = ''
+    // Personal identity is independent of Project settings and may be present
+    // before any Project is open. Failure leaves the identity refs empty.
     configUserName.value = ''
     configUserEmail.value = ''
     configTimezone.value = ''
     try {
       const config = await window.kernel.call('config.get') as {
         user?: { name?: string; email?: string; timezone?: string }
-        defaults?: { models?: { chat?: string; ghost?: string } }
       }
-      configChatModel.value = config?.defaults?.models?.chat ?? ''
-      configGhostModel.value = config?.defaults?.models?.ghost ?? ''
       configUserName.value = config?.user?.name ?? ''
       configUserEmail.value = config?.user?.email ?? ''
       configTimezone.value = config?.user?.timezone ?? ''
@@ -319,8 +313,6 @@ export const useSettingsStore = defineStore('settings', () => {
     loaded,
     telemetryEnabled,
     telemetryLocked,
-    configChatModel,
-    configGhostModel,
     configUserName,
     configUserEmail,
     configTimezone,

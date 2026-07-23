@@ -24,7 +24,8 @@ The actor on the tool context is the trust boundary:
 
 ## Approval modes
 
-The workspace setting `automationApprovalMode` in `.mim/settings.json` controls prompting behavior for the `ai` actor:
+The Personal `automationApprovalMode` preference in `~/.mim/config.yaml`
+controls prompting behavior for the `ai` actor across Projects:
 
 ::: rows
 - `strict` -- every `ai` action prompts, including reads.

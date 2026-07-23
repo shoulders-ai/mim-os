@@ -94,7 +94,7 @@ export const MCP_TOOL_SPECS: McpToolSpec[] = [
   { name: 'browser_open', mimName: 'web.live.open', description: 'Open Mim\'s live browser for interactive websites or localhost development servers' },
   { name: 'browser_act', mimName: 'web.live.act', description: 'Observe or act in the live browser session' },
   { name: 'settings_get', mimName: 'settings.get', description: 'Read a workspace setting' },
-  { name: 'settings_set', mimName: 'settings.set', description: 'Write a workspace setting' },
+  { name: 'settings_set', mimName: 'settings.set', description: 'Write a Personal or current Project setting' },
   { name: 'slack_status', mimName: 'slack.status', description: 'Check Slack connection status' },
   { name: 'slack_connect', mimName: 'slack.connect', description: 'Store and verify a Slack user token' },
   { name: 'slack_disconnect', mimName: 'slack.disconnect', description: 'Remove a Slack user token from the OS keychain' },

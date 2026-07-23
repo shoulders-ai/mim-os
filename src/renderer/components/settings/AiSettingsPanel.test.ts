@@ -47,7 +47,7 @@ function stubKernel(config: Record<string, unknown>, statuses: unknown[] = DEFAU
   return call
 }
 
-describe('AiSettingsPanel config.yaml cascade', () => {
+describe('AiSettingsPanel Personal model defaults', () => {
   let root: HTMLElement
   let app: ReturnType<typeof createApp>
 
@@ -63,15 +63,13 @@ describe('AiSettingsPanel config.yaml cascade', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows the config.yaml chat default when set and no workspace override', async () => {
+  it('shows the Personal chat default when set', async () => {
     stubKernel({
       user: {},
       defaults: { models: { chat: 'gpt-5.4', ghost: 'claude-haiku-4-5' } },
     })
     const store = useSettingsStore()
-    // config layer set, workspace override empty
-    store.configChatModel = 'gpt-5.4'
-    store.lastChatModel = ''
+    store.lastChatModel = 'gpt-5.4'
 
     app = createApp(AiSettingsPanel)
     app.mount(root)
@@ -79,15 +77,14 @@ describe('AiSettingsPanel config.yaml cascade', () => {
 
     const chatTrigger = document.body.querySelector('[data-testid="settings-model-trigger-chat"]') as HTMLButtonElement | null
     expect(chatTrigger).toBeTruthy()
-    // The effective chat default is the config.yaml value, not the registry default (sonnet).
+    // The Personal default wins over the registry default (sonnet).
     expect(chatTrigger.textContent).toContain('GPT-5.4')
     expect(chatTrigger.textContent).not.toContain('Claude Sonnet 4.6')
   })
 
-  it('falls back to the registry default when both override and config default are empty', async () => {
+  it('falls back to the registry default when the Personal default is empty', async () => {
     stubKernel({ user: {}, defaults: { models: {} } })
     const store = useSettingsStore()
-    store.configChatModel = ''
     store.lastChatModel = ''
 
     app = createApp(AiSettingsPanel)
@@ -100,10 +97,9 @@ describe('AiSettingsPanel config.yaml cascade', () => {
     expect(chatTrigger.textContent).toContain('Claude Sonnet 4.6')
   })
 
-  it('workspace override wins over the config.yaml default', async () => {
+  it('uses a Personal preference instead of the registry default', async () => {
     stubKernel({ user: {}, defaults: { models: { chat: 'gpt-5.4' } } })
     const store = useSettingsStore()
-    store.configChatModel = 'gpt-5.4'
     store.lastChatModel = 'claude-sonnet-4-6'
 
     app = createApp(AiSettingsPanel)
@@ -116,12 +112,11 @@ describe('AiSettingsPanel config.yaml cascade', () => {
   })
 
   it('shows a configured model even when it is outside the feature defaults order', async () => {
-    // config.yaml points chat at a model that exists in the registry but is
-    // NOT in defaults.chat — the trigger must not render blank.
+    // The preference points at a model that exists in the registry but is not
+    // in defaults.chat — the trigger must not render blank.
     stubKernel({ user: {}, defaults: { models: { chat: 'claude-haiku-4-5' } } })
     const store = useSettingsStore()
-    store.configChatModel = 'claude-haiku-4-5'
-    store.lastChatModel = ''
+    store.lastChatModel = 'claude-haiku-4-5'
 
     app = createApp(AiSettingsPanel)
     app.mount(root)

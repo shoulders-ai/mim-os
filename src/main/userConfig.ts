@@ -1,4 +1,5 @@
-// User-global config: ~/.mim/config.yaml. Identity + model defaults only, no keys.
+// Personal config: ~/.mim/config.yaml. Identity, preferences, model defaults,
+// and global skill activation only; never keys or tokens.
 // No Electron imports — unit-testable.
 
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs'
@@ -19,7 +20,20 @@ export interface UserConfig {
   defaults: {
     google?: string
     slack?: string
-    models: { chat?: string; ghost?: string }
+    models: { chat?: string; inline?: string; ghost?: string }
+  }
+  preferences: {
+    theme?: string
+    editorFontFamily?: string
+    editorFontSize?: number
+    editorWordWrap?: boolean
+    editorLineNumbers?: boolean
+    editorSpellCheck?: boolean
+    editorLivePreview?: boolean
+    sidebarWidth?: number
+    rightPanelWidth?: number
+    terminalHeight?: number
+    automationApprovalMode?: 'normal' | 'strict' | 'developer'
   }
   connectors: {
     google?: Record<string, unknown>
@@ -37,8 +51,52 @@ export const USER_SKILL_SOURCE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 let cache: UserConfig | null = null
 
+export type PersonalSettingKey =
+  | 'theme'
+  | 'editorFontFamily'
+  | 'editorFontSize'
+  | 'editorWordWrap'
+  | 'editorLineNumbers'
+  | 'editorSpellCheck'
+  | 'editorLivePreview'
+  | 'lastChatModel'
+  | 'lastInlineModel'
+  | 'lastGhostModel'
+  | 'sidebarWidth'
+  | 'rightPanelWidth'
+  | 'terminalHeight'
+  | 'automationApprovalMode'
+
+const MODEL_SETTING_FEATURES = {
+  lastChatModel: 'chat',
+  lastInlineModel: 'inline',
+  lastGhostModel: 'ghost',
+} as const
+
+const PREFERENCE_SETTING_KEYS = new Set<PersonalSettingKey>([
+  'theme',
+  'editorFontFamily',
+  'editorFontSize',
+  'editorWordWrap',
+  'editorLineNumbers',
+  'editorSpellCheck',
+  'editorLivePreview',
+  'sidebarWidth',
+  'rightPanelWidth',
+  'terminalHeight',
+  'automationApprovalMode',
+])
+
 function emptyConfig(): UserConfig {
-  return { user: {}, defaults: { models: {} }, connectors: {}, registry: {}, skillSources: {}, skills: { disabled: [] } }
+  return {
+    user: {},
+    defaults: { models: {} },
+    preferences: {},
+    connectors: {},
+    registry: {},
+    skillSources: {},
+    skills: { disabled: [] },
+  }
 }
 
 function str(value: unknown): string | undefined {
@@ -70,7 +128,27 @@ export function loadUserConfig(home?: string): UserConfig {
         config.defaults.slack = str(defaults.slack)
         const models = (defaults.models && typeof defaults.models === 'object') ? defaults.models as Record<string, unknown> : {}
         config.defaults.models.chat = str(models.chat)
+        config.defaults.models.inline = str(models.inline)
         config.defaults.models.ghost = str(models.ghost)
+
+        const preferences = objectValue(r.preferences)
+        config.preferences.theme = str(preferences.theme)
+        config.preferences.editorFontFamily = str(preferences.editorFontFamily)
+        config.preferences.editorFontSize = finiteNumber(preferences.editorFontSize)
+        config.preferences.editorWordWrap = bool(preferences.editorWordWrap)
+        config.preferences.editorLineNumbers = bool(preferences.editorLineNumbers)
+        config.preferences.editorSpellCheck = bool(preferences.editorSpellCheck)
+        config.preferences.editorLivePreview = bool(preferences.editorLivePreview)
+        config.preferences.sidebarWidth = finiteNumber(preferences.sidebarWidth)
+        config.preferences.rightPanelWidth = finiteNumber(preferences.rightPanelWidth)
+        config.preferences.terminalHeight = finiteNumber(preferences.terminalHeight)
+        if (
+          preferences.automationApprovalMode === 'normal' ||
+          preferences.automationApprovalMode === 'strict' ||
+          preferences.automationApprovalMode === 'developer'
+        ) {
+          config.preferences.automationApprovalMode = preferences.automationApprovalMode
+        }
 
         const registry = (r.registry && typeof r.registry === 'object') ? r.registry as Record<string, unknown> : {}
         config.registry.url = str(registry.url)
@@ -102,6 +180,9 @@ export function loadUserConfig(home?: string): UserConfig {
   for (const k of Object.keys(config.defaults.models) as (keyof UserConfig['defaults']['models'])[]) {
     if (config.defaults.models[k] === undefined) delete config.defaults.models[k]
   }
+  for (const k of Object.keys(config.preferences) as (keyof UserConfig['preferences'])[]) {
+    if (config.preferences[k] === undefined) delete config.preferences[k]
+  }
   if (config.registry.url === undefined) delete config.registry.url
 
   config.skills.disabled = [...new Set(config.skills.disabled.filter(name => USER_SKILL_NAME_PATTERN.test(name)))].sort()
@@ -112,6 +193,7 @@ export function loadUserConfig(home?: string): UserConfig {
       ...config.defaults,
       models: Object.freeze(config.defaults.models),
     }),
+    preferences: Object.freeze(config.preferences),
     connectors: Object.freeze({
       ...(config.connectors.google ? { google: Object.freeze({ ...config.connectors.google }) } : {}),
       ...(config.connectors.slack ? { slack: Object.freeze({ ...config.connectors.slack }) } : {}),
@@ -149,6 +231,29 @@ export function setUserSkillDisabled(name: string, disabled: boolean, home?: str
   writeRawConfig(raw, home)
 }
 
+export function setPersonalSetting(key: PersonalSettingKey, value: unknown, home?: string): void {
+  const raw = readRawConfig(home)
+  if (key in MODEL_SETTING_FEATURES) {
+    const defaults = objectValue(raw.defaults)
+    const models = objectValue(defaults.models)
+    const feature = MODEL_SETTING_FEATURES[key as keyof typeof MODEL_SETTING_FEATURES]
+    if (typeof value === 'string' && value.trim()) models[feature] = value.trim()
+    else delete models[feature]
+    if (Object.keys(models).length) defaults.models = models
+    else delete defaults.models
+    if (Object.keys(defaults).length) raw.defaults = defaults
+    else delete raw.defaults
+    writeRawConfig(raw, home)
+    return
+  }
+
+  if (!PREFERENCE_SETTING_KEYS.has(key)) throw new Error(`Unknown Personal setting: ${key}`)
+  const preferences = objectValue(raw.preferences)
+  preferences[key] = value
+  raw.preferences = preferences
+  writeRawConfig(raw, home)
+}
+
 export function writeSkillSource(id: string, source: SkillSourceConfig, home?: string): void {
   if (!USER_SKILL_SOURCE_ID_PATTERN.test(id)) throw new Error(`Invalid skill source id: ${id}`)
   const hasGit = typeof source.git === 'string' && source.git.length > 0
@@ -177,7 +282,7 @@ export function removeSkillSource(id: string, home?: string): void {
 }
 
 export function resolveModelDefault(
-  feature: 'chat' | 'ghost',
+  feature: 'chat' | 'inline' | 'ghost',
   opts: { override?: string }
 ): string | undefined {
   if (opts.override) return opts.override
@@ -226,6 +331,10 @@ function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? { ...(value as Record<string, unknown>) }
     : {}
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 function parseDisabledSkillNames(rawSkills: unknown): string[] {

@@ -1,7 +1,7 @@
 # Mim Restructure: Project, You, and Team
 
 Status: product direction, scope model, UX, and implementation programme
-accepted; implementation is in progress, with phases 1 and 2 complete.
+accepted; implementation is in progress, with phases 1 through 3 complete.
 
 Mim is a local, file-native workbench where humans and agents work together on
 real project files. Collaboration is local-first: every human and agent works
@@ -389,11 +389,13 @@ paths removed rather than left beside the replacement.
    transport, remote membership and mounts, Web Shell charter, shared-workspace
    UI/config, remote actor/grant paths, and remote-only tests are removed.
    Headless execution, local MCP, Slack, routines, and CLI-agent paths remain.
-3. **Make Personal and Project state honest.** Move theme, editor preferences,
-   model defaults, identity, and global skill toggles to Personal persistence.
-   Keep transcripts, app enablement, routine activation, recovery, and other
-   per-checkout runtime under gitignored `.mim/`. Remove superseded config
-   fields without compatibility readers.
+3. **Make Personal and Project state honest — complete.** Theme, editor and
+   layout preferences, model defaults, identity, approval preference, and
+   global skill toggles resolve from Personal persistence. Transcripts, app and
+   agent enablement, routine activation, recovery, traces, Navigator order,
+   tool policy, and other per-checkout runtime remain under gitignored `.mim/`.
+   Superseded Personal keys in Project settings are ignored without migration
+   or compatibility readers.
 4. **Introduce the Team contract.** Add one Team connection and validate
    `team.yaml`, `instructions.md`, `files/`, `skills/`, `apps/`, and
    `routines/`. Implement clone/open/status/sync through one resolver and one

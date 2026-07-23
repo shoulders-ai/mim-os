@@ -11,6 +11,7 @@ import {
   setUserSkillDisabled,
   writeSkillSource,
   removeSkillSource,
+  setPersonalSetting,
 } from '@main/userConfig.js'
 
 function writeConfig(home: string, text: string): void {
@@ -42,7 +43,12 @@ describe('userConfig — loadUserConfig', () => {
       '  slack: T123',
       '  models:',
       '    chat: claude-sonnet-4-6',
+      '    inline: gpt-5.4',
       '    ghost: claude-haiku-4-5-20251001',
+      'preferences:',
+      '  theme: sage',
+      '  editorFontSize: 18',
+      '  automationApprovalMode: strict',
       '',
     ].join('\n'))
 
@@ -53,7 +59,37 @@ describe('userConfig — loadUserConfig', () => {
     expect(config.defaults.google).toBe('acme.com')
     expect(config.defaults.slack).toBe('T123')
     expect(config.defaults.models.chat).toBe('claude-sonnet-4-6')
+    expect(config.defaults.models.inline).toBe('gpt-5.4')
     expect(config.defaults.models.ghost).toBe('claude-haiku-4-5-20251001')
+    expect(config.preferences.theme).toBe('sage')
+    expect(config.preferences.editorFontSize).toBe(18)
+    expect(config.preferences.automationApprovalMode).toBe('strict')
+  })
+
+  it('writes Personal settings without disturbing identity, skill toggles, or model defaults', () => {
+    writeConfig(home, [
+      'user:',
+      '  name: Paul',
+      'defaults:',
+      '  models:',
+      '    chat: claude-sonnet-4-6',
+      'skills:',
+      '  disabled:',
+      '    - email-voice',
+      '',
+    ].join('\n'))
+
+    setPersonalSetting('theme', 'nord', home)
+    setPersonalSetting('lastInlineModel', 'gpt-5.4', home)
+    setPersonalSetting('editorLivePreview', false, home)
+
+    const config = loadUserConfig(home)
+    expect(config.user.name).toBe('Paul')
+    expect(config.defaults.models.chat).toBe('claude-sonnet-4-6')
+    expect(config.defaults.models.inline).toBe('gpt-5.4')
+    expect(config.preferences.theme).toBe('nord')
+    expect(config.preferences.editorLivePreview).toBe(false)
+    expect(config.skills.disabled).toEqual(['email-voice'])
   })
 
   it('missing file → safe empty defaults, no throw', () => {

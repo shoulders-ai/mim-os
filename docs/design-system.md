@@ -76,7 +76,8 @@ Use the project's semantic token classes in templates: `text-ink-3`, `bg-chrome-
 - Vendor-prefixed properties (`-webkit-app-region: drag`)
 - `:deep()` selectors targeting third-party rendered content (CodeMirror, markdown preview, xterm)
 
-Theme is stored in workspace `.mim/settings.json` under the `theme` key.
+Theme is a Personal preference stored in `~/.mim/config.yaml` and does not
+change when the current Project changes.
 
 ### 2.1 Chrome Gradient (4 levels)
 

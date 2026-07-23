@@ -161,9 +161,8 @@ function featureModelOptions(feature: ModelFeature, effectiveId?: string): Model
     }
   }
   const options = featureModels(feature).map(toOption)
-  // The effective model (workspace override or ~/.mim/config.yaml) may not be
-  // in the feature's preferred list — e.g. a config.yaml model outside the
-  // registry's defaults order. Append it so the trigger never renders blank.
+  // A Personal model preference may not be in the feature's preferred list.
+  // Append it so the trigger never renders blank.
   if (effectiveId && !options.some(option => option.value === effectiveId)) {
     const known = (modelRegistry.value?.models || []).find(model => model.id === effectiveId)
     options.push(known
@@ -179,25 +178,12 @@ function featureModelOptions(feature: ModelFeature, effectiveId?: string): Model
   return options
 }
 
-// The config.yaml layer (~/.mim/config.yaml). Only chat and ghost have a config layer.
-function configDefaultFor(feature: ModelFeature): string {
-  if (feature === 'chat') return settings.configChatModel || ''
-  if (feature === 'ghost') return settings.configGhostModel || ''
-  return ''
-}
-
 function selectedModelValue(settingKey: ModelSettingKey): string {
   return (settings as unknown as Record<ModelSettingKey, string>)[settingKey] || ''
 }
 
-// Cascade: workspace override → ~/.mim/config.yaml → registry default.
 function effectiveModelId(settingKey: ModelSettingKey, feature: ModelFeature): string {
-  return selectedModelValue(settingKey) || configDefaultFor(feature) || featureDefaultId(feature)
-}
-
-// True when the effective value comes from the config.yaml layer (not override, not registry).
-function isFromConfig(settingKey: ModelSettingKey, feature: ModelFeature): boolean {
-  return !selectedModelValue(settingKey) && !!configDefaultFor(feature)
+  return selectedModelValue(settingKey) || featureDefaultId(feature)
 }
 
 function modelOptionProvider(option: MimSelectOption | null): string {
@@ -325,10 +311,6 @@ onMounted(async () => {
         :desc="pref.desc"
       >
         <div class="flex shrink-0 flex-col items-end">
-          <span
-            v-if="isFromConfig(pref.settingKey, pref.id)"
-            class="mb-0.5 block text-right font-mono text-[9px] uppercase tracking-wide text-ink-3"
-          >from ~/.mim/config.yaml</span>
           <MimSelect
             :model-value="effectiveModelId(pref.settingKey, pref.id)"
             :options="featureModelOptions(pref.id, effectiveModelId(pref.settingKey, pref.id))"

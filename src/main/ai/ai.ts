@@ -185,7 +185,7 @@ export function registerAiTools(tools: ToolRegistry, emit: (channel: string) => 
 
   tools.register({
     name: 'config.get',
-    description: 'Get the user-global config (~/.mim/config.yaml): identity and model defaults. Never returns API keys.',
+    description: 'Get Personal config (~/.mim/config.yaml): identity, preferences, model defaults, and skill activation. Never returns API keys.',
     inputSchema: objectSchema({}, []),
     execute: async () => loadUserConfig()
   })
@@ -643,7 +643,7 @@ export function resolveGenerationModel(registry: ModelRegistry, modelId?: string
     return found
   }
 
-  // config.yaml chat default wins over the registry default when it exists and its key resolves.
+  // The Personal chat default wins over the registry default when its key resolves.
   const configChat = resolveModelDefault('chat', {})
   if (configChat) {
     const found = registry.models.find(model => model.id === configChat || model.model === configChat)

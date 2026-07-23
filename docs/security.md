@@ -33,8 +33,9 @@ automation. The renderer cannot escalate because IPC is hardcoded to `user`.
 
 ## Modes
 
-Source: `.mim/settings.json` → `automationApprovalMode` (`readApprovalMode` in
-`index.ts`); defaults to `normal` with no workspace/setting.
+Source: Personal `~/.mim/config.yaml` preferences →
+`automationApprovalMode` (`readApprovalMode` in `index.ts`); defaults to
+`normal`.
 
 - **strict** → every `ai` action prompts (reads included).
 - **normal** → prompts when the tool's effect is `mutate` or `external`.

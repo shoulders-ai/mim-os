@@ -68,7 +68,11 @@ The key resolver checks, in order:
 
 The app-managed file wins so keys set, replaced, or removed in Settings always take effect, even when a stale key is exported in the shell that launched the app. Keys can be set from the app via the `ai.setKey` tool and removed via `ai.clearKey`, both of which write `~/.mim/keys.env`. Settings > AI & Models shows each configured key as a masked tail (`ai.keyStatus` returns the fragment; the full key never leaves the main process) with Replace/Remove controls for file-stored keys; env-sourced keys show Replace only, since removing them means removing the variable from the shell that launches Mim. Key changes apply live to every AI surface (chat, inline rewrite, ghost, apps) with no app restart: `setKey`/`clearKey` emit `ai:keys-changed`, and the renderer caches key status reactively in the settings store.
 
-`~/.mim/config.yaml` may hold identity, model defaults, and integration account labels. It never holds API keys or integration tokens.
+`~/.mim/config.yaml` holds Personal identity, appearance/editor preferences,
+model defaults, global skill activation, and integration account labels. It
+never holds API keys or integration tokens. Project runtime state such as
+transcripts, app enablement, routine activation, recovery, and traces remains
+under the checkout's gitignored `.mim/`.
 
 
 ## Concepts

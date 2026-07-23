@@ -12,9 +12,9 @@ The product rule is deliberately small:
 
 Slack does not introduce another permission system. There are no per-tool
 grants, approvers, elevation commands, access ceilings, or per-thread authority
-records. The selected workspace already owns its agent, model defaults, enabled
-tools, connected services, and trusted apps. Slack is another place to talk to
-that agent.
+records. The selected Project already owns its agent, enabled tools, connected
+services, and trusted apps, and uses the person's Personal model defaults.
+Slack is another place to talk to that agent.
 
 The one setup confirmation says what this means in plain language:
 

@@ -41,6 +41,7 @@ import {
   readTracePayloadMaxBytes,
   readTracePayloadRetentionDays,
   readTraceRetentionDays,
+  readPersonalApprovalMode,
   registerSettingsTools,
 } from '@main/tools/settings.js'
 import { registerToolPolicyTools } from '@main/tools/toolPolicy.js'
@@ -507,7 +508,7 @@ async function boot(): Promise<void> {
   }
 
   const gate = createPermissionGate({
-    getApprovalMode: () => readApprovalMode(tools),
+    getApprovalMode: () => readApprovalMode(),
     getWorkspacePath: () => tools.getWorkspacePath(),
     getPackagePermissions: (packageId) => packages?.get(packageId)?.manifest.permissions,
     getDynamicToolPolicy: (name) => namedPackageTools?.getPolicy(name),
@@ -1533,28 +1534,8 @@ async function boot(): Promise<void> {
   }
 }
 
-function readApprovalMode(tools: ToolRegistry): ApprovalMode {
-  const workspacePath = tools.getWorkspacePath()
-  if (!workspacePath) return 'normal'
-
-  try {
-    const settingsPath = join(workspacePath, '.mim', 'settings.json')
-    if (!existsSync(settingsPath)) return 'normal'
-    const raw = JSON.parse(readFileSync(settingsPath, 'utf-8')) as {
-      automationApprovalMode?: string
-    }
-    if (
-      raw.automationApprovalMode === 'normal' ||
-      raw.automationApprovalMode === 'strict' ||
-      raw.automationApprovalMode === 'developer'
-    ) {
-      return raw.automationApprovalMode
-    }
-  } catch {
-    return 'normal'
-  }
-
-  return 'normal'
+function readApprovalMode(): ApprovalMode {
+  return readPersonalApprovalMode()
 }
 
 app.setName('Mim')

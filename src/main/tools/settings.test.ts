@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createTraceLog } from '@main/trace/trace.js'
 import { createToolRegistry } from '@main/tools/registry.js'
 import {
@@ -7,29 +7,36 @@ import {
   readTracePayloadMaxBytes,
   readTracePayloadRetentionDays,
   readTraceRetentionDays,
+  readPersonalApprovalMode,
   registerSettingsTools,
 } from '@main/tools/settings.js'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { reset as resetUserConfig } from '@main/userConfig.js'
 
 describe('main settings tools', () => {
   let dir: string
+  let home: string
   let tools: ReturnType<typeof createToolRegistry>
   const ctx = { actor: 'user' as const }
 
   beforeEach(() => {
+    resetUserConfig()
     dir = mkdtempSync(join(tmpdir(), 'mim-settings-test-'))
+    home = mkdtempSync(join(tmpdir(), 'mim-settings-home-'))
     tools = createToolRegistry(createTraceLog({
       devConsole: false,
       getRetentionDays: () => readTraceRetentionDays(dir),
     }))
     tools.setWorkspacePath(dir)
-    registerSettingsTools(tools)
+    registerSettingsTools(tools, { homeDir: home })
   })
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true })
+    rmSync(home, { recursive: true, force: true })
+    resetUserConfig()
   })
 
   it('includes Workbench and automation defaults', async () => {
@@ -93,6 +100,8 @@ describe('main settings tools', () => {
     }
 
     expect(result.value).toBe('developer')
+    expect(readPersonalApprovalMode(home)).toBe('developer')
+    expect(existsSync(join(dir, '.mim', 'settings.json'))).toBe(false)
   })
 
   it('persists the trace retention window', async () => {
@@ -154,21 +163,66 @@ describe('main settings tools', () => {
     expect(result.value).toEqual(['rscript', 'python3'])
   })
 
-  it('keeps checkout-local settings isolated when the current Project changes', async () => {
+  it('keeps Personal preferences stable when the current Project changes', async () => {
     const first = join(dir, 'first-project')
     const second = join(dir, 'second-project')
     mkdirSync(first)
     mkdirSync(second)
 
     tools.setWorkspacePath(first)
-    await tools.call('settings.set', { key: 'theme', value: 'sepia' }, ctx)
+    await tools.call('settings.set', { key: 'theme', value: 'sage' }, ctx)
+    await tools.call('settings.set', { key: 'editorFontSize', value: 19 }, ctx)
+    await tools.call('settings.set', { key: 'lastInlineModel', value: 'gpt-5.4' }, ctx)
+    await tools.call('settings.set', { key: 'automationApprovalMode', value: 'strict' }, ctx)
 
     tools.setWorkspacePath(second)
-    expect(await tools.call('settings.get', { key: 'theme' }, ctx)).toEqual({ value: 'white' })
-    await tools.call('settings.set', { key: 'theme', value: 'black' }, ctx)
+    expect(await tools.call('settings.get', { key: 'theme' }, ctx)).toEqual({ value: 'sage' })
+    expect(await tools.call('settings.get', { key: 'editorFontSize' }, ctx)).toEqual({ value: 19 })
+    expect(await tools.call('settings.get', { key: 'lastInlineModel' }, ctx)).toEqual({ value: 'gpt-5.4' })
+    expect(await tools.call('settings.get', { key: 'automationApprovalMode' }, ctx)).toEqual({ value: 'strict' })
 
     tools.setWorkspacePath(first)
-    expect(await tools.call('settings.get', { key: 'theme' }, ctx)).toEqual({ value: 'sepia' })
-    expect(JSON.parse(readFileSync(join(second, '.mim', 'settings.json'), 'utf-8')).theme).toBe('black')
+    expect(await tools.call('settings.get', { key: 'theme' }, ctx)).toEqual({ value: 'sage' })
+    expect(existsSync(join(first, '.mim', 'settings.json'))).toBe(false)
+    expect(existsSync(join(second, '.mim', 'settings.json'))).toBe(false)
+    expect(readFileSync(join(home, '.mim', 'config.yaml'), 'utf-8')).toContain('theme: sage')
+  })
+
+  it('keeps Project runtime settings isolated between checkouts', async () => {
+    const first = join(dir, 'first-project')
+    const second = join(dir, 'second-project')
+    mkdirSync(first)
+    mkdirSync(second)
+
+    tools.setWorkspacePath(first)
+    await tools.call('settings.set', { key: 'traceRetentionDays', value: 14 }, ctx)
+    await tools.call('settings.set', { key: 'enabledAgents', value: ['codex'] }, ctx)
+
+    tools.setWorkspacePath(second)
+    expect(await tools.call('settings.get', { key: 'traceRetentionDays' }, ctx)).toEqual({ value: 90 })
+    expect(await tools.call('settings.get', { key: 'enabledAgents' }, ctx)).toEqual({ value: [] })
+
+    tools.setWorkspacePath(first)
+    expect(await tools.call('settings.get', { key: 'traceRetentionDays' }, ctx)).toEqual({ value: 14 })
+    expect(await tools.call('settings.get', { key: 'enabledAgents' }, ctx)).toEqual({ value: ['codex'] })
+  })
+
+  it('ignores superseded Personal keys in Project settings without a compatibility reader', async () => {
+    mkdirSync(join(dir, '.mim'), { recursive: true })
+    writeFileSync(join(dir, '.mim', 'settings.json'), JSON.stringify({
+      theme: 'dracula',
+      editorFontSize: 24,
+      lastChatModel: 'legacy-project-model',
+      automationApprovalMode: 'developer',
+      historyEnabled: false,
+    }))
+
+    const result = await tools.call('settings.get', {}, ctx) as { settings: Record<string, unknown> }
+
+    expect(result.settings.theme).toBe('white')
+    expect(result.settings.editorFontSize).toBe(16)
+    expect(result.settings.lastChatModel).toBe('')
+    expect(result.settings.automationApprovalMode).toBe('normal')
+    expect(result.settings.historyEnabled).toBe(false)
   })
 })

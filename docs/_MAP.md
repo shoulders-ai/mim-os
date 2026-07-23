@@ -73,8 +73,8 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Routines.** Workspace-local definitions under `routines/`; revision-aware create/edit/duplicate/Trash lifecycle; machine-local four-state activation and run state under `.mim/routines/`; manual chat-turn runs; desktop schedule/file/webhook/Slack automation; source-file live refresh; authority review; routine session metadata; and the dense Routines work surface. `src/main/routines/`, `tools/routines.ts`, `server/server.ts`, `sessions.ts`, `src/renderer/components/routines/`, `src/renderer/stores/routines.ts`. Docs: [routines.md](routines.md), [design-system.md](design-system.md#617-routines-work-surface).
 - **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
 - **Git tools.** Status/diff/log/commit/pull/push and opt-in managed sync. `src/main/git.ts`, `tools/git.ts`, `tools/sync.ts`.
-- **User-global config.** `~/.mim/config.yaml` (identity, model defaults, skill sources). Never holds keys or tokens. `src/main/userConfig.ts`.
-- **Settings tools.** Workspace settings persistence in `.mim/settings.json`; agent tool availability policy for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
+- **Personal config.** `~/.mim/config.yaml` (identity, appearance/editor/layout preferences, model defaults, skill activation, and currently legacy source configuration). Never holds keys or tokens. `src/main/userConfig.ts`.
+- **Settings tools.** Route Personal preferences to `~/.mim/config.yaml` and current-Project runtime/tool state to `.mim/settings.json`; agent tool availability policy remains Project-local for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
 - **Editor state tool.** `editor.state` (MCP: `editor_state`): open tabs + active document snapshot, pushed by the renderer and cached in main. `src/main/tools/editorState.ts`.
 - **Headless CLI.** `mim` command over the shared tool registry; no Electron. `src/main/cli.ts`, `headless.ts`. Docs: [cli.md](cli.md).
@@ -226,7 +226,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 ### Proposals
 
-- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phases 1 and 2 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
+- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phases 1–3 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
 - [proposals/r-first-class.md](proposals/r-first-class.md) — **implemented** (phases 1-5; phase 6 deferred). First-class R/Rmd/Quarto: `code.run` execution primitive, plot/artifact viewing, Cmd+Enter send-to-terminal, render loop, R modelling skill.
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/popout-editor-window.md](proposals/popout-editor-window.md) — **implemented** (phases 0-3; phase 4 deferred). Pop-out editor windows: move any editor tab into its own OS window and back, with full tab-state transfer, per-window close guards, focused-window menu routing, and macOS native touches.
@@ -381,7 +381,7 @@ src/
     styles.contrast.test.ts     # WCAG contrast contract for all 8 themes
     stores/
       sessions.ts               # Session state + filtering
-      settings.ts               # User preferences + theme
+      settings.ts               # Personal preferences + Project runtime settings
       workbench.ts              # Work/Artifact navigation state
       diff.ts                   # Editor diff review state
       approvals.ts              # Permission-request queue
@@ -518,7 +518,7 @@ docs/                           # Implementation docs (see Docs Index above)
 
 - Product name: **Mim**. Internal package: `mim`.
 - Workspace contract: `mim.yaml` + `AGENTS.md` + `CLAUDE.md`. Runtime (gitignored): `.mim/`.
-- User-global: `~/.mim/config.yaml` (identity, defaults — no secrets). Keys: `~/.mim/keys.env`. Integration tokens: OS keychain.
+- Personal: `~/.mim/config.yaml` (identity, preferences, model defaults, skill activation — no secrets). Keys: `~/.mim/keys.env`. Integration tokens: OS keychain.
 
 ## Maintenance
 
