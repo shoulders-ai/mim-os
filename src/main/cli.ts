@@ -18,6 +18,7 @@ export interface CliIO {
   confirmApproval?: (request: PermissionApprovalRequest) => Promise<boolean>
   spawn?: typeof spawn
   runMcp?: () => Promise<number>
+  waitForShutdown?: () => Promise<void>
   platform?: NodeJS.Platform
 }
 
@@ -40,6 +41,7 @@ Usage:
   mim tool <name> [json|--stdin] [--workspace path] [--json] [--yes]
   mim list-tools [--json]
   mim go [--workspace path] [-- command ...]
+  mim always-on [--workspace path] [--host address] [--port number]
   mim mcp
 `
 
@@ -67,6 +69,16 @@ export async function runCli(argv: string[], io: CliIO = defaultIO()): Promise<n
     if (parsed.command === 'mcp') {
       if (parsed.args.length > 0) throw new Error('Usage: mim mcp')
       return io.runMcp ? io.runMcp() : runMcpStdio()
+    }
+
+    if (parsed.command === 'always-on') {
+      const runtime = parseAlwaysOnArgs(parsed.args)
+      kernel = await openKernelForWorkspace(parsed, io)
+      const status = await kernel.startAlwaysOn(runtime)
+      if (parsed.json) writeResult(io, parsed, status)
+      else io.stdout(`Always-on client running for ${kernel.tools.getWorkspacePath()} at http://${status.host}:${status.port}\n`)
+      await (io.waitForShutdown?.() ?? waitForShutdownSignal())
+      return 0
     }
 
     if (parsed.command === 'init') {
@@ -234,6 +246,28 @@ function parseToolArgs(args: string[]): { name?: string; rawJson?: string; useSt
   return { name, rawJson: jsonArgs[0], useStdin }
 }
 
+function parseAlwaysOnArgs(args: string[]): { host?: string; port?: number } {
+  const result: { host?: string; port?: number } = {}
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index]
+    const value = args[index + 1]
+    if (!value) throw new Error('Usage: mim always-on [--host address] [--port number]')
+    if (flag === '--host') {
+      if (/[\r\n\0]/.test(value)) throw new Error('Invalid always-on host')
+      result.host = value
+      continue
+    }
+    if (flag === '--port') {
+      const port = Number(value)
+      if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new Error('Always-on port must be 0-65535')
+      result.port = port
+      continue
+    }
+    throw new Error(`Unknown always-on option: ${flag}`)
+  }
+  return result
+}
+
 function resolvePath(cwd: string, value: string): string {
   return isAbsolute(value) ? value : resolve(cwd, value)
 }
@@ -301,6 +335,18 @@ async function runExternal(command: string[], cwd: string, io: CliIO): Promise<n
       resolveCode(1)
     })
     child.on('exit', (code) => resolveCode(code ?? 0))
+  })
+}
+
+function waitForShutdownSignal(): Promise<void> {
+  return new Promise(resolveSignal => {
+    const finish = () => {
+      process.off('SIGINT', finish)
+      process.off('SIGTERM', finish)
+      resolveSignal()
+    }
+    process.once('SIGINT', finish)
+    process.once('SIGTERM', finish)
   })
 }
 

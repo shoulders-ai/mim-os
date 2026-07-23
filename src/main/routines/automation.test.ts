@@ -52,6 +52,35 @@ describe('routine automation', () => {
     })
   })
 
+  it('keeps the overnight scheduler running and retries one failed routine without blocking others', async () => {
+    writeRoutine('a-failing', ['trigger:', '  every: 10m', 'missed: once'])
+    writeRoutine('b-healthy', ['trigger:', '  every: 10m', 'missed: once'])
+    enable('a-failing')
+    enable('b-healthy')
+    const attempts = new Map<string, number>()
+    const runRoutine = vi.fn(async (routine: { id: string }) => {
+      attempts.set(routine.id, (attempts.get(routine.id) ?? 0) + 1)
+      if (routine.id === 'a-failing') throw new Error('provider offline')
+      return { sessionId: 's1', routineRunId: 'rr1', status: 'done' as const }
+    })
+    const automation = createRoutineAutomation({
+      getWorkspacePath: () => dir,
+      runRoutine,
+      now: () => new Date('2026-07-08T08:00:00.000Z'),
+    })
+
+    await automation.tick(new Date('2026-07-08T08:00:00.000Z'))
+    await expect(automation.tick(new Date('2026-07-08T08:10:00.000Z'))).resolves.toBeUndefined()
+    expect(attempts).toMatchObject(new Map([
+      ['a-failing', 1],
+      ['b-healthy', 1],
+    ]))
+
+    await automation.tick(new Date('2026-07-08T08:11:00.000Z'))
+    expect(attempts.get('a-failing')).toBe(2)
+    expect(attempts.get('b-healthy')).toBe(1)
+  })
+
   it('ignores disabled file-triggered routines and fires enabled matching changes', async () => {
     writeRoutine('watch-inbox', [
       'trigger:',

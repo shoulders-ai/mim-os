@@ -58,7 +58,15 @@ import { registerGoogleTools } from '@main/integrations/google/tools.js'
 import { registerWebTools } from '@main/tools/web.js'
 import { registerWorkspaceTools } from '@main/tools/workspace.js'
 import { registerSessionTools } from '@main/sessions.js'
-import { registerRoutineTools } from '@main/tools/routines.js'
+import {
+  continueRoutineRunInSession,
+  createRoutineChatSession,
+  registerRoutineTools,
+  runRoutineOnce,
+  startRoutineRun,
+} from '@main/tools/routines.js'
+import { createRoutineAutomation } from '@main/routines/automation.js'
+import { loadRoutineCatalog } from '@main/routines/routines.js'
 import { registerSubagentTools } from '@main/tools/subagents.js'
 import { createSubagentManager, type SubagentManager } from '@main/subagents/subagentManager.js'
 import { chatProfile } from '@main/ai/aiRuntime.js'
@@ -69,8 +77,21 @@ import { readTelemetryIdentity, setTelemetryIdentityEnabled } from '@main/teleme
 import { createTelemetry } from '@main/telemetry/telemetry.js'
 import { registerTelemetryTools } from '@main/tools/telemetry.js'
 import type { HttpClient } from '@main/integrations/http.js'
+import { createKeytarSecretStore } from '@main/integrations/secrets.js'
+import { SlackIntegration } from '@main/integrations/slack/client.js'
+import { createSlackSocketModeListener } from '@main/integrations/slack/listener.js'
+import { createBackgroundSync } from '@main/sync/backgroundSync.js'
 import { userHomeDir } from '@main/platform.js'
-import type { McpToolSpec } from '@main/server/server.js'
+import { createServer, type McpToolSpec } from '@main/server/server.js'
+
+export interface HeadlessAlwaysOnStatus {
+  running: boolean
+  host: string | null
+  port: number | null
+  startedAt: string | null
+  heartbeatAt: string | null
+  lastError: string | null
+}
 
 export interface HeadlessKernel {
   tools: ToolRegistry
@@ -78,6 +99,8 @@ export interface HeadlessKernel {
   getNamedMcpTools(): McpToolSpec[]
   getAgentMounts(): ReturnType<typeof createAgentMounts> | null
   openWorkspace(path: string): Promise<void>
+  startAlwaysOn(options?: { host?: string; port?: number; tickMs?: number }): Promise<HeadlessAlwaysOnStatus>
+  alwaysOnStatus(): HeadlessAlwaysOnStatus
   shutdown(): Promise<void>
 }
 
@@ -134,6 +157,21 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   let namedToolsRef: NamedPackageToolSync | null = null
   let agentMountsRef: ReturnType<typeof createAgentMounts> | null = null
   let subagentManagerRef: SubagentManager | null = null
+  let routineAutomation: ReturnType<typeof createRoutineAutomation> | null = null
+  let slackListener: ReturnType<typeof createSlackSocketModeListener> | null = null
+  let backgroundSync: ReturnType<typeof createBackgroundSync> | null = null
+  let alwaysOnServer: Awaited<ReturnType<typeof createServer>> | null = null
+  let alwaysOnTicker: ReturnType<typeof setInterval> | null = null
+  let alwaysOnCycle: Promise<void> | null = null
+  let alwaysOnState: HeadlessAlwaysOnStatus = {
+    running: false,
+    host: null,
+    port: null,
+    startedAt: null,
+    heartbeatAt: null,
+    lastError: null,
+  }
+  const packageSecretStore = createKeytarSecretStore()
   const gate = createHeadlessGate(
     () => tools.getWorkspacePath(),
     options,
@@ -159,6 +197,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
     outcomes: traceOutcomes,
     history: history.toolObserver(),
     getCaptureContent: () => readTraceCaptureContent(tools?.getWorkspacePath() ?? null),
+    onMutation: path => backgroundSync?.changed(path),
   })
 
   registerFileTools(tools)
@@ -179,7 +218,16 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
     },
   })
   registerSubagentTools(tools, subagentManagerRef)
-  registerRoutineTools(tools, { getAgentMounts: () => agentMountsRef })
+  registerRoutineTools(tools, {
+    getAgentMounts: () => agentMountsRef,
+    runRoutine: (routine, context) => runRoutineOnce(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+    startRoutine: (routine, context) => createRoutineChatSession(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+    secrets: packageSecretStore,
+    onChange: async () => {
+      await routineAutomation?.refresh()
+      await slackListener?.refresh()
+    },
+  })
   registerArchiveTools(tools)
   registerAiTools(tools)
   registerSearchTools(tools)
@@ -226,6 +274,12 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   registerGoogleTools(tools)
   registerTelemetryTools(tools, telemetry)
   registerCoreAppTools(tools)
+  tools.register({
+    name: 'always-on.status',
+    description: 'Read this headless client runtime state.',
+    inputSchema: { type: 'object', properties: {} },
+    execute: async () => ({ ...alwaysOnState, slack: slackListener?.status() ?? null }),
+  })
   telemetry.track('app_open', {
     appVersion: options.telemetry?.appVersion ?? process.env.npm_package_version ?? '0.1.0',
     platform: telemetryConfig.platform,
@@ -263,7 +317,7 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       })
       packageEnablement = enablement
       packages = await createPackageLoader(tools)
-      const runtime = createPackageRuntime({ packages, enablement, tools, trace: traceLog })
+      const runtime = createPackageRuntime({ packages, enablement, tools, trace: traceLog, secrets: packageSecretStore })
       const jobs = createPackageJobRunner({ runtime, getWorkspacePath: () => tools.getWorkspacePath(), emit: () => {}, trace: traceLog })
       registerPackageRuntimeTools(tools, packages, runtime, jobs, {})
 
@@ -287,9 +341,128 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       setAgentContextLocalPackagesProvider(createLocalPackageStatusProvider({ runtime, packages, enablement }))
       await namedTools.sync()
       await subagentManagerRef?.reconcile()
-
+      routineAutomation = createRoutineAutomation({
+        getWorkspacePath: () => tools.getWorkspacePath(),
+        runRoutine: (routine, context) => runRoutineOnce(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+        knownTools: () => new Set(tools.list().map(tool => tool.name)),
+        secrets: packageSecretStore,
+        trace: traceLog,
+      })
+      slackListener = createSlackSocketModeListener({
+        getWorkspacePath: () => tools.getWorkspacePath(),
+        getRoutines: () => {
+          const workspace = tools.getWorkspacePath()
+          return workspace
+            ? loadRoutineCatalog(workspace, { knownTools: new Set(tools.list().map(tool => tool.name)) }).routines
+            : []
+        },
+        runRoutine: (routine, context) => runRoutineOnce(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+        startRoutine: (routine, context) => startRoutineRun(tools, routine, context, { getAgentMounts: () => agentMountsRef }),
+        continueRoutine: (routine, context, thread) =>
+          continueRoutineRunInSession(tools, routine, context, thread.sessionId, { getAgentMounts: () => agentMountsRef }),
+        getSessionReplyText: sessionId => latestAssistantReply(tools, sessionId),
+        slack: new SlackIntegration({ secrets: packageSecretStore }),
+        trace: traceLog,
+      })
+    },
+    async startAlwaysOn(runtimeOptions = {}) {
+      if (!packages || !tools.getWorkspacePath() || !routineAutomation || !slackListener) {
+        throw new Error('Open a Project before starting the always-on client')
+      }
+      if (alwaysOnState.running) return { ...alwaysOnState }
+      const host = runtimeOptions.host ?? '127.0.0.1'
+      const tickMs = Math.max(1_000, runtimeOptions.tickMs ?? 60_000)
+      backgroundSync = createBackgroundSync({
+        syncProject: async () => {
+          const current = await tools.call('sync.status', {}, { actor: 'system' }) as {
+            mode?: string
+            state?: string
+            gitAvailable?: boolean
+            git?: boolean
+            remote?: string | null
+            retryable?: boolean
+            message?: string
+          }
+          if (
+            current.mode !== 'managed'
+            || !current.gitAvailable
+            || !current.git
+            || !current.remote
+            || (current.state === 'stopped' && !current.retryable)
+          ) return
+          const result = await tools.call('sync.now', {}, { actor: 'system' }) as {
+            state?: string
+            retryable?: boolean
+            message?: string
+          }
+          if (result.state === 'stopped' && result.retryable) {
+            throw new Error(result.message ?? 'Project sync is waiting to retry')
+          }
+        },
+        syncTeam: async () => {
+          const current = await tools.call('team.status', {}, { actor: 'system' }) as {
+            repository?: string | null
+            state?: string
+            retryable?: boolean
+          }
+          if (!current.repository || current.state === 'invalid' || (current.state === 'stopped' && !current.retryable)) return
+          const result = await tools.call('team.sync', {}, { actor: 'system' }) as {
+            state?: string
+            retryable?: boolean
+            message?: string
+          }
+          if (result.state === 'stopped' && result.retryable) {
+            throw new Error(result.message ?? 'Team sync is waiting to retry')
+          }
+        },
+        onError: (_scope, error) => {
+          alwaysOnState.lastError = error instanceof Error ? error.message : String(error)
+        },
+      })
+      alwaysOnServer = await createServer(tools, packages, {
+        host,
+        port: runtimeOptions.port ?? 0,
+        getNamedMcpTools: () => {
+          const specs: McpToolSpec[] = []
+          for (const name of namedToolsRef?.ownedNames() ?? []) {
+            const tool = tools.get(name)
+            if (tool) specs.push({ name: name.replace(/\./g, '_'), mimName: name, description: tool.description })
+          }
+          return specs
+        },
+        agentMounts: agentMountsRef ?? undefined,
+        handleRoutineWebhook: (name, delivery) => routineAutomation!.handleWebhook(name, delivery),
+      })
+      alwaysOnState = {
+        running: true,
+        host,
+        port: alwaysOnServer.port,
+        startedAt: new Date().toISOString(),
+        heartbeatAt: null,
+        lastError: null,
+      }
+      await routineAutomation.start()
+      await runAlwaysOnCycle()
+      alwaysOnTicker = setInterval(() => void runAlwaysOnCycle(), tickMs)
+      return { ...alwaysOnState }
+    },
+    alwaysOnStatus() {
+      return { ...alwaysOnState }
     },
     async shutdown() {
+      if (alwaysOnTicker) clearInterval(alwaysOnTicker)
+      alwaysOnTicker = null
+      await alwaysOnCycle?.catch(() => {})
+      await backgroundSync?.beforeClose().catch(() => {})
+      backgroundSync?.stop()
+      backgroundSync = null
+      await routineAutomation?.stop()
+      await slackListener?.stop()
+      routineAutomation = null
+      slackListener = null
+      alwaysOnServer?.close()
+      alwaysOnServer = null
+      alwaysOnState = { ...alwaysOnState, running: false }
       await subagentManagerRef?.dispose()
       namedToolsRef = null
       agentMountsRef = null
@@ -303,6 +476,30 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       packages = null
       subagentManagerRef = null
     },
+  }
+
+  async function runAlwaysOnCycle(): Promise<void> {
+    if (alwaysOnCycle) return alwaysOnCycle
+    alwaysOnCycle = (async () => {
+      const errors: string[] = []
+      for (const action of [
+        () => backgroundSync?.open(),
+        () => routineAutomation?.refresh(),
+        () => slackListener?.refresh(),
+        () => routineAutomation?.tick(),
+      ]) {
+        try {
+          await action()
+        } catch (error) {
+          errors.push(error instanceof Error ? error.message : String(error))
+        }
+      }
+      alwaysOnState.heartbeatAt = new Date().toISOString()
+      alwaysOnState.lastError = errors[0] ?? null
+    })().finally(() => {
+      alwaysOnCycle = null
+    })
+    return alwaysOnCycle
   }
 }
 
@@ -380,4 +577,23 @@ function createHeadlessGate(
   })
 
   return gate
+}
+
+async function latestAssistantReply(tools: ToolRegistry, sessionId: string): Promise<string | null> {
+  const session = await tools.call('session.get', { id: sessionId }, { actor: 'system' }) as {
+    messages?: Array<{ role?: unknown; parts?: Array<{ type?: unknown; text?: unknown }>; content?: unknown }>
+  }
+  for (const message of [...(session.messages ?? [])].reverse()) {
+    if (message.role !== 'assistant') continue
+    const parts = Array.isArray(message.parts)
+      ? message.parts
+          .filter(part => part.type === 'text' && typeof part.text === 'string')
+          .map(part => String(part.text))
+          .join('\n')
+          .trim()
+      : ''
+    if (parts) return parts
+    if (typeof message.content === 'string' && message.content.trim()) return message.content.trim()
+  }
+  return null
 }

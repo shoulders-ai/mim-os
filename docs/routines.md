@@ -156,12 +156,14 @@ the feature and opens the same New routine dialog.
 
 ## Automation
 
-When a workspace is open, the desktop app starts the routine automation service
-for that workspace.
+When a Project is open, the desktop app starts the routine automation service.
+The same service runs without Electron through `mim always-on`.
 
 - `schedule` and `every` triggers are checked by a one-minute lifecycle ticker.
   `nextRunAt`, scheduler heartbeat, last run id, last success, and last error
-  timestamps are stored in `.mim/routines/state.json`.
+  timestamps are stored in `.mim/routines/state.json`. One failed scheduled run
+  remains due for retry at the next heartbeat and does not block other routines
+  in the current tick.
 - `files` triggers start chokidar watchers for active routines. File event
   payloads contain workspace-relative paths and event kinds as data; the runner
   does not read file contents unless the routine prompt asks to use file tools.
@@ -204,6 +206,7 @@ Slack trigger validation, duplicate binding diagnostics, bot/app-token
 credential tools, one-shot setup/check tools that create/update and enable the
 workspace routine, Socket Mode lifecycle wiring, a metadata-only event ledger,
 event-to-routine dispatch, and bot thread replies are implemented in the
-desktop runtime. Durable per-thread session continuation, debounce/replay,
-chained routines, scheduler ownership across multiple clients, and durable
-parked approvals are still outside the current runtime.
+desktop and always-on runtimes. The always-on heartbeat also syncs before
+refreshing routine definitions, while Socket Mode reconnects independently.
+Durable per-thread session continuation is implemented. Chained routines and
+durable parked approvals remain outside the current runtime.

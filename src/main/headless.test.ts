@@ -67,6 +67,34 @@ describe('createHeadlessKernel', () => {
     expect(config.name).toBe(dir.split('/').pop())
   })
 
+  it('runs the same kernel as an always-on client with scheduler heartbeat and webhook endpoint', async () => {
+    writeFileSync(join(dir, 'mim.yaml'), 'name: Always On Test\n')
+    const kernel = createHeadlessKernel()
+    await kernel.openWorkspace(dir)
+
+    const started = await kernel.startAlwaysOn({ host: '127.0.0.1', port: 0 })
+
+    expect(started).toMatchObject({
+      running: true,
+      host: '127.0.0.1',
+      port: expect.any(Number),
+      heartbeatAt: expect.any(String),
+    })
+    const state = JSON.parse(readFileSync(join(dir, '.mim', 'routines', 'state.json'), 'utf-8'))
+    expect(Math.abs(Date.parse(state.scheduler.heartbeatAt) - Date.parse(started.heartbeatAt!))).toBeLessThan(100)
+    const response = await fetch(`http://127.0.0.1:${started.port}/api/hooks/missing`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(response.status).toBe(404)
+    await expect(kernel.tools.call('always-on.status', {}, { actor: 'user' }))
+      .resolves.toMatchObject({ running: true, port: started.port })
+
+    await kernel.shutdown()
+    expect(kernel.alwaysOnStatus().running).toBe(false)
+  })
+
   it('does not create telemetry identity while disabled under tests', async () => {
     const oldHome = process.env.HOME
     process.env.HOME = dir

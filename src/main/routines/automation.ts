@@ -98,10 +98,25 @@ export function createRoutineAutomation(options: RoutineAutomationOptions) {
         continue
       }
       if (next.getTime() > at.getTime()) continue
-      await fireRoutine(loaded.workspace, routine, { trigger: 'schedule' }, at)
-      recordRoutineAutomationState(loaded.workspace, routine, {
-        nextRunAt: nextFireAfter(routine, at)?.toISOString(),
-      })
+      try {
+        await fireRoutine(loaded.workspace, routine, { trigger: 'schedule' }, at)
+        recordRoutineAutomationState(loaded.workspace, routine, {
+          nextRunAt: nextFireAfter(routine, at)?.toISOString(),
+        })
+      } catch (error) {
+        options.trace?.append({
+          kind: 'routine.retry-pending',
+          actor: 'system',
+          status: 'error',
+          data: {
+            routineId: routine.id,
+            trigger: 'schedule',
+            error: error instanceof Error ? error.message : String(error),
+          },
+        })
+        // Keep the overdue nextRunAt. The next scheduler heartbeat retries it,
+        // while this tick continues to unrelated routines.
+      }
     }
   }
 

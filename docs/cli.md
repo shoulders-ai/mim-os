@@ -2,7 +2,10 @@
 
 The `mim` CLI is the Tier 1 headless interface over the same main-process tool registry used by the app.
 
-It boots `src/main/headless.ts`, registers safe non-UI tools, opens a workspace, and runs generic `mim tool` calls as the `ai` actor through the headless permission gate. It does not start Electron, the package iframe server, PTY tabs, or renderer bridge tools.
+It boots `src/main/headless.ts`, registers safe non-UI tools, opens a Project,
+and runs generic `mim tool` calls as the `ai` actor through the headless
+permission gate. It does not start Electron, PTY tabs, or renderer bridge
+tools. The explicit `always-on` command starts the local HTTP/webhook runtime.
 
 ## Running
 
@@ -36,6 +39,7 @@ mim log --read [--workspace path] [--json]
 mim list-tools [--json]
 mim tool <name> [json|--stdin] [--workspace path] [--json] [--yes]
 mim go [--workspace path] [-- command ...]
+mim always-on [--workspace path] [--host address] [--port number]
 mim mcp
 ```
 
@@ -55,6 +59,25 @@ For secret-bearing calls, prefer `--stdin` from a trusted local shell so tokens 
 Approval-required `mim tool` calls are denied by default in non-interactive mode. On an interactive TTY the CLI prompts on stderr. `--yes` is the explicit escape hatch for trusted local automation and auto-approves the headless gate.
 
 `mim go` refreshes agent context, then runs an external command in the workspace. With no command it runs `claude`.
+
+`mim always-on` keeps the same headless kernel alive for one Project. Each
+one-minute heartbeat:
+
+- fetches/synchronizes the machine's managed Project and Personal Team
+  checkouts, with the same offline retry and conflict-stop behavior as desktop;
+- refreshes Team and Project routine definitions and file watchers;
+- refreshes Slack Socket Mode connections, whose own reconnect loop remains
+  active between heartbeats;
+- runs due schedules without allowing one failed routine to block the others.
+
+Failed scheduled runs retain their overdue time and retry on the next
+heartbeat. Activation, authority acknowledgements, credentials, scheduler
+heartbeat, Slack ledger, and thread mappings remain local to the always-on
+machine. Signed webhooks use the same `POST /api/hooks/:routine` endpoint as
+desktop. The server binds to `127.0.0.1` and an available port by default;
+`--host` and `--port` make deployment behind the operator's chosen network
+boundary explicit. `always-on.status` reports the runtime heartbeat, endpoint,
+Slack state, and latest cycle error.
 
 `mim mcp` starts the MCP stdio bridge to the running desktop app. It does not
 boot a headless workspace. It uses `MIM_PORT`/`MIM_TOKEN` when present, otherwise
@@ -147,6 +170,7 @@ disabled. A committed `mim.yaml` app pin never activates app code by itself.
 
 - CLI entrypoint: `src/main/cli.ts`
 - Headless registry: `src/main/headless.ts`
+- Always-on lifecycle: `HeadlessKernel.startAlwaysOn()` in `src/main/headless.ts`
 - MCP stdio bridge: `src/main/mcp/stdio.ts`
 - Binary wrapper: `bin/mim.mjs`
 - Build output: `out/main/cli.js`

@@ -26,6 +26,7 @@ describe('mim CLI', () => {
     runMcp?: () => Promise<number>
     platform?: NodeJS.Platform
     spawn?: any
+    waitForShutdown?: () => Promise<void>
   } = {}) {
     return {
       cwd,
@@ -37,6 +38,7 @@ describe('mim CLI', () => {
       runMcp: options.runMcp,
       platform: options.platform,
       spawn: options.spawn,
+      waitForShutdown: options.waitForShutdown,
     }
   }
 
@@ -211,6 +213,19 @@ describe('mim CLI', () => {
 
     expect(code).toBe(7)
     expect(stderr.join('')).toBe('')
+  })
+
+  it('runs an always-on client until the process shutdown signal', async () => {
+    writeFileSync(join(dir, 'mim.yaml'), 'name: always-on\n')
+
+    const code = await runCli(
+      ['always-on', '--host', '127.0.0.1', '--port', '0'],
+      io(dir, undefined, { waitForShutdown: async () => {} }),
+    )
+
+    expect(code).toBe(0)
+    expect(stdout.join('')).toContain('Always-on client running')
+    expect(stdout.join('')).toContain('127.0.0.1:')
   })
 
   it('runs mim go commands through the shell on Windows so .cmd shims resolve', async () => {

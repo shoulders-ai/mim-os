@@ -439,10 +439,13 @@ paths removed rather than left beside the replacement.
     deliberately unbuilt: the durable Git signal is sufficient for beta, so no
     relay, lock, authoritative remote worktree, or shared editor state is
     introduced.
-12. **Exercise the always-on client.** Run the same Mim client on an always-on
-    machine with its own Team and Project checkouts. Make Slack, external
-    triggers, schedules, and overnight loops reliable while keeping activation
-    and credentials local to that machine.
+12. **Exercise the always-on client — complete.** `mim always-on` runs the same
+    headless kernel against that machine's own Team and Project checkouts. Its
+    heartbeat syncs, refreshes definitions/watchers and Slack, serves signed
+    webhooks, and runs schedules; a failed scheduled routine remains due for
+    retry without blocking unrelated routines. Graceful shutdown flushes sync.
+    Activation, authority review, scheduler state, Slack ledgers, and keychain
+    credentials remain local to the machine.
 13. **Close the restructure.** Remove dead dependencies and vocabulary, update
     current-state docs and `_MAP.md`, run the full repository and external app
     compatibility suites, build every supported target, and perform a visual
