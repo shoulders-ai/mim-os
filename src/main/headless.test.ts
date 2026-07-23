@@ -6,7 +6,6 @@ import { createHeadlessKernel } from '@main/headless.js'
 import { PermissionDeniedError } from '@main/security/gate.js'
 import type { AppStatus } from '@main/tools/coreApps.js'
 import { MCP_TOOL_SPECS } from '@main/server/server.js'
-import { writeSharedWorkspaceToken } from '@main/workspace/sharedWorkspaceTokens.js'
 
 describe('createHeadlessKernel', () => {
   let dir: string
@@ -371,95 +370,5 @@ describe('headless named app tools', () => {
     const result = await kernel.tools.call('workspace.orient', {}, ctx) as { content: string }
     expect(result.content).toContain('## Fixture')
     expect(result.content).toContain('fixture section body')
-  })
-})
-
-describe('headless shared workspace tools', () => {
-  let root: string
-  let home: string
-  let oldHome: string | undefined
-
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'mim-headless-shared-'))
-    home = mkdtempSync(join(tmpdir(), 'mim-headless-home-'))
-    oldHome = process.env.HOME
-    process.env.HOME = home
-    writeFileSync(join(root, 'mim.yaml'), [
-      'name: headless-shared-test',
-      'sharedWorkspace:',
-      '  id: team-server',
-      '  url: https://mim.example.com/mcp',
-      '  namespaces:',
-      '    - issues.*',
-      '',
-    ].join('\n'))
-    writeSharedWorkspaceToken('team-server', 'tok_remote', { home })
-  })
-
-  afterEach(() => {
-    if (oldHome === undefined) delete process.env.HOME
-    else process.env.HOME = oldHome
-    vi.unstubAllGlobals()
-    rmSync(root, { recursive: true, force: true })
-    rmSync(home, { recursive: true, force: true })
-  })
-
-  it('mounts configured remote MCP namespaces into the local tool registry', async () => {
-    const fetchUrl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body ?? '{}'))
-      if (body.method === 'initialize') {
-        return new Response(JSON.stringify({
-          jsonrpc: '2.0',
-          id: body.id,
-          result: {
-            protocolVersion: '2025-06-18',
-            serverInfo: { name: 'mim', version: '0.1.2' },
-            capabilities: { tools: {} },
-          },
-        }))
-      }
-      if (body.method === 'tools/list') {
-        return new Response(JSON.stringify({
-          jsonrpc: '2.0',
-          id: body.id,
-          result: {
-            tools: [{
-              name: 'issues_create',
-              description: 'Create remote issue',
-              inputSchema: { type: 'object', properties: { title: { type: 'string' } } },
-            }],
-          },
-        }))
-      }
-      if (body.method === 'tools/call') {
-        return new Response(JSON.stringify({
-          jsonrpc: '2.0',
-          id: body.id,
-          result: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({ id: 'ISS-1', title: body.params.arguments.title }),
-            }],
-          },
-        }))
-      }
-      return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, error: { message: 'unexpected method' } }))
-    })
-    vi.stubGlobal('fetch', fetchUrl)
-
-    const kernel = createHeadlessKernel()
-    await kernel.openWorkspace(root)
-
-    expect(kernel.tools.get('issues.create')?.description).toBe('Create remote issue')
-    expect(kernel.getNamedMcpTools()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: 'issues_create', mimName: 'issues.create' }),
-    ]))
-    await expect(kernel.tools.call('issues.create', { title: 'Fix auth' }, ctx)).resolves.toEqual({
-      id: 'ISS-1',
-      title: 'Fix auth',
-    })
-    expect(fetchUrl).toHaveBeenCalledWith('https://mim.example.com/mcp', expect.objectContaining({
-      headers: expect.objectContaining({ Authorization: 'Bearer tok_remote' }),
-    }))
   })
 })

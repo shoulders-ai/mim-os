@@ -41,10 +41,9 @@ Setting `traceCaptureContent: false` disables consequential tool-result and mode
 Every trace event carries:
 
 - `traceId`, `spanId`, `parentSpanId` for span hierarchy
-- `actor` (`user`, `ai`, `package`, `system`, `remote`)
-- `principal` from `~/.mim/config.yaml` user identity when configured, or a
-  per-call remote caller principal when one is supplied
-- optional `callerName`, `transport`, and `agent` attribution fields
+- `actor` (`user`, `ai`, `package`, `system`)
+- `principal` from `~/.mim/config.yaml` user identity when configured
+- optional `agent` attribution
 - `kind`, `status`, `durationMs`
 - optional `sessionId`, `runId`, `packageId`, `packageVersion`
 - optional `tool`, `model`, `subject`
@@ -53,12 +52,6 @@ Every trace event carries:
 - redacted `summary`, pointer-only `payloadRef`, and structured `data`
 
 Trace writes are best-effort. They must never throw through or block the action being traced.
-
-Serve mode also maintains a small operator ledger for denied remote requests at
-the per-workspace serve state directory (`denied-requests.jsonl`). It duplicates
-the actionable subset of remote `gate.decision` denials so operators can run
-`mim serve denials list --json` without searching trace day files. The trace
-stream remains the complete audit record.
 
 ## Emitters
 
@@ -226,8 +219,7 @@ Primary coverage:
 - `src/main/trace/outcomes.test.ts`: post-AI edit outcomes, revert detection,
   watcher echo suppression, lazy rebuild from payload objects, registry integration.
 - `src/main/tools/trace.test.ts`: kernel tool behavior.
-- `src/main/tools/registry.test.ts`: tracing, remote caller attribution, and
-  payload capture at dispatch.
+- `src/main/tools/registry.test.ts`: tracing and payload capture at dispatch.
 - `src/main/ai/aiRuntime.test.ts`: chat wrappers for `trace_query` and `trace_stats`, plus context-compaction record application, threshold-triggered summary writes, provider context-length classification, and overflow retry behavior.
 - `src/main/headless.test.ts`: headless tool surface registration.
 - `src/renderer/components/activity/ActivityTrustView.smoke.test.ts`: Review

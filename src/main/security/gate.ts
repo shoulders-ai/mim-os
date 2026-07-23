@@ -29,11 +29,6 @@ export interface ToolPolicy {
   category: ToolCategory
   risk: ToolRisk
   label?: string
-  source?: {
-    kind: 'sharedWorkspace'
-    id: string
-    name?: string
-  }
   ownerPackageId?: string
   pathParam?: string
   // A second path-bearing param (e.g. fs.rename new_path) that must also pass
@@ -46,9 +41,6 @@ export interface PermissionApprovalRequest {
   requestId: string
   toolName: string
   actor: ToolContext['actor']
-  principal?: string
-  callerName?: string
-  transport?: string
   package_id?: string
   sessionId?: string
   routineId?: string
@@ -67,7 +59,6 @@ export interface PermissionApprovalRequest {
   resourceCollectionId?: string
   // Human-readable action label from the resolved tool policy (e.g. "Board: Delete issue").
   label?: string
-  source?: ToolPolicy['source']
   params: Record<string, unknown>
   preview?: ApprovalPreview
   savedBrowserSession?: SavedBrowserSessionApproval
@@ -82,9 +73,6 @@ export interface PermissionDecisionEvent {
   decision: PermissionDecisionKind
   tool: string
   actor: ToolContext['actor']
-  principal?: string
-  callerName?: string
-  transport?: string
   package_id?: string
   sessionId?: string
   routineId?: string
@@ -103,31 +91,6 @@ export interface PermissionDecisionEvent {
   target?: string
   pathKind?: PermissionPathKind
   params?: Record<string, unknown>
-}
-
-export interface RemoteGrantPath {
-  value: string
-  kind?: PermissionPathKind
-  reason?: string
-  absolutePath: string | null
-  resourceCollectionId?: string
-}
-
-export interface RemoteGrantRequest {
-  toolName: string
-  params: Record<string, unknown>
-  ctx: ToolContext
-  policy: ToolPolicy
-  effect: ToolEffect
-  target?: string
-  pathKind?: PermissionPathKind
-  paths: RemoteGrantPath[]
-}
-
-export interface RemoteGrantDecision {
-  allowed: boolean
-  reason: string
-  grantId?: string
 }
 
 export interface PermissionGate {
@@ -157,9 +120,6 @@ export interface PermissionGateOptions {
     params: Record<string, unknown>,
     ctx: ToolContext,
   ) => void | Promise<void>
-  resolveRemoteGrant?: (
-    request: RemoteGrantRequest,
-  ) => RemoteGrantDecision | Promise<RemoteGrantDecision>
   onApprovalRequested?: (request: PermissionApprovalRequest) => void | Promise<void>
   onApprovalResolved?: (
     request: PermissionApprovalRequest,
@@ -465,9 +425,6 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
     const baseEvent = {
       tool: tool.name,
       actor: ctx.actor,
-      principal: ctx.principal,
-      callerName: ctx.callerName,
-      transport: ctx.transport,
       package_id: ctx.package_id,
       sessionId: ctx.sessionId,
       routineId: routineContext?.id,
@@ -550,43 +507,6 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
       }
     }
 
-    const remoteCtx: ToolContext | null = ctx.actor === 'remote'
-      ? ctx
-      : subagentContext?.originActor === 'remote'
-        ? {
-            ...ctx,
-            actor: 'remote',
-            principal: subagentContext.principal,
-            callerName: subagentContext.callerName,
-            transport: subagentContext.transport,
-          }
-        : null
-    if (remoteCtx) {
-      if (!options.resolveRemoteGrant) {
-        const reason = 'Remote caller is not authorized'
-        record({ ...baseEvent, decision: 'denied', reason })
-        throw new PermissionDeniedError(`Permission denied: ${reason}`)
-      }
-      const effect = resolvedToolEffect(tool.name, policy)
-      const resolved = options.resolveRemoteGrant({
-        toolName: tool.name,
-        params,
-        ctx: remoteCtx,
-        policy,
-        effect,
-        target,
-        pathKind: pathInfo?.kind,
-        paths: remoteGrantPaths(policy, params, [pathInfo, getSecondaryPathInfo(policy, params, options.getWorkspacePath())]),
-      })
-      const decision = isPromiseLike(resolved) ? await resolved : resolved
-      if (!decision.allowed) {
-        record({ ...baseEvent, decision: 'denied', reason: decision.reason })
-        throw new PermissionDeniedError(`Permission denied: ${decision.reason}`)
-      }
-      record({ ...baseEvent, decision: 'allowed', reason: decision.reason })
-      if (ctx.actor === 'remote') return
-    }
-
     if (ctx.actor === 'user' || ctx.actor === 'system') {
       record({ ...baseEvent, decision: 'allowed', reason: 'direct user action' })
       return
@@ -626,9 +546,6 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
         requestId: randomUUID(),
         toolName: tool.name,
         actor: ctx.actor,
-        principal: ctx.principal,
-        callerName: ctx.callerName,
-        transport: ctx.transport,
         package_id: ctx.package_id,
         sessionId: ctx.sessionId,
         routineId: routineContext?.id,
@@ -644,7 +561,6 @@ export function createPermissionGate(options: PermissionGateOptions): Permission
         pathKind: pathInfo?.kind,
         resourceCollectionId: pathInfo?.resourceCollectionId,
         label: policy.label,
-        source: policy.source,
         params: redactedParams,
         preview: buildApprovalPreview(tool.name, params),
         ...(savedBrowserSession ? { savedBrowserSession } : {}),
@@ -785,9 +701,6 @@ export function traceGateDecision(trace: TraceLog, event: PermissionDecisionEven
     actor: event.actor,
     tool: event.tool,
     subject: event.target,
-    principal: event.principal,
-    callerName: event.callerName,
-    transport: event.transport,
     sessionId: event.sessionId,
     ...(event.package_id ? { packageId: event.package_id } : {}),
     ...(event.traceId ? { traceId: event.traceId } : {}),
@@ -861,26 +774,6 @@ function getSecondaryPathInfo(policy: ToolPolicy, params: Record<string, unknown
   const value = params[policy.secondaryPathParam]
   if (typeof value !== 'string') return null
   return classifyPermissionPath(value, workspacePath)
-}
-
-function remoteGrantPaths(
-  policy: ToolPolicy,
-  params: Record<string, unknown>,
-  infos: Array<PermissionPathClassification | null>,
-): RemoteGrantPath[] {
-  const paramsToRead = [policy.pathParam, policy.secondaryPathParam].filter((value): value is string => Boolean(value))
-  return infos.flatMap((info, index) => {
-    const paramName = paramsToRead[index]
-    const value = paramName && typeof params[paramName] === 'string' ? params[paramName] as string : ''
-    if (!info) return []
-    return [{
-      value,
-      kind: info.kind,
-      reason: info.reason,
-      absolutePath: info.absolutePath,
-      resourceCollectionId: info.resourceCollectionId,
-    }]
-  })
 }
 
 function resourceWriteDenial(

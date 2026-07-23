@@ -10,7 +10,6 @@ import {
   detailRows,
   formatToolName,
   rememberLabel,
-  sourceChipLabel,
   targetDetail,
   targetDisplay,
   targetIsCommand,
@@ -40,7 +39,6 @@ const rememberText = computed(() => rememberLabel(props.approval))
 const caution = computed(() => tone.value === 'caution')
 const toolName = computed(() => formatToolName(props.approval.toolName))
 const rows = computed(() => detailRows(props.approval))
-const sourceLabel = computed(() => sourceChipLabel(props.approval))
 
 function approve() {
   emit('approve', alwaysAllow.value)
@@ -66,14 +64,6 @@ function approve() {
       </span>
       <div class="min-w-0 flex-1">
         <p class="m-0 font-sans text-[13px] font-[620] leading-[1.35] text-ink">{{ question }}</p>
-        <span
-          v-if="sourceLabel"
-          class="mt-1 inline-flex max-w-full items-center gap-1 rounded-[999px] border border-rule-light bg-chrome-high px-2 py-0.5 font-sans text-[10px] font-[620] text-ink-3"
-          title="Shared workspace"
-        >
-          <span class="h-1.5 w-1.5 shrink-0 rounded-[999px] bg-accent" />
-          <span class="min-w-0 truncate">{{ sourceLabel }}</span>
-        </span>
       </div>
       <span
         v-if="queueLength > 1"

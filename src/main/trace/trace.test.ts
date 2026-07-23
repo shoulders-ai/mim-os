@@ -80,22 +80,18 @@ describe('TraceLog', () => {
     expect(event.principal).toBe('user@example.com')
   })
 
-  it('lets a per-event caller identity override the process principal', () => {
+  it('lets an explicit principal override the process principal', () => {
     const trace = createTraceLog({ devConsole: false, getPrincipal: () => 'local-user' })
     trace.setWorkspacePath(dir)
 
     trace.append({
       kind: 'tool.call',
-      actor: 'remote',
-      principal: 'caller-token-1',
-      callerName: 'anna',
-      transport: 'mcp-http',
+      actor: 'user',
+      principal: 'user@example.com',
     })
 
     const [event] = readTraceLines(dir)
-    expect(event.principal).toBe('caller-token-1')
-    expect(event.callerName).toBe('anna')
-    expect(event.transport).toBe('mcp-http')
+    expect(event.principal).toBe('user@example.com')
   })
 
   it('delivers every event to extra sinks, even with no workspace open', () => {

@@ -38,14 +38,13 @@ assumptions, and agents must not build beyond them:
    a runtime capability. No app implements its own OAuth flow.
 3. **The human boundaries that are product features stay.** The Mail send gate
    (UI-only tools + the audience dispatch refusal in `packageRuntime.ts`), the
-   AI approval prompts, and the serve-mode remote grant system are unchanged.
+   AI approval prompts, and the local MCP allowlist are unchanged.
 4. **No new permission machinery without an explicit user decision.** An agent
    that believes a task needs new auth/permission surface logs it in
    `docs/issues.md` and stops, rather than building it.
 
-Revisit trigger: the registry accepts a package not authored by this org, or a
-serve deployment spans users who do not mutually trust each other. At that
-point the deferred work in §10 becomes real.
+Revisit trigger: the registry accepts a package not authored by this org. At
+that point the deferred work in §10 becomes real.
 
 ## 3. What changes
 
@@ -156,12 +155,6 @@ Stale `package:mail:google_oauth_*` keychain entries are deleted on first run.
   stands. This is a product commitment (human control over sending), not
   enterprise posture. Core `gmail.send` also keeps its normal-mode approval
   prompt for AI callers.
-- **The serve-mode boundary.** This is the one place "2–3 users" is a real
-  security line, and it already works: remote callers get a read-only default
-  grant (`serve/tokens.ts:86`), Google/Slack tools are not in the serve MCP
-  allowlist (`server.ts:65–141`), package named tools reach remote callers
-  only via an explicit per-token grant, and the executable-workspace floor is
-  intact. Nothing in this proposal widens the network surface.
 - OS keychain storage, the `ctx.http` host allowlist (declared intent +
   audit), per-app trace attribution, the `app.trust` acknowledgement, and the
   `package.secrets.*` mechanism for genuinely app-specific secrets (API keys).

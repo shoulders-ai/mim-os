@@ -488,47 +488,6 @@ describe('workspaceContract — removeApp', () => {
   })
 })
 
-describe('workspaceContract — sharedWorkspace key', () => {
-  it('round-trips shared workspace config', () => {
-    const config = {
-      name: 'my-project',
-      sharedWorkspace: {
-        id: 'team-server',
-        url: 'https://mim.example.com/mcp',
-        namespaces: ['issues.*', 'knowledge.*', 'references.*'],
-      },
-    }
-
-    expect(parseMimYaml(serializeMimYaml(config))).toEqual(config)
-  })
-
-  it('drops invalid shared workspace values', () => {
-    expect(parseMimYaml('name: x\nsharedWorkspace: nope\n').sharedWorkspace).toBeUndefined()
-    expect(parseMimYaml('name: x\nsharedWorkspace:\n  id: Bad Name\n  url: https://mim.example.com/mcp\n').sharedWorkspace)
-      .toBeUndefined()
-    expect(parseMimYaml('name: x\nsharedWorkspace:\n  id: team\n  url: file:///tmp/socket\n').sharedWorkspace)
-      .toBeUndefined()
-  })
-
-  it('filters invalid shared workspace namespaces', () => {
-    const config = parseMimYaml(`name: x
-sharedWorkspace:
-  id: team
-  url: https://mim.example.com/mcp
-  namespaces:
-    - issues.*
-    - Bad Name
-    - knowledge.create
-`)
-
-    expect(config.sharedWorkspace).toEqual({
-      id: 'team',
-      url: 'https://mim.example.com/mcp',
-      namespaces: ['issues.*', 'knowledge.create'],
-    })
-  })
-})
-
 describe('workspaceContract — classifyWorkspace', () => {
   let dir: string
 

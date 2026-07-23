@@ -192,5 +192,5 @@ credential tools, one-shot setup/check tools that create/update and enable the
 workspace routine, Socket Mode lifecycle wiring, a metadata-only event ledger,
 event-to-routine dispatch, and bot thread replies are implemented in the
 desktop runtime. Durable per-thread session continuation, debounce/replay,
-chained routines, scheduler ownership across multiple hosts, durable parked
-approvals, and `mim serve` ownership are still outside the current runtime.
+chained routines, scheduler ownership across multiple clients, and durable
+parked approvals are still outside the current runtime.

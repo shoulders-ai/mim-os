@@ -4,20 +4,6 @@ import type { ToolRegistry } from '@main/tools/registry.js'
 import { classifyWorkspace, scaffoldWorkspace, parseMimYaml, DEFAULT_AGENTS_MD } from '@main/workspace/workspaceContract.js'
 import { writeAgentContext } from '@main/ai/agentContext.js'
 import { atomicWriteJson } from '@main/atomicJson.js'
-import {
-  listSharedWorkspaceConnections,
-  readSharedWorkspaceConnection,
-  type SharedWorkspaceConnection,
-} from '@main/workspace/sharedWorkspaceConnections.js'
-import {
-  readSharedWorkspaceConfigWithSource,
-  writeSharedWorkspaceFolderLink,
-} from '@main/workspace/sharedWorkspaceLinks.js'
-import { readSharedWorkspaceToken, sharedWorkspaceTokenEnvKey } from '@main/workspace/sharedWorkspaceTokens.js'
-import {
-  inspectSharedWorkspaceInvite,
-  joinSharedWorkspaceFromInvite,
-} from '@main/workspace/sharedWorkspaceInvite.js'
 
 interface WorkspaceConfig {
   name: string
@@ -126,105 +112,9 @@ export function registerWorkspaceTools(tools: ToolRegistry): void {
   })
 
   tools.register({
-    name: 'workspace.sharedWorkspace.status',
-    description: 'Report saved shared workspace connections and the explicit link for the open folder without exposing bearer tokens.',
-    inputSchema: objectSchema({}),
-    execute: async () => {
-      const path = tools.getWorkspacePath()
-      const linked = path ? readSharedWorkspaceConfigWithSource(path) : null
-      const connections = listSharedWorkspaceConnections()
-      const connectionSummaries = connections.map(connection => summarizeSharedWorkspaceConnection(connection, linked?.config.id))
-      if (!linked) {
-        return {
-          configured: false,
-          linked: false,
-          connections: connectionSummaries,
-        }
-      }
-      const config = linked.config
-      return {
-        configured: true,
-        linked: true,
-        linkSource: linked.source,
-        id: config.id,
-        ...(config.name ? { name: config.name } : {}),
-        url: config.url,
-        namespaces: config.namespaces,
-        tokenConfigured: readSharedWorkspaceToken(config.id) !== null,
-        tokenKey: sharedWorkspaceTokenEnvKey(config.id),
-        connections: connectionSummaries,
-      }
-    },
-  })
-
-  tools.register({
-    name: 'workspace.sharedWorkspace.inspectInvite',
-    description: 'Inspect a shared workspace invite for confirmation without redeeming it.',
-    inputSchema: objectSchema({ invite: { type: 'string' } }, ['invite']),
-    execute: async (params) => {
-      const invite = typeof params.invite === 'string' ? params.invite : ''
-      if (!invite.trim()) throw new Error('Shared workspace invite is required')
-      return inspectSharedWorkspaceInvite(invite)
-    },
-  })
-
-  tools.register({
-    name: 'workspace.sharedWorkspace.join',
-    description: 'Redeem a shared workspace invite and save a user-level connection without exposing the token.',
-    inputSchema: objectSchema({ invite: { type: 'string' } }, ['invite']),
-    execute: async (params) => {
-      const invite = typeof params.invite === 'string' ? params.invite : ''
-      if (!invite.trim()) throw new Error('Shared workspace invite is required')
-      return joinSharedWorkspaceFromInvite({ invite })
-    },
-  })
-
-  tools.register({
-    name: 'workspace.sharedWorkspace.link',
-    description: 'Explicitly link the open folder to a saved shared workspace connection.',
-    inputSchema: objectSchema({ id: { type: 'string' } }),
-    execute: async (params) => {
-      const path = tools.getWorkspacePath()
-      if (!path) throw new Error('No workspace is open')
-      const idParam = typeof params.id === 'string' ? params.id.trim() : ''
-      const connections = listSharedWorkspaceConnections()
-      const id = idParam || onlyConnectionId(connections)
-      const connection = readSharedWorkspaceConnection(id)
-      if (!connection) throw new Error(`Shared workspace connection not found: ${id}`)
-      if (readSharedWorkspaceToken(connection.id) === null) {
-        throw new Error(`Shared workspace "${connection.id}" has no local token; reconnect with a fresh invite`)
-      }
-      const sharedWorkspace = writeSharedWorkspaceFolderLink(path, connection)
-      return {
-        linked: true,
-        sharedWorkspace,
-      }
-    },
-  })
-
-  tools.register({
     name: 'workspace.defaultAgentsMd',
     description: 'Return the default AGENTS.md template content.',
     inputSchema: objectSchema({}),
     execute: async () => ({ content: DEFAULT_AGENTS_MD }),
   })
-}
-
-function summarizeSharedWorkspaceConnection(connection: SharedWorkspaceConnection, linkedId?: string) {
-  return {
-    id: connection.id,
-    ...(connection.name ? { name: connection.name } : {}),
-    url: connection.url,
-    namespaces: connection.namespaces,
-    ...(connection.callerName ? { callerName: connection.callerName } : {}),
-    connectedAt: connection.connectedAt,
-    tokenConfigured: readSharedWorkspaceToken(connection.id) !== null,
-    linked: linkedId === connection.id,
-  }
-}
-
-function onlyConnectionId(connections: SharedWorkspaceConnection[]): string {
-  if (connections.length === 1) return connections[0].id
-  if (connections.length === 0) throw new Error('No shared workspace connection is saved')
-  throw new Error('Choose which shared workspace connection to link')
 }

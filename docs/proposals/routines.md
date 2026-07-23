@@ -252,10 +252,9 @@ machine that has been explicitly enabled as a scheduler for this workspace:
   separate git clones, because `.mim/routines/` is per-machine state by
   design.
 - Cross-machine safety comes from scheduler ownership, not shared CAS. A
-  desktop can run automatic triggers for its local workspace while the app is
-  open; when a `mim serve` host is configured as the workspace scheduler,
-  desktops still author, review, and manually run routines, but do not fire
-  schedule/file/webhook triggers.
+  client can run automatic triggers for its local checkout while the app is
+  open; an explicitly chosen always-on client can own schedule, file, and
+  webhook triggers.
 - A **file lock** under `.mim/routines/` makes the tick single-flight, with
   stale-lock takeover keyed on the heartbeat.
 - **Two health files, deliberately** (the Hermes lesson): a ticker
@@ -380,19 +379,18 @@ routines starter lands in the `build-app` skill's decision table: prose on a
 schedule → routine; imperative code on demand → app job; knowledge for the
 agent → skill.
 
-### Two hosts, one subsystem
+### Two clients, one subsystem
 
-The desktop and the sibling [mim-serve.md](mim-serve.md) host run the same
-subsystem, but only one host owns automatic triggers for a workspace at a
-time:
+Desktop and always-on clients run the same subsystem, but only one client owns
+automatic triggers for a Project at a time:
 
 - **Desktop-owned** — the app runs the ticker, file watchers, and loopback
   webhook routes while it is open. This covers workday rhythms and local
   authoring.
-- **Serve-owned** — `mim serve` runs the same scheduler 24/7 against its
-  checkout. Desktop Mims still list, edit, approve, and manually run
-  routines, but automatic triggers are disabled locally to avoid two clones
-  firing the same routine.
+- **Always-on-owned** — a chosen Mim client runs the same scheduler 24/7
+  against its checkout. Other clients still list, edit, approve, and manually
+  run routines, but automatic triggers are disabled locally to avoid two
+  clones firing the same routine.
 
 CAS state and file locks protect one checkout from double-firing. Scheduler
 ownership protects multiple checkouts from double-firing.
@@ -425,9 +423,8 @@ Each phase is independently shippable.
    payload delivery, and secret management tools. Deferred: rate caps,
    internet exposure under the server host, deliver-only mode, and trace-sourced
    `after` triggers.
-6. **Server host.** Run the subsystem under `mim serve`; durable parking,
-   remote approval surfacing, and scheduler ownership transfer are designed
-   there.
+6. **Always-on client.** Exercise the subsystem on a continuously running Mim
+   client; durable parking and scheduler ownership transfer are designed there.
 
 ## Security considerations
 

@@ -10,8 +10,6 @@ import {
   type PermissionApprovalRequest,
   type PermissionDecisionEvent,
   type PermissionGate,
-  type RemoteGrantDecision,
-  type RemoteGrantRequest,
 } from '@main/security/gate.js'
 import { createPackageEnablementStore } from '@main/packages/packageEnablement.js'
 import { createPackageLoader, type PackageLoader } from '@main/packages/packages.js'
@@ -74,8 +72,6 @@ import { registerTelemetryTools } from '@main/tools/telemetry.js'
 import type { HttpClient } from '@main/integrations/http.js'
 import { userHomeDir } from '@main/platform.js'
 import type { McpToolSpec } from '@main/server/server.js'
-import { openSharedWorkspaceToolMount, syncSharedWorkspaceToolMount } from '@main/workspace/sharedWorkspaceMount.js'
-import type { SharedWorkspaceToolMount } from '@main/workspace/sharedWorkspaceRemote.js'
 
 export interface HeadlessKernel {
   tools: ToolRegistry
@@ -89,7 +85,6 @@ export interface HeadlessKernel {
 export interface HeadlessKernelOptions {
   approvals?: 'deny' | 'prompt' | 'allow'
   confirmApproval?: (request: PermissionApprovalRequest) => Promise<boolean>
-  resolveRemoteGrant?: (request: RemoteGrantRequest) => RemoteGrantDecision | Promise<RemoteGrantDecision>
   onGateDecision?: (event: PermissionDecisionEvent) => void
   telemetry?: {
     enabled?: boolean
@@ -138,14 +133,13 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   let packageEnablement: ReturnType<typeof createPackageEnablementStore> | null = null
   // Per-kernel, not module-scope: tests create several kernels in one process.
   let namedToolsRef: NamedPackageToolSync | null = null
-  let sharedWorkspaceToolsRef: SharedWorkspaceToolMount | null = null
   let agentMountsRef: ReturnType<typeof createAgentMounts> | null = null
   let subagentManagerRef: SubagentManager | null = null
   const gate = createHeadlessGate(
     () => tools.getWorkspacePath(),
     options,
     traceLog,
-    (name) => sharedWorkspaceToolsRef?.getPolicy(name) ?? namedToolsRef?.getPolicy(name),
+    (name) => namedToolsRef?.getPolicy(name),
     (sessionId, data) => {
       void tools.call('session.update', { id: sessionId, ...data }, { actor: 'system' }).catch(() => {})
     },
@@ -223,10 +217,6 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
     runtime: 'headless',
   })
 
-  function warnSharedWorkspace(message: string): void {
-    console.warn(`[shared-workspace] ${message}`)
-  }
-
   return {
     tools,
     getPackages() {
@@ -243,7 +233,6 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
         if (tool) specs.push({ name: name.replace(/\./g, '_'), mimName: name, description: tool.description })
       }
       for (const name of namedToolsRef?.ownedNames() ?? []) pushSpec(name)
-      for (const name of sharedWorkspaceToolsRef?.ownedNames() ?? []) pushSpec(name)
       return specs
     },
     getAgentMounts() {
@@ -251,8 +240,6 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
     },
     async openWorkspace(path: string) {
       await subagentManagerRef?.interruptActive()
-      sharedWorkspaceToolsRef?.unmount()
-      sharedWorkspaceToolsRef = null
       await tools.call('workspace.open', { path }, { actor: 'system' })
       telemetry.track('workspace_open')
       const enablement = createPackageEnablementStore({
@@ -266,13 +253,9 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
 
       const namedTools = createNamedPackageToolSync({ runtime, tools, packages })
       namedToolsRef = namedTools
-      const syncNamedAndSharedTools = async () => {
-        await namedTools.sync()
-        await syncSharedWorkspaceToolMount(sharedWorkspaceToolsRef, warnSharedWorkspace)
-      }
       registerPackageTools(tools, packages, enablement, {
         invalidate: (id) => runtime.invalidate(id),
-        syncNamedTools: syncNamedAndSharedTools,
+        syncNamedTools: () => namedTools.sync(),
       })
 
       const agentMounts = createAgentMounts({ runtime, packages, tools })
@@ -280,19 +263,13 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
       registerCoreAppTools(tools, {
         packages,
         enablement,
-        invalidate: (id) => { runtime.invalidate(id); void syncNamedAndSharedTools() },
+        invalidate: (id) => { runtime.invalidate(id); void namedTools.sync() },
         agentMounts,
       })
 
       setAgentContextContributionsProvider(createAgentContextContributionsProvider({ runtime, packages }))
       setAgentContextLocalPackagesProvider(createLocalPackageStatusProvider({ runtime, packages, enablement }))
       await namedTools.sync()
-      sharedWorkspaceToolsRef = await openSharedWorkspaceToolMount({
-        workspacePath: tools.getWorkspacePath() ?? path,
-        tools,
-        canShadowTool: (name) => namedTools.ownedNames().includes(name),
-        onWarning: warnSharedWorkspace,
-      })
       await subagentManagerRef?.reconcile()
 
       const cacheRoot = DEFAULT_CACHE_ROOT
@@ -323,8 +300,6 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
     },
     async shutdown() {
       await subagentManagerRef?.dispose()
-      sharedWorkspaceToolsRef?.unmount()
-      sharedWorkspaceToolsRef = null
       namedToolsRef = null
       agentMountsRef = null
       packageEnablement = null
@@ -373,7 +348,6 @@ function createHeadlessGate(
       if (!ws) throw new Error('No workspace open')
       addBrowserSessionDomain(ws, grant.domain)
     },
-    resolveRemoteGrant: options.resolveRemoteGrant,
     onApprovalRequested: (request) => {
       if (request.sessionId && request.subagentRootSessionId) updateSubagentApproval(request.sessionId, 'needs-approval')
       if (!request.routineId || !request.sessionId) return

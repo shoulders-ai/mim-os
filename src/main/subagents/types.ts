@@ -26,10 +26,7 @@ export interface SubagentSessionMetadata {
   effectiveToolAllowlist?: string[]
   approvalAllow?: string[]
   requestedGrants?: string[]
-  originActor?: 'user' | 'ai' | 'system' | 'remote'
-  principal?: string
-  callerName?: string
-  transport?: string
+  originActor?: 'user' | 'ai' | 'system'
   inbox: SubagentInboxMessage[]
   result?: string
   resultUpdatedAt?: string
@@ -88,9 +85,6 @@ export function normalizeSubagentMetadata(
   copyString(value, base, result, 'currentTurnId')
   copyString(value, base, result, 'modelId')
   copyString(value, base, result, 'agentId')
-  copyString(value, base, result, 'principal')
-  copyString(value, base, result, 'callerName')
-  copyString(value, base, result, 'transport')
   copyString(value, base, result, 'result')
   copyString(value, base, result, 'resultUpdatedAt')
   copyString(value, base, result, 'collectedAt')
@@ -103,7 +97,7 @@ export function normalizeSubagentMetadata(
   copyStringArray(value, base, result, 'approvalAllow')
   copyStringArray(value, base, result, 'requestedGrants')
   const originActor = value.originActor ?? base?.originActor
-  if (originActor === 'user' || originActor === 'ai' || originActor === 'system' || originActor === 'remote') {
+  if (originActor === 'user' || originActor === 'ai' || originActor === 'system') {
     result.originActor = originActor
   }
   return result

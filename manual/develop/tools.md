@@ -300,6 +300,19 @@ approval.
 | `slack.listener.status` | Check the local Slack Socket Mode listener runtime. | read | auto |
 | `slack.replies` | Read threaded Slack replies for a message. | external | ask |
 
+## subagent
+
+| tool | description | effect | approval |
+|---|---|---|---|
+| `subagent.spawn` | Create a durable child agent thread and return immediately | **mutate** | ask |
+| `subagent.wait` | Wait for child state changes without limiting child runtime | read | auto |
+| `subagent.send` | Steer a running child or start a contextual follow-up turn | **mutate** | ask |
+| `subagent.interrupt` | Interrupt the active child turn and optionally redirect it | **mutate** | ask |
+| `subagent.stop` | Stop automatic child work while retaining its transcript | **mutate** | ask |
+| `subagent.status` | Read one child thread status and result summary | read | auto |
+| `subagent.list` | List child threads in this task lineage | read | auto |
+| `subagent.result` | Read a child final response by character page | read | auto |
+
 ## sync
 
 | tool | description | effect | approval |
@@ -362,8 +375,4 @@ approval.
 | `workspace.open` | Open a folder as a workspace. Creates .mim/ if needed. | **mutate** | ask |
 | `workspace.orient` | Regenerate the runtime agent context file (.mim/agent-context.md) for the current workspace and return it. | read | auto |
 | `workspace.info` | Get info about the current workspace | read | auto |
-| `workspace.sharedWorkspace.status` | Report saved shared workspace connections and the explicit link for the open folder without exposing bearer tokens. | **mutate** | ask |
-| `workspace.sharedWorkspace.inspectInvite` | Inspect a shared workspace invite for confirmation without redeeming it. | **mutate** | ask |
-| `workspace.sharedWorkspace.join` | Redeem a shared workspace invite and save a user-level connection without exposing the token. | **mutate** | ask |
-| `workspace.sharedWorkspace.link` | Explicitly link the open folder to a saved shared workspace connection. | **mutate** | ask |
 | `workspace.defaultAgentsMd` | Return the default AGENTS.md template content. | **mutate** | ask |

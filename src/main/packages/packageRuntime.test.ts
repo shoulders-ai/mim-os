@@ -162,8 +162,8 @@ describe('app runtime capabilities', () => {
     const tool = (await runtime.listChatTools()).find(candidate => candidate.packageId === 'board')!
 
     await Promise.all([
-      runtime.executeTool(tool.publicName, {}, { actor: 'remote', principal: 'anna' }),
-      runtime.executeTool(tool.publicName, {}, { actor: 'remote', principal: 'ben' }),
+      runtime.executeTool(tool.publicName, {}, { actor: 'user' }),
+      runtime.executeTool(tool.publicName, {}, { actor: 'user' }),
     ])
 
     const ctx = runtime.createContext({ pkg: packages.get('board')! })

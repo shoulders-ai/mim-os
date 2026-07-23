@@ -32,7 +32,6 @@ Electron App
     ├─ security/      permission gate and path classifier
     ├─ subagents/     durable delegated-thread scheduler and persisted types
     ├─ server/        Express + WebSocket for apps/AI/MCP
-    ├─ serve/         headless shared-workspace host helpers
     ├─ workspace/     boot, mim.yaml contract, file watcher
     ├─ tools/         registry + all tool modules
     ├─ integrations/  Slack, Google, keychain secrets, HTTP boundary
@@ -66,21 +65,20 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 
 - **Electron shell.** App lifecycle, window creation, IPC, quit guard, and macOS close-to-hide/Dock restore behavior. `src/main/index.ts`, `closeGuard.ts`, `platform.ts`, `menu.ts`, `windows/windowLifecycle.ts`.
 - **Tool registry.** Universal dispatch with actor context and trace logging. `src/main/tools/registry.ts`.
-- **Permission gate.** Approval policy for AI/app tool calls, keyed on effect (read/mutate/external), with serve-mode remote grant resolution. `src/main/security/gate.ts`, `gate-paths.ts`. Docs: [security.md](security.md).
+- **Permission gate.** Approval policy for AI/app tool calls, keyed on effect (read/mutate/external). `src/main/security/gate.ts`, `gate-paths.ts`. Docs: [security.md](security.md).
 - **File tools.** read/write/edit/create/delete/list/rename/copy/trash, workspace-scoped, stale-write protection via content hashes. `src/main/tools/fs.ts`, `workspaceFileWatcher.ts`.
 - **Local file history.** Optional per-file recovery under `.mim/history/`, independent of git, with resumable authored-text baselines, automatic exact/daily/weekly retention, and a soft byte budget. The normal Workspace control is on/off; technical storage controls live under Advanced. `src/main/history/`, `tools/history.ts`. UI: `HistoryRail.vue`, `StorageSettingsPanel.vue`. Docs: [history.md](history.md).
 - **Sessions.** Chat session CRUD, atomic JSON in `.mim/sessions/`, manifest cache, and durable child-thread metadata. `src/main/sessions.ts`, `sessionManifest.ts`.
 - **Subagents.** Durable AI-created child sessions with asynchronous queueing, event-driven waits, scheduler lease release, safe-boundary steering, contextual follow-ups, interruption/stop, result paging, inherited authority, MCP exposure, and Navigator runs. `src/main/subagents/`, `tools/subagents.ts`, `ai/aiRuntime.ts`, `security/gate.ts`, `src/renderer/stores/runs.ts`. Docs: [subagents.md](subagents.md), design rationale: [proposals/subagents.md](proposals/subagents.md).
 - **Routines.** Workspace-local definitions under `routines/`; revision-aware create/edit/duplicate/Trash lifecycle; machine-local four-state activation and run state under `.mim/routines/`; manual chat-turn runs; desktop schedule/file/webhook/Slack automation; source-file live refresh; authority review; routine session metadata; and the dense Routines work surface. `src/main/routines/`, `tools/routines.ts`, `server/server.ts`, `sessions.ts`, `src/renderer/components/routines/`, `src/renderer/stores/routines.ts`. Docs: [routines.md](routines.md), [design-system.md](design-system.md#617-routines-work-surface).
-- **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold, shared-workspace client config), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
+- **Workspace.** Boot (restore last or create default), `mim.yaml` contract (schema, init detection, scaffold), scoped open-file watcher. `src/main/workspace/`. Docs: [git.md](git.md) for sync.
 - **Git tools.** Status/diff/log/commit/pull/push and opt-in managed sync. `src/main/git.ts`, `tools/git.ts`, `tools/sync.ts`.
 - **User-global config.** `~/.mim/config.yaml` (identity, model defaults, skill sources). Never holds keys or tokens. `src/main/userConfig.ts`.
 - **Settings tools.** Workspace settings persistence in `.mim/settings.json`; agent tool availability policy for Settings > Tools. `src/main/tools/settings.ts`, `src/main/tools/toolPolicy.ts`.
 - **Bridge tools.** Cross-surface messaging: `editor.open`, `terminal.run`, `chat.send`. `src/main/tools/bridge.ts`.
 - **Editor state tool.** `editor.state` (MCP: `editor_state`): open tabs + active document snapshot, pushed by the renderer and cached in main. `src/main/tools/editorState.ts`.
 - **Headless CLI.** `mim` command over the shared tool registry; no Electron. `src/main/cli.ts`, `headless.ts`. Docs: [cli.md](cli.md).
-- **Mim Serve.** Headless shared-workspace host over authenticated MCP HTTP, with token store, single-use invite store, invite-aligned namespace grants, denial ledger, state migration, backup/restore helpers, desktop/headless remote named-tool mounting, user-level invite connections, explicit folder links, and live remote catalog refresh. `src/main/serve/`, `server/server.ts`, `workspace/sharedWorkspace*.ts`. Docs: [serve.md](serve.md).
-- **MCP bridge.** Stdio bridge from external CLI agents to the running desktop plus serve-mode HTTP MCP. `src/main/mcp/`, `src/main/server/server.ts`. Docs: [mcp.md](mcp.md).
+- **MCP bridge.** Local stdio bridge from external CLI agents to the running desktop. `src/main/mcp/`, `src/main/server/server.ts`. Docs: [mcp.md](mcp.md).
 - **Preload bridge.** `window.kernel` IPC gateway. `src/preload/index.ts`.
 
 ### Main Process — AI
@@ -117,7 +115,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Registry & install.** Multi-source resolution with ownership rule, trust gating, archive/git/local installs, and active-workspace package update checks. `src/main/packages/registrySources.ts`, `registryIndex.ts`, `updateCheck.ts`, `tools/registryTools.ts`, `tools/install.ts`. Docs: [private-registry.md](private-registry.md) for the authenticated account registry.
 - **Core-app tools.** `app.status/enable/disable/remove/trust` for personal enablement. `src/main/tools/coreApps.ts`.
 - **App authoring.** Starter templates, create/validate/reload authoring loop. `src/main/tools/packages.ts`, `templates/appTemplates.ts`.
-- **App server.** Express + WebSocket for desktop app/AI/MCP routes, explicit desktop vs serve-mode route gating, SDK file serving, app/MCP tool dispatch. `src/main/server/server.ts`.
+- **App server.** Express + WebSocket for desktop app/AI/MCP routes, SDK file serving, and app/MCP tool dispatch. `src/main/server/server.ts`.
 - **App SDK.** WebSocket client for iframes. `sdk/mim.js`, `sdk/tokens.css`.
 - **Skills.** Filesystem `SKILL.md` loader, authored + app-bundled skills, progressive tool gating. `src/main/skills.ts`, `tools/skills.ts`. Docs: [skills.md](skills.md), [custom-apps.md](custom-apps.md).
 
@@ -197,9 +195,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 | [security.md](security.md) | Permission gate, trust model, actor modes |
 | [design-system.md](design-system.md) | Visual language, tokens, interaction rules |
 | [cli.md](cli.md) | Headless CLI commands |
-| [serve.md](serve.md) | Currently implemented headless shared-workspace serving over MCP HTTP; product direction superseded by Mim Restructure |
-| [mim-server-status.md](mim-server-status.md) | Timestamped inventory of the superseded `mim serve` implementation |
-| [mcp.md](mcp.md) | MCP stdio bridge and serve-mode HTTP MCP |
+| [mcp.md](mcp.md) | Local MCP stdio bridge to the running desktop |
 | [integrations.md](integrations.md) | Slack/Google tools, keychain, policy |
 | [web-reading.md](web-reading.md) | Web/PDF reading, website access, evaluation harness |
 | [html-markdown.md](html-markdown.md) | HTML-to-Markdown parser |
@@ -230,15 +226,13 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 ### Proposals
 
-- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phase 1 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
+- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phases 1 and 2 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
 - [proposals/r-first-class.md](proposals/r-first-class.md) — **implemented** (phases 1-5; phase 6 deferred). First-class R/Rmd/Quarto: `code.run` execution primitive, plot/artifact viewing, Cmd+Enter send-to-terminal, render loop, R modelling skill.
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/popout-editor-window.md](proposals/popout-editor-window.md) — **implemented** (phases 0-3; phase 4 deferred). Pop-out editor windows: move any editor tab into its own OS window and back, with full tab-state transfer, per-window close guards, focused-window menu routing, and macOS native touches.
 - [proposals/tools-settings-tab.md](proposals/tools-settings-tab.md) — Settings > Tools plan for unified AI/MCP tool availability policy.
 - [proposals/agents-as-apps.md](proposals/agents-as-apps.md) — **implemented** (phases 0-4; phase 5 deferred). Agents as an app contribution type: `AgentProfile` primitive extracted from the chat runtime, `export const agents` mounting, agent sessions in the native chat surface, starter template and authoring docs.
 - [proposals/user-manual.md](proposals/user-manual.md) — user manual + developer docs for mim-web: positioning, IA, content pipeline, subagent authoring process, design guide.
-- [proposals/mim-serve.md](proposals/mim-serve.md) — **superseded** shared-workspace host proposal; retained as an inventory for the deliberate removal pass.
-- [proposals/web-shell.md](proposals/web-shell.md) — **superseded** browser team-space and remote-shell proposal.
 - [proposals/routines.md](proposals/routines.md) — Routines: workspace-owned standing prompts that create runs; desktop starts stream through the normal chat transcript, headless scheduler runner, visible tools plus approval grants, scheduler ownership.
 - [proposals/slack-listener.md](proposals/slack-listener.md) — Slack-triggered routines over Socket Mode: implemented trigger/ledger/dispatcher/listener runtime, responder bound as a routine with a `slack` trigger, durable per-thread Mim sessions, capability-based setup, bot thread replies, and deferred replay/parking.
 - [proposals/slack-transport.md](proposals/slack-transport.md) — proposed clean break: Slack as a first-class transport to the workspace's default Mim agent, with one standing-consent decision per enabled channel, durable threaded conversations, full normal tool/subagent utility, and no Slack-specific permission system.
@@ -319,7 +313,6 @@ src/
     workspace/
       workspaceBoot.ts          # Last-workspace restore
       workspaceContract.ts      # mim.yaml schema/parser/scaffold
-      sharedWorkspace*.ts       # shared-workspace token storage, user connections, folder links, remote tool mounting, event refresh
       workspaceFileWatcher.ts   # File-change events
     integrations/
       secrets.ts                # OS keychain boundary

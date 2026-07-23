@@ -1,16 +1,15 @@
 # Mim Restructure: Project, You, and Team
 
 Status: product direction, scope model, UX, and implementation programme
-accepted; implementation is in progress, with phase 1 complete.
+accepted; implementation is in progress, with phases 1 and 2 complete.
 
 Mim is a local, file-native workbench where humans and agents work together on
 real project files. Collaboration is local-first: every human and agent works
 from its own checkout, Git provides durable shared state and history, and an
 optional always-on Mim client handles Slack, schedules, and overnight runs.
 
-This direction supersedes the shared-workspace model in
-[mim-serve.md](mim-serve.md) and the remote team-space shell in
-[web-shell.md](web-shell.md).
+This direction supersedes and removes the former shared-workspace host and
+remote team-space shell.
 
 ## Product model
 
@@ -386,10 +385,10 @@ paths removed rather than left beside the replacement.
    the real file mount-to-search path, and prove managed sync across two
    checkouts. The external-source fixture is self-contained rather than tied to
    one developer machine.
-2. **Retire Serve and shared workspace.** Remove the network Serve command and
-   transport, remote membership and mount code, Web Shell charter, shared
-   workspace UI/config, and remote-only tests. Prove the headless kernel, local
-   MCP, Slack, routines, and CLI agents still boot and run.
+2. **Retire Serve and shared workspace — complete.** The network command and
+   transport, remote membership and mounts, Web Shell charter, shared-workspace
+   UI/config, remote actor/grant paths, and remote-only tests are removed.
+   Headless execution, local MCP, Slack, routines, and CLI-agent paths remain.
 3. **Make Personal and Project state honest.** Move theme, editor preferences,
    model defaults, identity, and global skill toggles to Personal persistence.
    Keep transcripts, app enablement, routine activation, recovery, and other

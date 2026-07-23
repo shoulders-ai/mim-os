@@ -106,32 +106,6 @@ describe('ToolRegistry', () => {
     expect(errorEvents.map(l => l.effect)).toEqual(['mutate', 'mutate'])
   })
 
-  it('traces remote caller identity on every tool span event', async () => {
-    tools.register({
-      name: 'fs.read',
-      description: 'Read file',
-      execute: async () => ({ content: 'ok' }),
-    })
-
-    await tools.call('fs.read', { path: 'notes.md' }, {
-      actor: 'remote',
-      principal: 'caller-token-1',
-      callerName: 'anna',
-      transport: 'mcp-http',
-      sessionId: 'remote-session-1',
-    })
-
-    const lines = readTraceLines(dir)
-    expect(lines).toHaveLength(2)
-    for (const event of lines) {
-      expect(event.actor).toBe('remote')
-      expect(event.principal).toBe('caller-token-1')
-      expect(event.callerName).toBe('anna')
-      expect(event.transport).toBe('mcp-http')
-      expect(event.sessionId).toBe('remote-session-1')
-    }
-  })
-
   it('parents the call span under the caller trace context', async () => {
     tools.register({
       name: 'test.child',

@@ -105,7 +105,6 @@ export function registerAppKernelEvents(
     ['menu:clear-recent', () => { deps.clearRecentFiles() }],
     ['menu:close-tab', () => { deps.handleCloseTab() }],
     ['menu:settings', () => { deps.openSettings() }],
-    ['shared-workspace:invite', () => { deps.openSettings('workspace') }],
     ['menu:shortcuts', () => { deps.openShortcuts() }],
     ['menu:welcome', () => { deps.openWelcome() }],
     ['bridge:terminal:run', (data: unknown) => {

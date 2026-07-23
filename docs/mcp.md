@@ -1,9 +1,6 @@
 # MCP Server
 
-Mim exposes two MCP transports:
-
-- `mim mcp` — a local stdio bridge to the running desktop app.
-- `mim serve` — authenticated HTTP MCP for a headless shared workspace.
+Mim exposes `mim mcp`, a local stdio bridge to the running desktop app.
 
 The local desktop bridge starts through:
 
@@ -15,9 +12,6 @@ It is a protocol bridge to the running desktop app. It does not boot the
 headless kernel and does not open a workspace by itself. The desktop owns the
 workspace, renderer bridge tools, approval gate, trace logging, local history,
 and export renderer.
-
-`createServer({ mode: "serve" })` disables the desktop WebSocket MCP surface and
-serves MCP over HTTP instead. See [serve.md](serve.md) for operator commands.
 
 ## Connection Model
 
@@ -38,15 +32,6 @@ Pi 0.76+
     bundled Mim extension (WebSocket JSON-RPC)
 Mim Desktop
     Tool registry
-```
-
-Serve mode:
-
-```
-Claude Code / Codex / Gemini CLI / curl
-    HTTP JSON-RPC 2.0 + bearer token
-mim serve
-    Headless Tool registry
 ```
 
 On desktop start, Mim writes `~/.mim/server.json`:
@@ -90,16 +75,6 @@ The MCP stdio bridge returns Mim's supported MCP protocol version during
 `initialize`; it does not echo future client versions. Desktop WebSocket calls
 are bounded by a per-call timeout so a hung desktop request fails the MCP call
 instead of blocking stdin processing forever.
-
-Serve-mode HTTP MCP authenticates every request with
-`Authorization: Bearer <token>` and binds tool calls as `actor: "remote"` with
-`principal`, `callerName`, and `transport: "mcp-http"` attribution. Remote
-authorization is the serve grant resolver, not the desktop MCP allowlist alone.
-Stateless requests from one authenticated principal share a stable task root,
-so a later request can wait for, steer, and collect a subagent spawned earlier.
-`GET /mcp/events` is an authenticated SSE stream and emits
-`notifications/tools/list_changed` when package reloads or named-tool changes
-invalidate cached tool catalogs.
 
 ## Tool Surface
 
@@ -183,8 +158,7 @@ or reuses the MCP session's live browser context, and `browser_act` observes,
 clicks, types, scrolls, waits, extracts, shows, hides, or closes that same
 session. Local desktop MCP clients may open public websites and loopback
 development servers on `localhost`, `*.localhost`, `127.0.0.0/8`, or `::1`.
-Public-page sessions cannot reach loopback subresources, and remote serve-mode
-MCP has no Electron live-browser runtime. The **Use live browser** row in
+Public-page sessions cannot reach loopback subresources. The **Use live browser** row in
 Settings > Tools is enabled by default and controls whether both tools appear in
 the MCP catalog.
 
@@ -192,8 +166,7 @@ the MCP catalog.
 
 Slack and Google data tools appear in the MCP catalog only when the corresponding
 token is configured in the OS keychain and the corresponding row is enabled in
-Settings > Tools. Desktop MCP calls use the `user` actor; serve-mode HTTP calls
-use the `remote` actor and must satisfy serve grants. The MCP allowlist plus
+Settings > Tools. Desktop MCP calls use the `user` actor. The MCP allowlist plus
 tool policy is the desktop security boundary, and CLI agents have their own
 permission gates.
 
@@ -235,16 +208,6 @@ only the tools they actually registered. Named tools from enabled apps are
 exposed dynamically alongside the core set — the server queries the active named
 tool registrations at request time. Named tools without an `inputSchema` are
 silently excluded from the MCP catalog.
-
-When a workspace has an explicit `.mim/shared-workspace.json` folder link,
-desktop and headless Mim mount the configured remote named-tool namespaces into
-the local registry. Existing `mim.yaml sharedWorkspace` declarations are still
-read as a compatibility path. Mounted remote tools use the same underscore MCP
-naming convention and appear in the dynamic MCP catalog. They shadow local
-app-provided named tools for the configured server-owned namespaces, but do not
-replace local core tools. The mount listens to the shared workspace's
-`/mcp/events` stream and refreshes when it receives
-`notifications/tools/list_changed`.
 
 ## Client Config
 

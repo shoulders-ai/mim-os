@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { findWorkspaceRoot, parseArgs, runCli } from '@main/cli.js'
 import type { PermissionApprovalRequest } from '@main/security/gate.js'
-import { recordServeDeniedRequest } from '@main/serve/denials.js'
 
 describe('mim CLI', () => {
   let dir: string
@@ -25,10 +24,8 @@ describe('mim CLI', () => {
     isTTY?: boolean
     confirmApproval?: (request: PermissionApprovalRequest) => Promise<boolean>
     runMcp?: () => Promise<number>
-    runServe?: (options: { workspacePath: string; host: string; port: number; home?: string }) => Promise<number>
     platform?: NodeJS.Platform
     spawn?: any
-    home?: string
   } = {}) {
     return {
       cwd,
@@ -38,10 +35,8 @@ describe('mim CLI', () => {
       isTTY: options.isTTY,
       confirmApproval: options.confirmApproval,
       runMcp: options.runMcp,
-      runServe: options.runServe,
       platform: options.platform,
       spawn: options.spawn,
-      home: options.home,
     }
   }
 
@@ -53,6 +48,15 @@ describe('mim CLI', () => {
       json: true,
       yes: false,
     })
+  })
+
+  it('advertises local MCP without retired network collaboration commands', async () => {
+    expect(await runCli(['help'], io())).toBe(0)
+
+    const help = stdout.join('')
+    expect(help).toContain('mim mcp')
+    expect(help).not.toContain('mim serve')
+    expect(help).not.toContain('shared-workspace')
   })
 
   it('parses the explicit approval flag', () => {
@@ -207,201 +211,6 @@ describe('mim CLI', () => {
 
     expect(code).toBe(7)
     expect(stderr.join('')).toBe('')
-  })
-
-  it('stores, reports, and clears a shared workspace client token', async () => {
-    const home = join(dir, 'home')
-
-    const set = await runCli(['shared-workspace', 'token', 'set', 'team-server', 'tok_remote', '--json'], io(dir, undefined, { home }))
-    expect(set).toBe(0)
-    const keysPath = join(home, '.mim', 'keys.env')
-    expect(readFileSync(keysPath, 'utf-8')).toContain('MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN=tok_remote')
-    expect(stdout.join('')).not.toContain('tok_remote')
-    expect(JSON.parse(stdout.join(''))).toEqual({
-      saved: true,
-      id: 'team-server',
-      key: 'MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN',
-    })
-
-    stdout = []
-    const setFromStdin = await runCli(['shared-workspace', 'token', 'set', 'team-server', '--stdin', '--json'], io(dir, 'tok_stdin\n', { home }))
-    expect(setFromStdin).toBe(0)
-    expect(readFileSync(keysPath, 'utf-8')).toContain('MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN=tok_stdin')
-    expect(stdout.join('')).not.toContain('tok_stdin')
-
-    stdout = []
-    const status = await runCli(['shared-workspace', 'token', 'status', 'team-server', '--json'], io(dir, undefined, { home }))
-    expect(status).toBe(0)
-    expect(JSON.parse(stdout.join(''))).toEqual({
-      configured: true,
-      id: 'team-server',
-      key: 'MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN',
-    })
-
-    stdout = []
-    const clear = await runCli(['shared-workspace', 'token', 'clear', 'team-server', '--json'], io(dir, undefined, { home }))
-    expect(clear).toBe(0)
-    expect(JSON.parse(stdout.join(''))).toEqual({
-      cleared: true,
-      id: 'team-server',
-      key: 'MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN',
-    })
-    expect(readFileSync(keysPath, 'utf-8')).not.toContain('MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN')
-  })
-
-  it('creates and lists serve tokens for the selected workspace', async () => {
-    await runCli(['init', '--name', 'demo'], io())
-    stdout = []
-
-    const create = await runCli(['serve', 'token', 'create', '--name', 'anna', '--json'], io(dir, undefined, {
-      home: join(dir, 'home'),
-    }))
-    expect(create).toBe(0)
-    const created = JSON.parse(stdout.join('')) as { token: string; record: { id: string; name: string }; snippets: { claude: string } }
-    expect(created.token).toMatch(/^mim_serve_/)
-    expect(created.record).toMatchObject({ name: 'anna' })
-    expect(created.snippets.claude).toContain('claude mcp add')
-
-    stdout = []
-    const list = await runCli(['serve', 'token', 'list', '--json'], io(dir, undefined, {
-      home: join(dir, 'home'),
-    }))
-    expect(list).toBe(0)
-    const listed = JSON.parse(stdout.join('')) as { callers: Array<{ id: string; name: string; hash?: string }> }
-    expect(listed.callers).toEqual([expect.objectContaining({ id: created.record.id, name: 'anna' })])
-    expect(listed.callers[0].hash).toBeUndefined()
-  })
-
-  it('creates, lists, and revokes serve invites for human desktop join', async () => {
-    await runCli(['init', '--name', 'demo'], io())
-    const home = join(dir, 'home')
-    stdout = []
-
-    const create = await runCli([
-      'serve',
-      'invite',
-      'create',
-      '--name',
-      'anna',
-      '--url',
-      'https://mim.example.com/mcp',
-      '--workspace-id',
-      'team-server',
-      '--workspace-name',
-      'HTA Model',
-      '--namespaces',
-      'issues.*,knowledge.*',
-      '--json',
-    ], io(dir, undefined, { home }))
-    expect(create).toBe(0)
-    const created = JSON.parse(stdout.join('')) as {
-      invite: string
-      deepLink: string
-      record: { id: string; name: string; hash: string; workspaceName: string }
-    }
-    expect(created.invite).toMatch(/^mim-invite-/)
-    expect(created.deepLink).toMatch(/^mim:\/\/join\//)
-    expect(created.record).toMatchObject({ name: 'anna', workspaceName: 'HTA Model' })
-
-    stdout = []
-    const list = await runCli(['serve', 'invite', 'list', '--json'], io(dir, undefined, { home }))
-    expect(list).toBe(0)
-    const listed = JSON.parse(stdout.join('')) as { invites: Array<{ id: string; hash?: string; invite?: string; name: string }> }
-    expect(listed.invites).toEqual([expect.objectContaining({ id: created.record.id, name: 'anna' })])
-    expect(listed.invites[0].hash).toBeUndefined()
-    expect(listed.invites[0].invite).toBeUndefined()
-
-    stdout = []
-    const revoke = await runCli(['serve', 'invite', 'revoke', created.record.id, '--json'], io(dir, undefined, { home }))
-    expect(revoke).toBe(0)
-    expect(JSON.parse(stdout.join(''))).toEqual({ revoked: created.record.id })
-  })
-
-  it('starts serve mode through the injected runner with host and port', async () => {
-    await runCli(['init', '--name', 'demo'], io())
-    let seen: { workspacePath: string; host: string; port: number; home?: string } | null = null
-
-    const code = await runCli(['serve', '--host', '0.0.0.0', '--port', '4780'], io(dir, undefined, {
-      home: join(dir, 'home'),
-      runServe: async (options) => {
-        seen = options
-        return 11
-      },
-    }))
-
-    expect(code).toBe(11)
-    expect(seen).toEqual({
-      workspacePath: dir,
-      host: '0.0.0.0',
-      port: 4780,
-      home: join(dir, 'home'),
-    })
-  })
-
-  it('lists serve denied requests for operator review', async () => {
-    await runCli(['init', '--name', 'demo'], io())
-    const home = join(dir, 'home')
-    recordServeDeniedRequest({
-      home,
-      workspacePath: dir,
-      now: () => new Date('2026-07-08T10:00:00.000Z'),
-      event: {
-        decision: 'denied',
-        tool: 'fs.write',
-        actor: 'remote',
-        principal: 'caller_anna',
-        callerName: 'anna',
-        transport: 'mcp-http',
-        category: 'write',
-        risk: 'medium',
-        mode: 'normal',
-        reason: 'Grant does not include mutate effects',
-      },
-    })
-    stdout = []
-
-    const code = await runCli(['serve', 'denials', 'list', '--json'], io(dir, undefined, { home }))
-
-    expect(code).toBe(0)
-    const parsed = JSON.parse(stdout.join('')) as { deniedRequests: Array<{ tool: string; principal?: string }> }
-    expect(parsed.deniedRequests).toEqual([
-      expect.objectContaining({ tool: 'fs.write', principal: 'caller_anna' }),
-    ])
-  })
-
-  it('migrates selected structured app state into the served workspace', async () => {
-    await runCli(['init', '--name', 'demo'], io())
-    const source = join(dir, 'source-workspace')
-    mkdirSync(join(source, '.mim/packages/board/data/collections/issues'), { recursive: true })
-    writeFileSync(join(source, '.mim/packages/board/data/collections/issues/issue-1.json'), '{"title":"Existing"}')
-    stdout = []
-
-    const code = await runCli(['serve', 'state', 'migrate', '--from', source, '--apps', 'board', '--json'], io())
-
-    expect(code).toBe(0)
-    expect(JSON.parse(stdout.join(''))).toMatchObject({ migrated: ['board'] })
-    expect(readFileSync(join(dir, '.mim/packages/board/data/collections/issues/issue-1.json'), 'utf-8'))
-      .toBe('{"title":"Existing"}')
-  })
-
-  it('creates and restores serve backups from the CLI', async () => {
-    await runCli(['init', '--name', 'demo'], io())
-    writeFileSync(join(dir, '.mim/settings.json'), '{"traceRetentionDays":14}')
-    const backupDir = join(dir, 'backup')
-    stdout = []
-
-    const create = await runCli(['serve', 'backup', 'create', '--output', backupDir, '--json'], io())
-
-    expect(create).toBe(0)
-    expect(JSON.parse(stdout.join(''))).toMatchObject({ copied: expect.arrayContaining(['settings.json']) })
-
-    const restoreTarget = join(dir, 'restored')
-    stdout = []
-    const restore = await runCli(['serve', 'backup', 'restore', '--from', backupDir, '--workspace', restoreTarget, '--json'], io())
-
-    expect(restore).toBe(0)
-    expect(JSON.parse(stdout.join(''))).toMatchObject({ restored: expect.arrayContaining(['settings.json']) })
-    expect(readFileSync(join(restoreTarget, '.mim/settings.json'), 'utf-8')).toBe('{"traceRetentionDays":14}')
   })
 
   it('runs mim go commands through the shell on Windows so .cmd shims resolve', async () => {

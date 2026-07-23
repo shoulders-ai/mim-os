@@ -23,17 +23,6 @@ nothing.
   renderer IPC.
 - **`package`** → declared-permission check only (`packagePermissionViolation`);
   pass → allowed silently, fail → throw. Apps never get an interactive prompt.
-- **`remote`** → serve-mode network callers. Without a serve grant resolver,
-  every remote call is denied before any approval or developer-mode bypass.
-  With `mim serve`, the resolver enforces the caller token's effect/tool/path
-  grants and records denials with `principal`, `callerName`, and
-  `transport: "mcp-http"` attribution. Remote calls never enter the interactive
-  approval queue and are never treated as `user`.
-
-Serve mode has one tokenless exception: `POST /join` redeems a single-use,
-expiring shared-workspace invite. It accepts only the invite exchange body,
-rate-limits attempts, stores invite secrets as hashes, and returns the durable
-caller token only to the joining Mim process.
 
 App-mounted agents (`export const agents` in a backend) execute as actor `ai`
 through the same gate. Agents are backend exports, so the workspace trust ack
@@ -113,10 +102,7 @@ its every-action rule. `subagent.spawn.requestedGrants` is different: it forces
 a real approval and only an approved request becomes a durable task-lineage
 grant. The requested tool must already be in the child's inherited surface.
 
-Serve-mode delegation preserves `originActor: "remote"`, principal, caller,
-and transport. Every child tool call must first satisfy the originating remote
-grant resolver, then the ordinary AI gate. Local desktop MCP remains
-`actor: "user"` as described below.
+Local desktop MCP calls remain `actor: "user"` as described below.
 
 ## Sensitive paths (`src/main/security/gate-paths.ts`)
 
@@ -127,20 +113,6 @@ Prefix segments: `.env` (matches `.env`, `.env.production`, `.env.local`, etc.
 but not `envelope.md` or `environment.ts`). SSH key patterns:
 `id_rsa`/`id_ed25519`/`id_ecdsa`/`id_dsa` and their `.pub` counterparts.
 Classification → `workspace` | `sensitive` | `outside-workspace` | `invalid`.
-
-## Serve-mode executable floor
-
-Serve grants cannot authorize writes to executable or prompt-bearing workspace
-surfaces. The remote resolver hard-denies mutating path writes to `AGENTS.md`,
-`CLAUDE.md`, `mim.yaml`, `skills/`, `routines/`, workspace package directories,
-and package manifests inside those directories. It also hard-denies higher-level
-management tools that can change those surfaces, including app/package install
-and trust tools, skill authoring/import/delete tools, and routine create, update,
-duplicate, enable, disable, remove, run, and start tools.
-
-Remote denials are recorded in the normal trace stream and in the serve denial
-ledger (`mim serve denials list --json`) so operators can review grant misses
-without opening trace files.
 
 ## Redaction & audit (two separate redactors)
 
@@ -235,11 +207,6 @@ clears the approval store queue so inline cards disappear immediately.
   server-allowlisted before tool dispatch; `packages.list` stays app-only. The discovery MCP token is
   valid for the desktop process lifetime; per-agent MCP tokens are revoked when
   their live agent session ends.
-- **Serve-mode route boundary**: `createServer({ mode: "serve" })` disables the
-  desktop WebSocket surface, `/api/ai/*`, `/workspace-files/*`, `/packages/*`,
-  and `/sdk/*`. The decision is keyed on server mode, not peer address, because
-  a reverse proxy reaches Mim from loopback and `X-Forwarded-*` headers are not
-  proof of locality.
 - **IPC actor**: renderer IPC is hardcoded `actor: 'user'` — the renderer cannot
   claim AI or app identity.
 - **API key hygiene**: `~/.mim/keys.env` is written with `mode: 0o600` and
@@ -256,7 +223,7 @@ clears the approval store queue so inline cards disappear immediately.
   URL is itself loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, or `::1`).
   Its HTTP(S) and WebSocket request blocker carries that per-session decision:
   public pages cannot pivot into localhost, and all non-loopback private ranges
-  remain denied. Headless/serve runtimes never receive the Electron driver.
+  remain denied. Headless runtimes never receive the Electron driver.
 
 ## Known limits
 
@@ -289,14 +256,7 @@ clears the approval store queue so inline cards disappear immediately.
 - `src/main/server/server.test.ts` — CORS origin restriction: allows same-origin
   and `null`, denies foreign origins; `packages.list` refused before WS
   identification; MCP identify, metadata, server-side allowlist, app-only
-  app listing, desktop/serve-mode route separation, and AI actor/session
-  routing; serve-mode HTTP MCP auth, tokenless invite redemption, `remote`
-  actor attribution, and MCP `tools/list_changed` event stream.
-- `src/main/serve/tokens.test.ts` — serve token hashing/rotation/revocation,
-  remote grant enforcement, path scopes, and executable workspace floors.
-- `src/main/serve/invites.test.ts` — single-use invite hashing,
-  redemption-to-token, revocation, and expiry.
-- `src/main/serve/denials.test.ts` — serve denial ledger entries.
+  app listing, and AI actor/session routing.
 - `src/main/web/urlPolicy.test.ts` — private, loopback, link-local, unique-local,
   and cloud metadata URL blocking.
 - `src/main/packages/packageHttp.test.ts` — verifies `redirect: manual` is passed

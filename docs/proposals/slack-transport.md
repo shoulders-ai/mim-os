@@ -82,7 +82,7 @@ channel. Slack channel membership is the understandable access boundary.
 
 Deferred product features: DMs/MPIMs, file attachments, edited-message replay,
 streaming replies with `chat.update`, emoji acknowledgements, multiple bot
-accounts in one workspace, and remote `mim serve` ownership.
+accounts in one project, and always-on client ownership.
 
 ## Current state
 

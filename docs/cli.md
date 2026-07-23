@@ -37,21 +37,6 @@ mim list-tools [--json]
 mim tool <name> [json|--stdin] [--workspace path] [--json] [--yes]
 mim go [--workspace path] [-- command ...]
 mim mcp
-mim shared-workspace token set <id> <token|--stdin> [--json]
-mim shared-workspace token status <id> [--json]
-mim shared-workspace token clear <id> [--json]
-mim serve [--host host] [--port port] [--workspace path]
-mim serve token create --name name [--workspace path] [--json]
-mim serve token list [--workspace path] [--json]
-mim serve token rotate <id> [--workspace path] [--json]
-mim serve token revoke <id> [--workspace path]
-mim serve invite create --name name [--url url] [--expires 7d] [--workspace path] [--json]
-mim serve invite list [--workspace path] [--json]
-mim serve invite revoke <id> [--workspace path]
-mim serve denials list [--workspace path] [--json]
-mim serve state migrate --from workspace [--apps ids] [--workspace path] [--json]
-mim serve backup create --output dir [--workspace path] [--json]
-mim serve backup restore --from dir [--workspace path] [--json]
 ```
 
 `mim orient` regenerates `.mim/agent-context.md` and prints it by default.
@@ -74,24 +59,6 @@ Approval-required `mim tool` calls are denied by default in non-interactive mode
 `mim mcp` starts the MCP stdio bridge to the running desktop app. It does not
 boot a headless workspace. It uses `MIM_PORT`/`MIM_TOKEN` when present, otherwise
 reads `~/.mim/server.json`. See [mcp.md](mcp.md).
-
-`mim shared-workspace token` stores client-side bearer tokens for
-`sharedWorkspace` mounts in `~/.mim/keys.env`. `set` writes or replaces the
-token without echoing it and can read the token from `--stdin`, `status`
-reports whether an id is configured, and `clear` removes the id's token. The
-key name is deterministic: `team-server` maps to
-`MIM_SHARED_WORKSPACE_TEAM_SERVER_TOKEN`.
-
-`mim serve` starts a headless shared-workspace host over authenticated MCP HTTP.
-Create at least one serve token or redeemable invite before starting. Serve
-invite commands are for humans with the desktop app: `create` prints a
-`mim://join/...` link and `mim-invite-...` paste string, `list` omits secrets,
-and `revoke` cancels an unused invite. Serve token commands are for CLI agents
-and automation: they manage shown-once bearer tokens. Denials list the remote
-requests that failed grants; state migration copies selected app data from an
-existing workspace; backup and restore round-trip served structured `.mim`
-state plus serve config. See
-[serve.md](serve.md).
 
 ## Trace Tools
 
@@ -181,9 +148,6 @@ disabled. A committed `mim.yaml` app pin never activates app code by itself.
 - CLI entrypoint: `src/main/cli.ts`
 - Headless registry: `src/main/headless.ts`
 - MCP stdio bridge: `src/main/mcp/stdio.ts`
-- Shared workspace client token helpers: `src/main/workspace/sharedWorkspaceTokens.ts`
-- Shared workspace invite connection and folder link: `src/main/workspace/sharedWorkspace*.ts`
-- Serve helpers: `src/main/serve/`
 - Binary wrapper: `bin/mim.mjs`
 - Build output: `out/main/cli.js`
 - Tests: `src/main/cli.test.ts`

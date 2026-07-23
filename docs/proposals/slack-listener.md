@@ -5,14 +5,14 @@ validation, duplicate binding diagnostics, bot/app-token credential tools, a
 metadata-only event ledger, one-shot setup/check tools, Socket Mode lifecycle,
 event dispatch, durable per-thread Mim sessions, follow-up routing without
 repeated mentions, capability-based setup, and bot thread replies are
-implemented. Debounce/replay, parked approvals, and
-[mim-serve.md](mim-serve.md) as an always-on host remain proposal work.
+implemented. Debounce/replay, parked approvals, and exercising an always-on Mim
+client remain proposal work.
 
 Mim hosts a Slack-triggered routine: a Socket Mode listener in the main
 process watches configured channels and answers by running a mounted agent,
 replying in thread as the bot. No public server, no dashboard, no second bot
-runtime — Socket Mode dials out over websocket, so the desktop app (or
-`mim serve` later) is the bot host. Prior art: the sf-bot architecture
+runtime — Socket Mode dials out over websocket, so a Mim client is the bot
+host. Prior art: the sf-bot architecture
 (Slack event → durable dedup → per-thread debounce → agent with tools →
 thread reply), rebuilt on Mim's primitives instead of a bespoke process.
 
@@ -32,7 +32,7 @@ per-thread session rather than one-shot runs.
 
 Readiness gate: the user-facing path is `slack.bot.setup`/`slack.bot.check`,
 not routine-file editing or hidden runtime-state inspection. The desktop app
-must be open for Socket Mode delivery; `mim serve` is the future always-on host.
+must be open for Socket Mode delivery; an always-on Mim client can own it.
 
 ## Why Socket Mode, not the personal token
 
@@ -327,13 +327,12 @@ Depends on routines phase 1 (store + runner) and phase 3 (allowlist grant
   bot/app-token pair — multiple Mim instances connected to the same Slack app
   are unsupported because event delivery may be distributed across sockets).
 
-### Phase 4 — Always-on host (deferred)
+### Phase 4 — Always-on client (deferred)
 
 The listener, responder, and trigger are renderer-free by construction;
-running them under `mim serve` is wiring, and lands with routines phase 5
-/ mim-serve phase 4. Durable parking (an approval that survives restarts
-and reaches a human who is not at the machine) is decided there, once,
-for all unattended runs.
+running them on an always-on Mim client is wiring. Durable parking (an approval
+that survives restarts and reaches a human who is not at the machine) is
+decided there, once, for all unattended runs.
 
 ## Open decisions
 

@@ -48,13 +48,6 @@ export interface MimSyncConfig {
   remote?: string
 }
 
-export interface MimSharedWorkspaceConfig {
-  id: string
-  name?: string
-  url: string
-  namespaces: string[]
-}
-
 export interface MimConfig {
   name: string
   google?: string
@@ -67,8 +60,6 @@ export interface MimConfig {
   registries?: Record<string, MimRegistryConfig>
   // Explicit workspace sync mode. Omitted means infer safe defaults.
   sync?: MimSyncConfig
-  // Remote shared workspace used as canonical source for selected tool namespaces.
-  sharedWorkspace?: MimSharedWorkspaceConfig
 }
 
 const COLLECTION_WRITE_POLICIES: CollectionWritePolicy[] = ['readonly', 'direct']
@@ -76,8 +67,6 @@ const SYNC_MODES: MimSyncMode[] = ['manual', 'managed']
 export const COLLECTION_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/
 export const PACKAGE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,59}$/
 export const SKILL_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
-export const SHARED_WORKSPACE_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
-const TOOL_NAMESPACE_PATTERN = /^[a-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*(?:\.\*)?$/
 
 const RESERVED_REGISTRY_IDS = new Set(['default', 'user'])
 
@@ -208,8 +197,6 @@ export function parseMimYaml(text: string): MimConfig {
   if (registries) config.registries = registries
   const sync = parseSync(raw.sync)
   if (sync) config.sync = sync
-  const sharedWorkspace = parseSharedWorkspace(raw.sharedWorkspace)
-  if (sharedWorkspace) config.sharedWorkspace = sharedWorkspace
   return config
 }
 
@@ -220,35 +207,6 @@ function parseSync(raw: unknown): MimSyncConfig | undefined {
   if (SYNC_MODES.includes(source.mode as MimSyncMode)) out.mode = source.mode as MimSyncMode
   if (typeof source.remote === 'string' && source.remote.trim()) out.remote = source.remote.trim()
   return out.mode || out.remote ? out : undefined
-}
-
-function parseSharedWorkspace(raw: unknown): MimSharedWorkspaceConfig | undefined {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
-  const source = raw as Record<string, unknown>
-  if (typeof source.id !== 'string' || !SHARED_WORKSPACE_ID_PATTERN.test(source.id)) return undefined
-  const name = typeof source.name === 'string' && source.name.trim()
-    ? source.name.trim().slice(0, 80)
-    : undefined
-  if (typeof source.url !== 'string') return undefined
-  try {
-    const url = new URL(source.url)
-    if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined
-    if (url.username || url.password) return undefined
-  } catch {
-    return undefined
-  }
-  const namespaces = Array.isArray(source.namespaces)
-    ? [...new Set(source.namespaces
-        .filter((item): item is string => typeof item === 'string' && TOOL_NAMESPACE_PATTERN.test(item))
-        .sort())]
-    : []
-  if (namespaces.length === 0) return undefined
-  return {
-    id: source.id,
-    ...(name ? { name } : {}),
-    url: source.url,
-    namespaces,
-  }
 }
 
 function parseSkills(raw: unknown): MimSkillsConfig | undefined {
@@ -376,8 +334,6 @@ export function serializeMimYaml(config: MimConfig): string {
   if (registries) out.registries = registries
   const sync = serializeSync(config.sync)
   if (sync) out.sync = sync
-  const sharedWorkspace = serializeSharedWorkspace(config.sharedWorkspace)
-  if (sharedWorkspace) out.sharedWorkspace = sharedWorkspace
   return stringifyYaml(out)
 }
 
@@ -387,13 +343,6 @@ function serializeSync(sync: MimSyncConfig | undefined): MimSyncConfig | undefin
   if (SYNC_MODES.includes(sync.mode as MimSyncMode)) out.mode = sync.mode
   if (sync.remote !== undefined && sync.remote.trim()) out.remote = sync.remote.trim()
   return out.mode || out.remote ? out : undefined
-}
-
-function serializeSharedWorkspace(
-  sharedWorkspace: MimSharedWorkspaceConfig | undefined,
-): MimSharedWorkspaceConfig | undefined {
-  if (!sharedWorkspace) return undefined
-  return parseSharedWorkspace(sharedWorkspace)
 }
 
 function serializeSkills(skills: MimSkillsConfig | undefined): MimSkillsConfig | undefined {

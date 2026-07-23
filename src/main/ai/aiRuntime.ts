@@ -349,9 +349,6 @@ function subagentDelegationContext(metadata: SubagentSessionMetadata): NonNullab
     approvalAllow: metadata.approvalAllow,
     requestedGrants: metadata.requestedGrants,
     originActor: metadata.originActor ?? 'ai',
-    principal: metadata.principal,
-    callerName: metadata.callerName,
-    transport: metadata.transport,
     status: metadata.status,
   }
 }

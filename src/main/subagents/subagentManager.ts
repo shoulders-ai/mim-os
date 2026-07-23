@@ -192,9 +192,6 @@ export function createSubagentManager(options: SubagentManagerOptions): Subagent
       ...(ctx.subagent?.approvalAllow?.length ? { approvalAllow: [...ctx.subagent.approvalAllow] } : {}),
       ...(requestedGrants.length ? { requestedGrants } : {}),
       originActor: ctx.subagent?.originActor ?? (ctx.actor === 'package' ? 'ai' : ctx.actor),
-      ...(ctx.subagent?.principal ?? ctx.principal ? { principal: ctx.subagent?.principal ?? ctx.principal } : {}),
-      ...(ctx.subagent?.callerName ?? ctx.callerName ? { callerName: ctx.subagent?.callerName ?? ctx.callerName } : {}),
-      ...(ctx.subagent?.transport ?? ctx.transport ? { transport: ctx.subagent?.transport ?? ctx.transport } : {}),
       inbox: [],
       createdAt: now,
       updatedAt: now,
@@ -833,9 +830,6 @@ function delegationContext(metadata: SubagentSessionMetadata): NonNullable<ToolC
     approvalAllow: metadata.approvalAllow,
     requestedGrants: metadata.requestedGrants,
     originActor: metadata.originActor ?? 'ai',
-    principal: metadata.principal,
-    callerName: metadata.callerName,
-    transport: metadata.transport,
     status: metadata.status,
   }
 }

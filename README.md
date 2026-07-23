@@ -33,12 +33,9 @@ a normal Mim routine session; replies in that Slack thread continue the same
 transcript without repeated mentions, and setup uses capability groups instead
 of raw tool plumbing. See [docs/integrations.md](docs/integrations.md#slack).
 
-Mim can also run headless with `mim serve`, exposing a shared workspace over
-authenticated MCP HTTP. Human desktop users join from a single-use invite link
-or paste string; CLI agents and automation use issued MCP tokens. Desktop and
-headless workspaces can mount selected remote named-tool namespaces, such as
-`issues.*` and `knowledge.*`, while keeping durable serve tokens outside the
-workspace.
+Mim also has a headless kernel for local automation and a local `mim mcp`
+stdio bridge that connects CLI agents to the running desktop app. Collaboration
+uses ordinary local checkouts and Git rather than a network-hosted workspace.
 
 Desktop-first. Local-first. File-based. Built with Electron + Vue 3 + Vercel AI SDK + CodeMirror 6.
 
@@ -83,7 +80,6 @@ The app-managed file wins so keys set, replaced, or removed in Settings always t
 - `localStorage` keys use `mim:` prefix.
 - Workspace data lives in `~/mim-workspace/.mim/`.
 - API keys live in `~/.mim/keys.env`.
-- Shared workspace client tokens also live in `~/.mim/keys.env`.
 - Integration tokens live in the OS keychain.
 - On macOS, the main window's red close button hides Mim without stopping the
   app; clicking Mim in the Dock restores the same window. Use `Cmd+Q` or

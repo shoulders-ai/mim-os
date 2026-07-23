@@ -226,9 +226,7 @@ describe('central AI runtime tools', () => {
       depth: 1,
       modelId: 'test-model',
       toolAllowlist: ['fs.read', 'subagent.spawn'],
-      originActor: 'remote' as const,
-      principal: 'token_1',
-      transport: 'mcp-http',
+      originActor: 'user' as const,
     }
     const aiTools = await createAiSdkTools({
       tools,
@@ -2228,10 +2226,7 @@ describe('AgentProfile', () => {
         effectiveToolAllowlist: ['fs.read'],
         approvalAllow: ['fs.read'],
         requestedGrants: ['fs.read'],
-        originActor: 'remote',
-        principal: 'token-1',
-        callerName: 'review-client',
-        transport: 'mcp-http',
+        originActor: 'user',
         inbox: [],
         createdAt: now,
         updatedAt: now,
@@ -2278,8 +2273,7 @@ describe('AgentProfile', () => {
         parentSessionId: 'parent-session',
         depth: 1,
         toolAllowlist: ['fs.read'],
-        originActor: 'remote',
-        principal: 'token-1',
+        originActor: 'user',
       }),
     }))
     const turn = events.find(event => event.kind === 'chat.turn')

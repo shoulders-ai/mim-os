@@ -8,7 +8,7 @@ import { gunzipSync, gzipSync } from 'zlib'
 // traceId/spanId/parentSpanId so a chat turn or package run renders as a
 // span tree. Identity is the principal -> agent (session/run) -> package
 // chain; it must be stamped at write time because it cannot be retrofitted.
-export type TraceActor = 'user' | 'ai' | 'package' | 'system' | 'remote'
+export type TraceActor = 'user' | 'ai' | 'package' | 'system'
 
 export interface TraceEvent {
   ts: string
@@ -18,8 +18,6 @@ export interface TraceEvent {
   kind: string
   actor: TraceActor
   principal?: string
-  callerName?: string
-  transport?: string
   agent?: string
   status?: 'ok' | 'error'
   durationMs?: number
