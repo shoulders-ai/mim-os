@@ -6,18 +6,24 @@ import { findWorkspaceRoot, parseArgs, runCli } from '@main/cli.js'
 import type { PermissionApprovalRequest } from '@main/security/gate.js'
 
 describe('mim CLI', () => {
+  const originalHome = process.env.HOME
   let dir: string
+  let home: string
   let stdout: string[]
   let stderr: string[]
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'mim-cli-'))
+    home = mkdtempSync(join(tmpdir(), 'mim-cli-home-'))
+    process.env.HOME = home
     stdout = []
     stderr = []
   })
 
   afterEach(() => {
+    process.env.HOME = originalHome
     rmSync(dir, { recursive: true, force: true })
+    rmSync(home, { recursive: true, force: true })
   })
 
   function io(cwd = dir, stdin?: string, options: {

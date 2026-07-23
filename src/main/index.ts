@@ -69,6 +69,7 @@ import { createBackgroundSync } from '@main/sync/backgroundSync.js'
 import { registerTeamTools } from '@main/tools/team.js'
 import { createTeamSource, resolveTeamCheckout, teamCheckoutPath } from '@main/team/teamSource.js'
 import { syncTeamFilesMount } from '@main/team/teamFiles.js'
+import { refreshLiveTeamContributions } from '@main/team/liveTeamRefresh.js'
 import { registerTraceTools } from '@main/tools/trace.js'
 import { createHistoryStore, type HistoryStore } from '@main/history/history.js'
 import { registerHistoryTools } from '@main/tools/history.js'
@@ -702,12 +703,20 @@ async function boot(): Promise<void> {
   registerTeamTools(tools, {
     source: teamSource,
     onChanged: async () => {
-      const workspace = tools.getWorkspacePath()
-      if (workspace) await syncWorkspaceTeamMount(workspace)
-      await routineAutomation?.refresh()
-      await slackListener?.refresh()
-      broadcastToRenderers('routines:changed', {})
-      server?.broadcast('routines:changed', {})
+      await refreshLiveTeamContributions({
+        syncMount: async () => {
+          const workspace = tools.getWorkspacePath()
+          if (workspace) await syncWorkspaceTeamMount(workspace)
+        },
+        rescanApps: async () => { await packages?.rescan() },
+        syncNamedTools: async () => { await namedPackageTools?.sync() },
+        refreshRoutines: async () => { await routineAutomation?.refresh() },
+        refreshSlack: async () => { await slackListener?.refresh() },
+        notifyRoutines: () => {
+          broadcastToRenderers('routines:changed', {})
+          server?.broadcast('routines:changed', {})
+        },
+      })
     },
     emit: (channel) => {
       mainWindow?.webContents.send(channel)

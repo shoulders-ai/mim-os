@@ -80,8 +80,10 @@ describeCompat('mim-apps compatibility', () => {
     const root = mkdtempSync(join(tmpdir(), 'mim-package-compat-'))
     const workspace = join(root, 'workspace')
     const mimDir = join(root, 'mim-apps')
+    const teamDir = join(root, 'team-apps')
     mkdirSync(workspace, { recursive: true })
     mkdirSync(mimDir, { recursive: true })
+    mkdirSync(teamDir, { recursive: true })
     writeFileSync(join(workspace, 'mim.yaml'), 'name: package-compat\n')
 
     const packageJsonById = new Map<string, PackageJson>()
@@ -101,7 +103,7 @@ describeCompat('mim-apps compatibility', () => {
     registerDocumentTools(tools)
     registerReferencesTools(tools)
 
-    const packages = await createPackageLoader(tools, { mimDir })
+    const packages = await createPackageLoader(tools, { mimDir, teamDir })
     const enablement = createPackageEnablementStore({ getWorkspacePath: () => workspace })
     const secrets = createMemorySecretStore()
     for (const [id, packageJson] of packageJsonById) {

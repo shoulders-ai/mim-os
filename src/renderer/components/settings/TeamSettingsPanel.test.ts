@@ -69,4 +69,34 @@ describe('TeamSettingsPanel', () => {
     expect(root.textContent).toContain('Run winget install')
     app.unmount()
   })
+
+  it('makes credential-free HTTPS the approachable default while accepting SSH', async () => {
+    const call = vi.fn(async () => ({
+      state: 'disconnected',
+      repository: null,
+      message: 'Connect a Team source.',
+      team: null,
+      git: {
+        available: true,
+        installAction: null,
+        lfsRequired: false,
+        lfsAvailable: null,
+        lfsInstallAction: null,
+      },
+    }))
+    Object.defineProperty(window, 'kernel', {
+      configurable: true,
+      value: { call, revealInFinder: vi.fn(), on: vi.fn(), off: vi.fn() },
+    })
+    const root = document.createElement('div')
+    const app = createApp(TeamSettingsPanel)
+    app.mount(root)
+    await Promise.resolve()
+    await nextTick()
+
+    expect(root.textContent).toContain('HTTPS or SSH')
+    expect(root.querySelector<HTMLInputElement>('input')?.placeholder)
+      .toBe('https://github.com/organisation/team.git')
+    app.unmount()
+  })
 })

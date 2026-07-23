@@ -38,6 +38,7 @@ import { registerSyncTools } from '@main/tools/sync.js'
 import { registerTeamTools } from '@main/tools/team.js'
 import { createTeamSource } from '@main/team/teamSource.js'
 import { syncTeamFilesMount } from '@main/team/teamFiles.js'
+import { refreshLiveTeamContributions } from '@main/team/liveTeamRefresh.js'
 import { registerTraceTools } from '@main/tools/trace.js'
 import { createHistoryStore } from '@main/history/history.js'
 import { registerHistoryTools } from '@main/tools/history.js'
@@ -248,7 +249,15 @@ export function createHeadlessKernel(options: HeadlessKernelOptions = {}): Headl
   }
   registerTeamTools(tools, {
     source: teamSource,
-    onChanged: syncCurrentTeamMount,
+    onChanged: async () => {
+      await refreshLiveTeamContributions({
+        syncMount: syncCurrentTeamMount,
+        rescanApps: async () => { await packages?.rescan() },
+        syncNamedTools: async () => { await namedToolsRef?.sync() },
+        refreshRoutines: async () => { await routineAutomation?.refresh() },
+        refreshSlack: async () => { await slackListener?.refresh() },
+      })
+    },
   })
   registerTraceTools(tools)
   registerHistoryTools(tools, history)

@@ -115,9 +115,9 @@ onBeforeUnmount(() => window.kernel.off('team:changed', refresh))
     <SettingsGroup v-else title="Team source">
       <p class="pb-3 text-[11px] leading-5 text-ink-3">Connect one writable Git repository for shared files, instructions, skills, apps, and routines.</p>
       <SettingRow v-if="setupAction" label="Setup required" :desc="setupAction" />
-      <SettingRow label="Repository" desc="Uses your system Git credentials.">
+      <SettingRow label="Repository" desc="HTTPS or SSH. Uses your system Git credentials.">
         <div class="flex min-w-[320px] gap-2">
-          <input v-model="repository" placeholder="git@github.com:team/mim.git" class="h-8 min-w-0 flex-1 rounded-[5px] border border-rule-light bg-surface px-2 font-mono text-[10px] text-ink outline-none hover:bg-chrome-mid focus-visible:border-accent" @keydown.enter="connect" />
+          <input v-model="repository" placeholder="https://github.com/organisation/team.git" class="h-8 min-w-0 flex-1 rounded-[5px] border border-rule-light bg-surface px-2 font-mono text-[10px] text-ink outline-none hover:bg-chrome-mid focus-visible:border-accent" @keydown.enter="connect" />
           <button type="button" class="h-8 shrink-0 rounded-[5px] bg-accent px-3 text-[11px] font-semibold text-accent-ink hover:bg-accent/90 disabled:opacity-50" :disabled="busy !== '' || !repository.trim()" @click="connect">
             {{ busy === 'connect' ? 'Connecting' : 'Connect Team source' }}
           </button>

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { execFileSync } from 'child_process'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -6,6 +7,19 @@ import { createHeadlessKernel } from '@main/headless.js'
 import { PermissionDeniedError } from '@main/security/gate.js'
 import type { AppStatus } from '@main/tools/coreApps.js'
 import { MCP_TOOL_SPECS } from '@main/server/server.js'
+
+const originalHome = process.env.HOME
+let isolatedHome: string
+
+beforeEach(() => {
+  isolatedHome = mkdtempSync(join(tmpdir(), 'mim-headless-home-'))
+  process.env.HOME = isolatedHome
+})
+
+afterEach(() => {
+  process.env.HOME = originalHome
+  rmSync(isolatedHome, { recursive: true, force: true })
+})
 
 describe('createHeadlessKernel', () => {
   let dir: string
@@ -208,12 +222,63 @@ describe('createHeadlessKernel', () => {
     await kernel.tools.call('fs.write', { path: 'user.md', content: 'mine' }, { actor: 'user' })
     expect(readFileSync(join(dir, 'user.md'), 'utf-8')).toBe('mine')
   })
+
+  it('discovers Team apps immediately when a Team is connected after the Project opens', async () => {
+    const oldHome = process.env.HOME
+    const personalHome = join(dir, 'person')
+    const project = join(dir, 'project')
+    const seed = join(dir, 'team-seed')
+    const remote = join(dir, 'team.git')
+    mkdirSync(personalHome, { recursive: true })
+    mkdirSync(project, { recursive: true })
+    mkdirSync(seed, { recursive: true })
+    writeFileSync(join(project, 'mim.yaml'), 'name: live-team-test\n')
+    writeFileSync(join(seed, 'team.yaml'), 'name: Live Team\n')
+    writeTeamPackage(seed, 'team-board')
+    execFileSync('git', ['init', '--bare', remote])
+    execFileSync('git', ['init', '-b', 'main'], { cwd: seed })
+    execFileSync('git', ['config', 'user.email', 'mim@example.test'], { cwd: seed })
+    execFileSync('git', ['config', 'user.name', 'Mim Test'], { cwd: seed })
+    execFileSync('git', ['add', '.'], { cwd: seed })
+    execFileSync('git', ['commit', '-m', 'seed'], { cwd: seed })
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: seed })
+    execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: seed })
+    execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: remote })
+
+    process.env.HOME = personalHome
+    const kernel = createHeadlessKernel()
+    try {
+      await kernel.openWorkspace(project)
+      const before = await kernel.tools.call('app.status', {}, ctx) as { apps: AppStatus[] }
+      expect(before.apps.some(app => app.id === 'team-board')).toBe(false)
+
+      await kernel.tools.call('team.connect', { repository: remote }, ctx)
+
+      const after = await kernel.tools.call('app.status', {}, ctx) as { apps: AppStatus[] }
+      expect(after.apps).toContainEqual(expect.objectContaining({
+        id: 'team-board',
+        source: 'team',
+      }))
+    } finally {
+      await kernel.shutdown()
+      process.env.HOME = oldHome
+    }
+  })
 })
 
 const ctx = { actor: 'user' as const }
 
 function writeWorkspacePackage(root: string, id: string): void {
   const packageDir = join(root, 'packages', id)
+  writePackageManifest(packageDir, id)
+}
+
+function writeTeamPackage(root: string, id: string): void {
+  const packageDir = join(root, 'apps', id)
+  writePackageManifest(packageDir, id)
+}
+
+function writePackageManifest(packageDir: string, id: string): void {
   mkdirSync(packageDir, { recursive: true })
   writeFileSync(join(packageDir, 'package.json'), JSON.stringify({
     name: `@mim/${id}`,
