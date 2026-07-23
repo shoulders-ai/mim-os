@@ -9,7 +9,7 @@ import {
   readTraceRetentionDays,
   registerSettingsTools,
 } from '@main/tools/settings.js'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -152,5 +152,23 @@ describe('main settings tools', () => {
     }
 
     expect(result.value).toEqual(['rscript', 'python3'])
+  })
+
+  it('keeps checkout-local settings isolated when the current Project changes', async () => {
+    const first = join(dir, 'first-project')
+    const second = join(dir, 'second-project')
+    mkdirSync(first)
+    mkdirSync(second)
+
+    tools.setWorkspacePath(first)
+    await tools.call('settings.set', { key: 'theme', value: 'sepia' }, ctx)
+
+    tools.setWorkspacePath(second)
+    expect(await tools.call('settings.get', { key: 'theme' }, ctx)).toEqual({ value: 'white' })
+    await tools.call('settings.set', { key: 'theme', value: 'black' }, ctx)
+
+    tools.setWorkspacePath(first)
+    expect(await tools.call('settings.get', { key: 'theme' }, ctx)).toEqual({ value: 'sepia' })
+    expect(JSON.parse(readFileSync(join(second, '.mim', 'settings.json'), 'utf-8')).theme).toBe('black')
   })
 })

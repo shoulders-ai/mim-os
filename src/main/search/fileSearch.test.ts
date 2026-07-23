@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { searchFiles } from '@main/search/fileSearch.js'
+import { resolveCollections, syncMounts } from '@main/resources/resourceModel.js'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -223,6 +224,28 @@ describe('File search — resource mounts', () => {
     expect(results.length).toBe(1)
     expect(results[0].path).toBe('.mim/resources/journal-guidance/guidance.md')
     expect(results[0].collection).toBe('journal-guidance')
+  })
+
+  it('finds files through the real resolve, mount, and search seam', async () => {
+    writeFileSync(join(source, 'team-brief.md'), 'The launch phrase is reusable seam.')
+    const collections = resolveCollections({
+      workspaceDir: dir,
+      config: { name: 'Project' },
+      bindings: {
+        collections: {
+          team: { path: source, name: 'Shoulders', write: 'direct' },
+        },
+      },
+      mirrorsDir: join(dir, '.mim', 'mirrors'),
+    })
+
+    expect(syncMounts(dir, collections)).toMatchObject({ mounted: ['team'], conflicts: [] })
+    expect(await searchFiles(dir, 'reusable seam')).toEqual([
+      expect.objectContaining({
+        path: '.mim/resources/team/team-brief.md',
+        collection: 'team',
+      }),
+    ])
   })
 
   it('does not tag ordinary workspace hits with a collection', async () => {

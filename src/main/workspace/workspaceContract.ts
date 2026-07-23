@@ -594,12 +594,12 @@ export function scaffoldWorkspace(dir: string, opts: { name: string }): { create
     created.push('.mim/')
   }
 
-  mergeGitignore(dir)
+  ensureWorkspaceGitignore(dir)
 
   return { created }
 }
 
-function mergeGitignore(dir: string): void {
+export function ensureWorkspaceGitignore(dir: string): void {
   const gitignorePath = join(dir, '.gitignore')
   let lines: string[] = []
   let existed = false

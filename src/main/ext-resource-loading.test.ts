@@ -1,13 +1,49 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { join } from 'path'
-import { existsSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import { createSkillLoader } from '@main/skills.js'
 import { parsePackageManifest } from '@main/packages/packageManifest.js'
-import { readFileSync } from 'fs'
-
-const EXT_ROOT = join(process.env.HOME!, 'Desktop', 'ext-test')
 
 describe('external resource loading', () => {
+  let externalRoot: string
+
+  beforeEach(() => {
+    externalRoot = mkdtempSync(join(tmpdir(), 'mim-external-source-'))
+
+    const skillDir = join(externalRoot, 'skills', 'greet')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(join(skillDir, 'SKILL.md'), [
+      '---',
+      'name: greet',
+      'description: Use when the user wants a friendly greeting or needs a morale boost.',
+      '---',
+      '',
+      'Write a warm and encouraging message.',
+    ].join('\n'))
+
+    const packageDir = join(externalRoot, 'packages', 'ext-demo')
+    mkdirSync(packageDir, { recursive: true })
+    writeFileSync(join(packageDir, 'backend.mjs'), 'export const tools = {}\n')
+    writeFileSync(join(packageDir, 'package.json'), JSON.stringify({
+      name: '@mim/ext-demo',
+      version: '0.1.0',
+      mim: {
+        manifestVersion: 1,
+        id: 'ext-demo',
+        name: 'External Demo',
+        views: [],
+        backend: './backend.mjs',
+        permissions: {},
+        provides: { tools: ['demo.greet', 'demo.status'] },
+      },
+    }))
+  })
+
+  afterEach(() => {
+    rmSync(externalRoot, { recursive: true, force: true })
+  })
+
   describe('skills from an external source folder', () => {
     it('discovers the greet skill from the external source root', () => {
       const loader = createSkillLoader({
@@ -16,7 +52,7 @@ describe('external resource loading', () => {
         getSourceSkillRoots: () => [{
           id: 'ext-test',
           name: 'External Test',
-          dir: join(EXT_ROOT, 'skills'),
+          dir: join(externalRoot, 'skills'),
         }],
       })
 
@@ -35,7 +71,7 @@ describe('external resource loading', () => {
         getSourceSkillRoots: () => [{
           id: 'ext-test',
           name: 'External Test',
-          dir: join(EXT_ROOT, 'skills'),
+          dir: join(externalRoot, 'skills'),
         }],
       })
 
@@ -47,11 +83,11 @@ describe('external resource loading', () => {
 
   describe('app from an external folder', () => {
     it('does not require an index.json — the folder has none', () => {
-      expect(existsSync(join(EXT_ROOT, 'index.json'))).toBe(false)
+      expect(existsSync(join(externalRoot, 'index.json'))).toBe(false)
     })
 
     it('parses the app manifest from the external app dir', () => {
-      const packageDir = join(EXT_ROOT, 'packages', 'ext-demo')
+      const packageDir = join(externalRoot, 'packages', 'ext-demo')
       const raw = JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf-8'))
       const { manifest, diagnostics } = parsePackageManifest(raw, packageDir)
 

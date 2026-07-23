@@ -100,6 +100,49 @@ maybeDescribe('sync tools with git', () => {
     expect(status.ahead).toBe(false)
     expect(status.behind).toBe(false)
     expect(gitOutput(root, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'])).toContain('origin/')
+    expect(readFileSync(join(root, '.gitignore'), 'utf-8').split('\n')).toContain('.mim/')
+    expect(gitOutput(root, ['ls-files', '.mim'])).toBe('')
     expect(execFileSync('git', ['--git-dir', remoteRoot, 'log', '--oneline'], { encoding: 'utf-8' })).toContain('Mim sync')
+  })
+
+  it('fast-forwards changes from another checkout and returns to synced', async () => {
+    execFileSync('git', ['init', '--bare', remoteRoot], { stdio: 'ignore' })
+    await tools.call('sync.configure', {
+      mode: 'managed',
+      remote: remoteRoot,
+    }, { actor: 'user' })
+    git(root, ['config', 'user.name', 'Mim Test'])
+    git(root, ['config', 'user.email', 'mim@example.test'])
+    writeFileSync(join(root, 'project.md'), 'initial\n')
+    await tools.call('sync.now', {}, { actor: 'user' })
+
+    const peer = mkdtempSync(join(tmpdir(), 'mim-sync-peer-'))
+    try {
+      execFileSync('git', ['clone', remoteRoot, peer], { stdio: 'ignore' })
+      git(peer, ['config', 'user.name', 'Mim Peer'])
+      git(peer, ['config', 'user.email', 'peer@example.test'])
+      writeFileSync(join(peer, 'from-peer.md'), 'shared update\n')
+      git(peer, ['add', '-A'])
+      git(peer, ['commit', '-m', 'Peer update'])
+      git(peer, ['push'])
+
+      const status = await tools.call('sync.now', {}, { actor: 'user' }) as {
+        state: string
+        dirty: boolean
+        ahead: boolean
+        behind: boolean
+      }
+
+      expect(status).toMatchObject({
+        state: 'synced',
+        dirty: false,
+        ahead: false,
+        behind: false,
+      })
+      expect(readFileSync(join(root, 'from-peer.md'), 'utf-8')).toBe('shared update\n')
+      expect(gitOutput(root, ['log', '-1', '--pretty=%s'])).toBe('Peer update')
+    } finally {
+      rmSync(peer, { recursive: true, force: true })
+    }
   })
 })

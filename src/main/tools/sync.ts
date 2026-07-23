@@ -3,7 +3,13 @@ import { existsSync, readFileSync, writeFileSync } from 'fs'
 import { basename, join } from 'path'
 import { promisify } from 'util'
 import type { ToolRegistry } from '@main/tools/registry.js'
-import { parseMimYaml, serializeMimYaml, type MimConfig, type MimSyncMode } from '@main/workspace/workspaceContract.js'
+import {
+  ensureWorkspaceGitignore,
+  parseMimYaml,
+  serializeMimYaml,
+  type MimConfig,
+  type MimSyncMode,
+} from '@main/workspace/workspaceContract.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -157,6 +163,7 @@ export function registerSyncTools(tools: ToolRegistry): void {
       if (remote) nextConfig.sync!.remote = remote
 
       if (mode === 'managed') {
+        ensureWorkspaceGitignore(workspace)
         if (!existsSync(join(workspace, '.git'))) await execFileAsync('git', ['init', workspace], { timeout: 30000 })
         if (remote) {
           const existing = await gitMaybe(workspace, ['remote', 'get-url', 'origin'])
@@ -183,6 +190,10 @@ export function registerSyncTools(tools: ToolRegistry): void {
       if (status.conflicts.length > 0) throw new Error('Sync is stopped until conflicts are resolved')
 
       try {
+        // Runtime state is always checkout-local. Reassert the invariant here
+        // before staging in case managed sync was configured outside the
+        // normal workspace scaffold or the ignore file was later removed.
+        ensureWorkspaceGitignore(workspace)
         await git(workspace, ['add', '-A'])
         const pending = await gitMaybe(workspace, ['status', '--short'])
         if (pending.trim()) {

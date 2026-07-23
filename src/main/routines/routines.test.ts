@@ -161,6 +161,25 @@ describe('routine definitions', () => {
     expect(readRoutineState(dir).version).toBe(2)
   })
 
+  it('changes machine-local activation without rewriting the shared routine definition', () => {
+    const routine = createRoutineFile(dir, {
+      name: 'team-pulse',
+      trigger: { every: '4h' },
+      body: 'Check the team pulse.',
+    })
+    const definitionPath = join(dir, 'routines', 'team-pulse.md')
+    const definition = readFileSync(definitionPath, 'utf-8')
+
+    enableRoutine(dir, routine)
+    disableRoutine(dir, routine)
+
+    expect(readFileSync(definitionPath, 'utf-8')).toBe(definition)
+    expect(readRoutineState(dir).routines?.['team-pulse']).toMatchObject({
+      enabled: false,
+      authorityHash: routine.authorityHash,
+    })
+  })
+
   it('ignores legacy state and requires automatic routines to be reviewed again', () => {
     mkdirSync(join(dir, 'routines'), { recursive: true })
     mkdirSync(join(dir, '.mim', 'routines'), { recursive: true })

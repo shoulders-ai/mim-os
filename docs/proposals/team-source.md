@@ -1,7 +1,7 @@
 # Mim Restructure: Project, You, and Team
 
-Status: core product direction accepted; Settings and implementation plan under
-review; not yet implemented.
+Status: product direction, scope model, UX, and implementation programme
+accepted; implementation is in progress, with phase 1 complete.
 
 Mim is a local, file-native workbench where humans and agents work together on
 real project files. Collaboration is local-first: every human and agent works
@@ -16,15 +16,22 @@ This direction supersedes the shared-workspace model in
 
 Mim has three scopes with deliberately different jobs:
 
-- **Project** contains the current project's files and project-specific
-  capabilities.
-- **Team** supplies reusable files, skills, and apps across projects.
+- **Project** contains the current project's files, instructions, and
+  project-specific capabilities.
+- **Team** supplies reusable files, instructions, skills, apps, and routines
+  across projects.
 - **Personal** holds individual preferences, reusable skills and instructions,
-  plus local runtime state. It is local, not a second external source or an
-  organisational content tree.
+  credentials, transcripts, and local runtime choices. It is local, not a
+  second external source or an organisational content tree.
 
 The UI uses the Team's actual name, such as **Shoulders**, wherever provenance
 matters.
+
+The scopes are intentionally not symmetrical. Project and Team provide work;
+Personal adapts Mim to one person. There is no generic Personal Files tree and
+no Personal app catalog. Personal is still essential for things such as email
+voice, model defaults, credentials, and the apps one person has enabled in a
+particular project.
 
 ## One Team source
 
@@ -36,20 +43,39 @@ in Mim's fixed shape:
 ```text
 shoulders/
   team.yaml
+  instructions.md
   files/
   skills/
   apps/
+  routines/
 ```
 
-`team.yaml` supplies the Team identity. Mim discovers all three contribution
-types from the fixed directories and presents one connection, one sync state,
-and one update flow. Apps and skills may retain different internal runtime
-lifecycles; that distinction is not a source-management concept in the UI.
+`team.yaml` supplies the Team identity. Mim discovers the fixed contributions
+and presents one connection, one sync state, and one update flow. Apps, skills,
+files, instructions, and routines retain their natural runtime lifecycles;
+those differences are not source-management concepts in the UI.
 
 The Team source is writable. Team members edit its files and authored skills
 through Mim, and Mim synchronises those changes through Git. Team material does
 not have a special read-only policy or write-policy toggle; it behaves like
 ordinary project material.
+
+## Scope contract
+
+| Material | Availability | Individual choice |
+|---|---|---|
+| Files | Project files belong to the current Project. Team files are present in every Project. | Project and Team files are ordinary writable files. There is no Personal Files root. |
+| Instructions | Personal, Team, and Project instructions compose automatically, with the Project as the most specific context. | Personal instructions are editable only by that person; Project and Team instructions are shared ordinary files. |
+| Skills | Mim, Team, Project, and Personal skills resolve into one catalog. | Each person can enable or disable authored skills without changing Team or Project state. |
+| Apps | Mim and Team apps are available in every Project; Project apps are available in that Project. | Each person enables apps independently for each local Project checkout. The choice is local and gitignored. |
+| Routines | Team routines are available in every Project; Project routines stay with their Project. | Activation and schedule ownership are local to a chosen machine, including an optional always-on client. |
+
+Availability and activation are separate. A Team or Project can provide an app
+without enabling it for anybody. Mim's existing
+`.mim/packages/enabled.json` is already the right shape for app activation: it
+records one user's choices for one local checkout and is never committed. A
+toggle therefore does not mutate `team.yaml`, `mim.yaml`, or another person's
+state.
 
 ## Files
 
@@ -95,10 +121,25 @@ definitions, which override Mim's built-ins.
 
 ## Apps
 
-Settings -> Apps uses the same Team connection and labels catalog entries by
-origin. Enabled apps continue to appear in the Navigator's existing Apps
-section without a redundant Team prefix. Project-local apps can override Team
-apps.
+Settings -> Apps & agents uses the same Team connection and labels catalog
+entries by origin. Team apps are available in every Project, but each user
+independently enables or disables them for the current local Project checkout.
+Enabled apps continue to appear in the Navigator's existing Apps section
+without a redundant Team prefix. Project-local apps can override Team apps.
+Mim-shipped apps remain a built-in origin and do not create another external
+source.
+
+## Instructions and routines
+
+Personal, Team, and Project instructions are normal readable documents and are
+composed automatically. Settings links open them in Mim's editor; there is no
+standalone Instructions settings form.
+
+Team routines appear alongside Project routines in the existing Routines
+surface. Definitions travel with their source, while activation, schedules,
+and ownership stay local to the machine that should run them. An always-on Mim
+client can activate the Team's Slack or overnight routines without becoming a
+server or the canonical owner of Team state.
 
 ## Concrete UI placement
 
@@ -107,7 +148,8 @@ apps.
 - Settings gains a **Team** section for the single connection, displaying the
   actual Team name, repository, sync state, and an action to open it.
 - Files uses the actual Team name as the organisational-files section label.
-- Settings -> Skills and Settings -> Apps use the actual Team name as origin.
+- Settings -> Skills and Settings -> Apps & agents use the actual Team name as
+  origin.
 - Search, `@` results, skill chips, and document provenance use the actual Team
   name only when the distinction is useful.
 
@@ -136,7 +178,9 @@ ADVANCED
 ```
 
 Mim's version and update information move into the Settings footer instead of
-occupying an About tab.
+occupying an About tab. The footer reads **Mim 0.x · Check for updates** and
+changes to **Mim 0.y ready · Restart** after an update downloads. Individual
+app updates remain on their rows in Apps & agents.
 
 ### General
 
@@ -187,14 +231,17 @@ Shoulders
 github.com/shoulders-ai/shoulders-mim
 Synced just now
 
-Files 42   Skills 8   Apps 4
+Files · Skills · Apps · Routines
 
 [Open] [Sync now]
 ```
 
+The contribution summary also includes routines when the source provides them;
+it does not expose source-management detail.
+
 There are no invites, hosts, namespaces, entitlement tokens, source lists, or
-per-source trust controls. Team files, skills, and apps are managed on their
-natural surfaces; this tab manages only the one source.
+per-source trust controls. Team files, instructions, skills, apps, and routines
+are managed on their natural surfaces; this tab manages only the one source.
 
 ### Project
 
@@ -223,7 +270,9 @@ tab contains:
 Every app row carries a small origin label. App documentation, capabilities,
 updates, enablement, and developer details remain. Registry groups, Add source,
 organisation entitlements, and registry connection/trust flows disappear.
-Creating an app chooses only **Project** or **Team** as its destination.
+Creating an app chooses only **Project** or **Team** as its destination. App
+enablement always writes private local state for the current user and Project;
+it never edits the Project or Team source.
 
 ### Skills
 
@@ -264,33 +313,151 @@ indexing, search, `@` mention, and editor paths. It becomes one fixed Team root:
 - Team-file and skill edits participate in the same background Git sync as
   other Team changes.
 
+## Clean-break removal inventory
+
+Backward compatibility is explicitly not required for the abandoned sharing
+model. The restructure removes old concepts instead of preserving aliases,
+migrations, or hidden compatibility paths.
+
+Remove:
+
+- network `mim serve`, HTTP MCP/SSE serving, member tokens, invites, remote
+  shared-workspace links, remote tool mounts, and their Settings flows;
+- the Web Shell and the browser-hosted shared team-space direction;
+- arbitrary Resources/Collections, mount lists, read-only/write policy, and
+  committed collection configuration;
+- separate skill sources, app registry source lists, organisation-registry
+  accounts and entitlements, registry trust/source management, and their
+  configuration fields;
+- shared-workspace, collection, registry-source, and skill-source parsers,
+  tools, tests, docs, and stale UI copy once their reusable internals have been
+  moved behind the fixed Team source.
+
+Keep:
+
+- the headless kernel, local MCP bridge, CLI agents, apps runtime, skills,
+  routines, Slack/Google/Granola connections, editor handoff, search, and
+  document tooling;
+- project Git tools, managed sync, local file recovery, traces, transcripts,
+  package/app updates, and the resource indexer and file-mount internals reused
+  for Team files;
+- the ordinary desktop client as the same executable used interactively,
+  offline, or as an always-on client.
+
+The clean break does not delete ordinary Project or Personal material. It
+means obsolete Serve, Resources, registry-source, and skill-source settings are
+no longer read or migrated.
+
+## Git and Git LFS for beta
+
+Mim will not bundle Git or Git LFS during the beta. Bundling would enlarge each
+platform installer and add platform-specific binary acquisition, verification,
+licensing, signing, packaging, and release tests before beta usage proves that
+the convenience is needed.
+
+Instead:
+
+- Team connection and managed Project sync perform a friendly Git capability
+  check before setup;
+- when Git is missing, Mim gives one exact platform-specific installation
+  action and a **Try again** button;
+- ordinary DOCX, XLSX, PDF, image, and other binary files use normal Git during
+  beta;
+- Git LFS is optional and requested only when a repository's attributes
+  actually use LFS; Mim then gives one exact installation action and verifies
+  it;
+- normal operation still hides commits, pulls, pushes, and merges. This is a
+  dependency check, not a Git UI.
+
+This keeps the beta installer and release pipeline unchanged. Bundling can be
+reconsidered when actual beta users are blocked by installation, with a
+one-time managed download as a smaller alternative to permanently embedding
+every binary in Mim.
+
 ## Implementation programme
 
-1. **Retire the abandoned direction.** Remove Serve/shared-workspace UI and
-   plumbing, the Web Shell charter, and unfinished remote collaboration tracks
-   without removing the headless kernel or local MCP.
-2. **Make scopes real.** Separate Personal settings from local Project state;
-   define the fixed Team-source contract and ordered capability resolution.
-3. **Build one Team resolver.** Clone/open/sync the single Git repository and
-   discover `files/`, `skills/`, and `apps/` through one service and status.
-4. **Simplify Files.** Reuse the existing resource mount/index paths for the
-   fixed writable Team files root; remove arbitrary collections and read-only
-   policy logic.
-5. **Unify Skills.** Replace skill-source management with Team discovery, a
-   flat catalog, origin labels, toggles, and editor handoff.
-6. **Unify Apps.** Replace multi-registry source management with Team discovery
-   while retaining installation, updates, project enablement, app runtime, and
-   project overrides.
-7. **Restructure Settings.** Apply the navigation and control moves above,
-   including Personal persistence and removal of superseded settings.
-8. **Finish invisible Git.** Bundle the required Git/LFS runtime, automate Team
-   and Project pull/commit/push, preserve conflicting versions, and expose only
-   plain-language sync state and recovery.
-9. **Add lightweight awareness.** Report recent file opens/changes without hard
-   locks or shared mutable worktrees.
-10. **Harden the optional always-on client as a client.** Make Slack, schedules,
-    and unattended routines reliable without making that machine the owner of
-    Team or Project state.
+Each phase starts with co-located contract tests and finishes with obsolete
+paths removed rather than left beside the replacement.
+
+1. **Characterise the reusable seams — complete.** Contract tests protect app
+   enablement, skill resolution, file mount/index/search, settings persistence,
+   routine activation, and Git sync. The tests keep activation and runtime
+   state local, pin Project > Personal > Team > Mim skill precedence, exercise
+   the real file mount-to-search path, and prove managed sync across two
+   checkouts. The external-source fixture is self-contained rather than tied to
+   one developer machine.
+2. **Retire Serve and shared workspace.** Remove the network Serve command and
+   transport, remote membership and mount code, Web Shell charter, shared
+   workspace UI/config, and remote-only tests. Prove the headless kernel, local
+   MCP, Slack, routines, and CLI agents still boot and run.
+3. **Make Personal and Project state honest.** Move theme, editor preferences,
+   model defaults, identity, and global skill toggles to Personal persistence.
+   Keep transcripts, app enablement, routine activation, recovery, and other
+   per-checkout runtime under gitignored `.mim/`. Remove superseded config
+   fields without compatibility readers.
+4. **Introduce the Team contract.** Add one Team connection and validate
+   `team.yaml`, `instructions.md`, `files/`, `skills/`, `apps/`, and
+   `routines/`. Implement clone/open/status/sync through one resolver and one
+   credential path. A missing optional directory is simply empty.
+5. **Replace Resources with Team Files.** Repoint the existing mount, watcher,
+   index, search, `@` mention, editor, and native-open flows to the Team
+   `files/` root. Make the root writable and remove collections, path bindings,
+   read-only badges, write policies, and Resources Settings.
+6. **Compose instructions and unify Skills.** Load Personal, Team, Project, and
+   Mim origins with explicit precedence. Build the flat Skills list, origin
+   chips, per-user toggles, create destinations, editor opening, and normal
+   save/sync for writable `SKILL.md` files. Replace the Settings textarea for
+   instructions with editor links.
+7. **Unify Apps and agents.** Discover Team apps directly from the Team source,
+   Project apps from the Project, and Mim apps from the build. Preserve runtime,
+   validation, updates, developer information, overrides, and the existing
+   per-user/per-Project enablement file. Delete registry browse/source/account
+   flows and merge CLI agents into Apps & agents.
+8. **Add Team routines.** Resolve Team and Project routine definitions in one
+   surface, retain machine-local activation and schedule ownership, and make
+   the chosen owner visible. Verify that two clients can make different
+   activation choices without writing shared state.
+9. **Restructure Settings and updater UX.** Implement the accepted YOU / WORK /
+   ADVANCED navigation, move every retained control to its new owner, delete
+   Workspace/Instructions/About remnants, and add the version/update footer.
+   Settings remains a dense fixed-size dialog using existing UI primitives.
+10. **Finish invisible Git for beta.** Add Git/LFS preflight and guided setup,
+    then automate conservative Team and Project fetch/pull/commit/push. Preserve
+    both versions on conflicts, report plain-language sync state, and retain
+    manual **Sync now** and local history as escape hatches. Do not bundle Git
+    in this phase.
+11. **Add useful awareness in two cuts.** First show fetched Git-derived recent
+    changes and authors. Later, if still valuable, add ephemeral open-file
+    presence through a tiny online relay; do not introduce locks, authoritative
+    remote worktrees, or shared editor state.
+12. **Exercise the always-on client.** Run the same Mim client on an always-on
+    machine with its own Team and Project checkouts. Make Slack, external
+    triggers, schedules, and overnight loops reliable while keeping activation
+    and credentials local to that machine.
+13. **Close the restructure.** Remove dead dependencies and vocabulary, update
+    current-state docs and `_MAP.md`, run the full repository and external app
+    compatibility suites, build every supported target, and perform a visual
+    walkthrough of each accepted Settings and Files flow.
+
+## Acceptance checks
+
+- A person connects **Shoulders** once and its files, instructions, skills,
+  apps, and routines appear in their natural surfaces.
+- A Team file or skill can be edited in Mim and synchronised like an ordinary
+  file; offline edits remain possible.
+- Two people can enable different Team apps in the same Project without either
+  toggle appearing in Git or affecting the other person.
+- A Project app or skill overrides the same Team contribution while retaining
+  clear origin.
+- A chosen always-on client runs a Team routine while another person's client
+  leaves it inactive.
+- Conflicting edits never silently overwrite one version, and no file is left
+  permanently locked because somebody once opened it.
+- Settings exposes only the accepted YOU / WORK / ADVANCED structure and the
+  update footer; there is no Serve, Shared workspace, Resources, source-list,
+  registry-account, or entitlement surface.
+- Headless execution, local MCP, editor handoff, connections, routines, apps,
+  recovery, and traces still work after the removal pass.
 
 ## Collaboration decisions
 
@@ -300,5 +467,8 @@ indexing, search, `@` mention, and editor paths. It becomes one fixed Team root:
 - Normal use does not expose Git commands, commits, pulls, pushes, or merges.
 - Files are not hard-locked. Awareness may report who recently opened or
   changed a file; conflicts preserve both versions for resolution.
+- Team and Project determine app availability. Per-user/per-Project local state
+  determines app activation; collaborators never share toggles.
+- Git-derived recent changes ship before any live open-file presence.
 - An always-on Mim is an optional client for external triggers and unattended
   work, not the canonical owner of project state.

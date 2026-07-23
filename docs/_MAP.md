@@ -230,7 +230,7 @@ All user-facing apps live in [shoulders-ai/mim-apps](https://github.com/shoulder
 
 ### Proposals
 
-- [proposals/team-source.md](proposals/team-source.md) — **core direction accepted; UX plan under review**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, and implementation programme.
+- [proposals/team-source.md](proposals/team-source.md) — **accepted; implementation underway (phase 1 complete)**. Major Mim restructure around Project, You, and one writable Git-backed Team source; concrete Settings/Files/Chat design, capability resolution, local-first collaboration, clean-break removal inventory, and phased implementation programme.
 - [proposals/r-first-class.md](proposals/r-first-class.md) — **implemented** (phases 1-5; phase 6 deferred). First-class R/Rmd/Quarto: `code.run` execution primitive, plot/artifact viewing, Cmd+Enter send-to-terminal, render loop, R modelling skill.
 - [proposals/ai-native-browser.md](proposals/ai-native-browser.md) — two-layer web access plan: cheap reader plus AI-native live browser with bounded observations and compact action refs.
 - [proposals/popout-editor-window.md](proposals/popout-editor-window.md) — **implemented** (phases 0-3; phase 4 deferred). Pop-out editor windows: move any editor tab into its own OS window and back, with full tab-state transfer, per-window close guards, focused-window menu routing, and macOS native touches.

@@ -83,6 +83,34 @@ describe('filesystem skill loader', () => {
     ]))
   })
 
+  it('resolves authored skills in Project, You, Team, then Mim precedence', () => {
+    writeSkill(builtinDir, 'project-wins', 'name: project-wins\ndescription: Mim')
+    writeSkill(sourceDir, 'project-wins', 'name: project-wins\ndescription: Team')
+    writeSkill(personalDir, 'project-wins', 'name: project-wins\ndescription: You')
+    writeSkill(join(workspaceDir, 'skills'), 'project-wins', 'name: project-wins\ndescription: Project')
+
+    writeSkill(builtinDir, 'you-win', 'name: you-win\ndescription: Mim')
+    writeSkill(sourceDir, 'you-win', 'name: you-win\ndescription: Team')
+    writeSkill(personalDir, 'you-win', 'name: you-win\ndescription: You')
+
+    writeSkill(builtinDir, 'team-wins', 'name: team-wins\ndescription: Mim')
+    writeSkill(sourceDir, 'team-wins', 'name: team-wins\ndescription: Team')
+
+    writeSkill(builtinDir, 'mim-wins', 'name: mim-wins\ndescription: Mim')
+
+    const loader = createSkillLoader({
+      builtinDir,
+      personalDir,
+      getSourceSkillRoots: () => [{ id: 'team', name: 'Shoulders', dir: sourceDir }],
+      getWorkspacePath: () => workspaceDir,
+    })
+
+    expect(loader.get('project-wins')).toMatchObject({ source: 'workspace', description: 'Project' })
+    expect(loader.get('you-win')).toMatchObject({ source: 'personal', description: 'You' })
+    expect(loader.get('team-wins')).toMatchObject({ source: 'source', description: 'Team', sourceName: 'Shoulders' })
+    expect(loader.get('mim-wins')).toMatchObject({ source: 'builtin', description: 'Mim' })
+  })
+
   it('diagnoses invalid skill frontmatter without failing the catalog', () => {
     writeSkill(builtinDir, 'wrong-folder', 'name: other\ndescription: Bad')
 

@@ -73,5 +73,10 @@ upstream or matching remote branch exists, and pushes. First pushes set the
 upstream branch. It stops on conflicts, missing remotes, non-fast-forward pulls,
 or git errors. Mim does not auto-resolve conflicts.
 
+Managed configuration and every managed sync reassert `.mim/` in the workspace
+`.gitignore` before staging. This protects transcripts, traces, activation, and
+other machine-local runtime state even when managed sync was enabled on a
+workspace that did not pass through the normal scaffold.
+
 Settings > Workspace is the human manage surface for sync mode, remote, status,
 and Sync now.

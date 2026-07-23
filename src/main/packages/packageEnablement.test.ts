@@ -85,6 +85,24 @@ describe('app enablement', () => {
       expect(raw.disabled).toEqual(['mid'])
     })
 
+    it('keeps each person\'s activation choices out of the shared project contract', () => {
+      const projectContract = 'name: test\napps:\n  board: true\n'
+      writeFileSync(join(workspace, 'mim.yaml'), projectContract)
+
+      const store = makeStore()
+      store.setEnabled('board', true)
+      store.setEnabled('notes', false)
+
+      expect(readFileSync(join(workspace, 'mim.yaml'), 'utf-8')).toBe(projectContract)
+      expect(JSON.parse(readFileSync(
+        join(workspace, '.mim', 'packages', 'enabled.json'),
+        'utf-8',
+      ))).toMatchObject({
+        enabled: ['board'],
+        disabled: ['notes'],
+      })
+    })
+
     it('rejects invalid app ids', () => {
       const store = makeStore()
       expect(() => store.setEnabled('Not Valid!', true)).toThrow(/Invalid app id/)
