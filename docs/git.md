@@ -113,3 +113,14 @@ Settings > Project is the human manage surface for sync mode, remote, status,
 guided platform-specific Git/Git LFS setup, and **Sync now**. Git LFS is checked
 only when the Project attributes request `filter=lfs`; normal binary files do
 not require it.
+
+## Fetched-change awareness
+
+`awareness.recent` reads local Project and mounted Team Git history without
+contacting a remote. The Files **Changed** view uses it after background sync to
+show the latest fetched change for each current file, including author, commit
+time, and commit summary. A two-client contract test verifies that one client's
+fetched commit appears with the other client's author identity.
+
+This first awareness cut is deliberately durable and offline-capable. Mim does
+not ship live open-file presence, locks, shared editor state, or an online relay.

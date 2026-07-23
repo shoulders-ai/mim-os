@@ -154,6 +154,7 @@ const TOOL_POLICIES: Record<string, ToolPolicy> = {
   'history.prune': { category: 'settings', risk: 'medium' },
   'history.clear': { category: 'settings', risk: 'medium' },
   'git.status': { category: 'read', risk: 'low' },
+  'awareness.recent': { category: 'read', risk: 'low' },
   'git.diff': { category: 'read', risk: 'low', pathParam: 'path' },
   'git.log': { category: 'read', risk: 'low' },
   'git.commit': { category: 'write', risk: 'medium', targetParam: 'message' },

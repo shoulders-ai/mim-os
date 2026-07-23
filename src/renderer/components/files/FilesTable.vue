@@ -29,10 +29,11 @@ import {
 } from './fileDisplay.js'
 import type { FileRow, SortDirection, SortKey, TableMode } from './fileTypes.js'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   rows: FileRow[]
   tableMode: TableMode
   showLocationColumn: boolean
+  showChangedByColumn?: boolean
   selectedIndex: number
   query: string
   activeFilePath?: string
@@ -43,7 +44,9 @@ const props = defineProps<{
   expandedPaths: Set<string>
   expandedLoading: Set<string>
   selectedPaths: Set<string>
-}>()
+}>(), {
+  showChangedByColumn: false,
+})
 
 const emit = defineEmits<{
   setSort: [key: SortKey]
@@ -265,7 +268,7 @@ function fileIconClass(row: FileRow): string {
     >
       <button type="button" class="truncate text-left hover:text-ink" @click="emit('setSort', 'name')">Name {{ sortIndicator('name') }}</button>
       <button type="button" class="truncate text-left hover:text-ink" @click="emit('setSort', 'kindOrLocation')">
-        {{ showLocationColumn ? 'Location' : 'Kind' }} {{ sortIndicator('kindOrLocation') }}
+        {{ showChangedByColumn ? 'Changed by' : showLocationColumn ? 'Location' : 'Kind' }} {{ sortIndicator('kindOrLocation') }}
       </button>
       <button type="button" class="truncate text-left hover:text-ink" @click="emit('setSort', 'size')">Size {{ sortIndicator('size') }}</button>
       <button type="button" class="truncate text-left hover:text-ink" @click="emit('setSort', 'modifiedAt')">Modified {{ sortIndicator('modifiedAt') }}</button>
@@ -359,11 +362,11 @@ function fileIconClass(row: FileRow): string {
           </span>
         </span>
         <span class="min-w-0 truncate font-mono text-[10px] text-ink-3">
-          {{ locationLabel(row, showLocationColumn) }}
+          {{ showChangedByColumn ? (row.lastChangedBy || 'Unknown') : locationLabel(row, showLocationColumn) }}
         </span>
         <span class="truncate font-mono text-[10px] text-ink-3">{{ formatSize(row.size, row.type) }}</span>
         <span class="truncate font-mono text-[10px] text-ink-3">{{ formatTime(row.modifiedAt) }}</span>
-        <span class="truncate font-mono text-[10px] text-ink-3">{{ formatTime(row.createdAt) }}</span>
+        <span class="truncate font-mono text-[10px] text-ink-3">{{ showChangedByColumn ? row.changeSummary : formatTime(row.createdAt) }}</span>
       </button>
     </template>
 

@@ -11,6 +11,7 @@ export interface FsEntry {
   modifiedAt?: string
   createdAt?: string
   lastChangedBy?: string
+  changeSummary?: string
 }
 
 export interface FileRow {
@@ -55,4 +56,5 @@ export interface RowCompareOptions {
   sortKey: SortKey
   sortDirection: SortDirection
   showLocationColumn: boolean
+  showChangedByColumn?: boolean
 }

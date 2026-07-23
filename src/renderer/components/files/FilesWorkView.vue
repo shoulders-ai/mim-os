@@ -20,7 +20,6 @@ import {
   isFsEntry,
   parentDir,
   sortEntries as sortFileEntries,
-  timestampOf,
 } from './fileDisplay.js'
 import type {
   BreadcrumbItem,
@@ -94,6 +93,16 @@ const contextRow = ref<FileRow | null>(null)
 const contentMatches = ref<FileContentMatch[]>([])
 const contentSearchLoading = ref(false)
 const contentSearchError = ref('')
+const awarenessChanges = ref<Array<{
+  path: string
+  name: string
+  size: number
+  author: string
+  changedAt: string
+  summary: string
+}>>([])
+const awarenessLoading = ref(false)
+const awarenessError = ref('')
 const sortKey = ref<SortKey>('modifiedAt')
 const sortDirection = ref<SortDirection>('desc')
 const sortTouched = ref(false)
@@ -115,6 +124,7 @@ const sortOptions = computed<RowCompareOptions>(() => ({
   sortKey: sortKey.value,
   sortDirection: sortDirection.value,
   showLocationColumn: showLocationColumn.value,
+  showChangedByColumn: tableMode.value === 'changed',
 }))
 
 const breadcrumbItems = computed<BreadcrumbItem[]>(() => {
@@ -161,11 +171,14 @@ const browseRows = computed<FileRowBase[]>(() => {
 })
 
 const changedRows = computed<FileRowBase[]>(() =>
-  (index.files.value as IndexedFile[])
-    .slice()
-    .sort((a, b) => timestampOf(b.modifiedAt) - timestampOf(a.modifiedAt) || a.path.localeCompare(b.path))
-    .slice(0, CHANGED_LIMIT)
-    .map(fileToRow)
+  awarenessChanges.value.map(change => fileToRow({
+    path: change.path,
+    name: change.name,
+    size: change.size,
+    modifiedAt: change.changedAt,
+    lastChangedBy: change.author,
+    changeSummary: change.summary,
+  }))
 )
 
 const recentRows = computed<FileRowBase[]>(() =>
@@ -208,7 +221,10 @@ const emptyText = computed(() => {
     return contentSearchError.value || 'No matching files'
   }
   if (tableMode.value === 'recent') return 'No recent files'
-  if (tableMode.value === 'changed') return 'No indexed files'
+  if (tableMode.value === 'changed') {
+    if (awarenessLoading.value) return 'Loading fetched changes'
+    return awarenessError.value || 'No fetched Git changes'
+  }
   return directoryLoading.value ? 'Loading files' : 'No files'
 })
 watch(currentDir, (path) => {
@@ -327,7 +343,24 @@ async function refresh() {
     loadTeamRoot(),
     index.refresh(),
     refreshExpandedChildren(),
+    ...(mode.value === 'changed' ? [loadAwareness()] : []),
   ])
+}
+
+async function loadAwareness() {
+  awarenessLoading.value = true
+  awarenessError.value = ''
+  try {
+    const result = await window.kernel.call('awareness.recent', { limit: CHANGED_LIMIT }) as {
+      changes?: typeof awarenessChanges.value
+    }
+    awarenessChanges.value = Array.isArray(result.changes) ? result.changes : []
+  } catch (err) {
+    awarenessChanges.value = []
+    awarenessError.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    awarenessLoading.value = false
+  }
 }
 
 function buildSearchRows(): FileRowBase[] {
@@ -520,6 +553,7 @@ async function revealSelected() {
 function setMode(next: Mode) {
   mode.value = next
   query.value = ''
+  if (next === 'changed') void loadAwareness()
 }
 
 function navigateTo(path: string) {
@@ -968,6 +1002,7 @@ async function handleWorkspaceDrop(source: WorkspaceDragPayload, targetDir: stri
       :rows="rows"
       :table-mode="tableMode"
       :show-location-column="showLocationColumn"
+      :show-changed-by-column="tableMode === 'changed'"
       :selected-index="selectedIndex"
       :query="query"
       :active-file-path="activeFilePath"

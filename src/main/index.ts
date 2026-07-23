@@ -63,6 +63,7 @@ import { createAgentSessions } from '@main/agents/agentSessions.js'
 import { registerAgentTools } from '@main/tools/agents.js'
 import { registerSearchTools } from '@main/tools/search.js'
 import { registerGitTools } from '@main/tools/git.js'
+import { registerAwarenessTools } from '@main/tools/awareness.js'
 import { registerSyncTools } from '@main/tools/sync.js'
 import { createBackgroundSync } from '@main/sync/backgroundSync.js'
 import { registerTeamTools } from '@main/tools/team.js'
@@ -696,6 +697,7 @@ async function boot(): Promise<void> {
   registerPtyTools(tools)
   registerSearchTools(tools)
   registerGitTools(tools)
+  registerAwarenessTools(tools)
   registerSyncTools(tools)
   registerTeamTools(tools, {
     source: teamSource,

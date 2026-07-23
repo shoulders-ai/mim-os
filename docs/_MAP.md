@@ -136,7 +136,7 @@ Each entry is a one-liner with the source cluster and relevant docs. Read the li
 - **Editor / Document pane.** Unified tab host: CodeMirror text, PDF viewer, table grid (AG Grid), file cards. Autosave, conflict bar, per-tab scroll restore, inline AI (Cmd+K), diff review, comments rail, citations, ghost completions. `src/renderer/components/editor/`. Docs: [document-pane.md](document-pane.md), [comments.md](comments.md).
 - **CodeMirror extensions.** Setup, formatting, citations, outline, ghost, live preview (single-line viewport decorations plus state-backed image/table widgets), inline anchor, send-to-terminal (Cmd+Enter / chunk send). `src/renderer/components/editor/codemirror/`.
 - **Terminal.** xterm.js multi-tab shells, TerminalSurface shared with agent sessions. `src/renderer/components/terminal/`.
-- **Files.** Work-side file browser: Browse/Recent/Changed, search, drag-drop import/move, multi-select (cmd/ctrl+click, shift+click) with bulk move/delete, context menus, passive active-document marker, image artifact viewer. `src/renderer/components/files/`, `services/fileOpenPolicy.ts`, `components/files/ImageArtifact.vue`.
+- **Files.** Work-side file browser: Browse/Recent/Changed, fetched Project + Team Git changes with author and commit summary, search, drag-drop import/move, multi-select (cmd/ctrl+click, shift+click) with bulk move/delete, context menus, passive active-document marker, image artifact viewer. `src/main/tools/awareness.ts`, `src/renderer/components/files/`, `services/fileOpenPolicy.ts`, `components/files/ImageArtifact.vue`.
 - **History.** Browse active/archived sessions, app runs, agent sessions. `src/renderer/components/archive/`.
 - **Agent sessions.** Work surface for live terminal or scrollback replay. `src/renderer/components/agents/AgentSessionView.vue`.
 - **Pop-out editor windows.** Move any editor tab into its own OS window and back. Ack'd handshake tab transfer, per-window close guards, aggregate quit guard, focused-window menu routing, terminal/chat forwarding, theme/settings live-sync, macOS native document-edited/represented-filename, `editor.open` routing to the owning pop-out. `src/main/windows/popoutWindows.ts`, `src/renderer/popout.html`, `src/renderer/popout.ts`, `src/renderer/components/popout/PopoutShell.vue`. Docs: [document-pane.md](document-pane.md) (pop-out section).
@@ -340,6 +340,7 @@ src/
       fs.ts                     # File operations
       history.ts                # File history tools
       git.ts                    # Git tools
+      awareness.ts              # Fetched Project + Team changes and authors
       sync.ts                   # Managed sync tools
       team.ts                   # Team connection/status/open/sync tools
       workspace.ts              # Workspace tools

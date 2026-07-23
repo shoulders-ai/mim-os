@@ -17,6 +17,7 @@ export function fileToRow(file: IndexedFile | {
   modifiedAt?: string
   createdAt?: string
   lastChangedBy?: string
+  changeSummary?: string
 }): FileRowBase {
   return {
     path: file.path,
@@ -28,6 +29,7 @@ export function fileToRow(file: IndexedFile | {
     modifiedAt: file.modifiedAt,
     createdAt: file.createdAt,
     lastChangedBy: file.lastChangedBy,
+    changeSummary: file.changeSummary,
     positions: [],
     level: 0,
   }
@@ -56,8 +58,8 @@ export function compareRows(a: FileRowBase, b: FileRowBase, options: RowCompareO
   let result = 0
   if (options.sortKey === 'name') result = a.name.localeCompare(b.name)
   else if (options.sortKey === 'kindOrLocation') {
-    const left = options.showLocationColumn ? a.dir : a.kind
-    const right = options.showLocationColumn ? b.dir : b.kind
+    const left = options.showChangedByColumn ? (a.lastChangedBy ?? '') : options.showLocationColumn ? a.dir : a.kind
+    const right = options.showChangedByColumn ? (b.lastChangedBy ?? '') : options.showLocationColumn ? b.dir : b.kind
     result = left.localeCompare(right) || a.name.localeCompare(b.name)
   } else if (options.sortKey === 'size') {
     result = numericSortValue(a.size, a.type) - numericSortValue(b.size, b.type)
@@ -144,6 +146,7 @@ export function rowTitle(row: FileRow): string {
   const details = [row.path]
   if (row.searchLine && row.searchSnippet) details.push(`Line ${row.searchLine}: ${row.searchSnippet}`)
   if (row.lastChangedBy) details.push(`Changed by ${row.lastChangedBy}`)
+  if (row.changeSummary) details.push(row.changeSummary)
   return details.join('\n')
 }
 

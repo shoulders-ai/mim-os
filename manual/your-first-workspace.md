@@ -78,7 +78,8 @@ Select Files in the Navigator to browse your workspace. The toolbar offers three
 ::: rows
 - Browse -- a tree of every file and folder in the workspace.
 - Recent -- files ordered by when you last opened them.
-- Changed -- files that have been modified since the last commit.
+- Changed -- the latest fetched Project and Team changes, with author and
+  commit summary.
 :::
 
 A search field at the top searches by file name and content. To import files from outside the workspace, drag them from Finder or your file manager into the files view. A drop overlay confirms the import destination.

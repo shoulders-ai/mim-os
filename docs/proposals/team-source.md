@@ -432,10 +432,13 @@ paths removed rather than left beside the replacement.
     restore the local path and preserve timestamped local and remote sibling
     copies; automatic retry then waits for the explicit **Sync now** escape
     hatch. Local history remains independent, and Git is not bundled.
-11. **Add useful awareness in two cuts.** First show fetched Git-derived recent
-    changes and authors. Later, if still valuable, add ephemeral open-file
-    presence through a tiny online relay; do not introduce locks, authoritative
-    remote worktrees, or shared editor state.
+11. **Add useful awareness — complete for the useful first cut.** Files >
+    Changed reads fetched Project and Team Git history and shows each current
+    file's latest author, commit time, and summary. A two-client test proves a
+    fetched peer change retains peer authorship. Live open-file presence remains
+    deliberately unbuilt: the durable Git signal is sufficient for beta, so no
+    relay, lock, authoritative remote worktree, or shared editor state is
+    introduced.
 12. **Exercise the always-on client.** Run the same Mim client on an always-on
     machine with its own Team and Project checkouts. Make Slack, external
     triggers, schedules, and overnight loops reliable while keeping activation

@@ -221,6 +221,22 @@ describe('FilesWorkView', () => {
         }
       }
       if (tool === 'search.files') return { results: [] }
+      if (tool === 'awareness.recent') {
+        return {
+          changes: [
+            {
+              id: 'abc:docs/design-system.md',
+              origin: 'project',
+              path: 'docs/design-system.md',
+              name: 'design-system.md',
+              size: 1200,
+              author: 'Ada',
+              changedAt: '2026-06-01T09:30:00.000Z',
+              summary: 'Clarify navigation',
+            },
+          ],
+        }
+      }
       return { entries: [] }
     })
     Object.defineProperty(window, 'kernel', {
@@ -284,6 +300,19 @@ describe('FilesWorkView', () => {
     modeButton(mounted.root, 'Browse').click()
     await type(mounted.root, 'design')
     expect(pathBar().textContent).toContain('Search results')
+  })
+
+  it('shows fetched Git changes with their authors and commit summaries', async () => {
+    mounted = mountFiles()
+    await flushUi()
+
+    modeButton(mounted.root, 'Changed').click()
+    await flushUi()
+
+    expect(call).toHaveBeenCalledWith('awareness.recent', { limit: 240 })
+    expect(mounted.root.textContent).toContain('Changed by')
+    expect(mounted.root.textContent).toContain('Ada')
+    expect(mounted.root.textContent).toContain('Clarify navigation')
   })
 
   it('navigates to an ancestor directory when its breadcrumb is clicked', async () => {
@@ -794,7 +823,7 @@ describe('FilesWorkView', () => {
     expect(call).not.toHaveBeenCalledWith('fs.import', expect.anything())
   })
 
-  it('shows Changed as a workspace-wide modified-time table', async () => {
+  it('shows Changed as a workspace-wide fetched-change table', async () => {
     mounted = mountFiles()
     await flushUi()
 
@@ -803,8 +832,9 @@ describe('FilesWorkView', () => {
 
     const names = rowButtons(mounted.root).map(row => row.textContent ?? '')
     expect(names[0]).toContain('design-system.md')
-    expect(names[1]).toContain('proposal.docx')
-    expect(mounted.root.textContent).toContain('Location')
+    expect(names[0]).toContain('Ada')
+    expect(names[0]).toContain('Clarify navigation')
+    expect(mounted.root.textContent).toContain('Changed by')
   })
 
   it('shows recent files with metadata from the workspace index', async () => {
