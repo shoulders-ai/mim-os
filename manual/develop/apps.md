@@ -18,7 +18,6 @@ Apps maintained in the Mim app catalog.
 | Mail | AI-native Gmail: collaborative drafting with proposal review, legible voices, a hard human send gate, and a provenance flywheel. | 0.1.3 |
 | References | Reference library: capture by DOI, PDF, or paste; cite from a real, verifiable library. | 0.1.0 |
 | Scholar | Reproducible abstract-level literature search with source-grounded candidate sets. | 0.1.0 |
-| Sanktionsfrei CRM | CRM for sanktionsfrei e.V. | 0.1.0 |
 | Slides | Generates slide decks as paginated HTML and exports a print-exact PDF. | 0.2.1 |
 | Word Count | Count words, characters, and lines from pasted text or a workspace text file. | 0.1.0 |
 | Word Count 2 | Count words, characters, and lines from pasted text or a workspace text file. | 0.1.0 |
@@ -137,31 +136,6 @@ Reproducible abstract-level literature search with source-grounded candidate set
 - `litsearch.citations`
 
 Reproducible literature search across public academic databases.
-
-## sanktionsfrei crm
-
-CRM for sanktionsfrei e.V.
-
-**views:**
-- CRM (work)
-
-**named tools:**
-- `sf-crm.clients.list`
-- `sf-crm.clients.get`
-- `sf-crm.clients.create`
-- `sf-crm.clients.update`
-- `sf-crm.payments.list`
-- `sf-crm.payments.unlinked`
-- `sf-crm.payments.link`
-- `sf-crm.payments.summary`
-- `sf-crm.darlehen.open`
-- `sf-crm.repayments.list`
-- `sf-crm.repayments.create`
-- `sf-crm.reminders.list`
-- `sf-crm.reminders.update`
-- `sf-crm.reminders.create`
-
-CRM for sanktionsfrei e.V. -- tracks clients, payments, loans (Darlehen), repayments, and reminders.
 
 ## slides
 

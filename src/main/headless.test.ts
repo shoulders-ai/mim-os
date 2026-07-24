@@ -264,6 +264,63 @@ describe('createHeadlessKernel', () => {
       process.env.HOME = oldHome
     }
   })
+
+  it('refreshes apps after Team sync without changing Project issue or knowledge data', async () => {
+    const oldHome = process.env.HOME
+    const personalHome = join(dir, 'person')
+    const project = join(dir, 'project')
+    const seed = join(dir, 'team-seed')
+    const remote = join(dir, 'team.git')
+    const issuePath = join(project, 'issues', 'keep.md')
+    const knowledgePath = join(project, 'knowledge', 'keep.md')
+    mkdirSync(personalHome, { recursive: true })
+    mkdirSync(join(project, 'issues'), { recursive: true })
+    mkdirSync(join(project, 'knowledge'), { recursive: true })
+    mkdirSync(seed, { recursive: true })
+    writeFileSync(join(project, 'mim.yaml'), 'name: sync-safety-test\n')
+    writeFileSync(issuePath, '# Keep this issue\n\nProject-owned.\n')
+    writeFileSync(knowledgePath, '# Keep this knowledge\n\nProject-owned.\n')
+    writeFileSync(join(seed, 'team.yaml'), 'name: Live Team\n')
+    execFileSync('git', ['init', '--bare', remote])
+    execFileSync('git', ['init', '-b', 'main'], { cwd: seed })
+    execFileSync('git', ['config', 'user.email', 'mim@example.test'], { cwd: seed })
+    execFileSync('git', ['config', 'user.name', 'Mim Test'], { cwd: seed })
+    execFileSync('git', ['add', '.'], { cwd: seed })
+    execFileSync('git', ['commit', '-m', 'seed'], { cwd: seed })
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: seed })
+    execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: seed })
+    execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: remote })
+
+    const before = {
+      issue: readFileSync(issuePath, 'utf-8'),
+      knowledge: readFileSync(knowledgePath, 'utf-8'),
+    }
+    process.env.HOME = personalHome
+    const kernel = createHeadlessKernel()
+    try {
+      await kernel.openWorkspace(project)
+      await kernel.tools.call('team.connect', { repository: remote }, ctx)
+
+      writeTeamPackage(seed, 'synced-app')
+      execFileSync('git', ['add', '.'], { cwd: seed })
+      execFileSync('git', ['commit', '-m', 'add synced app'], { cwd: seed })
+      execFileSync('git', ['push'], { cwd: seed })
+      await kernel.tools.call('team.sync', {}, ctx)
+
+      const status = await kernel.tools.call('app.status', {}, ctx) as { apps: AppStatus[] }
+      expect(status.apps).toContainEqual(expect.objectContaining({
+        id: 'synced-app',
+        source: 'team',
+      }))
+      expect({
+        issue: readFileSync(issuePath, 'utf-8'),
+        knowledge: readFileSync(knowledgePath, 'utf-8'),
+      }).toEqual(before)
+    } finally {
+      await kernel.shutdown()
+      process.env.HOME = oldHome
+    }
+  })
 })
 
 const ctx = { actor: 'user' as const }

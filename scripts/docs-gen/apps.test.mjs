@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import {
   findMimAppsPath,
   loadAppManifests,
@@ -98,6 +101,33 @@ describe('apps', () => {
   })
 
   describe('loadAppManifests (integration)', () => {
+    it('includes only apps declared by the catalog index', () => {
+      const root = mkdtempSync(join(tmpdir(), 'mim-app-docs-'))
+      const packagesDir = join(root, 'packages')
+      mkdirSync(join(packagesDir, 'board'), { recursive: true })
+      mkdirSync(join(packagesDir, 'private-local'), { recursive: true })
+      writeFileSync(join(root, 'index.json'), JSON.stringify({
+        manifestVersion: 1,
+        packages: [{ id: 'board', path: 'packages/board' }],
+      }))
+      writeFileSync(join(packagesDir, 'board', 'package.json'), JSON.stringify({
+        name: '@mim/board',
+        version: '1.0.0',
+        mim: { id: 'board', name: 'Board' },
+      }))
+      writeFileSync(join(packagesDir, 'private-local', 'package.json'), JSON.stringify({
+        name: '@private/local',
+        version: '1.0.0',
+        mim: { id: 'private-local', name: 'Private local' },
+      }))
+
+      try {
+        expect(loadAppManifests(packagesDir).map(app => app.id)).toEqual(['board'])
+      } finally {
+        rmSync(root, { recursive: true, force: true })
+      }
+    })
+
     it('loads real manifests from mim-apps if available', () => {
       const packagesDir = findMimAppsPath()
       if (!packagesDir) return // skip if not available

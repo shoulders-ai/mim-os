@@ -4,7 +4,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -30,11 +29,6 @@ import { registerReferencesTools } from '@main/tools/references.js'
 
 const runCompat = process.env.MIM_PACKAGE_COMPAT === '1'
 const describeCompat = runCompat ? describe : describe.skip
-
-// `scholar` exists as a planned app today but has no backend entrypoint yet.
-// Use MIM_COMPAT_PACKAGES=all to force every local app directory through
-// this gate once planned apps graduate.
-const DEFAULT_ALLOWED_OMISSIONS = ['scholar']
 
 interface PackageJson {
   name?: string
@@ -160,13 +154,17 @@ describeCompat('mim-apps compatibility', () => {
     harness = null
   })
 
-  it('uses every local app directory except allowed omissions by default', () => {
+  it('uses every app published in the catalog index by default', () => {
     const h = requireHarness()
     if (process.env.MIM_COMPAT_PACKAGES) return
 
-    const allIds = discoverPackageDirs(h.packagesRoot).map(pkg => pkg.id).sort()
-    const allowed = new Set(DEFAULT_ALLOWED_OMISSIONS)
-    const expected = allIds.filter(id => !allowed.has(id)).sort()
+    const index = JSON.parse(readFileSync(join(h.packagesRoot, 'index.json'), 'utf-8')) as {
+      packages: Array<{ id: string; path: string }>
+    }
+    const expected = index.packages
+      .filter(pkg => pkg.path === `packages/${pkg.id}`)
+      .map(pkg => pkg.id)
+      .sort()
 
     expect(h.selectedIds).toEqual(expected)
   })
@@ -316,20 +314,30 @@ function expandHome(path: string): string {
 function discoverPackageDirs(packagesRoot: string): Array<{ id: string; dir: string }> {
   const packagesDir = join(packagesRoot, 'packages')
   if (!existsSync(packagesDir)) throw new Error(`packages directory not found: ${packagesDir}`)
+  const indexPath = join(packagesRoot, 'index.json')
+  if (!existsSync(indexPath)) throw new Error(`catalog index not found: ${indexPath}`)
+  const index = JSON.parse(readFileSync(indexPath, 'utf-8')) as {
+    packages?: Array<{ id?: unknown; path?: unknown }>
+  }
+  if (!Array.isArray(index.packages)) throw new Error(`catalog index has no packages array: ${indexPath}`)
 
-  return readdirSync(packagesDir, { withFileTypes: true })
-    .filter(entry => entry.isDirectory())
-    .map(entry => ({ id: entry.name, dir: join(packagesDir, entry.name) }))
-    .filter(pkg => existsSync(join(pkg.dir, 'package.json')))
+  return index.packages
+    .filter((pkg): pkg is { id: string; path: string } => (
+      typeof pkg.id === 'string' && pkg.path === `packages/${pkg.id}`
+    ))
+    .map(pkg => {
+      const dir = join(packagesDir, pkg.id)
+      if (!existsSync(join(dir, 'package.json'))) {
+        throw new Error(`catalogued package is missing: ${pkg.id}`)
+      }
+      return { id: pkg.id, dir }
+    })
     .sort((a, b) => a.id.localeCompare(b.id))
 }
 
 function selectedPackageIds(allIds: string[]): string[] {
   const raw = process.env.MIM_COMPAT_PACKAGES
-  if (!raw) {
-    const allowed = new Set(DEFAULT_ALLOWED_OMISSIONS)
-    return allIds.filter(id => !allowed.has(id)).sort()
-  }
+  if (!raw) return [...allIds].sort()
   if (raw.trim() === 'all') return [...allIds].sort()
   return raw.split(',').map(id => id.trim()).filter(Boolean).sort()
 }

@@ -1,5 +1,7 @@
 // Apps page generator.
-// Reads mim-apps manifests and README files and emits manual/develop/apps.md.
+// Reads catalogued mim-apps manifests and README files and emits
+// manual/develop/apps.md. index.json is the publication boundary: ignored or
+// otherwise local-only app directories must never leak into public docs.
 // Sources: MIM_APPS_PATH env override, then well-known local checkouts. If no
 // source is found, warns and exits 0 — does not fail the whole generation.
 
@@ -56,8 +58,21 @@ function hasPackageDirs(dir) {
  */
 export function loadAppManifests(packagesDir) {
   const apps = []
+  const indexPath = join(dirname(packagesDir), 'index.json')
+  if (!existsSync(indexPath)) {
+    throw new Error(`mim-apps catalog index not found: ${indexPath}`)
+  }
+
+  const index = JSON.parse(readFileSync(indexPath, 'utf-8'))
+  if (!Array.isArray(index.packages)) {
+    throw new Error(`mim-apps catalog index has no packages array: ${indexPath}`)
+  }
+  const catalogIds = new Set(index.packages
+    .filter(pkg => typeof pkg?.id === 'string' && pkg.path === `packages/${pkg.id}`)
+    .map(pkg => pkg.id))
+
   const entries = readdirSync(packagesDir, { withFileTypes: true })
-    .filter(e => e.isDirectory())
+    .filter(e => e.isDirectory() && catalogIds.has(e.name))
     .sort((a, b) => a.name.localeCompare(b.name))
 
   for (const entry of entries) {
